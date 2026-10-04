@@ -6,6 +6,7 @@ edition.workspace = true
 
 [dependencies]
 lodestone-core = { workspace = true }
+ct = { workspace = true }
 common = { workspace = true }
 tokio = { workspace = true, features = ["sync", "time", "rt", "macros"] }
 tracing = { workspace = true }

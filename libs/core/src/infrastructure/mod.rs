@@ -1,6 +1,7 @@
 pub mod assessment;
 pub mod candidate_host;
 pub mod contact;
+pub mod ct_cursor;
 pub mod host_visit;
 pub mod job;
 pub mod lead;

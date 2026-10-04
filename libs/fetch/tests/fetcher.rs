@@ -475,3 +475,54 @@ async fn robots_redirect_to_other_site_refuses_crawl() {
     );
     page.assert_hits_async(0).await;
 }
+
+fn gzip(bytes: &[u8]) -> Vec<u8> {
+    use std::io::Write;
+    let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+    encoder.write_all(bytes).unwrap();
+    encoder.finish().unwrap()
+}
+
+#[tokio::test]
+async fn gzip_encoded_bodies_are_decoded() {
+    let server = MockServer::start_async().await;
+    let payload = vec![7u8; 1000];
+    let encoded = gzip(&payload);
+    server
+        .mock_async(|when, then| {
+            when.method(GET).path("/tile");
+            then.status(200)
+                .header("content-encoding", "gzip")
+                .body(encoded.clone());
+        })
+        .await;
+    let response = fetcher(settings())
+        .fetch(&request(&server, "/tile", FetchPurpose::Api))
+        .await
+        .unwrap();
+    assert_eq!(response.body.len(), payload.len());
+    assert!(response.body.iter().all(|byte| *byte == 7));
+    assert!(!response.truncated);
+}
+
+#[tokio::test]
+async fn body_cap_applies_after_decompression() {
+    let server = MockServer::start_async().await;
+    let encoded = gzip(&vec![0u8; 64 * 1024]);
+    server
+        .mock_async(|when, then| {
+            when.method(GET).path("/bomb");
+            then.status(200)
+                .header("content-encoding", "gzip")
+                .body(encoded.clone());
+        })
+        .await;
+    let settings = settings();
+    let cap = settings.max_body_bytes;
+    let response = fetcher(settings)
+        .fetch(&request(&server, "/bomb", FetchPurpose::Api))
+        .await
+        .unwrap();
+    assert!(response.truncated);
+    assert_eq!(response.body.len(), cap);
+}

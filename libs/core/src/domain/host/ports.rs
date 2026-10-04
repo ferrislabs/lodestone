@@ -42,3 +42,17 @@ pub trait DnsResolver: Send + Sync {
         host: &Hostname,
     ) -> impl Future<Output = Result<Vec<Hostname>, DnsError>> + Send;
 }
+
+pub trait CtCursors: Send + Sync {
+    fn next_index(
+        &self,
+        log_id: &str,
+    ) -> impl Future<Output = Result<Option<u64>, CoreError>> + Send;
+
+    fn advance(
+        &self,
+        log_id: &str,
+        next_index: u64,
+        at: DateTime<Utc>,
+    ) -> impl Future<Output = Result<(), CoreError>> + Send;
+}

@@ -17,4 +17,5 @@ texting_robots = "0.2.2"
 
 [dev-dependencies]
 httpmock = "0.7.0"
+flate2 = "1.1.9"
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util", "time"] }

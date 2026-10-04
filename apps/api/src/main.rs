@@ -17,11 +17,15 @@ use fetch::{FetchSettings, PoliteFetcher};
 use handlers::state;
 use lodestone_core::{
     RetryPolicy,
-    infrastructure::{candidate_host::postgres::PgCandidateHosts, job::postgres::PgJobQueue},
+    infrastructure::{
+        candidate_host::postgres::PgCandidateHosts, ct_cursor::postgres::PgCtCursors,
+        job::postgres::PgJobQueue,
+    },
     jobs::{SystemClock, WorkerPool, WorkerSettings},
 };
 use server::{get_addr, run_server, shutdown_signal};
 use sources::{
+    ct::{CtSettings, CtSource},
     dns_cname::{DnsCnameSettings, DnsCnameSource},
     http_probe::{HttpProbeSettings, HttpProbeSource, ProbeScheme},
 };
@@ -30,7 +34,7 @@ use tracing::{error, info};
 
 use crate::{
     internal_router::internal_router,
-    jobs::{JobRouter, schedule_wired_sources},
+    jobs::{Intervals, JobRouter, WiredSources, schedule_wired_sources},
     logger::init_tracing_and_logging,
     router::router,
 };
@@ -39,6 +43,7 @@ const DNS_BATCH_SIZE: u32 = 500;
 const DNS_CONCURRENCY: usize = 16;
 const PROBE_BATCH_SIZE: u32 = 200;
 const PROBE_CONCURRENCY: usize = 8;
+const CT_LOG_LIST_TTL: Duration = Duration::from_secs(6 * 3600);
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -60,10 +65,23 @@ async fn main() -> Result<(), Box<dyn Error>> {
             revisit_interval: outbound_config.revisit_interval,
         },
     );
+    let fetcher = Arc::new(PoliteFetcher::new(FetchSettings::from_outbound(
+        &outbound_config,
+    ))?);
+    let certificate_transparency = CtSource::new(
+        Arc::clone(&fetcher),
+        Arc::new(PgCandidateHosts::new(pool.clone())),
+        Arc::new(PgCtCursors::new(pool.clone())),
+        CtSettings {
+            log_list_url: args.ct.log_list_url.clone(),
+            log_list_ttl: CT_LOG_LIST_TTL,
+            max_logs: args.ct.max_logs,
+            tiles_per_log: args.ct.tiles_per_run.get(),
+            max_lag_tiles: args.ct.max_lag_tiles.get(),
+        },
+    );
     let http_probe = HttpProbeSource::new(
-        Arc::new(PoliteFetcher::new(FetchSettings::from_outbound(
-            &outbound_config,
-        ))?),
+        fetcher,
         Arc::new(PgCandidateHosts::new(pool)),
         Arc::new(app_state.usecase.clone()),
         HttpProbeSettings {
@@ -77,9 +95,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
     );
     let job_router = JobRouter::new(
         app_state.usecase.clone(),
-        dns_cname,
-        http_probe,
-        jobs_config.source_interval,
+        WiredSources {
+            certificate_transparency,
+            dns_cname,
+            http_probe,
+        },
+        Intervals {
+            certificate_transparency: args.ct.interval(),
+            other_sources: jobs_config.source_interval,
+        },
     );
     schedule_wired_sources(&queue).await?;
 
