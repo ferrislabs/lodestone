@@ -30,6 +30,7 @@ pub use domain::{
         ports::ProfileRepository,
     },
     run::{Run, RunId, RunOutcome, RunStatus, ports::RunRepository},
+    source::{Observation, Source, SourceError},
     suppression::{
         SuppressionEntry, SuppressionId, SuppressionTarget, ports::SuppressionRepository,
     },

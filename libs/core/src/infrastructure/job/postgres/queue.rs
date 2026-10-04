@@ -30,24 +30,28 @@ fn lease_deadline(now: DateTime<Utc>, lease: Duration) -> Result<DateTime<Utc>, 
 
 impl JobQueue for PgJobQueue {
     #[tracing::instrument(skip(self, job), fields(db.system = "postgresql", db.operation = "insert", db.table = "jobs", job.kind = job.kind.as_str()), err)]
-    async fn enqueue(&self, job: &NewJob, now: DateTime<Utc>) -> Result<JobId, CoreError> {
+    async fn enqueue(&self, job: &NewJob, now: DateTime<Utc>) -> Result<Option<JobId>, CoreError> {
         let id = common::generate_uuid_v7();
-        sqlx::query!(
+        let inserted = sqlx::query_scalar!(
             r#"
-            INSERT INTO jobs (id, kind, payload, status, attempts, max_attempts, run_at, created_at, updated_at)
-            VALUES ($1, $2, $3, 'pending', 0, $4, $5, $6, $6)
+            INSERT INTO jobs (id, kind, payload, status, attempts, max_attempts, run_at, dedup_key, created_at, updated_at)
+            VALUES ($1, $2, $3, 'pending', 0, $4, $5, $6, $7, $7)
+            ON CONFLICT (dedup_key) WHERE dedup_key IS NOT NULL AND status IN ('pending', 'running')
+            DO NOTHING
+            RETURNING id
             "#,
             id,
             job.kind.as_str(),
             job.payload,
             i32::from(job.max_attempts.get()),
             job.run_at,
+            job.dedup_key.as_deref(),
             now,
         )
-        .execute(&self.pool)
+        .fetch_optional(&self.pool)
         .await
         .map_err(map_sqlx_error)?;
-        Ok(JobId(id))
+        Ok(inserted.map(JobId))
     }
 
     #[tracing::instrument(skip(self), fields(db.system = "postgresql", db.operation = "claim", db.table = "jobs"), err)]
