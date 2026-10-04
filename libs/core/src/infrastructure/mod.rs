@@ -9,6 +9,7 @@ pub mod job;
 pub mod lead;
 pub mod llm_cache;
 pub mod llm_provider;
+pub mod partner;
 pub mod postgres;
 pub mod profile;
 pub mod registry;

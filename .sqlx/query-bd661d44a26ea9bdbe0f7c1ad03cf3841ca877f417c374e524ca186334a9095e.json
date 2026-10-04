@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO partners (id, profile_id, siret, name, first_seen_at, award_count)\n            VALUES ($1, $2, $3, $4, $5, 0)\n            ON CONFLICT (profile_id, siret) DO UPDATE\n            SET name = COALESCE(EXCLUDED.name, partners.name)\n            RETURNING id\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "bd661d44a26ea9bdbe0f7c1ad03cf3841ca877f417c374e524ca186334a9095e"
+}

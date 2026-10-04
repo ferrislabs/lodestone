@@ -5,6 +5,7 @@ pub(crate) mod job;
 pub(crate) mod lead;
 pub(crate) mod llm;
 pub(crate) mod normalized_domain;
+pub(crate) mod partner;
 pub(crate) mod profile;
 pub(crate) mod prompt;
 pub(crate) mod run;

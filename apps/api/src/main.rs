@@ -30,6 +30,7 @@ use sources::{
     boamp::{BoampSettings, BoampSource},
     contact_pages::{ContactPageSettings, PublicPageFinder},
     ct::{CtSettings, CtSource},
+    decp::{DecpSettings, DecpSource},
     dns_cname::{DnsCnameSettings, DnsCnameSource},
     http_probe::{HttpProbeSettings, HttpProbeSource, ProbeScheme},
     role_guess::RoleGuessFinder,
@@ -53,6 +54,9 @@ const PROBE_BATCH_SIZE: u32 = 200;
 const PROBE_CONCURRENCY: usize = 8;
 const BOAMP_MAX_BODY_BYTES: usize = 16 * 1024 * 1024;
 const BOAMP_REQUESTS_PER_MINUTE: u32 = 30;
+const DECP_REQUESTS_PER_MINUTE: u32 = 120;
+const DECP_REQUEST_TIMEOUT: Duration = Duration::from_secs(900);
+const DECP_MAX_RATE_LIMIT_WAIT: Duration = Duration::from_secs(75);
 const CT_LOG_LIST_TTL: Duration = Duration::from_secs(6 * 3600);
 
 #[tokio::main]
@@ -96,6 +100,24 @@ async fn main() -> Result<(), Box<dyn Error>> {
             base_url: args.boamp.base_url.clone(),
             lookback_days: args.boamp.lookback_days.get(),
             max_pages: args.boamp.max_pages.get(),
+        },
+    );
+    let mut decp_fetch = FetchSettings::from_outbound(&outbound_config);
+    decp_fetch.max_body_bytes = args.decp.max_body_bytes();
+    decp_fetch.request_timeout = decp_fetch.request_timeout.max(DECP_REQUEST_TIMEOUT);
+    decp_fetch.requests_per_host_per_minute = decp_fetch
+        .requests_per_host_per_minute
+        .max(NonZeroU32::new(DECP_REQUESTS_PER_MINUTE).unwrap_or(NonZeroU32::MIN));
+    let decp = DecpSource::new(
+        Arc::new(PoliteFetcher::new(decp_fetch)?),
+        DecpSettings {
+            dataset_api_url: args.decp.dataset_api_url.clone(),
+            annuaire_url: args.decp.annuaire_url.clone(),
+            entreprises_url: args.decp.entreprises_url.clone(),
+            lookback_days: args.decp.lookback_days.get(),
+            notified_within_days: args.decp.notified_within_days.get(),
+            max_body_bytes: args.decp.max_body_bytes(),
+            max_rate_limit_wait: DECP_MAX_RATE_LIMIT_WAIT,
         },
     );
     let certificate_transparency = CtSource::new(
@@ -150,11 +172,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
             dns_cname,
             http_probe,
             boamp,
+            decp,
             contacts,
         },
         Intervals {
             certificate_transparency: args.ct.interval(),
             other_sources: jobs_config.source_interval,
+            decp: args.decp.interval(),
         },
         llm_runtime,
     );

@@ -41,6 +41,7 @@ pub use domain::{
         },
         render_user_content,
     },
+    partner::{InvalidSiret, Partner, PartnerAward, PartnerId, Siret, ports::PartnerRepository},
     profile::{
         ActiveProfile, Profile, ProfileId, ProfileName, ProfileNameError, ProfileProblem,
         ProfileRevision, ProfileValidationError, RevisionNumber, ValidatedProfile,

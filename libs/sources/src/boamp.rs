@@ -11,55 +11,13 @@ use serde_json::{Value, json};
 use tracing::{debug, info};
 use url::Url;
 
+use crate::buyer_domain::{domain_of_email, domain_of_url};
+
 pub const PAGE_SIZE: usize = 50;
 pub const OFFSET_CAP: usize = 10_000;
 pub const TEXT_MAX_CHARS: usize = 4000;
 const FALLBACK_NOTICE_URL: &str = "https://www.boamp.fr/pages/avis/?q=idweb:";
 const DESCRIPTION_KEYS: [&str; 4] = ["objet", "principales", "description", "intitule"];
-
-const PLATFORM_SUFFIXES: [&str; 22] = [
-    "aws-france.com",
-    "achatpublic.com",
-    "marches-publics.gouv.fr",
-    "marches-securises.fr",
-    "marches-publics.info",
-    "e-marchespublics.com",
-    "megalis.bretagne.bzh",
-    "maximilien.fr",
-    "klekoon.com",
-    "synapse-entreprises.com",
-    "centraledesmarches.com",
-    "dematis.com",
-    "omnikles.com",
-    "ternum-bfc.fr",
-    "alsacemarchespublics.eu",
-    "marchespublics.grandest.fr",
-    "e-bourgogne.fr",
-    "telerecours.fr",
-    "mpe76.fr",
-    "demat-ampa.fr",
-    "marchespublics-ght.fr",
-    "marches-publics-securises.fr",
-];
-
-const WEBMAIL_DOMAINS: [&str; 14] = [
-    "gmail.com",
-    "orange.fr",
-    "wanadoo.fr",
-    "free.fr",
-    "laposte.net",
-    "sfr.fr",
-    "neuf.fr",
-    "bbox.fr",
-    "icloud.com",
-    "aol.com",
-    "protonmail.com",
-    "proton.me",
-    "me.com",
-    "msn.com",
-];
-
-const WEBMAIL_LABELS: [&str; 4] = ["hotmail", "outlook", "yahoo", "live"];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BoampSettings {
@@ -157,53 +115,6 @@ fn find_key<'a>(value: &'a Value, key: &str) -> Option<&'a Value> {
         Value::Array(list) => list.iter().find_map(|inner| find_key(inner, key)),
         _ => None,
     }
-}
-
-fn matches_suffix(host: &str, suffix: &str) -> bool {
-    host == suffix
-        || host
-            .strip_suffix(suffix)
-            .is_some_and(|rest| rest.ends_with('.'))
-}
-
-fn is_platform(host: &str) -> bool {
-    PLATFORM_SUFFIXES
-        .iter()
-        .any(|suffix| matches_suffix(host, suffix))
-}
-
-fn is_webmail(domain: &str) -> bool {
-    WEBMAIL_DOMAINS.contains(&domain)
-        || domain
-            .split('.')
-            .next()
-            .is_some_and(|label| WEBMAIL_LABELS.contains(&label))
-}
-
-fn buyer_domain(host: &str) -> Option<NormalizedDomain> {
-    let host = host.trim().to_lowercase();
-    if is_platform(&host) {
-        return None;
-    }
-    let domain = NormalizedDomain::from_host(&host).ok()?;
-    if is_platform(domain.as_str()) || is_webmail(domain.as_str()) {
-        return None;
-    }
-    Some(domain)
-}
-
-fn domain_of_url(raw: &str) -> Option<NormalizedDomain> {
-    let raw = raw.trim();
-    let url = Url::parse(raw)
-        .ok()
-        .filter(|url| url.host_str().is_some())
-        .or_else(|| Url::parse(&format!("https://{raw}")).ok())?;
-    buyer_domain(url.host_str()?)
-}
-
-fn domain_of_email(raw: &str) -> Option<NormalizedDomain> {
-    let (_, host) = raw.trim().rsplit_once('@')?;
-    buyer_domain(host)
 }
 
 #[derive(Default)]

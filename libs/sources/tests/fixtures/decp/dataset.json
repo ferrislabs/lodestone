@@ -1,0 +1,46 @@
+{
+ "id": "ds",
+ "slug": "donnees-essentielles-de-la-commande-publique-fichiers-consolides",
+ "resources": [
+  {
+   "id": "res-2026-04",
+   "title": "decp-2026-04.json",
+   "url": "https://static.data.gouv.fr/resources/fixture/decp-2026-04.json",
+   "last_modified": "2026-04-20T03:00:00+00:00",
+   "filesize": 1,
+   "format": "json"
+  },
+  {
+   "id": "res-2026-03",
+   "title": "decp-2026-03.json",
+   "url": "https://static.data.gouv.fr/resources/fixture/decp-2026-03.json",
+   "last_modified": "2026-04-20T03:00:00+00:00",
+   "filesize": 1,
+   "format": "json"
+  },
+  {
+   "id": "res-2026-02",
+   "title": "decp-2026-02.json",
+   "url": "https://static.data.gouv.fr/resources/fixture/decp-2026-02.json",
+   "last_modified": "2026-04-20T03:00:00+00:00",
+   "filesize": 1,
+   "format": "json"
+  },
+  {
+   "id": "res-schema",
+   "title": "schema-decp.json",
+   "url": "https://static.data.gouv.fr/resources/fixture/schema-decp.json",
+   "last_modified": "2026-04-20T03:00:00+00:00",
+   "filesize": 1,
+   "format": "json"
+  },
+  {
+   "id": "res-csv",
+   "title": "decp-2026-04.csv",
+   "url": "https://static.data.gouv.fr/resources/fixture/decp-2026-04.csv",
+   "last_modified": "2026-04-20T03:00:00+00:00",
+   "filesize": 1,
+   "format": "json"
+  }
+ ]
+}
