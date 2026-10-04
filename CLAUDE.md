@@ -42,6 +42,7 @@ pnpm build
 - Errors: `thiserror` enums per boundary, `CoreError` in `libs/common`.
 - Repository adapters are tested in `libs/<crate>/tests/` with `#[sqlx::test(migrations = "../../migrations")]`: one fresh database per test.
 - Detection profiles: `docs/profiles.md`. Definition types in `libs/core/src/domain/profile/definition.rs`; the JSON Schema is generated (ADR 0002).
+- Background work: a row in `jobs`, claimed by `WorkerPool` (`libs/core/src/application/jobs/`) through `PgJobQueue`. A new job kind gets its arm in `apps/api/src/jobs.rs` (`JobRouter`). Handlers must be safe to run twice: a crash after the work but before `complete` replays the job.
 - Market-specific criteria (keywords, filters, weights, prompts) never live in code: they belong to detection profiles in Postgres.
 
 ## Frontend conventions

@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                    UPDATE jobs\n                    SET status = 'pending', run_at = $3, lease_token = NULL,\n                        lease_until = NULL, last_error = $4, updated_at = $5\n                    WHERE id = $1 AND status = 'running' AND lease_token = $2\n                    ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Timestamptz",
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a000f1cbd8f612e2c50101c7ec013234037b40bfbd425b51674681d73c31bc15"
+}

@@ -94,10 +94,13 @@ version = "0.1.0"
 dependencies = [
  "args",
  "axum",
+ "axum-server",
  "clap",
+ "common",
  "dotenvy",
  "handlers",
  "http 1.4.0",
+ "lodestone-core",
  "opentelemetry",
  "opentelemetry-appender-tracing",
  "opentelemetry-otlp",
@@ -3267,6 +3270,7 @@ dependencies = [
  "axum",
  "axum-server",
  "thiserror 2.0.18",
+ "tokio",
  "tracing",
 ]
 

@@ -48,19 +48,30 @@ pub struct JobsArgs {
         long_help = "Base delay of the exponential backoff between attempts"
     )]
     pub retry_base_seconds: u64,
+
+    #[arg(
+        long = "jobs-shutdown-grace-seconds",
+        env = "JOBS_SHUTDOWN_GRACE_SECONDS",
+        name = "JOBS_SHUTDOWN_GRACE_SECONDS",
+        default_value_t = 20,
+        long_help = "Seconds running jobs get to finish on shutdown before their lease is released"
+    )]
+    pub shutdown_grace_seconds: u64,
 }
 
 impl TryFrom<JobsArgs> for JobsConfig {
     type Error = SettingsError;
 
     fn try_from(value: JobsArgs) -> Result<Self, Self::Error> {
-        JobsConfig::new(
-            value.workers,
-            Duration::from_secs(value.lease_seconds),
-            Duration::from_millis(value.poll_interval_ms),
-            value.max_attempts,
-            Duration::from_secs(value.retry_base_seconds),
-        )
+        JobsConfig {
+            workers: value.workers,
+            lease: Duration::from_secs(value.lease_seconds),
+            poll_interval: Duration::from_millis(value.poll_interval_ms),
+            max_attempts: value.max_attempts,
+            retry_base_delay: Duration::from_secs(value.retry_base_seconds),
+            shutdown_grace: Duration::from_secs(value.shutdown_grace_seconds),
+        }
+        .validated()
     }
 }
 
