@@ -13,6 +13,7 @@ pub mod domain {
     pub struct Contact;
     pub struct HostVisit;
     pub struct Lead;
+    pub struct LlmProvider;
     pub struct Profile;
     pub struct Run;
     pub struct Signal;

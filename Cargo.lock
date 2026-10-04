@@ -2377,6 +2377,7 @@ version = "0.1.0"
 dependencies = [
  "auth",
  "authz",
+ "aws-lc-rs",
  "chrono",
  "common",
  "idna",

@@ -33,7 +33,12 @@ pub use domain::{
     },
     llm::{
         LlmError, LlmProvider, LlmRequest, LlmResponse, ProviderDefinition, ProviderKind,
-        TokenUsage, UntrustedDocument, render_user_content,
+        TokenUsage, UntrustedDocument,
+        provider::{
+            CipherError, LlmProviderRecord, LlmProviderRepository, ProviderId, ResolvedProvider,
+            SealedSecret, SecretCipher, Tier, TierError, TokenPricing,
+        },
+        render_user_content,
     },
     profile::{
         ActiveProfile, Profile, ProfileId, ProfileName, ProfileNameError, ProfileProblem,

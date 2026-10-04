@@ -1,0 +1,100 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT p.id, p.name, p.kind, p.base_url, p.model, p.timeout_ms, p.max_retries,\n                   p.input_cents_per_mtok, p.output_cents_per_mtok,\n                   p.api_key_nonce, p.api_key_ciphertext, p.enabled, p.created_at, p.updated_at\n            FROM llm_tiers t\n            JOIN llm_providers p ON p.id = t.provider_id\n            WHERE t.tier = $1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "kind",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "base_url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "model",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "timeout_ms",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 6,
+        "name": "max_retries",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 7,
+        "name": "input_cents_per_mtok",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 8,
+        "name": "output_cents_per_mtok",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 9,
+        "name": "api_key_nonce",
+        "type_info": "Bytea"
+      },
+      {
+        "ordinal": 10,
+        "name": "api_key_ciphertext",
+        "type_info": "Bytea"
+      },
+      {
+        "ordinal": 11,
+        "name": "enabled",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 12,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 13,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "f59d1b06dd1e7ee972522ac642a48204c592afd2aa2fcfcc5dc5a33377bb09ae"
+}
