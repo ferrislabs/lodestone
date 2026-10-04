@@ -1,15 +1,19 @@
 use clap::Parser;
-use common::Config;
+use common::{Config, SettingsError};
 
 use crate::{
-    auth::AuthArgs, database::DatabaseArgs, log::LogArgs, observability::ObservabilityArgs,
-    rate_limit::RateLimitArgs, server::ServerArgs,
+    auth::AuthArgs, database::DatabaseArgs, jobs::JobsArgs, llm::LlmArgs, log::LogArgs,
+    observability::ObservabilityArgs, outbound::OutboundArgs, rate_limit::RateLimitArgs,
+    server::ServerArgs,
 };
 
 pub mod auth;
 pub mod database;
+pub mod jobs;
+pub mod llm;
 pub mod log;
 pub mod observability;
+pub mod outbound;
 pub mod rate_limit;
 pub mod server;
 
@@ -32,14 +36,28 @@ pub struct Args {
 
     #[command(flatten)]
     pub rate_limit: RateLimitArgs,
+
+    #[command(flatten)]
+    pub jobs: JobsArgs,
+
+    #[command(flatten)]
+    pub outbound: OutboundArgs,
+
+    #[command(flatten)]
+    pub llm: LlmArgs,
 }
 
-impl From<Args> for Config {
-    fn from(value: Args) -> Self {
-        Self {
+impl TryFrom<Args> for Config {
+    type Error = SettingsError;
+
+    fn try_from(value: Args) -> Result<Self, Self::Error> {
+        Ok(Self {
             auth: value.auth.into(),
             database: value.db.into(),
             rate_limit: value.rate_limit.into(),
-        }
+            jobs: value.jobs.try_into()?,
+            outbound: value.outbound.try_into()?,
+            llm: value.llm.try_into()?,
+        })
     }
 }
