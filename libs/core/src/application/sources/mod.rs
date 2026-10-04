@@ -189,7 +189,7 @@ impl LodestoneUseCase {
                 .record_seen(profile_id, &observation.domain, observation.observed_at)
                 .await?;
             signals
-                .insert(&Signal {
+                .record(&Signal {
                     id: SignalId(generate_uuid_v7()),
                     lead_id: lead.id,
                     kind: observation.kind.clone(),

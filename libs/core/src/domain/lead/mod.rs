@@ -159,6 +159,27 @@ pub struct Signal {
     pub observed_at: DateTime<Utc>,
 }
 
+const FINGERPRINT_SEPARATOR: char = '\u{1f}';
+
+impl Signal {
+    pub fn fingerprint(&self) -> String {
+        let mut fingerprint = String::with_capacity(
+            self.kind.as_str().len()
+                + self.value.as_deref().map_or(0, str::len)
+                + self.provenance.as_str().len()
+                + 32,
+        );
+        fingerprint.push_str(self.kind.as_str());
+        fingerprint.push(FINGERPRINT_SEPARATOR);
+        fingerprint.push_str(self.value.as_deref().unwrap_or_default());
+        fingerprint.push(FINGERPRINT_SEPARATOR);
+        fingerprint.push_str(self.source.as_str());
+        fingerprint.push(FINGERPRINT_SEPARATOR);
+        fingerprint.push_str(self.provenance.as_str());
+        fingerprint
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ContactMethod {
     PublicPage,

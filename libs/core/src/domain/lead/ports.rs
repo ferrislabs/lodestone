@@ -52,7 +52,7 @@ pub trait LeadRepository: Send {
 
 #[cfg_attr(test, mockall::automock)]
 pub trait SignalRepository: Send {
-    fn insert(&mut self, signal: &Signal) -> impl Future<Output = Result<(), CoreError>> + Send;
+    fn record(&mut self, signal: &Signal) -> impl Future<Output = Result<bool, CoreError>> + Send;
 
     fn list_for_lead(
         &mut self,

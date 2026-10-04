@@ -22,13 +22,19 @@ impl<'tx> PgSignalRepository<'tx> {
 }
 
 impl<'tx> SignalRepository for PgSignalRepository<'tx> {
-    #[tracing::instrument(skip(self, signal), fields(db.system = "postgresql", db.operation = "insert", db.table = "signals", signal.id = %signal.id), err)]
-    async fn insert(&mut self, signal: &Signal) -> Result<(), CoreError> {
+    #[tracing::instrument(skip(self, signal), fields(db.system = "postgresql", db.operation = "upsert", db.table = "signals", signal.id = %signal.id), err)]
+    async fn record(&mut self, signal: &Signal) -> Result<bool, CoreError> {
         let mut tx = self.tx.lock().await;
-        sqlx::query!(
+        let inserted = sqlx::query_scalar!(
             r#"
-            INSERT INTO signals (id, lead_id, kind, value, source, raw, provenance, strength, observed_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            INSERT INTO signals (id, lead_id, kind, value, source, raw, provenance, strength, observed_at, fingerprint)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            ON CONFLICT (lead_id, fingerprint) DO UPDATE SET
+                raw = CASE WHEN EXCLUDED.observed_at >= signals.observed_at
+                           THEN EXCLUDED.raw ELSE signals.raw END,
+                strength = GREATEST(signals.strength, EXCLUDED.strength),
+                observed_at = GREATEST(signals.observed_at, EXCLUDED.observed_at)
+            RETURNING (xmax = 0) AS "inserted!"
             "#,
             signal.id.0,
             signal.lead_id.0,
@@ -39,12 +45,13 @@ impl<'tx> SignalRepository for PgSignalRepository<'tx> {
             signal.provenance.as_str(),
             signal.strength.get(),
             signal.observed_at,
+            signal.fingerprint(),
         )
-        .execute(&mut ***tx)
+        .fetch_one(&mut ***tx)
         .await
         .map_err(map_sqlx_error)?;
 
-        Ok(())
+        Ok(inserted)
     }
 
     #[tracing::instrument(skip(self), fields(db.system = "postgresql", db.operation = "select", db.table = "signals", lead.id = %lead_id), err)]

@@ -42,8 +42,8 @@ async fn insert_then_list_in_observation_order(pool: PgPool) {
 
     let listed = with_tx(&pool, async |shared| {
         let mut repo = PgSignalRepository::new(&shared);
-        repo.insert(&late).await?;
-        repo.insert(&early).await?;
+        repo.record(&late).await?;
+        repo.record(&early).await?;
         repo.list_for_lead(lead).await
     })
     .await
@@ -61,7 +61,7 @@ async fn raw_json_round_trips(pool: PgPool) {
 
     let listed = with_tx(&pool, async |shared| {
         let mut repo = PgSignalRepository::new(&shared);
-        repo.insert(&stored).await?;
+        repo.record(&stored).await?;
         repo.list_for_lead(lead).await
     })
     .await
@@ -83,12 +83,98 @@ async fn boundary_strengths_are_accepted(pool: PgPool) {
 
     let listed = with_tx(&pool, async |shared| {
         let mut repo = PgSignalRepository::new(&shared);
-        repo.insert(&zero).await?;
-        repo.insert(&one).await?;
+        repo.record(&zero).await?;
+        repo.record(&one).await?;
         repo.list_for_lead(lead).await
     })
     .await
     .unwrap();
 
     assert_eq!(listed.len(), 2);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn same_fact_observed_again_refreshes_instead_of_duplicating(pool: PgPool) {
+    let profile = create_profile(&pool, "alpha").await;
+    let lead = lead_id(&pool, profile, "example.com").await;
+    let first = signal(
+        lead,
+        "product_detected",
+        Some("keycloak"),
+        10,
+        serde_json::json!({"run": 1}),
+    );
+    let mut again = signal(
+        lead,
+        "product_detected",
+        Some("keycloak"),
+        30,
+        serde_json::json!({"run": 2}),
+    );
+    again.strength = UnitInterval::new(0.9).unwrap();
+    let older = signal(
+        lead,
+        "product_detected",
+        Some("keycloak"),
+        5,
+        serde_json::json!({"run": 0}),
+    );
+
+    let (inserted, listed) = with_tx(&pool, async |shared| {
+        let mut repo = PgSignalRepository::new(&shared);
+        let inserted = [
+            repo.record(&first).await?,
+            repo.record(&again).await?,
+            repo.record(&older).await?,
+        ];
+        Ok((inserted, repo.list_for_lead(lead).await?))
+    })
+    .await
+    .unwrap();
+
+    assert_eq!(inserted, [true, false, false]);
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].observed_at, at(30));
+    assert_eq!(listed[0].raw, serde_json::json!({"run": 2}));
+    assert_eq!(listed[0].strength.get(), 0.9);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn different_value_or_provenance_is_a_different_signal(pool: PgPool) {
+    let profile = create_profile(&pool, "alpha").await;
+    let lead = lead_id(&pool, profile, "example.com").await;
+    let keycloak = signal(
+        lead,
+        "product_detected",
+        Some("keycloak"),
+        1,
+        serde_json::json!({}),
+    );
+    let authentik = signal(
+        lead,
+        "product_detected",
+        Some("authentik"),
+        1,
+        serde_json::json!({}),
+    );
+    let mut other_host = signal(
+        lead,
+        "product_detected",
+        Some("keycloak"),
+        1,
+        serde_json::json!({}),
+    );
+    other_host.provenance = Provenance::parse("https://sso.example.com/realms/master").unwrap();
+
+    let listed = with_tx(&pool, async |shared| {
+        let mut repo = PgSignalRepository::new(&shared);
+        repo.record(&keycloak).await?;
+        repo.record(&authentik).await?;
+        repo.record(&other_host).await?;
+        repo.list_for_lead(lead).await
+    })
+    .await
+    .unwrap();
+
+    assert_eq!(listed.len(), 3);
 }
