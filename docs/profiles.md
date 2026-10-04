@@ -31,6 +31,6 @@ Without `UPDATE_SCHEMA=1` the same test fails if the committed file is stale. Th
   - `dns_cname`: provider names with the CNAME target suffix that identifies them.
   - `boamp`, `decp`, `ted`: public procurement sources, with keywords and exclusions.
   - `france_travail`, `ats`: job sources, with keywords and exclusions.
-- `scoring`: weighted factors, each made of a signal, an optional value and a weight.
+- `scoring`: weighted factors, each made of a signal, an optional value and a weight. A lead's score is the sum, over factors, of `weight × measure`. For a normal factor the measure is the highest strength (0 to 1) among the lead's signals of that kind, and of that value when one is set; several matching signals count once. The reserved factor `distinct_signals` measures the number of distinct signal kinds on the lead. The score and its per-factor breakdown are recomputed whenever the lead's signals change, and stored on the lead.
 - `contact_ranking`: preferred email local parts, most preferred first.
 - `llm`: the qualification threshold and the relevance criteria given to the model.

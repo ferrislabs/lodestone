@@ -141,6 +141,7 @@ pub struct Lead {
     pub domain: NormalizedDomain,
     pub status: LeadStatus,
     pub score: Score,
+    pub score_breakdown: Vec<crate::domain::scoring::ScoreContribution>,
     pub first_seen_at: DateTime<Utc>,
     pub last_seen_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,

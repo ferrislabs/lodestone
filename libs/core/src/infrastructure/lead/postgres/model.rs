@@ -11,6 +11,7 @@ pub struct LeadRow {
     pub domain: String,
     pub status: String,
     pub score: f64,
+    pub score_breakdown: serde_json::Value,
     pub first_seen_at: DateTime<Utc>,
     pub last_seen_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
@@ -30,12 +31,15 @@ impl TryFrom<LeadRow> for Lead {
             .map_err(|_| CoreError::Internal("stored lead status is invalid".to_owned()))?;
         let score = Score::new(row.score)
             .map_err(|_| CoreError::Internal("stored lead score is invalid".to_owned()))?;
+        let score_breakdown = serde_json::from_value(row.score_breakdown)
+            .map_err(|_| CoreError::Internal("stored score breakdown is invalid".to_owned()))?;
         Ok(Self {
             id: LeadId(row.id),
             profile_id: ProfileId(row.profile_id),
             domain,
             status,
             score,
+            score_breakdown,
             first_seen_at: row.first_seen_at,
             last_seen_at: row.last_seen_at,
             updated_at: row.updated_at,

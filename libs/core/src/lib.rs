@@ -39,6 +39,7 @@ pub use domain::{
         ports::ProfileRepository,
     },
     run::{Run, RunId, RunOutcome, RunStatus, ports::RunRepository},
+    scoring::{DISTINCT_SIGNALS_FACTOR, ScoreBreakdown, ScoreContribution, score},
     source::{Observation, Source, SourceError},
     suppression::{
         SuppressionEntry, SuppressionId, SuppressionTarget, ports::SuppressionRepository,

@@ -10,11 +10,12 @@ use crate::{
     domain::{
         job::{Job, JobKind, NewJob, ports::Clock},
         lead::{
-            Signal, SignalId,
+            LeadId, Signal, SignalId,
             ports::{LeadRepository, SignalRepository},
         },
-        profile::{ActiveProfile, ProfileId},
+        profile::{ActiveProfile, definition::Scoring},
         run::{Run, RunId, RunOutcome, ports::RunRepository},
+        scoring::score,
         source::{Observation, Source, SourceError},
         values::SourceName,
     },
@@ -131,9 +132,7 @@ impl LodestoneUseCase {
                 .flat_map(|item| source.evaluate(item, active))
                 .collect();
             let signals = count(observations.len());
-            let recorded = self
-                .record_observations(active.profile.id, name, &observations)
-                .await;
+            let recorded = self.record_observations(active, name, &observations).await;
             let outcome = match &recorded {
                 Ok(()) => RunOutcome::Succeeded { volume, signals },
                 Err(error) => RunOutcome::Failed {
@@ -178,16 +177,24 @@ impl LodestoneUseCase {
     #[transactional(lead, signal)]
     pub async fn record_observations(
         &self,
-        profile_id: ProfileId,
+        active: &ActiveProfile,
         source: SourceName,
         observations: &[Observation],
     ) -> Result<(), CoreError> {
         let mut leads = lead_repository;
         let mut signals = signal_repository;
+        let mut touched = Vec::new();
         for observation in observations {
             let lead = leads
-                .record_seen(profile_id, &observation.domain, observation.observed_at)
+                .record_seen(
+                    active.profile.id,
+                    &observation.domain,
+                    observation.observed_at,
+                )
                 .await?;
+            if !touched.contains(&lead.id) {
+                touched.push(lead.id);
+            }
             signals
                 .record(&Signal {
                     id: SignalId(generate_uuid_v7()),
@@ -202,6 +209,28 @@ impl LodestoneUseCase {
                 })
                 .await?;
         }
+        let scoring = &active.revision.definition.definition().scoring;
+        for lead_id in touched {
+            rescore(&mut leads, &mut signals, lead_id, scoring, Utc::now()).await?;
+        }
         Ok(())
     }
+}
+
+pub(crate) async fn rescore<L, S>(
+    leads: &mut L,
+    signals: &mut S,
+    lead_id: LeadId,
+    scoring: &Scoring,
+    at: DateTime<Utc>,
+) -> Result<(), CoreError>
+where
+    L: LeadRepository,
+    S: SignalRepository,
+{
+    let current = signals.list_for_lead(lead_id).await?;
+    leads
+        .update_score(lead_id, &score(&current, scoring), at)
+        .await?;
+    Ok(())
 }

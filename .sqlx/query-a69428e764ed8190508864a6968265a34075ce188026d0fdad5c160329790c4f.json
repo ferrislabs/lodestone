@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            INSERT INTO leads (id, profile_id, domain, status, score, first_seen_at, last_seen_at, updated_at)\n            VALUES ($1, $2, $3, 'new', 0, $4, $4, $4)\n            ON CONFLICT (profile_id, domain) DO UPDATE SET\n                last_seen_at  = GREATEST(leads.last_seen_at, EXCLUDED.last_seen_at),\n                first_seen_at = LEAST(leads.first_seen_at, EXCLUDED.first_seen_at),\n                updated_at    = EXCLUDED.updated_at\n            RETURNING id, profile_id, domain, status, score, first_seen_at, last_seen_at, updated_at\n            ",
+  "query": "\n            SELECT id, profile_id, domain, status, score, score_breakdown, first_seen_at, last_seen_at, updated_at\n            FROM leads\n            WHERE domain = $1\n            ORDER BY profile_id\n            ",
   "describe": {
     "columns": [
       {
@@ -30,26 +30,28 @@
       },
       {
         "ordinal": 5,
+        "name": "score_breakdown",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 6,
         "name": "first_seen_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 6,
+        "ordinal": 7,
         "name": "last_seen_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 7,
+        "ordinal": 8,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
-        "Uuid",
-        "Uuid",
-        "Text",
-        "Timestamptz"
+        "Text"
       ]
     },
     "nullable": [
@@ -60,8 +62,9 @@
       false,
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "c12b00949392c8e9a2d9fa1bf7e090664773537d8bdfc297cd8b4a2539c90cff"
+  "hash": "a69428e764ed8190508864a6968265a34075ce188026d0fdad5c160329790c4f"
 }

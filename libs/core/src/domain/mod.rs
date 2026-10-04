@@ -6,6 +6,7 @@ pub(crate) mod lead;
 pub(crate) mod normalized_domain;
 pub(crate) mod profile;
 pub(crate) mod run;
+pub(crate) mod scoring;
 pub(crate) mod source;
 pub(crate) mod suppression;
 pub(crate) mod user;
