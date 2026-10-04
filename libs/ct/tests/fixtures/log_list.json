@@ -1,0 +1,172 @@
+{
+ "version": "93.3",
+ "log_list_timestamp": "2026-10-03T13:35:24Z",
+ "operators": [
+  {
+   "name": "Google",
+   "email": [
+    "x@example.org"
+   ],
+   "logs": [
+    {
+     "description": "RFC6962 log",
+     "log_id": "cmZjNjk2Mg==",
+     "state": {
+      "usable": {
+       "timestamp": "2025-01-01T00:00:00Z"
+      }
+     }
+    }
+   ],
+   "tiled_logs": [
+    {
+     "description": "Google 'ParcelYard2026h2' log",
+     "log_id": "utuIpG+cr6QJDoLlk1bbbni0pT9YLbCBl5UkLym2jJg=",
+     "submission_url": "https://parcelyard2026h2.prod.certificate.transparency.goog/",
+     "monitoring_url": "https://storage.googleapis.com/parcelyard2026h2.prod.certificate.transparency.goog/",
+     "mmd": 60,
+     "state": {
+      "usable": {
+       "timestamp": "2026-08-31T13:50:00Z"
+      }
+     },
+     "temporal_interval": {
+      "start_inclusive": "2026-07-01T00:00:00Z",
+      "end_exclusive": "2027-01-01T00:00:00Z"
+     }
+    },
+    {
+     "description": "Google 'ParcelYard2027h1' log",
+     "log_id": "HIl0B+YBCgEpO7Z439ejaM6xjMpSHcyk04bkoy5bXQQ=",
+     "submission_url": "https://parcelyard2027h1.prod.certificate.transparency.goog/",
+     "monitoring_url": "https://storage.googleapis.com/parcelyard2027h1.prod.certificate.transparency.goog/",
+     "mmd": 60,
+     "state": {
+      "usable": {
+       "timestamp": "2026-08-31T13:50:00Z"
+      }
+     },
+     "temporal_interval": {
+      "start_inclusive": "2027-01-01T00:00:00Z",
+      "end_exclusive": "2027-07-01T00:00:00Z"
+     }
+    },
+    {
+     "description": "Google 'Retired2025h1'",
+     "log_id": "cmV0aXJlZA==",
+     "submission_url": "https://parcelyard2026h2.prod.certificate.transparency.goog/",
+     "monitoring_url": "https://storage.googleapis.com/parcelyard2026h2.prod.certificate.transparency.goog/",
+     "mmd": 60,
+     "state": {
+      "retired": {
+       "timestamp": "2026-01-01T00:00:00Z"
+      }
+     },
+     "temporal_interval": {
+      "start_inclusive": "2025-01-01T00:00:00Z",
+      "end_exclusive": "2025-07-01T00:00:00Z"
+     }
+    }
+   ]
+  },
+  {
+   "name": "Let's Encrypt",
+   "email": [
+    "x@example.org"
+   ],
+   "logs": [
+    {
+     "description": "RFC6962 log",
+     "log_id": "cmZjNjk2Mg==",
+     "state": {
+      "usable": {
+       "timestamp": "2025-01-01T00:00:00Z"
+      }
+     }
+    }
+   ],
+   "tiled_logs": [
+    {
+     "description": "Let's Encrypt 'Sycamore2026h2'",
+     "log_id": "bP5QGUOoXqkWvFLRM+TcyR7xQRx9JYQg0XOAnhgY6zo=",
+     "submission_url": "https://log.sycamore.ct.letsencrypt.org/2026h2/",
+     "monitoring_url": "https://mon.sycamore.ct.letsencrypt.org/2026h2/",
+     "mmd": 60,
+     "state": {
+      "usable": {
+       "timestamp": "2025-11-27T03:00:00Z"
+      }
+     },
+     "temporal_interval": {
+      "start_inclusive": "2026-06-18T00:00:00Z",
+      "end_exclusive": "2026-12-17T00:00:00Z"
+     }
+    },
+    {
+     "description": "Let's Encrypt 'Sycamore2027h1'",
+     "log_id": "jspHC6zeavOiBrCkeoS3Rv4fxr+VPiXmm07kAkjzxug=",
+     "submission_url": "https://log.sycamore.ct.letsencrypt.org/2027h1/",
+     "monitoring_url": "https://mon.sycamore.ct.letsencrypt.org/2027h1/",
+     "mmd": 60,
+     "state": {
+      "usable": {
+       "timestamp": "2025-11-27T03:00:00Z"
+      }
+     },
+     "temporal_interval": {
+      "start_inclusive": "2026-12-17T00:00:00Z",
+      "end_exclusive": "2027-06-18T00:00:00Z"
+     }
+    },
+    {
+     "description": "Let's Encrypt 'Rejected'",
+     "log_id": "cmVqZWN0ZWQ=",
+     "submission_url": "https://log.sycamore.ct.letsencrypt.org/2026h2/",
+     "monitoring_url": "https://mon.sycamore.ct.letsencrypt.org/2026h2/",
+     "mmd": 60,
+     "state": {
+      "rejected": {
+       "timestamp": "2026-01-01T00:00:00Z"
+      }
+     },
+     "temporal_interval": {
+      "start_inclusive": "2026-06-18T00:00:00Z",
+      "end_exclusive": "2026-12-17T00:00:00Z"
+     }
+    },
+    {
+     "description": "Let's Encrypt 'NoInterval'",
+     "log_id": "bm9pbnRlcnZhbA==",
+     "submission_url": "https://log.sycamore.ct.letsencrypt.org/2026h2/",
+     "monitoring_url": "https://mon.example.org/nointerval",
+     "mmd": 60,
+     "state": {
+      "usable": {
+       "timestamp": "2025-11-27T03:00:00Z"
+      }
+     }
+    },
+    {
+     "description": "Let's Encrypt 'ReadOnly'",
+     "log_id": "cmVhZG9ubHk=",
+     "submission_url": "https://log.sycamore.ct.letsencrypt.org/2026h2/",
+     "monitoring_url": "https://mon.sycamore.ct.letsencrypt.org/2026h2/",
+     "mmd": 60,
+     "state": {
+      "readonly": {
+       "timestamp": "2026-01-01T00:00:00Z",
+       "final_tree_head": {
+        "sha256_root_hash": "AA==",
+        "tree_size": 1
+       }
+      }
+     },
+     "temporal_interval": {
+      "start_inclusive": "2026-06-18T00:00:00Z",
+      "end_exclusive": "2026-12-17T00:00:00Z"
+     }
+    }
+   ]
+  }
+ ]
+}

@@ -13,7 +13,7 @@ pub use domain::{
     },
     host::{
         CandidateHost, HostOrigin, Hostname, InvalidHostname,
-        ports::{CandidateHosts, DnsError, DnsResolver},
+        ports::{CandidateHosts, CtCursors, DnsError, DnsResolver},
     },
     job::{
         ClaimedJob, FailureDecision, InvalidJobKind, Job, JobId, JobKind, JobStatus, LeaseToken,

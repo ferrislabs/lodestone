@@ -1,0 +1,18 @@
+[package]
+name = "ct"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+
+[dependencies]
+lodestone-core = { workspace = true }
+chrono = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+url = { workspace = true }
+x509-parser = "0.18.1"
+
+[dev-dependencies]
+tokio = { workspace = true }
+proptest = { workspace = true }

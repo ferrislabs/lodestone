@@ -87,6 +87,11 @@ Common flags / env vars (see `libs/args/src/`):
 | `OUTBOUND_REQUESTS_PER_HOST_PER_MINUTE` | `--outbound-requests-per-host-per-minute` | `6` |
 | `OUTBOUND_REVISIT_INTERVAL_HOURS` | `--outbound-revisit-interval-hours` | `720` |
 | `OUTBOUND_REQUEST_TIMEOUT_SECONDS` | `--outbound-request-timeout-seconds` | `15` |
+| `CT_LOG_LIST_URL` | `--ct-log-list-url` | Chrome v3 log list |
+| `CT_MAX_LOGS` | `--ct-max-logs` | `4` |
+| `CT_TILES_PER_RUN` | `--ct-tiles-per-run` | `16` |
+| `CT_MAX_LAG_TILES` | `--ct-max-lag-tiles` | `256` |
+| `CT_INTERVAL_SECONDS` | `--ct-interval-seconds` | `60` |
 | `LLM_SECRETS_ENCRYPTION_KEY` | `--llm-secrets-encryption-key` | required, base64 of 32 bytes |
 | `LLM_RUN_BUDGET_CENTS` | `--llm-run-budget-cents` | `500` |
 
