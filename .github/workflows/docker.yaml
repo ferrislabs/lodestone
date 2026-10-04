@@ -8,8 +8,6 @@ on:
       - v*.*.*
       - v*.*.*-rc*
   pull_request:
-    branches:
-      - main
   workflow_dispatch:
     inputs:
       push:
@@ -46,7 +44,7 @@ jobs:
           - task: clippy
             cmd: cargo clippy --workspace --all-targets --locked -- -D warnings
           - task: test
-            cmd: cargo test --workspace --locked
+            cmd: cargo test --workspace --locked -- --include-ignored
     steps:
       - name: checkout
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -74,11 +72,64 @@ jobs:
           SQLX_OFFLINE: "true"
         run: ${{ matrix.cmd }}
 
+  integration:
+    permissions:
+      contents: read
+    name: rust (integration)
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: lodestone
+          POSTGRES_PASSWORD: lodestone
+          POSTGRES_DB: lodestone
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U lodestone -d lodestone"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://lodestone:lodestone@localhost:5432/lodestone
+      REQUIRE_DATABASE_URL: "1"
+    steps:
+      - name: checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: install rust toolchain
+        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        with:
+          toolchain: 1.95.0
+
+      - name: cache cargo + target
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          shared-key: rust-integration
+          cache-on-failure: true
+          cache-bin: true
+
+      - name: install sqlx-cli
+        run: command -v sqlx || cargo install sqlx-cli --version 0.8.6 --locked --no-default-features --features rustls,postgres
+
+      - name: migrations up, down, up
+        run: |
+          sqlx migrate run
+          while sqlx migrate info | grep -q "installed"; do sqlx migrate revert; done
+          sqlx migrate run
+
+      - name: sqlx offline data is current
+        run: cargo sqlx prepare --check --workspace -- --all-targets
+
+      - name: tests against postgres
+        run: cargo test --workspace --locked -- --include-ignored
+
   build:
     permissions:
       contents: read
       packages: write
-    needs: rust-check
+    needs: [rust-check, integration]
     runs-on: ${{ matrix.runner.name }}
     strategy:
       matrix:
