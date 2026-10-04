@@ -124,7 +124,7 @@ async fn well_known_contacts_are_returned_as_security_txt_hints() {
         WELL_KNOWN,
         Ok((200, "text/plain; charset=utf-8", SIGNED)),
     )]);
-    let found = finder.find(&domain(), now()).await.unwrap();
+    let found = finder.find(&domain(), &[], now()).await.unwrap();
     assert_eq!(found.len(), 2);
     assert!(found.iter().all(|f| f.method == ContactMethod::SecurityTxt));
     assert!(found.iter().all(|f| f.provenance.as_str() == WELL_KNOWN));
@@ -140,7 +140,7 @@ async fn legacy_location_is_the_fallback() {
         LEGACY,
         Ok((200, "text/plain", "Contact: mailto:sec@acme.com\n")),
     )]);
-    let found = finder.find(&domain(), now()).await.unwrap();
+    let found = finder.find(&domain(), &[], now()).await.unwrap();
     assert_eq!(found[0].address.as_str(), "sec@acme.com");
 }
 
@@ -160,7 +160,7 @@ async fn html_soft_404_and_expired_files_are_ignored() {
             )),
         ),
     ]);
-    assert!(finder.find(&domain(), now()).await.unwrap().is_empty());
+    assert!(finder.find(&domain(), &[], now()).await.unwrap().is_empty());
 }
 
 #[tokio::test]
@@ -172,7 +172,7 @@ async fn rate_limit_is_propagated() {
         }),
     )]);
     assert!(matches!(
-        finder.find(&domain(), now()).await,
+        finder.find(&domain(), &[], now()).await,
         Err(SourceError::RateLimited { .. })
     ));
 }

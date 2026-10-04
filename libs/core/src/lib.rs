@@ -8,7 +8,7 @@ pub use application::*;
 pub use domain::{
     NormalizedDomain, NormalizedDomainError, User, UserId,
     contact::{
-        ContactFinder, ContactTargets, FoundAddress, rank_of,
+        ContactFinder, ContactTargets, FoundAddress, rank_contacts, rank_of,
         recipient::{NotARecipient, Recipient},
         select_for_profile,
     },
@@ -18,7 +18,7 @@ pub use domain::{
     },
     host::{
         CandidateHost, HostOrigin, Hostname, InvalidHostname,
-        ports::{CandidateHosts, CtCursors, DnsError, DnsResolver},
+        ports::{CandidateHosts, CtCursors, DnsError, DnsResolver, MxLookup},
     },
     job::{
         ClaimedJob, FailureDecision, InvalidJobKind, Job, JobId, JobKind, JobStatus, LeaseToken,

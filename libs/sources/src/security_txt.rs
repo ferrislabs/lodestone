@@ -2,9 +2,9 @@ use std::{sync::Arc, time::Duration};
 
 use chrono::{DateTime, Utc};
 use lodestone_core::{
-    ContactFinder, ContactMethod, EmailAddress, FetchError, FetchPurpose, FetchRequest,
-    FetchResponse, Fetcher, FoundAddress, NormalizedDomain, Provenance, SourceError, SourceName,
-    UnitInterval,
+    ActiveProfile, ContactFinder, ContactMethod, EmailAddress, FetchError, FetchPurpose,
+    FetchRequest, FetchResponse, Fetcher, FoundAddress, NormalizedDomain, Provenance, SourceError,
+    SourceName, UnitInterval,
 };
 use url::Url;
 
@@ -135,6 +135,7 @@ impl<F: Fetcher> ContactFinder for SecurityTxtFinder<F> {
     async fn find(
         &self,
         domain: &NormalizedDomain,
+        _profiles: &[ActiveProfile],
         now: DateTime<Utc>,
     ) -> Result<Vec<FoundAddress>, SourceError> {
         let confidence = UnitInterval::new(HINT_CONFIDENCE)

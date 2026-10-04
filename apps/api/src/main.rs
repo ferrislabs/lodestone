@@ -30,6 +30,7 @@ use sources::{
     ct::{CtSettings, CtSource},
     dns_cname::{DnsCnameSettings, DnsCnameSource},
     http_probe::{HttpProbeSettings, HttpProbeSource, ProbeScheme},
+    role_guess::RoleGuessFinder,
     security_txt::SecurityTxtFinder,
 };
 use tokio::sync::watch;
@@ -59,8 +60,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let outbound_config = OutboundConfig::try_from(args.outbound.clone())?;
     let pool = app_state.usecase.pool().clone();
     let queue = Arc::new(PgJobQueue::new(pool.clone()));
+    let resolver = Arc::new(HickoryResolver::from_system(DnsSettings::default())?);
     let dns_cname = DnsCnameSource::new(
-        Arc::new(HickoryResolver::from_system(DnsSettings::default())?),
+        Arc::clone(&resolver),
         Arc::new(PgCandidateHosts::new(pool.clone())),
         DnsCnameSettings {
             batch_size: DNS_BATCH_SIZE,
@@ -96,6 +98,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             Arc::clone(&fetcher),
             args.contacts.max_rate_limit_wait(),
         ),
+        role_guess: RoleGuessFinder::new(resolver),
         targets: PgContactTargets::new(pool.clone()),
         settings: ContactRunSettings {
             batch_size: args.contacts.batch_size,

@@ -121,6 +121,7 @@ pub enum SourceName {
     DnsCname,
     PublicPage,
     SecurityTxt,
+    RoleGuess,
     Boamp,
     Decp,
     Ted,
@@ -129,12 +130,13 @@ pub enum SourceName {
 }
 
 impl SourceName {
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 11] = [
         Self::CertificateTransparency,
         Self::HttpProbe,
         Self::DnsCname,
         Self::PublicPage,
         Self::SecurityTxt,
+        Self::RoleGuess,
         Self::Boamp,
         Self::Decp,
         Self::Ted,
@@ -149,6 +151,7 @@ impl SourceName {
             Self::DnsCname => "dns_cname",
             Self::PublicPage => "public_page",
             Self::SecurityTxt => "security_txt",
+            Self::RoleGuess => "role_guess",
             Self::Boamp => "boamp",
             Self::Decp => "decp",
             Self::Ted => "ted",

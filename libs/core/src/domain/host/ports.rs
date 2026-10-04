@@ -56,3 +56,10 @@ pub trait CtCursors: Send + Sync {
         at: DateTime<Utc>,
     ) -> impl Future<Output = Result<(), CoreError>> + Send;
 }
+
+pub trait MxLookup: Send + Sync {
+    fn has_mx(
+        &self,
+        domain: &crate::domain::NormalizedDomain,
+    ) -> impl Future<Output = Result<bool, DnsError>> + Send;
+}

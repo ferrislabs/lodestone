@@ -25,6 +25,7 @@ impl ContactTargets for PgContactTargets {
         source: SourceName,
         checked_before: DateTime<Utc>,
         limit: u32,
+        after: Option<SourceName>,
     ) -> Result<Vec<NormalizedDomain>, CoreError> {
         let rows = sqlx::query_scalar!(
             r#"
@@ -32,13 +33,17 @@ impl ContactTargets for PgContactTargets {
             FROM (SELECT DISTINCT leads.domain FROM leads
                   JOIN profiles ON profiles.id = leads.profile_id AND profiles.active) l
             LEFT JOIN lead_domain_checks c ON c.domain = l.domain AND c.source = $1
-            WHERE c.checked_at IS NULL OR c.checked_at < $2
+            WHERE (c.checked_at IS NULL OR c.checked_at < $2)
+              AND ($4::text IS NULL OR EXISTS (
+                  SELECT 1 FROM lead_domain_checks p WHERE p.domain = l.domain AND p.source = $4
+              ))
             ORDER BY c.checked_at NULLS FIRST, l.domain
             LIMIT $3
             "#,
             source.as_str(),
             checked_before,
             i64::from(limit),
+            after.map(SourceName::as_str),
         )
         .fetch_all(&self.pool)
         .await

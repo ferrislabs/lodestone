@@ -25,6 +25,7 @@ use crate::{
 
 pub const CONTACT_SIGNAL: &str = "role_contact_found";
 pub const SECURITY_TXT_SIGNAL: &str = "security_txt_contact";
+pub const GUESSED_CONTACT_SIGNAL: &str = "role_contact_guessed";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ContactRunSettings {
@@ -65,7 +66,7 @@ impl LodestoneUseCase {
         let revisit = chrono::Duration::from_std(settings.revisit_interval)
             .map_err(|_| CoreError::Internal("revisit interval out of range".to_owned()))?;
         let domains = targets
-            .list_due(name, now - revisit, settings.batch_size)
+            .list_due(name, now - revisit, settings.batch_size, finder.requires())
             .await?;
 
         let runs: Vec<Run> = profiles
@@ -80,7 +81,7 @@ impl LodestoneUseCase {
         let mut checked = Vec::with_capacity(domains.len());
         let mut per_profile = vec![0u64; profiles.len()];
         for domain in &domains {
-            let found = match finder.find(domain, clock.now()).await {
+            let found = match finder.find(domain, &profiles, clock.now()).await {
                 Ok(found) => found,
                 Err(SourceError::RateLimited { .. }) => {
                     report.rate_limited = true;
@@ -159,15 +160,22 @@ impl LodestoneUseCase {
             return Ok(0);
         };
         let ranking = &active.revision.definition.definition().contact_ranking;
-        let known: Vec<String> = contacts
-            .list_for_lead(lead.id)
-            .await?
+        let existing = contacts.list_for_lead(lead.id).await?;
+        let has_real_address = existing.iter().any(|contact| {
+            matches!(
+                contact.method,
+                ContactMethod::PublicPage | ContactMethod::LlmExtraction
+            )
+        });
+        let known: Vec<String> = existing
             .into_iter()
             .map(|contact| contact.address.to_string())
             .collect();
         let mut stored = 0;
         for candidate in select_for_profile(found, domain, ranking) {
-            if known.contains(&candidate.address.to_string()) {
+            if known.contains(&candidate.address.to_string())
+                || (candidate.method == ContactMethod::RoleGuess && has_real_address)
+            {
                 continue;
             }
             contacts
@@ -184,7 +192,8 @@ impl LodestoneUseCase {
                 .await?;
             let kind = SignalKind::parse(match candidate.method {
                 ContactMethod::SecurityTxt => SECURITY_TXT_SIGNAL,
-                _ => CONTACT_SIGNAL,
+                ContactMethod::RoleGuess => GUESSED_CONTACT_SIGNAL,
+                ContactMethod::PublicPage | ContactMethod::LlmExtraction => CONTACT_SIGNAL,
             })
             .map_err(|_| CoreError::Internal("invalid contact signal kind".to_owned()))?;
             signals

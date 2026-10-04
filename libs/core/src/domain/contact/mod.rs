@@ -6,7 +6,7 @@ use common::CoreError;
 use crate::domain::{
     NormalizedDomain,
     lead::ContactMethod,
-    profile::definition::ContactRanking,
+    profile::{ActiveProfile, definition::ContactRanking},
     source::SourceError,
     values::{EmailAddress, Provenance, SourceName, UnitInterval},
 };
@@ -22,9 +22,14 @@ pub struct FoundAddress {
 pub trait ContactFinder: Send + Sync {
     fn name(&self) -> SourceName;
 
+    fn requires(&self) -> Option<SourceName> {
+        None
+    }
+
     fn find(
         &self,
         domain: &NormalizedDomain,
+        profiles: &[ActiveProfile],
         now: DateTime<Utc>,
     ) -> impl Future<Output = Result<Vec<FoundAddress>, SourceError>> + Send;
 }
@@ -35,6 +40,7 @@ pub trait ContactTargets: Send + Sync {
         source: SourceName,
         checked_before: DateTime<Utc>,
         limit: u32,
+        after: Option<SourceName>,
     ) -> impl Future<Output = Result<Vec<NormalizedDomain>, CoreError>> + Send;
 
     fn mark_checked(
@@ -61,6 +67,25 @@ pub fn rank_of(address: &EmailAddress, ranking: &ContactRanking) -> Option<usize
         .position(|preferred| preferred.eq_ignore_ascii_case(local))
 }
 
+pub fn rank_contacts<'a>(
+    contacts: &'a [crate::domain::lead::ContactEmail],
+    ranking: &ContactRanking,
+) -> Vec<&'a crate::domain::lead::ContactEmail> {
+    let mut ranked: Vec<_> = contacts.iter().collect();
+    ranked.sort_by(|a, b| {
+        let rank = |contact: &crate::domain::lead::ContactEmail| {
+            rank_of(&contact.address, ranking).unwrap_or(usize::MAX)
+        };
+        rank(a).cmp(&rank(b)).then_with(|| {
+            b.confidence
+                .get()
+                .partial_cmp(&a.confidence.get())
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+    });
+    ranked
+}
+
 pub fn select_for_profile<'a>(
     found: &'a [FoundAddress],
     domain: &NormalizedDomain,
@@ -68,9 +93,17 @@ pub fn select_for_profile<'a>(
 ) -> Vec<&'a FoundAddress> {
     let mut selected: Vec<&FoundAddress> = Vec::with_capacity(found.len());
     for candidate in found {
-        let ranked = rank_of(&candidate.address, ranking).is_some();
-        let hint = candidate.method == ContactMethod::SecurityTxt;
-        if !belongs_to(&candidate.address, domain) || !(ranked || hint) {
+        let allowed = match candidate.method {
+            ContactMethod::SecurityTxt => true,
+            ContactMethod::RoleGuess => ranking
+                .guess_local_parts
+                .iter()
+                .any(|part| part.eq_ignore_ascii_case(candidate.address.local_part())),
+            ContactMethod::PublicPage | ContactMethod::LlmExtraction => {
+                rank_of(&candidate.address, ranking).is_some()
+            }
+        };
+        if !belongs_to(&candidate.address, domain) || !allowed {
             continue;
         }
         match selected
@@ -187,6 +220,68 @@ mod tests {
         assert_eq!(
             addresses(&selected),
             ["contact@example.com", "psirt@example.com"]
+        );
+    }
+
+    #[test]
+    fn guesses_need_the_profile_guess_list() {
+        let guess = |address: &str| FoundAddress {
+            method: ContactMethod::RoleGuess,
+            ..found(address, 0.2)
+        };
+        let found = [guess("contact@example.com"), guess("info@example.com")];
+        let ranking = ContactRanking {
+            preferred_local_parts: vec!["security".into(), "contact".into(), "info".into()],
+            guess_local_parts: vec!["contact".into()],
+        };
+        let selected = select_for_profile(&found, &domain(), &ranking);
+        assert_eq!(addresses(&selected), ["contact@example.com"]);
+    }
+
+    #[test]
+    fn stored_contacts_rank_by_profile_then_confidence() {
+        use crate::domain::lead::{ContactEmail, ContactId, ContactKind, LeadId};
+        let contact = |address: &str, method: ContactMethod, confidence: f64| ContactEmail {
+            id: ContactId(uuid::Uuid::nil()),
+            lead_id: LeadId(uuid::Uuid::nil()),
+            address: EmailAddress::parse(address).unwrap(),
+            provenance: Provenance::parse("https://example.com/").unwrap(),
+            method,
+            confidence: UnitInterval::new(confidence).unwrap(),
+            kind: ContactKind::Role,
+            found_at: chrono::Utc::now(),
+        };
+        let contacts = [
+            contact("info@example.com", ContactMethod::RoleGuess, 0.2),
+            contact("contact@example.com", ContactMethod::PublicPage, 0.8),
+            contact("security@example.com", ContactMethod::PublicPage, 0.8),
+            contact("psirt@example.com", ContactMethod::SecurityTxt, 0.7),
+        ];
+        let iam = ranking(&["security", "it", "contact", "info"]);
+        let shop = ranking(&["info", "contact"]);
+        let order = |ranking: &ContactRanking| -> Vec<String> {
+            rank_contacts(&contacts, ranking)
+                .iter()
+                .map(|c| c.address.to_string())
+                .collect()
+        };
+        assert_eq!(
+            order(&iam),
+            [
+                "security@example.com",
+                "contact@example.com",
+                "info@example.com",
+                "psirt@example.com"
+            ]
+        );
+        assert_eq!(
+            order(&shop),
+            [
+                "info@example.com",
+                "contact@example.com",
+                "security@example.com",
+                "psirt@example.com"
+            ]
         );
     }
 
