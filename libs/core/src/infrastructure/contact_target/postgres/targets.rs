@@ -34,6 +34,9 @@ impl ContactTargets for PgContactTargets {
                   JOIN profiles ON profiles.id = leads.profile_id AND profiles.active) l
             LEFT JOIN lead_domain_checks c ON c.domain = l.domain AND c.source = $1
             WHERE (c.checked_at IS NULL OR c.checked_at < $2)
+              AND NOT EXISTS (
+                  SELECT 1 FROM suppression_list s WHERE s.kind = 'domain' AND s.value = l.domain
+              )
               AND ($4::text IS NULL OR EXISTS (
                   SELECT 1 FROM lead_domain_checks p WHERE p.domain = l.domain AND p.source = $4
               ))

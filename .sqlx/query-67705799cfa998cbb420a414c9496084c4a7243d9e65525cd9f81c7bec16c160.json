@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT l.domain AS \"domain!\"\n            FROM (SELECT DISTINCT leads.domain FROM leads\n                  JOIN profiles ON profiles.id = leads.profile_id AND profiles.active) l\n            LEFT JOIN lead_domain_checks c ON c.domain = l.domain AND c.source = $1\n            WHERE (c.checked_at IS NULL OR c.checked_at < $2)\n              AND NOT EXISTS (\n                  SELECT 1 FROM suppression_list s WHERE s.kind = 'domain' AND s.value = l.domain\n              )\n              AND ($4::text IS NULL OR EXISTS (\n                  SELECT 1 FROM lead_domain_checks p WHERE p.domain = l.domain AND p.source = $4\n              ))\n            ORDER BY c.checked_at NULLS FIRST, l.domain\n            LIMIT $3\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "domain!",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Timestamptz",
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "67705799cfa998cbb420a414c9496084c4a7243d9e65525cd9f81c7bec16c160"
+}

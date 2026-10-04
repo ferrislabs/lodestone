@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT h.host, h.domain, h.origin, h.first_seen_at, h.last_seen_at\n            FROM candidate_hosts h\n            LEFT JOIN host_source_checks c ON c.host = h.host AND c.source = $1\n            WHERE c.checked_at IS NULL OR c.checked_at < $2\n            ORDER BY c.checked_at ASC NULLS FIRST, h.host ASC\n            LIMIT $3\n            ",
+  "query": "\n            SELECT h.host, h.domain, h.origin, h.first_seen_at, h.last_seen_at\n            FROM candidate_hosts h\n            LEFT JOIN host_source_checks c ON c.host = h.host AND c.source = $1\n            WHERE (c.checked_at IS NULL OR c.checked_at < $2)\n              AND NOT EXISTS (\n                  SELECT 1 FROM suppression_list s WHERE s.kind = 'domain' AND s.value = h.domain\n              )\n            ORDER BY c.checked_at ASC NULLS FIRST, h.host ASC\n            LIMIT $3\n            ",
   "describe": {
     "columns": [
       {
@@ -44,5 +44,5 @@
       false
     ]
   },
-  "hash": "1d7e1ee294415d0c6379a231b7b7abc2b8e937f973a91e6ac7ba9744730fe038"
+  "hash": "8e0a1c06437d6f2162c80049e6ff7b6606cdf9ee9e72f6b4fa349f21acc98e25"
 }
