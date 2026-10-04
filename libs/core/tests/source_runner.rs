@@ -220,3 +220,46 @@ fn source_job_round_trips_its_source() {
     };
     assert_eq!(source_of_job(&job), Ok(SourceName::DnsCname));
 }
+
+async fn signal_count(pool: &PgPool, profile: ProfileId) -> usize {
+    let mut total = 0;
+    for domain_name in leads(pool, profile).await {
+        let found = with_tx(pool, async |shared| {
+            let lead = PgLeadRepository::new(&shared)
+                .find_by_domain(profile, &NormalizedDomain::from_host(&domain_name).unwrap())
+                .await?
+                .unwrap();
+            PgSignalRepository::new(&shared)
+                .list_for_lead(lead.id)
+                .await
+        })
+        .await
+        .unwrap();
+        total += found.len();
+    }
+    total
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn replaying_a_run_creates_no_duplicate_and_keeps_profiles_apart(pool: PgPool) {
+    let alpha = active_profile(&pool, "alpha").await;
+    let beta = active_profile(&pool, "beta").await;
+    let source = FakeSource::new(vec!["sso.acme.com", "auth.beta.io"]);
+    let usecase = LodestoneUseCase::new(pool.clone());
+
+    usecase.run_source(&source, &FixedClock).await.unwrap();
+    let after_first = (
+        signal_count(&pool, alpha).await,
+        signal_count(&pool, beta).await,
+    );
+    usecase.run_source(&source, &FixedClock).await.unwrap();
+    let after_replay = (
+        signal_count(&pool, alpha).await,
+        signal_count(&pool, beta).await,
+    );
+
+    assert_eq!(after_first, (2, 1));
+    assert_eq!(after_replay, after_first);
+    assert_eq!(leads(&pool, alpha).await.len(), 2);
+    assert_eq!(leads(&pool, beta).await, vec!["beta.io"]);
+}

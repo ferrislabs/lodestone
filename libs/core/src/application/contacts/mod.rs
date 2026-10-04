@@ -197,7 +197,7 @@ impl LodestoneUseCase {
             })
             .map_err(|_| CoreError::Internal("invalid contact signal kind".to_owned()))?;
             signals
-                .insert(&Signal {
+                .record(&Signal {
                     id: SignalId(generate_uuid_v7()),
                     lead_id: lead.id,
                     kind,
