@@ -31,6 +31,10 @@ pub use domain::{
         UnknownLeadStatus,
         ports::{AssessmentRepository, ContactRepository, LeadRepository, SignalRepository},
     },
+    llm::{
+        LlmError, LlmProvider, LlmRequest, LlmResponse, ProviderDefinition, ProviderKind,
+        TokenUsage, UntrustedDocument, render_user_content,
+    },
     profile::{
         ActiveProfile, Profile, ProfileId, ProfileName, ProfileNameError, ProfileProblem,
         ProfileRevision, ProfileValidationError, RevisionNumber, ValidatedProfile,
