@@ -5,4 +5,6 @@ pub(crate) mod domain;
 pub mod infrastructure;
 
 pub use application::*;
-pub use domain::{User, UserId, user::commands::CreateUserCommand};
+pub use domain::{
+    NormalizedDomain, NormalizedDomainError, User, UserId, user::commands::CreateUserCommand,
+};
