@@ -33,6 +33,33 @@
               "rule": { "kind": "matches", "matcher": { "kind": "body", "pattern": "/auth/realms/master" } }
             }
           ]
+        },
+        {
+          "id": "authentik",
+          "path": "/-/health/live/",
+          "product": "authentik",
+          "matchers": [
+            { "kind": "status", "equals": 200 },
+            { "kind": "header", "name": "x-powered-by", "pattern": "^authentik$" }
+          ]
+        },
+        {
+          "id": "zitadel",
+          "path": "/ui/console",
+          "product": "zitadel",
+          "matchers": [
+            { "kind": "status", "equals": 200 },
+            { "kind": "body", "pattern": "<title>ZITADEL" }
+          ]
+        },
+        {
+          "id": "ferriskey",
+          "path": "/realms/master",
+          "product": "ferriskey",
+          "matchers": [
+            { "kind": "status", "equals": 401 },
+            { "kind": "body", "pattern": "\"code\"\\s*:\\s*\"E_UNAUTHORIZED\"" }
+          ]
         }
       ],
       "excluded_products": ["ferriskey"]

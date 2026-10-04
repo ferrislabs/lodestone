@@ -11,6 +11,7 @@ args = { workspace = true }
 common = { workspace = true }
 lodestone-core = { workspace = true }
 dns = { workspace = true }
+fetch = { workspace = true }
 sources = { workspace = true }
 axum-server = { workspace = true }
 

@@ -13,6 +13,7 @@ use clap::Parser;
 use common::{JobsConfig, OutboundConfig};
 use dns::{DnsSettings, HickoryResolver};
 use dotenvy::dotenv;
+use fetch::{FetchSettings, PoliteFetcher};
 use handlers::state;
 use lodestone_core::{
     RetryPolicy,
@@ -20,7 +21,10 @@ use lodestone_core::{
     jobs::{SystemClock, WorkerPool, WorkerSettings},
 };
 use server::{get_addr, run_server, shutdown_signal};
-use sources::dns_cname::{DnsCnameSettings, DnsCnameSource};
+use sources::{
+    dns_cname::{DnsCnameSettings, DnsCnameSource},
+    http_probe::{HttpProbeSettings, HttpProbeSource, ProbeScheme},
+};
 use tokio::sync::watch;
 use tracing::{error, info};
 
@@ -33,6 +37,8 @@ use crate::{
 
 const DNS_BATCH_SIZE: u32 = 500;
 const DNS_CONCURRENCY: usize = 16;
+const PROBE_BATCH_SIZE: u32 = 200;
+const PROBE_CONCURRENCY: usize = 8;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -47,16 +53,32 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let queue = Arc::new(PgJobQueue::new(pool.clone()));
     let dns_cname = DnsCnameSource::new(
         Arc::new(HickoryResolver::from_system(DnsSettings::default())?),
-        Arc::new(PgCandidateHosts::new(pool)),
+        Arc::new(PgCandidateHosts::new(pool.clone())),
         DnsCnameSettings {
             batch_size: DNS_BATCH_SIZE,
             concurrency: DNS_CONCURRENCY,
             revisit_interval: outbound_config.revisit_interval,
         },
     );
+    let http_probe = HttpProbeSource::new(
+        Arc::new(PoliteFetcher::new(FetchSettings::from_outbound(
+            &outbound_config,
+        ))?),
+        Arc::new(PgCandidateHosts::new(pool)),
+        Arc::new(app_state.usecase.clone()),
+        HttpProbeSettings {
+            batch_size: PROBE_BATCH_SIZE,
+            concurrency: PROBE_CONCURRENCY,
+            revisit_interval: outbound_config.revisit_interval,
+            scheme: ProbeScheme::Https,
+            port: None,
+            host_override: None,
+        },
+    );
     let job_router = JobRouter::new(
         app_state.usecase.clone(),
         dns_cname,
+        http_probe,
         jobs_config.source_interval,
     );
     schedule_wired_sources(&queue).await?;
