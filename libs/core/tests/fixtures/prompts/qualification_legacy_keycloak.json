@@ -1,0 +1,33 @@
+{
+  "name": "qualification_legacy_keycloak",
+  "template": "qualification",
+  "documents": [
+    {
+      "source": "https://sso.example-retail.fr/auth/realms/master",
+      "content": "signal product_detected value keycloak, fingerprint keycloak-legacy-realm, path /auth/realms/master, status 200"
+    },
+    {
+      "source": "https://jobs.example-retail.fr/offres/ingenieur-iam",
+      "content": "Vous maintiendrez notre plateforme Keycloak 18 auto-hébergée et préparerez sa migration."
+    }
+  ],
+  "expect": {},
+  "recorded_output": {
+    "summary": "Example Retail exposes a Keycloak realm under the legacy /auth path and is hiring an engineer to maintain a self-hosted Keycloak 18 and prepare its migration.",
+    "approach_angle": "A planned Keycloak migration is the moment to evaluate a maintained IAM such as FerrisKey or a managed Autharie instance.",
+    "evidence": [
+      {
+        "document_index": 0,
+        "quote": "path /auth/realms/master, status 200"
+      },
+      {
+        "document_index": 1,
+        "quote": "Vous maintiendrez notre plateforme Keycloak 18 auto-hébergée et préparerez sa migration."
+      }
+    ],
+    "draft_message": {
+      "subject": "Votre migration Keycloak",
+      "body": "Bonjour,\n\nVotre offre d'emploi mentionne la migration de votre plateforme Keycloak 18 auto-hébergée. FerrisKey est un IAM open source compatible avec ces usages, également disponible en version managée (Autharie). Seriez-vous ouvert à un échange de 20 minutes ?\n\nCordialement"
+    }
+  }
+}
