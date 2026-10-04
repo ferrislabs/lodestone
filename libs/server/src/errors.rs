@@ -5,6 +5,9 @@ pub enum ServerError {
     #[error("internal server error: {message}")]
     Internal { message: String },
 
+    #[error("invalid configuration: {0}")]
+    Configuration(String),
+
     #[error("socket resolve error: {0}")]
     SocketResolveError(String),
 

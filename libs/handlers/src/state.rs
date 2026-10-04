@@ -19,7 +19,8 @@ pub struct AppState {
 }
 
 pub async fn state(args: Arc<Args>) -> Result<AppState, ServerError> {
-    let config = Config::from(args.as_ref().clone());
+    let config = Config::try_from(args.as_ref().clone())
+        .map_err(|e| ServerError::Configuration(e.to_string()))?;
 
     let service = create_service(config).await.unwrap();
 

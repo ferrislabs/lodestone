@@ -75,6 +75,18 @@ Common flags / env vars (see `libs/args/src/`):
 | `ACTIVE_OBSERVABILITY` | `--active-observability`   | `false`                            |
 | `OTLP_ENDPOINT`        | `--otlp-endpoint`          | `http://localhost:4317`            |
 | `METRICS_ENDPOINT`     | `--metrics-endpoint`       | `http://localhost:4317`            |
+| `RATE_LIMIT_PER_MINUTE` | `--rate-limit-per-minute` | `10` |
+| `JOBS_WORKERS` | `--jobs-workers` | `4` |
+| `JOBS_LEASE_SECONDS` | `--jobs-lease-seconds` | `300` |
+| `JOBS_POLL_INTERVAL_MS` | `--jobs-poll-interval-ms` | `1000` |
+| `JOBS_MAX_ATTEMPTS` | `--jobs-max-attempts` | `5` |
+| `JOBS_RETRY_BASE_SECONDS` | `--jobs-retry-base-seconds` | `10` |
+| `OUTBOUND_CONTACT` | `--outbound-contact` | required, email or https URL |
+| `OUTBOUND_REQUESTS_PER_HOST_PER_MINUTE` | `--outbound-requests-per-host-per-minute` | `6` |
+| `OUTBOUND_REVISIT_INTERVAL_HOURS` | `--outbound-revisit-interval-hours` | `720` |
+| `OUTBOUND_REQUEST_TIMEOUT_SECONDS` | `--outbound-request-timeout-seconds` | `15` |
+| `LLM_SECRETS_ENCRYPTION_KEY` | `--llm-secrets-encryption-key` | required, base64 of 32 bytes |
+| `LLM_RUN_BUDGET_CENTS` | `--llm-run-budget-cents` | `500` |
 
 ## Database migrations
 

@@ -1,6 +1,11 @@
 pub mod secret;
+pub mod settings;
 
 pub use secret::Secret;
+pub use settings::{
+    ENCRYPTION_KEY_LENGTH, EncryptionKey, JobsConfig, LlmConfig, OutboundConfig, OutboundContact,
+    SettingsError,
+};
 
 use chrono::{DateTime, Utc};
 use thiserror::Error;
@@ -11,6 +16,9 @@ pub struct Config {
     pub database: DatabaseConfig,
     pub auth: AuthConfig,
     pub rate_limit: RateLimitConfig,
+    pub jobs: JobsConfig,
+    pub outbound: OutboundConfig,
+    pub llm: LlmConfig,
 }
 
 #[derive(Clone, Debug)]
