@@ -43,9 +43,7 @@
 	},
 	"overrides": [
 		{
-			"includes": [
-				"**/src/components/ui/**"
-			],
+			"includes": ["**/src/components/ui/**"],
 			"linter": {
 				"enabled": false
 			}

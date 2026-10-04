@@ -11,8 +11,6 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as AppRouteImport } from './routes/_app'
 import { Route as AppIndexRouteImport } from './routes/_app.index'
-import { Route as AppCustomersIndexRouteImport } from './routes/_app.customers.index'
-import { Route as AppCustomersCustomerIdRouteImport } from './routes/_app.customers.$customerId'
 
 const AppRoute = AppRouteImport.update({
   id: '/_app',
@@ -23,45 +21,24 @@ const AppIndexRoute = AppIndexRouteImport.update({
   path: '/',
   getParentRoute: () => AppRoute,
 } as any)
-const AppCustomersIndexRoute = AppCustomersIndexRouteImport.update({
-  id: '/customers/',
-  path: '/customers/',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppCustomersCustomerIdRoute = AppCustomersCustomerIdRouteImport.update({
-  id: '/customers/$customerId',
-  path: '/customers/$customerId',
-  getParentRoute: () => AppRoute,
-} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof AppIndexRoute
-  '/customers/$customerId': typeof AppCustomersCustomerIdRoute
-  '/customers/': typeof AppCustomersIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof AppIndexRoute
-  '/customers/$customerId': typeof AppCustomersCustomerIdRoute
-  '/customers': typeof AppCustomersIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/_app': typeof AppRouteWithChildren
   '/_app/': typeof AppIndexRoute
-  '/_app/customers/$customerId': typeof AppCustomersCustomerIdRoute
-  '/_app/customers/': typeof AppCustomersIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/customers/$customerId' | '/customers/'
+  fullPaths: '/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/customers/$customerId' | '/customers'
-  id:
-    | '__root__'
-    | '/_app'
-    | '/_app/'
-    | '/_app/customers/$customerId'
-    | '/_app/customers/'
+  to: '/'
+  id: '__root__' | '/_app' | '/_app/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -84,33 +61,15 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppIndexRouteImport
       parentRoute: typeof AppRoute
     }
-    '/_app/customers/': {
-      id: '/_app/customers/'
-      path: '/customers'
-      fullPath: '/customers/'
-      preLoaderRoute: typeof AppCustomersIndexRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/customers/$customerId': {
-      id: '/_app/customers/$customerId'
-      path: '/customers/$customerId'
-      fullPath: '/customers/$customerId'
-      preLoaderRoute: typeof AppCustomersCustomerIdRouteImport
-      parentRoute: typeof AppRoute
-    }
   }
 }
 
 interface AppRouteChildren {
   AppIndexRoute: typeof AppIndexRoute
-  AppCustomersCustomerIdRoute: typeof AppCustomersCustomerIdRoute
-  AppCustomersIndexRoute: typeof AppCustomersIndexRoute
 }
 
 const AppRouteChildren: AppRouteChildren = {
   AppIndexRoute: AppIndexRoute,
-  AppCustomersCustomerIdRoute: AppCustomersCustomerIdRoute,
-  AppCustomersIndexRoute: AppCustomersIndexRoute,
 }
 
 const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
