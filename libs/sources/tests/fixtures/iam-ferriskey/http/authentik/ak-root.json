@@ -1,0 +1,57 @@
+{
+ "product": "authentik",
+ "image": "ghcr.io/goauthentik/server:2026.8",
+ "image_digest": "ghcr.io/goauthentik/server@sha256:ab9b4e8cc4ab3f8d1198d2db6aeea66bafea1963b3f2843589e0d163f97d9849",
+ "captured_at": "2026-10-04T13:28:55Z",
+ "request": {
+  "method": "GET",
+  "path": "/"
+ },
+ "response": {
+  "status": 302,
+  "headers": [
+   [
+    "server",
+    "uvicorn"
+   ],
+   [
+    "content-type",
+    "text/html; charset=utf-8"
+   ],
+   [
+    "location",
+    "/setup"
+   ],
+   [
+    "x-frame-options",
+    "DENY"
+   ],
+   [
+    "content-length",
+    "0"
+   ],
+   [
+    "x-content-type-options",
+    "nosniff"
+   ],
+   [
+    "referrer-policy",
+    "same-origin"
+   ],
+   [
+    "vary",
+    "Accept-Language, Cookie"
+   ],
+   [
+    "content-language",
+    "en"
+   ],
+   [
+    "x-powered-by",
+    "authentik"
+   ]
+  ],
+  "body": "",
+  "body_truncated": false
+ }
+}

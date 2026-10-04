@@ -1,0 +1,41 @@
+{
+ "product": "none",
+ "image": "httpd:alpine",
+ "image_digest": "httpd@sha256:3440c39d8d6f54fa9ad2549e5a60c19ddd435faadc29c1ad28aa795f71888889",
+ "captured_at": "2026-10-04T13:08:53Z",
+ "request": {
+  "method": "GET",
+  "path": "/"
+ },
+ "response": {
+  "status": 200,
+  "headers": [
+   [
+    "server",
+    "Apache/2.4.69 (Unix)"
+   ],
+   [
+    "last-modified",
+    "Fri, 07 Nov 2025 08:23:08 GMT"
+   ],
+   [
+    "etag",
+    "\"bf-642fce432f300\""
+   ],
+   [
+    "accept-ranges",
+    "bytes"
+   ],
+   [
+    "content-length",
+    "191"
+   ],
+   [
+    "content-type",
+    "text/html"
+   ]
+  ],
+  "body": "<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.01//EN\" \"http://www.w3.org/TR/html4/strict.dtd\">\n<html>\n<head>\n<title>It works! Apache httpd</title>\n</head>\n<body>\n<p>It works!</p>\n</body>\n</html>\n",
+  "body_truncated": false
+ }
+}

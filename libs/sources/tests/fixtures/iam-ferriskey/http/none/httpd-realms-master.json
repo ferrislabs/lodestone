@@ -1,0 +1,29 @@
+{
+ "product": "none",
+ "image": "httpd:alpine",
+ "image_digest": "httpd@sha256:3440c39d8d6f54fa9ad2549e5a60c19ddd435faadc29c1ad28aa795f71888889",
+ "captured_at": "2026-10-04T13:08:53Z",
+ "request": {
+  "method": "GET",
+  "path": "/realms/master"
+ },
+ "response": {
+  "status": 404,
+  "headers": [
+   [
+    "server",
+    "Apache/2.4.69 (Unix)"
+   ],
+   [
+    "content-length",
+    "236"
+   ],
+   [
+    "content-type",
+    "text/html; charset=iso-8859-1"
+   ]
+  ],
+  "body": "<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.01//EN\" \"http://www.w3.org/TR/html4/strict.dtd\">\n<html><head>\n<title>404 Not Found</title>\n</head><body>\n<h1>Not Found</h1>\n<p>The requested URL was not found on this server.</p>\n</body></html>\n",
+  "body_truncated": false
+ }
+}

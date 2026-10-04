@@ -1,0 +1,41 @@
+{
+ "product": "zitadel",
+ "image": "ghcr.io/zitadel/zitadel:latest",
+ "image_digest": "ghcr.io/zitadel/zitadel@sha256:90a3045b80a2b5b395e1e770302076906af3a5911225af7c464b4f3bd00d0a1b",
+ "captured_at": "2026-10-04T13:25:23Z",
+ "request": {
+  "method": "GET",
+  "path": "/oauth/v2/keys"
+ },
+ "response": {
+  "status": 200,
+  "headers": [
+   [
+    "cache-control",
+    "max-age=300, must-revalidate"
+   ],
+   [
+    "content-type",
+    "application/json"
+   ],
+   [
+    "vary",
+    "Origin"
+   ],
+   [
+    "vary",
+    "Cookie"
+   ],
+   [
+    "x-robots-tag",
+    "none"
+   ],
+   [
+    "content-length",
+    "865"
+   ]
+  ],
+  "body": "{\"keys\":[{\"use\":\"sig\",\"kty\":\"RSA\",\"kid\":\"393634236332007683\",\"alg\":\"RS256\",\"n\":\"xHuoqQyHAqgMr8nlpaIIkfijKzpzKJH1QEe0P7za-XITH0-TnpVRoODLy7bPgmQ6VvlrJPyLk84_ZnhuH8AM8W2kEM5ukqUR2hibwk4nTY1w0RthmBQB6m2T11vuzj846y-XI9fIx86CD_VWAGjNxmY6haInOl-R0wAVn8Odzq_K_XeHdTAI5ehtaekw3aM1GW4lYKQYHcz_zfZvGt1rKwww90T3xIwXHHG-OXPeNhenSy6gf9aEXpRl-iv_bccdRRNjIMQbNMITZNsLSAljIHQZY-BuFGEAc_RSOfLz_otHYRnFpIO4fgMzYeKEJ4rKkBs_KZUNSM_8P3tIeerVJQ\",\"e\":\"AQAB\"},{\"use\":\"sig\",\"kty\":\"RSA\",\"kid\":\"393634236633997571\",\"alg\":\"RS256\",\"n\":\"wOHsVdkN7O5dDW-pVLA6j0AbwZjsGc40rE_2ZGoY2rtlOJ4ShmIXvi62T2-GHXZpxALy4qrLX41JMWTaATgkyrAtYE92myJsWL7funsoTUpuNZBCiBzb14GWlDx03rAH5P3TyabDk2Amr0ZpV5l3lHcP_l6VEHSqmaa6vvUVKb3fzqIbhpnHvv7r1EeOQXAyX60z67W54BvOTyBv1gzrts0foeME1uLznRR8e5Lzmz8D9XaJrfAS9JWsyiY_-JIu8O62EVnQGsrTgiCVoNxitNV_5mXQ9gWKwLV44FQV58CNa6zdrsOSIKJugMyaxa1TYM_x7I64ugz8X5X-RfpbOQ\",\"e\":\"AQAB\"}]}\n",
+  "body_truncated": false
+ }
+}

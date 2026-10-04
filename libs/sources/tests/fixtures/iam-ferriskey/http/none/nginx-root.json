@@ -1,0 +1,45 @@
+{
+ "product": "none",
+ "image": "nginx:alpine",
+ "image_digest": "nginx@sha256:df221db836e1754089190208cee7eeda94f233197056426eda74a43ab1abeac2",
+ "captured_at": "2026-10-04T13:08:53Z",
+ "request": {
+  "method": "GET",
+  "path": "/"
+ },
+ "response": {
+  "status": 200,
+  "headers": [
+   [
+    "server",
+    "nginx/1.31.6"
+   ],
+   [
+    "content-type",
+    "text/html"
+   ],
+   [
+    "content-length",
+    "896"
+   ],
+   [
+    "last-modified",
+    "Tue, 15 Sep 2026 14:18:52 GMT"
+   ],
+   [
+    "connection",
+    "keep-alive"
+   ],
+   [
+    "etag",
+    "\"6aa953cc-380\""
+   ],
+   [
+    "accept-ranges",
+    "bytes"
+   ]
+  ],
+  "body": "<!DOCTYPE html>\n<html>\n<head>\n<title>Welcome to nginx!</title>\n<style>\nhtml { color-scheme: light dark; }\nbody { width: 35em; margin: 0 auto;\nfont-family: Tahoma, Verdana, Arial, sans-serif; }\n</style>\n</head>\n<body>\n<h1>Welcome to nginx!</h1>\n<p>If you see this page, nginx is successfully installed and working.\nFurther configuration is required for the web server, reverse proxy, \nAPI gateway, load balancer, content cache, or other features.</p>\n\n<p>For online documentation and support please refer to\n<a href=\"https://nginx.org/\">nginx.org</a>.<br/>\nTo engage with the community please visit\n<a href=\"https://community.nginx.org/\">community.nginx.org</a>.<br/>\nFor enterprise grade support, professional services, additional \nsecurity features and capabilities please refer to\n<a href=\"https://f5.com/nginx\">f5.com/nginx</a>.</p>\n\n<p><em>Thank you for using nginx.</em></p>\n</body>\n</html>\n",
+  "body_truncated": false
+ }
+}

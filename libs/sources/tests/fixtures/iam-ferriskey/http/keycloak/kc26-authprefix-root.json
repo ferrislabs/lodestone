@@ -1,0 +1,29 @@
+{
+ "product": "keycloak",
+ "image": "quay.io/keycloak/keycloak:26.4",
+ "image_digest": "quay.io/keycloak/keycloak@sha256:9409c59bdfb65dbffa20b11e6f18b8abb9281d480c7ca402f51ed3d5977e6007",
+ "captured_at": "2026-10-04T13:10:18Z",
+ "request": {
+  "method": "GET",
+  "path": "/"
+ },
+ "response": {
+  "status": 302,
+  "headers": [
+   [
+    "location",
+    "/auth"
+   ],
+   [
+    "content-type",
+    "text/plain; charset=utf-8"
+   ],
+   [
+    "content-length",
+    "21"
+   ]
+  ],
+  "body": "Redirecting to /auth.",
+  "body_truncated": false
+ }
+}

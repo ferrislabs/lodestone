@@ -1,0 +1,33 @@
+{
+ "product": "zitadel",
+ "image": "ghcr.io/zitadel/zitadel:latest",
+ "image_digest": "ghcr.io/zitadel/zitadel@sha256:90a3045b80a2b5b395e1e770302076906af3a5911225af7c464b4f3bd00d0a1b",
+ "captured_at": "2026-10-04T13:25:22Z",
+ "request": {
+  "method": "GET",
+  "path": "/"
+ },
+ "response": {
+  "status": 302,
+  "headers": [
+   [
+    "content-type",
+    "text/html; charset=utf-8"
+   ],
+   [
+    "location",
+    "/ui/login"
+   ],
+   [
+    "x-robots-tag",
+    "none"
+   ],
+   [
+    "content-length",
+    "32"
+   ]
+  ],
+  "body": "<a href=\"/ui/login\">Found</a>.\n\n",
+  "body_truncated": false
+ }
+}
