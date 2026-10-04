@@ -11,7 +11,6 @@ use utoipa_swagger_ui::SwaggerUi;
 
 use axum::middleware::from_fn_with_state;
 use handlers::{ApiError, AppState, rate_limit::rate_limit_middleware};
-use handlers_organization as organization;
 
 use crate::openapi::ApiDoc;
 
@@ -89,7 +88,7 @@ pub fn router(state: AppState) -> Result<Router, ApiError> {
         ])
         .allow_credentials(true);
 
-    let mut router = Router::new().merge(organization::router(&state));
+    let mut router = Router::new();
 
     if state.args.server.enable_api_docs {
         router = router

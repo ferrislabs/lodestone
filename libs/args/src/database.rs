@@ -21,7 +21,7 @@ pub struct DatabaseArgs {
     #[arg(
         long = "database-password",
         env = "DATABASE_PASSWORD",
-        default_value = "oxid",
+        default_value = "lodestone",
         name = "DATABASE_PASSWORD",
         long_help = "The database password. Required: a default would let a \
 deployment that forgets it start silently with a value anyone can read in this \
@@ -39,7 +39,7 @@ repository."
     #[arg(
         long = "database-user",
         env = "DATABASE_USER",
-        default_value = "oxid",
+        default_value = "lodestone",
         name = "DATABASE_USER",
         long_help = "The database user to use"
     )]
@@ -50,10 +50,10 @@ impl Default for DatabaseArgs {
     fn default() -> Self {
         Self {
             host: "localhost".to_string(),
-            name: "oxid".to_string(),
-            password: Secret::new("oxid"),
+            name: "lodestone".to_string(),
+            password: Secret::new("lodestone"),
             port: 5432,
-            user: "oxid".to_string(),
+            user: "lodestone".to_string(),
         }
     }
 }
@@ -93,10 +93,10 @@ mod tests {
     fn default_values() {
         let args = DatabaseArgs::default();
         assert_eq!(args.host, "localhost");
-        assert_eq!(args.name, "oxid");
-        assert_eq!(args.password.expose(), "oxid");
+        assert_eq!(args.name, "lodestone");
+        assert_eq!(args.password.expose(), "lodestone");
         assert_eq!(args.port, 5432);
-        assert_eq!(args.user, "oxid");
+        assert_eq!(args.user, "lodestone");
     }
 
     #[test]

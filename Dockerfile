@@ -1,6 +1,6 @@
 FROM rust:1.95.0-bookworm AS chef
 
-WORKDIR /usr/local/src/oxid
+WORKDIR /usr/local/src/lodestone
 
 RUN cargo install cargo-chef --version 0.1.77 --locked && \
     cargo install sqlx-cli --version 0.8.6 --no-default-features --features postgres --locked
@@ -17,7 +17,7 @@ RUN cargo chef prepare --recipe-path recipe.json
 # stable. Source changes do not invalidate it.
 FROM chef AS builder
 
-COPY --from=planner /usr/local/src/oxid/recipe.json recipe.json
+COPY --from=planner /usr/local/src/lodestone/recipe.json recipe.json
 RUN cargo chef cook --release --recipe-path recipe.json
 
 # --- Build the actual workspace binaries -------------------------------
@@ -35,32 +35,32 @@ RUN \
     addgroup \
     --system \
     --gid 1000 \
-    oxid && \
+    lodestone && \
     adduser \
     --system \
     --no-create-home \
     --disabled-login \
     --uid 1000 \
     --gid 1000 \
-    oxid
+    lodestone
 
-USER oxid
+USER lodestone
 
 # The migration CLI is a full DDL tool; it has no business in the image that
 # serves traffic. It gets its own, run as a job before a rollout.
 FROM runtime AS migrator
 
 COPY --from=builder /usr/local/cargo/bin/sqlx /usr/local/bin/
-COPY --from=builder /usr/local/src/oxid/migrations /usr/local/oxid/migrations
+COPY --from=builder /usr/local/src/lodestone/migrations /usr/local/lodestone/migrations
 
-WORKDIR /usr/local/oxid
+WORKDIR /usr/local/lodestone
 ENTRYPOINT [ "sqlx", "migrate", "run" ]
 
 
 FROM runtime AS api
 
-COPY --from=builder /usr/local/src/oxid/target/release/api /usr/local/bin/api
-COPY --from=builder /usr/local/src/oxid/migrations /usr/local/oxid/migrations
+COPY --from=builder /usr/local/src/lodestone/target/release/api /usr/local/bin/api
+COPY --from=builder /usr/local/src/lodestone/migrations /usr/local/lodestone/migrations
 
 # The API listens on 3456 and its health/metrics router on 3457. EXPOSE 80 was
 # wrong, and the unprivileged user this image runs as could not bind it anyway.
@@ -75,7 +75,7 @@ ENTRYPOINT [ "api" ]
 
 FROM node:24.13.0-alpine AS webapp-deps
 
-WORKDIR /usr/local/src/oxid
+WORKDIR /usr/local/src/lodestone
 
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
@@ -100,12 +100,12 @@ FROM nginxinc/nginx-unprivileged:1.28.0-alpine3.21 AS webapp
 # Assets are placed at build time and owned by the runtime user. The entrypoint
 # used to wipe and repopulate this directory on every start, which a non-root
 # process cannot do - and which was needless work besides.
-COPY --from=webapp-build --chown=101:101 /usr/local/src/oxid/dist/client /usr/share/nginx/html
+COPY --from=webapp-build --chown=101:101 /usr/local/src/lodestone/dist/client /usr/share/nginx/html
 COPY apps/webapp/nginx.conf /etc/nginx/conf.d/default.conf
 
 # The pristine template stays out of the served tree so that every start
 # re-substitutes from placeholders rather than from the previous start's values.
-COPY --from=webapp-build /usr/local/src/oxid/dist/client/config.json /usr/local/share/oxid/config.json
+COPY --from=webapp-build /usr/local/src/lodestone/dist/client/config.json /usr/local/share/lodestone/config.json
 
 # Mode set at copy time rather than by a later RUN: this image runs as a
 # non-root user, which cannot chmod a file root owns.

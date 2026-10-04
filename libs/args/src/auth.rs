@@ -6,7 +6,7 @@ pub struct AuthArgs {
         long = "auth-issuer",
         env = "AUTH_ISSUER",
         name = "AUTH_ISSUER",
-        default_value = "http://localhost:3333/realms/oxid",
+        default_value = "http://localhost:3333/realms/lodestone",
         long_help = "The issuer URL to use for authentication"
     )]
     pub issuer: String,
@@ -15,7 +15,7 @@ pub struct AuthArgs {
         long = "auth-client-id",
         env = "AUTH_CLIENT_ID",
         name = "AUTH_CLIENT_ID",
-        default_value = "oxid",
+        default_value = "lodestone",
         long_help = "The client ID to use for authentication"
     )]
     pub client_id: String,
@@ -60,8 +60,8 @@ mod tests {
     #[test]
     fn parse_defaults() {
         let cmd = Cmd::try_parse_from(["cmd", "--auth-client-secret", "s"]).unwrap();
-        assert_eq!(cmd.auth.issuer, "http://localhost:3333/realms/oxid");
-        assert_eq!(cmd.auth.client_id, "oxid");
+        assert_eq!(cmd.auth.issuer, "http://localhost:3333/realms/lodestone");
+        assert_eq!(cmd.auth.client_id, "lodestone");
     }
 
     #[test]
@@ -84,13 +84,13 @@ mod tests {
             "--auth-issuer",
             "https://sso.example.com",
             "--auth-client-id",
-            "oxid",
+            "lodestone",
             "--auth-client-secret",
             "supersecret",
         ])
         .unwrap();
         assert_eq!(cmd.auth.issuer, "https://sso.example.com");
-        assert_eq!(cmd.auth.client_id, "oxid");
+        assert_eq!(cmd.auth.client_id, "lodestone");
         assert_eq!(cmd.auth.client_secret.expose(), "supersecret");
     }
 }

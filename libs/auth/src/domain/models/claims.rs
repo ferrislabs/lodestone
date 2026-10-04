@@ -154,11 +154,11 @@ mod tests {
             "sub": "019c3a7d-30e8-7474-af67-65ff8186bfb6",
             "iat": 1770516273,
             "jti": "c5e66041-e6c0-4be1-8129-174f5e60422f",
-            "iss": "http://localhost:3333/realms/oxid",
+            "iss": "http://localhost:3333/realms/lodestone",
             "typ": "Bearer",
             "azp": "console",
             "aud": [
-              "oxid-realm",
+              "lodestone-realm",
               "account"
             ],
             "scope": "address email offline_access openid phone profile",
@@ -180,7 +180,7 @@ mod tests {
         assert_eq!(
             claims.aud,
             Some(Audience::Multiple(vec![
-                "oxid-realm".to_string(),
+                "lodestone-realm".to_string(),
                 "account".to_string()
             ]))
         );

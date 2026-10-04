@@ -1,66 +1,41 @@
 use auth::{AuthService, FerrisKeyRepository};
-use authz::LocalPolicyEngine;
 use common::{Config, CoreError};
-use rate_limit::{Quota, RateLimitService, RedisRateLimiter};
+use rate_limit::{InMemoryRateLimiter, Quota, RateLimitService};
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 
-use crate::domain::role::Permissions;
 use crate::infrastructure::postgres::error::map_sqlx_error;
 
-pub mod member;
-pub mod organization;
 pub mod policy;
-pub mod role;
 pub mod user;
 
-pub type OxidAuthService = AuthService<FerrisKeyRepository>;
-pub type OxidRateLimitService = RateLimitService<RedisRateLimiter>;
-
-/// In-process Policy Decision Point used by Oxid's services. Aliased so
-/// callers can swap the concrete engine later (e.g. for a remote PDP)
-/// with a single type change.
-pub type OxidAuthorizer = LocalPolicyEngine;
-
-/// Builds the default action → required permission bits map. The bit
-/// values come from [`Permissions`] so the service-side bitfield stays
-/// the single source of truth.
-pub fn default_authorizer() -> OxidAuthorizer {
-    LocalPolicyEngine::builder()
-        .action("organization.update", Permissions::MANAGE_ORG.0)
-        .action("organization.delete", Permissions::MANAGE_ORG.0)
-        .action("member.invite", Permissions::MANAGE_MEMBERS.0)
-        .action("member.remove", Permissions::MANAGE_MEMBERS.0)
-        .action("role.assign", Permissions::MANAGE_ROLES.0)
-        .action("role.manage", Permissions::MANAGE_ROLES.0)
-        .build()
-}
+pub type LodestoneAuthService = AuthService<FerrisKeyRepository>;
+pub type LodestoneRateLimitService = RateLimitService<InMemoryRateLimiter>;
 
 #[derive(Clone)]
-pub struct OxidUseCase {
+pub struct LodestoneUseCase {
     pub(crate) pool: PgPool,
-    pub(crate) authz: OxidAuthorizer,
 }
 
-impl OxidUseCase {
-    pub fn new(pool: PgPool, authz: OxidAuthorizer) -> Self {
-        Self { pool, authz }
+impl LodestoneUseCase {
+    pub fn new(pool: PgPool) -> Self {
+        Self { pool }
     }
 }
 
 #[derive(Clone)]
-pub struct OxidService {
-    pub auth: OxidAuthService,
-    pub usecase: OxidUseCase,
-    pub rate_limit: OxidRateLimitService,
+pub struct LodestoneService {
+    pub auth: LodestoneAuthService,
+    pub usecase: LodestoneUseCase,
+    pub rate_limit: LodestoneRateLimitService,
     pub rate_limit_quota: Quota,
 }
 
-impl OxidService {
+impl LodestoneService {
     pub fn new(
-        auth: OxidAuthService,
-        usecase: OxidUseCase,
-        rate_limit: OxidRateLimitService,
+        auth: LodestoneAuthService,
+        usecase: LodestoneUseCase,
+        rate_limit: LodestoneRateLimitService,
         rate_limit_quota: Quota,
     ) -> Self {
         Self {
@@ -72,7 +47,7 @@ impl OxidService {
     }
 }
 
-pub async fn create_service(config: Config) -> Result<OxidService, CoreError> {
+pub async fn create_service(config: Config) -> Result<LodestoneService, CoreError> {
     let auth_repo = FerrisKeyRepository::new(config.auth.issuer, None);
     let auth = AuthService::new(auth_repo);
 
@@ -89,17 +64,12 @@ pub async fn create_service(config: Config) -> Result<OxidService, CoreError> {
         .await
         .map_err(map_sqlx_error)?;
 
-    let limiter = RedisRateLimiter::connect(config.rate_limit.redis_url.expose())
-        .await
-        // The URL may carry a password, and this message reaches a panic
-        // at boot. Report the failure, not the credential.
-        .map_err(|_| CoreError::Internal("redis connection failed".to_owned()))?;
-    let rate_limit = RateLimitService::new(limiter);
+    let rate_limit = RateLimitService::new(InMemoryRateLimiter::new());
     let rate_limit_quota = Quota::per_minute(config.rate_limit.per_minute);
 
-    Ok(OxidService::new(
+    Ok(LodestoneService::new(
         auth,
-        OxidUseCase::new(pool, default_authorizer()),
+        LodestoneUseCase::new(pool),
         rate_limit,
         rate_limit_quota,
     ))

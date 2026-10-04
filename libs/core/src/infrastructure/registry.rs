@@ -1,6 +1,6 @@
 //! Repository registry: maps a (domain, backend) pair to a concrete repository
 //! implementation. Each `Pg*Repository` declares its membership via
-//! `#[oxid_macros::repository(domain = X, backend = Postgres)]`, which expands
+//! `#[lodestone_macros::repository(domain = X, backend = Postgres)]`, which expands
 //! to a [`RepoFor`] impl. Use-case macros resolve the right type by querying
 //! `<Backend as RepoFor<Domain>>::Repo`, so swapping the active backend is a
 //! single-line change ([`Backend`] alias below).
@@ -9,9 +9,6 @@ use crate::infrastructure::postgres::SharedTx;
 
 /// Domain markers — one zero-sized type per aggregate root.
 pub mod domain {
-    pub struct Organization;
-    pub struct Role;
-    pub struct Member;
     pub struct User;
 }
 

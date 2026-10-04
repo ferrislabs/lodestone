@@ -15,7 +15,7 @@ use syn::{
 /// # Requirements
 /// - The struct has a `pub fn new(tx: &SharedTx<'tx>) -> Self`.
 /// - Domain and backend marker zero-sized types exist under
-///   `oxid_core::infrastructure::registry::{domain, backend}`.
+///   `lodestone_core::infrastructure::registry::{domain, backend}`.
 ///
 /// # Example
 /// ```ignore
@@ -34,13 +34,13 @@ pub fn repository(args: TokenStream, input: TokenStream) -> TokenStream {
     let expanded = quote! {
         #item
 
-        impl ::oxid_core::infrastructure::registry::RepoFor<
-            ::oxid_core::infrastructure::registry::domain::#domain
-        > for ::oxid_core::infrastructure::registry::backend::#backend {
+        impl ::lodestone_core::infrastructure::registry::RepoFor<
+            ::lodestone_core::infrastructure::registry::domain::#domain
+        > for ::lodestone_core::infrastructure::registry::backend::#backend {
             type Repo<'tx> = #struct_name<'tx>;
 
             fn build<'tx>(
-                tx: &::oxid_core::infrastructure::postgres::SharedTx<'tx>,
+                tx: &::lodestone_core::infrastructure::postgres::SharedTx<'tx>,
             ) -> Self::Repo<'tx> {
                 #struct_name::new(tx)
             }
@@ -149,9 +149,9 @@ pub fn transactional(args: TokenStream, input: TokenStream) -> TokenStream {
         let domain_ty = Ident::new(&pascal_case(&name.to_string()), name.span());
         quote! {
             let #binding = <
-                ::oxid_core::infrastructure::registry::Backend
-                as ::oxid_core::infrastructure::registry::RepoFor<
-                    ::oxid_core::infrastructure::registry::domain::#domain_ty
+                ::lodestone_core::infrastructure::registry::Backend
+                as ::lodestone_core::infrastructure::registry::RepoFor<
+                    ::lodestone_core::infrastructure::registry::domain::#domain_ty
                 >
             >::build(&tx);
         }
@@ -162,7 +162,7 @@ pub fn transactional(args: TokenStream, input: TokenStream) -> TokenStream {
     let expanded = quote! {
         #(#attrs)*
         #vis #sig {
-            ::oxid_core::infrastructure::postgres::with_tx(&self.pool, async |tx| {
+            ::lodestone_core::infrastructure::postgres::with_tx(&self.pool, async |tx| {
                 #(#bindings)*
                 #(#body_stmts)*
             }).await

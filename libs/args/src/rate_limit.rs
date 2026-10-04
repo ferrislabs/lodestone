@@ -1,16 +1,7 @@
-use common::{RateLimitConfig, Secret};
+use common::RateLimitConfig;
 
 #[derive(clap::Args, Debug, Clone)]
 pub struct RateLimitArgs {
-    #[arg(
-        long = "rate-limit-redis-url",
-        env = "RATE_LIMIT_REDIS_URL",
-        name = "RATE_LIMIT_REDIS_URL",
-        default_value = "redis://localhost:6379",
-        long_help = "Redis URL backing the rate limiter"
-    )]
-    pub redis_url: Secret,
-
     #[arg(
         long = "rate-limit-per-minute",
         env = "RATE_LIMIT_PER_MINUTE",
@@ -24,7 +15,6 @@ pub struct RateLimitArgs {
 impl From<RateLimitArgs> for RateLimitConfig {
     fn from(value: RateLimitArgs) -> Self {
         Self {
-            redis_url: value.redis_url,
             per_minute: value.per_minute,
         }
     }
@@ -44,21 +34,12 @@ mod tests {
     #[test]
     fn parse_defaults() {
         let cmd = Cmd::try_parse_from(["cmd"]).unwrap();
-        assert_eq!(cmd.rate_limit.redis_url.expose(), "redis://localhost:6379");
         assert_eq!(cmd.rate_limit.per_minute, 10);
     }
 
     #[test]
     fn parse_custom() {
-        let cmd = Cmd::try_parse_from([
-            "cmd",
-            "--rate-limit-redis-url",
-            "redis://redis.prod:6379",
-            "--rate-limit-per-minute",
-            "1000",
-        ])
-        .unwrap();
-        assert_eq!(cmd.rate_limit.redis_url.expose(), "redis://redis.prod:6379");
+        let cmd = Cmd::try_parse_from(["cmd", "--rate-limit-per-minute", "1000"]).unwrap();
         assert_eq!(cmd.rate_limit.per_minute, 1000);
     }
 }

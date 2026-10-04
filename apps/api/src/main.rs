@@ -18,7 +18,7 @@ use crate::{internal_router::internal_router, logger::init_tracing_and_logging, 
 async fn main() -> Result<(), Box<dyn Error>> {
     dotenv().ok();
     let args = Arc::new(Args::parse());
-    let observability = init_tracing_and_logging(&args.log, "oxid", &args.observability)?;
+    let observability = init_tracing_and_logging(&args.log, "lodestone", &args.observability)?;
 
     let app_state = state(args.clone()).await?;
 

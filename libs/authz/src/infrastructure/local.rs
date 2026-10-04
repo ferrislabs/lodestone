@@ -8,13 +8,13 @@
 //!    internal webhooks where there is no authenticated principal.
 //!
 //! 2. **Super-admin bypass** — a subject whose `iam.roles` property
-//!    contains the configured super-admin role (default `oxid:admin`)
+//!    contains the configured super-admin role (default `lodestone:admin`)
 //!    is allowed regardless of the action.
 //!
 //! 3. **RBAC check** — the action name is looked up in an injectable
 //!    action map (`name → required permission bits`). The subject's
 //!    aggregated permission bitfield is read from
-//!    `subject.properties["oxid.permissions"]` (i64). The action is
+//!    `subject.properties["lodestone.permissions"]` (i64). The action is
 //!    allowed iff every required bit is set.
 //!
 //! The bit values themselves are owned by the application layer (see
@@ -46,14 +46,14 @@ use crate::domain::{
 };
 
 /// Property key carrying the subject's aggregated permission bitfield.
-pub const SUBJECT_PERMISSIONS_KEY: &str = "oxid.permissions";
+pub const SUBJECT_PERMISSIONS_KEY: &str = "lodestone.permissions";
 
 /// Property key carrying the subject's IAM (Ferriskey) realm roles as a
 /// JSON array of strings.
 pub const SUBJECT_IAM_ROLES_KEY: &str = "iam.roles";
 
 /// Default IAM role that bypasses every authorization check.
-pub const DEFAULT_SUPER_ADMIN_ROLE: &str = "oxid:admin";
+pub const DEFAULT_SUPER_ADMIN_ROLE: &str = "lodestone:admin";
 
 /// In-process Policy Decision Point. Construct via
 /// [`LocalPolicyEngine::builder`] and inject as a generic parameter into
@@ -261,7 +261,7 @@ mod tests {
     async fn super_admin_role_bypasses_check() {
         let pdp = engine();
         let subject = Subject::new(SubjectKind::User, "alice")
-            .with_property(SUBJECT_IAM_ROLES_KEY, json!(["oxid:admin", "viewer"]));
+            .with_property(SUBJECT_IAM_ROLES_KEY, json!(["lodestone:admin", "viewer"]));
         let r = req(
             subject,
             "anything.unmapped",
@@ -333,7 +333,7 @@ mod tests {
         // do not panic, we simply do not recognize a super-admin.
         let pdp = engine();
         let subject = Subject::new(SubjectKind::User, "alice")
-            .with_property(SUBJECT_IAM_ROLES_KEY, "oxid:admin")
+            .with_property(SUBJECT_IAM_ROLES_KEY, "lodestone:admin")
             .with_property(SUBJECT_PERMISSIONS_KEY, 0_i64);
         let r = req(
             subject,
@@ -347,10 +347,10 @@ mod tests {
     async fn custom_super_admin_role_is_honored() {
         let pdp = LocalPolicyEngine::builder()
             .action("organization.update", MANAGE_ORG)
-            .super_admin_role("oxid:root")
+            .super_admin_role("lodestone:root")
             .build();
         let subject = Subject::new(SubjectKind::User, "alice")
-            .with_property(SUBJECT_IAM_ROLES_KEY, json!(["oxid:admin"])); // not "oxid:root"
+            .with_property(SUBJECT_IAM_ROLES_KEY, json!(["lodestone:admin"])); // not "lodestone:root"
         let r = req(
             subject,
             "organization.update",

@@ -40,7 +40,7 @@ pub trait Authorizer: Send + Sync {
 
 /// Forwards to the inner authorizer so a service generic over
 /// `A: Authorizer` can be parameterized with `&LocalPolicyEngine` (the
-/// pattern used by the [`#[transactional]`](oxid_macros::transactional)
+/// pattern used by the [`#[transactional]`](lodestone_macros::transactional)
 /// macro when it injects `&self.authz`).
 impl<T: Authorizer + ?Sized> Authorizer for &T {
     fn evaluate(

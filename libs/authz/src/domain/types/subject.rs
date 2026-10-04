@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::domain::types::Properties;
 
-/// Well-known subject types used by Oxid. The AuthZen spec leaves the
+/// Well-known subject types used by Lodestone. The AuthZen spec leaves the
 /// `type` field free-form, so this enum is purely a convenience: it
 /// serializes to the canonical strings and accepts any other value via
 /// [`SubjectKind::Other`].
@@ -12,11 +12,11 @@ pub enum SubjectKind {
     User,
     /// A machine-to-machine client (service account).
     Client,
-    /// Internal Oxid code acting on its own behalf (seeds, jobs, CLI,
+    /// Internal Lodestone code acting on its own behalf (seeds, jobs, CLI,
     /// webhooks). The default [`Authorizer`](crate::Authorizer)
     /// implementation grants every action to system subjects.
     System,
-    /// Any subject type Oxid does not know about. Passed through as-is.
+    /// Any subject type Lodestone does not know about. Passed through as-is.
     Other(String),
 }
 
@@ -72,10 +72,10 @@ impl Subject {
         }
     }
 
-    /// Internal Oxid actor (jobs, seeds, CLI, webhooks). The default PDP
+    /// Internal Lodestone actor (jobs, seeds, CLI, webhooks). The default PDP
     /// allows every action when the subject is of type `system`.
     pub fn system() -> Self {
-        Self::new(SubjectKind::System, "oxid")
+        Self::new(SubjectKind::System, "lodestone")
     }
 
     pub fn kind(&self) -> SubjectKind {

@@ -10,7 +10,7 @@ use crate::domain::types::Properties;
 /// { "name": "organization.update", "properties": { ... } }
 /// ```
 ///
-/// Oxid convention is `domain.verb` in lower-case (e.g. `member.remove`,
+/// Lodestone convention is `domain.verb` in lower-case (e.g. `member.remove`,
 /// `role.assign`). Names form a public vocabulary — keep them stable.
 ///
 /// [AuthZen 1.0 §5.1.2]: https://openid.net/specs/authorization-api-1_0.html
