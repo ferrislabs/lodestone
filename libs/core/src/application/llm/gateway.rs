@@ -190,6 +190,39 @@ pub fn cache_key(scope: &CacheScope, prompt: &Prompt<'_>, schema: &serde_json::V
     context.finish().as_ref().to_vec()
 }
 
+pub async fn store_cached<T, C>(
+    cache: &C,
+    scope: &CacheScope,
+    prompt: &Prompt<'_>,
+    value: &T,
+    model: &str,
+) where
+    T: JsonSchema + Serialize,
+    C: LlmCache,
+{
+    let schema = match output_schema::<T>() {
+        Ok(schema) => schema,
+        Err(error) => {
+            warn!(%error, "llm output could not be cached");
+            return;
+        }
+    };
+    let key = cache_key(scope, prompt, &schema);
+    match serde_json::to_value(value) {
+        Ok(output) => {
+            let entry = CachedOutput {
+                output,
+                model: model.to_owned(),
+                created_at: Utc::now(),
+            };
+            if let Err(error) = cache.put(&key, scope, &entry).await {
+                warn!(%error, "llm cache write failed");
+            }
+        }
+        Err(error) => warn!(%error, "llm output could not be cached"),
+    }
+}
+
 pub async fn call_structured_cached<T, P, C>(
     provider: &P,
     cache: &C,

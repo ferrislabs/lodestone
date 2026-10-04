@@ -1,8 +1,12 @@
 mod support;
 
 use std::{
+    collections::VecDeque,
     num::NonZeroU32,
-    sync::atomic::{AtomicU64, Ordering},
+    sync::{
+        Mutex,
+        atomic::{AtomicU64, Ordering},
+    },
     time::Duration,
 };
 
@@ -35,17 +39,37 @@ impl Clock for FixedClock {
     }
 }
 
+#[derive(Clone, Copy)]
+enum Cite {
+    Verbatim,
+    Fabricated,
+    Empty,
+    OutOfRange,
+}
+
 struct ScriptedProvider {
     input_tokens: u64,
     calls: AtomicU64,
+    script: Mutex<VecDeque<Cite>>,
+    instructions: Mutex<Vec<String>>,
 }
 
 impl ScriptedProvider {
     fn new(input_tokens: u64) -> Self {
+        Self::scripted(input_tokens, &[])
+    }
+
+    fn scripted(input_tokens: u64, script: &[Cite]) -> Self {
         Self {
             input_tokens,
             calls: AtomicU64::new(0),
+            script: Mutex::new(script.iter().copied().collect()),
+            instructions: Mutex::new(Vec::new()),
         }
+    }
+
+    fn instructions(&self) -> Vec<String> {
+        self.instructions.lock().unwrap().clone()
     }
 
     fn calls(&self) -> u64 {
@@ -60,18 +84,34 @@ fn first_line(content: &str) -> &str {
 impl LlmProvider for ScriptedProvider {
     async fn complete(&self, request: &LlmRequest<'_>) -> Result<LlmResponse, LlmError> {
         self.calls.fetch_add(1, Ordering::SeqCst);
+        self.instructions
+            .lock()
+            .unwrap()
+            .push(request.instruction.to_owned());
+        let cite = self
+            .script
+            .lock()
+            .unwrap()
+            .pop_front()
+            .unwrap_or(Cite::Verbatim);
         let quote = request
             .documents
             .first()
             .map_or("", |document| first_line(document.content));
+        let evidence = match cite {
+            Cite::Verbatim => json!([{"document_index": 0, "quote": quote}]),
+            Cite::Fabricated => json!([
+                {"document_index": 0, "quote": quote},
+                {"document_index": 0, "quote": "runs Keycloak 3.0 behind a hidden admin console"}
+            ]),
+            Cite::Empty => json!([]),
+            Cite::OutOfRange => json!([{"document_index": 9, "quote": quote}]),
+        };
         Ok(LlmResponse {
             output: json!({
                 "summary": "Runs an outdated Keycloak",
                 "approach_angle": "Offer a managed migration",
-                "evidence": [
-                    {"document_index": 0, "quote": quote},
-                    {"document_index": 9, "quote": "ghost"}
-                ],
+                "evidence": evidence,
                 "draft_message": {"subject": "Your Keycloak", "body": "Hello, we can help."}
             }),
             model: "scripted".to_owned(),
@@ -351,4 +391,112 @@ async fn a_new_profile_revision_qualifies_the_lead_again(pool: PgPool) {
             .iter()
             .any(|a| a.profile_revision == RevisionNumber::new(2).unwrap())
     );
+}
+
+async fn count_assessments(pool: &PgPool) -> i64 {
+    sqlx::query_scalar("SELECT count(*) FROM assessments")
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn fabricated_evidence_is_retried_once_and_the_good_answer_replaces_the_cache(pool: PgPool) {
+    let profile = iam_profile(&pool).await;
+    let signal = lead_with_score(&pool, profile, "high.com", 80.0).await;
+    let provider = ScriptedProvider::scripted(10, &[Cite::Fabricated, Cite::Verbatim]);
+
+    let report = qualify(&pool, &provider, settings(100, 0)).await;
+
+    assert_eq!(provider.calls(), 2);
+    assert_eq!(report.qualified, 1);
+    assert_eq!(report.uncertain, 0);
+    let instructions = provider.instructions();
+    assert!(!instructions[0].contains("Quote only exact substrings"));
+    assert!(instructions[1].ends_with("Quote only exact substrings of the documents."));
+    let stored = assessments(&pool, profile, "high.com").await;
+    assert_eq!(stored.len(), 1);
+    assert_eq!(stored[0].evidence.len(), 1);
+    assert_eq!(
+        stored[0].evidence[0].quote,
+        first_line(&render_signal(&signal))
+    );
+    assert_eq!(
+        status(&pool, profile, "high.com").await,
+        LeadStatus::Qualified
+    );
+
+    sqlx::query("DELETE FROM assessments")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE leads SET status = 'new'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let again = qualify(&pool, &provider, settings(100, 0)).await;
+    assert_eq!(provider.calls(), 2);
+    assert_eq!(again.qualified, 1);
+    assert_eq!(assessments(&pool, profile, "high.com").await.len(), 1);
+}
+
+async fn assert_uncertain(pool: &PgPool, profile: ProfileId, provider: &ScriptedProvider) {
+    let report = qualify(pool, provider, settings(100, 0)).await;
+
+    assert_eq!(provider.calls(), 2);
+    assert_eq!(report.uncertain, 1);
+    assert_eq!(report.qualified, 0);
+    assert_eq!(count_assessments(pool).await, 0);
+    assert_eq!(
+        status(pool, profile, "high.com").await,
+        LeadStatus::Uncertain
+    );
+    let qualified: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM leads WHERE status = 'qualified'")
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(qualified, 0);
+
+    let rerun = qualify(pool, provider, settings(100, 0)).await;
+    assert_eq!(provider.calls(), 2);
+    assert_eq!(rerun.leads_considered, 0);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn evidence_fabricated_twice_marks_the_lead_uncertain(pool: PgPool) {
+    let profile = iam_profile(&pool).await;
+    lead_with_score(&pool, profile, "high.com", 80.0).await;
+    let provider = ScriptedProvider::scripted(10, &[Cite::Fabricated, Cite::Fabricated]);
+    assert_uncertain(&pool, profile, &provider).await;
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn empty_evidence_twice_marks_the_lead_uncertain(pool: PgPool) {
+    let profile = iam_profile(&pool).await;
+    lead_with_score(&pool, profile, "high.com", 80.0).await;
+    let provider = ScriptedProvider::scripted(10, &[Cite::Empty, Cite::Empty]);
+    assert_uncertain(&pool, profile, &provider).await;
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn an_out_of_range_document_index_counts_as_fabricated(pool: PgPool) {
+    let profile = iam_profile(&pool).await;
+    lead_with_score(&pool, profile, "high.com", 80.0).await;
+    let provider = ScriptedProvider::scripted(10, &[Cite::OutOfRange, Cite::OutOfRange]);
+    assert_uncertain(&pool, profile, &provider).await;
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn budget_exhaustion_on_the_retry_leaves_the_lead_new(pool: PgPool) {
+    let profile = iam_profile(&pool).await;
+    lead_with_score(&pool, profile, "high.com", 80.0).await;
+    let provider = ScriptedProvider::scripted(1_000_000, &[Cite::Fabricated, Cite::Verbatim]);
+
+    let report = qualify(&pool, &provider, settings(1, 100)).await;
+
+    assert_eq!(provider.calls(), 1);
+    assert!(report.budget_exhausted);
+    assert_eq!(count_assessments(&pool).await, 0);
+    assert_eq!(status(&pool, profile, "high.com").await, LeadStatus::New);
 }

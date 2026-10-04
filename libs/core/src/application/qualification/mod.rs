@@ -8,7 +8,10 @@ use tracing::warn;
 use crate::{
     application::{
         LodestoneUseCase,
-        llm::gateway::{CallSettings, LlmCallError, Prompt, RunBudget, call_structured_cached},
+        llm::gateway::{
+            CallSettings, LlmCallError, Prompt, RunBudget, Structured, call_structured,
+            call_structured_cached, store_cached,
+        },
         sources::SourceRunError,
     },
     domain::{
@@ -22,13 +25,14 @@ use crate::{
             cache::{CacheScope, LlmCache},
         },
         profile::ActiveProfile,
-        prompt::{QUALIFICATION_V1, QualificationOutput},
+        prompt::{EvidenceProblem, QUALIFICATION_V1, QualificationOutput, verified_evidence},
         run::{Run, RunId, RunOutcome, ports::RunRepository},
         values::SourceName,
     },
 };
 
 const BUDGET_EXHAUSTED: &str = "llm budget exhausted";
+const EVIDENCE_RETRY: &str = "Your previous answer cited text that does not appear verbatim in the documents. Quote only exact substrings of the documents.";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct QualificationSettings {
@@ -42,6 +46,7 @@ pub struct QualificationSettings {
 pub struct QualificationReport {
     pub leads_considered: u64,
     pub qualified: u64,
+    pub uncertain: u64,
     pub skipped_suppressed: u64,
     pub failed_calls: u64,
     pub budget_exhausted: bool,
@@ -51,6 +56,7 @@ impl QualificationReport {
     fn absorb(&mut self, other: &Self) {
         self.leads_considered += other.leads_considered;
         self.qualified += other.qualified;
+        self.uncertain += other.uncertain;
         self.skipped_suppressed += other.skipped_suppressed;
         self.failed_calls += other.failed_calls;
         self.budget_exhausted |= other.budget_exhausted;
@@ -81,10 +87,14 @@ fn count(value: usize) -> u64 {
     u64::try_from(value).unwrap_or(u64::MAX)
 }
 
-fn map_evidence(output: &QualificationOutput, signals: &[Signal]) -> Vec<Evidence> {
-    output
-        .evidence
-        .iter()
+fn evidence_of(
+    output: &QualificationOutput,
+    documents: &[UntrustedDocument<'_>],
+    signals: &[Signal],
+) -> Result<Vec<Evidence>, EvidenceProblem> {
+    let verified = verified_evidence(output, documents)?;
+    Ok(verified
+        .into_iter()
         .filter_map(|quote| {
             let index = usize::try_from(quote.document_index).ok()?;
             let signal = signals.get(index)?;
@@ -93,7 +103,32 @@ fn map_evidence(output: &QualificationOutput, signals: &[Signal]) -> Vec<Evidenc
                 provenance: signal.provenance.clone(),
             })
         })
-        .collect()
+        .collect())
+}
+
+enum Attempt {
+    Done(Structured<QualificationOutput>),
+    Stop,
+    Skip,
+}
+
+fn classify(
+    result: Result<Structured<QualificationOutput>, LlmCallError>,
+    tally: &mut QualificationReport,
+    domain: &str,
+) -> Attempt {
+    match result {
+        Ok(structured) => Attempt::Done(structured),
+        Err(LlmCallError::BudgetExhausted) => {
+            tally.budget_exhausted = true;
+            Attempt::Stop
+        }
+        Err(error) => {
+            warn!(%domain, %error, "qualification call failed, lead skipped");
+            tally.failed_calls += 1;
+            Attempt::Skip
+        }
+    }
 }
 
 impl LodestoneUseCase {
@@ -209,25 +244,61 @@ impl LodestoneUseCase {
                 documents: &documents,
                 max_tokens: settings.max_tokens,
             };
-            let structured = match call_structured_cached::<QualificationOutput, _, _>(
-                llm.provider,
-                llm.cache,
-                &scope,
-                prompt,
-                settings.call,
-                &mut budget,
-            )
-            .await
-            {
-                Ok(structured) => structured,
-                Err(LlmCallError::BudgetExhausted) => {
-                    tally.budget_exhausted = true;
-                    return Ok(());
-                }
-                Err(error) => {
-                    warn!(domain = %lead.domain, %error, "qualification call failed, lead skipped");
-                    tally.failed_calls += 1;
-                    continue;
+            let first = match classify(
+                call_structured_cached::<QualificationOutput, _, _>(
+                    llm.provider,
+                    llm.cache,
+                    &scope,
+                    prompt,
+                    settings.call,
+                    &mut budget,
+                )
+                .await,
+                tally,
+                lead.domain.as_str(),
+            ) {
+                Attempt::Done(structured) => structured,
+                Attempt::Stop => return Ok(()),
+                Attempt::Skip => continue,
+            };
+            let (structured, evidence) = match evidence_of(&first.value, &documents, &signals) {
+                Ok(evidence) => (first, evidence),
+                Err(problem) => {
+                    warn!(domain = %lead.domain, %problem, "unverified evidence, retrying once");
+                    let instruction = format!("{}\n\n{EVIDENCE_RETRY}", prompt.instruction);
+                    let retry_prompt = Prompt {
+                        instruction: &instruction,
+                        ..prompt
+                    };
+                    let second = match classify(
+                        call_structured::<QualificationOutput, _>(
+                            llm.provider,
+                            retry_prompt,
+                            settings.call,
+                            &mut budget,
+                        )
+                        .await,
+                        tally,
+                        lead.domain.as_str(),
+                    ) {
+                        Attempt::Done(structured) => structured,
+                        Attempt::Stop => return Ok(()),
+                        Attempt::Skip => continue,
+                    };
+                    match evidence_of(&second.value, &documents, &signals) {
+                        Ok(evidence) => {
+                            store_cached(llm.cache, &scope, &prompt, &second.value, &second.model)
+                                .await;
+                            (second, evidence)
+                        }
+                        Err(problem) => {
+                            warn!(lead_id = %lead.id, domain = %lead.domain, %problem, "evidence still unverified, lead marked uncertain");
+                            if self.mark_uncertain(lead.id, clock.now()).await? {
+                                tally.uncertain += 1;
+                            }
+                            continue;
+                        }
+                    }
                 }
             };
             let now = clock.now();
@@ -236,7 +307,7 @@ impl LodestoneUseCase {
                 id: AssessmentId(generate_uuid_v7()),
                 lead_id: lead.id,
                 profile_revision: active.revision.number,
-                evidence: map_evidence(&output, &signals),
+                evidence,
                 summary: output.summary,
                 approach_angle: output.approach_angle,
                 model: structured.model,
@@ -249,6 +320,18 @@ impl LodestoneUseCase {
             }
         }
         Ok(())
+    }
+
+    #[transactional(lead)]
+    async fn mark_uncertain(&self, lead_id: LeadId, at: DateTime<Utc>) -> Result<bool, CoreError> {
+        let mut repo = lead_repository;
+        let to = LeadStatus::New
+            .move_to(LeadStatus::Uncertain)
+            .map_err(|error| CoreError::Internal(error.to_string()))?;
+        Ok(repo
+            .update_status(lead_id, LeadStatus::New, to, at)
+            .await?
+            .is_some())
     }
 
     #[transactional(lead)]
@@ -356,28 +439,32 @@ mod tests {
     }
 
     #[test]
-    fn out_of_range_quotes_are_dropped() {
+    fn only_verified_quotes_are_mapped() {
         use crate::domain::prompt::{DraftMessage, EvidenceQuote};
-        let output = QualificationOutput {
+        let signals = [signal(None)];
+        let content = render_signal(&signals[0]);
+        let documents = [UntrustedDocument {
+            source: signals[0].provenance.as_str(),
+            content: &content,
+        }];
+        let build = |quotes: Vec<(u32, &str)>| QualificationOutput {
             summary: String::new(),
             approach_angle: String::new(),
-            evidence: vec![
-                EvidenceQuote {
-                    document_index: 0,
-                    quote: "a".to_owned(),
-                },
-                EvidenceQuote {
-                    document_index: 3,
-                    quote: "b".to_owned(),
-                },
-            ],
+            evidence: quotes
+                .into_iter()
+                .map(|(document_index, quote)| EvidenceQuote {
+                    document_index,
+                    quote: quote.to_owned(),
+                })
+                .collect(),
             draft_message: DraftMessage {
                 subject: String::new(),
                 body: String::new(),
             },
         };
-        let evidence = map_evidence(&output, &[signal(None)]);
-        assert_eq!(evidence.len(), 1);
-        assert_eq!(evidence[0].quote, "a");
+        let evidence = evidence_of(&build(vec![(0, "product_detected")]), &documents, &signals);
+        assert_eq!(evidence.unwrap()[0].quote, "product_detected");
+        assert!(evidence_of(&build(vec![(3, "product_detected")]), &documents, &signals).is_err());
+        assert!(evidence_of(&build(vec![]), &documents, &signals).is_err());
     }
 }

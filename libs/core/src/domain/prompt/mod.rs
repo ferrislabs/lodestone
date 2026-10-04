@@ -1,6 +1,10 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+pub mod evidence;
+
+pub use evidence::{EvidenceProblem, verified_evidence};
+
 use crate::domain::{llm::UntrustedDocument, profile::definition::ProfileDefinition};
 
 const CONTEXT_TAG: &str = "market_context";
