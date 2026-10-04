@@ -19,8 +19,13 @@ chrono = { workspace = true }
 sqlx = { workspace = true }
 tokio = { workspace = true, features = ["sync"] }
 tracing = { workspace = true }
+psl = { workspace = true }
+idna = { workspace = true }
+url = { workspace = true }
+thiserror = { workspace = true }
 
 [dev-dependencies]
+proptest = { workspace = true }
 authz = { workspace = true, features = ["mock"] }
 mockall = { workspace = true }
 tokio = { workspace = true }
