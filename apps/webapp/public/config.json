@@ -1,0 +1,6 @@
+{
+  "api_url": "${API_URL}",
+  "issuer_url": "${ISSUER_URL}",
+  "client_id": "${OIDC_CLIENT_ID}",
+  "scope": "${OIDC_SCOPE}"
+}

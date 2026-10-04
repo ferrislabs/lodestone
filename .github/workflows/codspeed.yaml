@@ -1,0 +1,27 @@
+name: CodSpeed Benchmarks
+
+on:
+  pull_request:
+
+jobs:
+  benchmarks:
+    name: Run benchmarks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Setup Rust toolchain and cargo-codspeed
+        uses: moonrepo/setup-rust@abb2d32350334249b178c401e5ec5836e0cd88d3 # v1
+        with:
+          channel: stable
+          cache-target: release
+          bins: cargo-codspeed
+      - name: Build the benchmark target(s)
+        run: cargo codspeed build
+      - name: Run the benchmarks
+        uses: CodSpeedHQ/action@f22792bfac16f3e14eb9fbea76f4a48e9cc22b93 # v4
+        with:
+          mode: simulation
+          run: cargo codspeed run

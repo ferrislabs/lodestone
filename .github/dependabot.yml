@@ -1,0 +1,19 @@
+version: 2
+updates:
+  # Actions are pinned to commit SHAs, which is what makes a compromised
+  # upstream tag harmless - and what makes them stop receiving fixes unless
+  # something rotates them. That is this file's job.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: npm
+    directory: /apps/webapp
+    schedule:
+      interval: weekly
