@@ -1,4 +1,10 @@
+pub mod assessment;
+pub mod contact;
+pub mod lead;
 pub mod postgres;
 pub mod profile;
 pub mod registry;
+pub mod run;
+pub mod signal;
+pub mod suppression;
 pub mod user;
