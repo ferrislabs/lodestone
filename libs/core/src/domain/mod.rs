@@ -1,3 +1,4 @@
+pub(crate) mod fetch;
 pub(crate) mod job;
 pub(crate) mod lead;
 pub(crate) mod normalized_domain;

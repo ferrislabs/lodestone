@@ -7,6 +7,10 @@ pub mod infrastructure;
 pub use application::*;
 pub use domain::{
     NormalizedDomain, NormalizedDomainError, User, UserId,
+    fetch::{
+        FetchError, FetchPurpose, FetchRequest, FetchResponse,
+        ports::{Fetcher, HostVisitRepository},
+    },
     job::{
         ClaimedJob, FailureDecision, InvalidJobKind, Job, JobId, JobKind, JobStatus, LeaseToken,
         NewJob, RetryPolicy, new_lease_token,

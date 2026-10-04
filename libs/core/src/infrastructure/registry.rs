@@ -11,6 +11,7 @@ use crate::infrastructure::postgres::SharedTx;
 pub mod domain {
     pub struct Assessment;
     pub struct Contact;
+    pub struct HostVisit;
     pub struct Lead;
     pub struct Profile;
     pub struct Run;

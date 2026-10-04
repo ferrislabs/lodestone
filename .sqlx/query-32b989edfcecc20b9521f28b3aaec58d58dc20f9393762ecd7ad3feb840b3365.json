@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO host_visits (host, last_probed_at)\n            VALUES ($1, $2)\n            ON CONFLICT (host) DO UPDATE SET last_probed_at = EXCLUDED.last_probed_at\n            WHERE host_visits.last_probed_at <= $3\n            RETURNING host\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "host",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Timestamptz",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "32b989edfcecc20b9521f28b3aaec58d58dc20f9393762ecd7ad3feb840b3365"
+}
