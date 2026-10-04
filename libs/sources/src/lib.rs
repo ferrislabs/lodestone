@@ -1,3 +1,4 @@
+pub mod boamp;
 pub mod contact_pages;
 pub mod ct;
 pub mod dns_cname;

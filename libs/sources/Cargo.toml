@@ -21,3 +21,4 @@ fetch = { workspace = true }
 sqlx = { workspace = true }
 tokio = { workspace = true, features = ["test-util"] }
 httpmock = "0.7.0"
+flate2 = "1.1.9"

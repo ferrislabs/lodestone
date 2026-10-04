@@ -120,6 +120,7 @@ fn candidate(host: &str, title: &str) -> Candidate {
         text: "Avis de marche public".to_owned(),
         provenance: Provenance::parse(&format!("https://marches.example/avis/{host}")).unwrap(),
         observed_at: at(50),
+        details: json!({"idweb": host}),
     }
 }
 
@@ -162,6 +163,15 @@ async fn run_triage(
     pool: &PgPool,
     source: &FakeSource,
     provider: &ScriptedProvider,
+    settings: TriageSettings,
+) -> lodestone_core::triage::TriageReport {
+    run_triage_with(pool, source, Some(provider), settings).await
+}
+
+async fn run_triage_with(
+    pool: &PgPool,
+    source: &FakeSource,
+    provider: Option<&ScriptedProvider>,
     settings: TriageSettings,
 ) -> lodestone_core::triage::TriageReport {
     LodestoneUseCase::new(pool.clone())
@@ -247,11 +257,13 @@ async fn only_ambiguous_candidates_reach_the_llm(pool: PgPool) {
     assert_eq!(accepted.len(), 1);
     assert_eq!(accepted[0].source, SourceName::Boamp);
     assert_eq!(accepted[0].raw["route"], "keywords");
+    assert_eq!(accepted[0].raw["details"]["idweb"], "mairie.fr");
     assert_eq!(accepted[0].strength.get(), 0.7);
     assert!(signals(&pool, profile, "meubles.fr").await.is_empty());
     let by_llm = signals(&pool, profile, "acme.com").await;
     assert_eq!(by_llm.len(), 1);
     assert_eq!(by_llm[0].raw["route"], "llm");
+    assert_eq!(by_llm[0].raw["details"]["idweb"], "acme.com");
     assert_eq!(by_llm[0].raw["model"], "scripted");
     assert_eq!(by_llm[0].raw["prompt"], "triage@1");
     assert_eq!(by_llm[0].raw["from_cache"], false);
@@ -408,4 +420,28 @@ async fn profiles_route_the_same_candidate_with_their_own_rules(pool: PgPool) {
     assert_eq!(accepted.len(), 1);
     assert_eq!(accepted[0].raw["route"], "keywords");
     assert_eq!(runs(&pool).await.len(), 2);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn without_a_provider_ambiguous_candidates_are_deferred(pool: PgPool) {
+    let profile = iam_profile(&pool).await;
+    let source = FakeSource {
+        candidates: vec![
+            candidate("mairie.fr", "Mise en place d'un SSO avec MFA"),
+            candidate("meubles.fr", "Fourniture de mobilier de bureau"),
+            candidate("acme.com", "Badge d'acces et SSO"),
+        ],
+    };
+
+    let report = run_triage_with(&pool, &source, None, settings(100, 0)).await;
+
+    assert_eq!(report.accepted_by_rules, 1);
+    assert_eq!(report.rejected_by_rules, 1);
+    assert_eq!(report.deferred, 1);
+    assert_eq!(report.sent_to_llm, 0);
+    assert_eq!(signals(&pool, profile, "mairie.fr").await.len(), 1);
+    assert!(signals(&pool, profile, "acme.com").await.is_empty());
+    let recorded = runs(&pool).await;
+    assert_eq!(recorded[0].status, RunStatus::Succeeded);
+    assert_eq!(recorded[0].signals, 1);
 }
