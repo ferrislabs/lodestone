@@ -97,6 +97,25 @@ impl<'tx> LeadRepository for PgLeadRepository<'tx> {
         row.map(Lead::try_from).transpose()
     }
 
+    #[tracing::instrument(skip(self), fields(db.system = "postgresql", db.operation = "select", db.table = "leads"), err)]
+    async fn list_by_domain(&mut self, domain: &NormalizedDomain) -> Result<Vec<Lead>, CoreError> {
+        let mut tx = self.tx.lock().await;
+        let rows = sqlx::query_as!(
+            LeadRow,
+            r#"
+            SELECT id, profile_id, domain, status, score, first_seen_at, last_seen_at, updated_at
+            FROM leads
+            WHERE domain = $1
+            ORDER BY profile_id
+            "#,
+            domain.as_str(),
+        )
+        .fetch_all(&mut ***tx)
+        .await
+        .map_err(map_sqlx_error)?;
+        rows.into_iter().map(Lead::try_from).collect()
+    }
+
     #[tracing::instrument(skip(self), fields(db.system = "postgresql", db.operation = "update", db.table = "leads", lead.id = %id), err)]
     async fn update_status(
         &mut self,

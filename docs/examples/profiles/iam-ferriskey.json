@@ -104,7 +104,8 @@
     ]
   },
   "contact_ranking": {
-    "preferred_local_parts": ["security", "it", "dsi", "tech", "contact", "info"]
+    "preferred_local_parts": ["security", "it", "dsi", "tech", "contact", "info"],
+    "guess_local_parts": ["contact", "info"]
   },
   "llm": {
     "qualification_threshold": 50,

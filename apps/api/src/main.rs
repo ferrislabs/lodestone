@@ -17,14 +17,16 @@ use fetch::{FetchSettings, PoliteFetcher};
 use handlers::state;
 use lodestone_core::{
     RetryPolicy,
+    contacts::ContactRunSettings,
     infrastructure::{
-        candidate_host::postgres::PgCandidateHosts, ct_cursor::postgres::PgCtCursors,
-        job::postgres::PgJobQueue,
+        candidate_host::postgres::PgCandidateHosts, contact_target::postgres::PgContactTargets,
+        ct_cursor::postgres::PgCtCursors, job::postgres::PgJobQueue,
     },
     jobs::{SystemClock, WorkerPool, WorkerSettings},
 };
 use server::{get_addr, run_server, shutdown_signal};
 use sources::{
+    contact_pages::{ContactPageSettings, PublicPageFinder},
     ct::{CtSettings, CtSource},
     dns_cname::{DnsCnameSettings, DnsCnameSource},
     http_probe::{HttpProbeSettings, HttpProbeSource, ProbeScheme},
@@ -34,7 +36,7 @@ use tracing::{error, info};
 
 use crate::{
     internal_router::internal_router,
-    jobs::{Intervals, JobRouter, WiredSources, schedule_wired_sources},
+    jobs::{ContactFinders, Intervals, JobRouter, WiredSources, schedule_wired_sources},
     logger::init_tracing_and_logging,
     router::router,
 };
@@ -80,6 +82,21 @@ async fn main() -> Result<(), Box<dyn Error>> {
             max_lag_tiles: args.ct.max_lag_tiles.get(),
         },
     );
+    let contacts = ContactFinders {
+        public_page: PublicPageFinder::new(
+            Arc::clone(&fetcher),
+            ContactPageSettings {
+                max_pages: args.contacts.page_paths.len(),
+                paths: args.contacts.page_paths.clone(),
+                max_rate_limit_wait: args.contacts.max_rate_limit_wait(),
+            },
+        ),
+        targets: PgContactTargets::new(pool.clone()),
+        settings: ContactRunSettings {
+            batch_size: args.contacts.batch_size,
+            revisit_interval: outbound_config.revisit_interval,
+        },
+    };
     let http_probe = HttpProbeSource::new(
         fetcher,
         Arc::new(PgCandidateHosts::new(pool)),
@@ -99,6 +116,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             certificate_transparency,
             dns_cname,
             http_probe,
+            contacts,
         },
         Intervals {
             certificate_transparency: args.ct.interval(),

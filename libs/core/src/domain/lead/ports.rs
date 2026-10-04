@@ -24,6 +24,11 @@ pub trait LeadRepository: Send {
         domain: &NormalizedDomain,
     ) -> impl Future<Output = Result<Option<Lead>, CoreError>> + Send;
 
+    fn list_by_domain(
+        &mut self,
+        domain: &NormalizedDomain,
+    ) -> impl Future<Output = Result<Vec<Lead>, CoreError>> + Send;
+
     fn update_status(
         &mut self,
         id: LeadId,

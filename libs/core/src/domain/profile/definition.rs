@@ -138,6 +138,8 @@ pub struct ScoringFactor {
 #[serde(deny_unknown_fields)]
 pub struct ContactRanking {
     pub preferred_local_parts: Vec<String>,
+    #[serde(default)]
+    pub guess_local_parts: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]

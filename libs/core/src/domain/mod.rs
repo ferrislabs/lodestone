@@ -1,3 +1,4 @@
+pub(crate) mod contact;
 pub(crate) mod fetch;
 pub(crate) mod host;
 pub(crate) mod job;

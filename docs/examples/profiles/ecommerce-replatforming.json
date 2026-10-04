@@ -39,7 +39,8 @@
     ]
   },
   "contact_ranking": {
-    "preferred_local_parts": ["contact", "commercial", "info"]
+    "preferred_local_parts": ["contact", "commercial", "info"],
+    "guess_local_parts": ["contact"]
   },
   "llm": {
     "qualification_threshold": 55,

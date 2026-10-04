@@ -6,30 +6,42 @@ use dns::HickoryResolver;
 use fetch::PoliteFetcher;
 use lodestone_core::{
     Clock, Job, JobQueue, LodestoneUseCase, SourceName,
+    contacts::ContactRunSettings,
     infrastructure::{
-        candidate_host::postgres::PgCandidateHosts, ct_cursor::postgres::PgCtCursors,
-        job::postgres::PgJobQueue,
+        candidate_host::postgres::PgCandidateHosts, contact_target::postgres::PgContactTargets,
+        ct_cursor::postgres::PgCtCursors, job::postgres::PgJobQueue,
     },
     jobs::{JobError, JobHandler, JobOutcome, SystemClock},
     sources::{SOURCE_JOB_KIND, source_job, source_of_job},
 };
-use sources::{ct::CtSource, dns_cname::DnsCnameSource, http_probe::HttpProbeSource};
+use sources::{
+    contact_pages::PublicPageFinder, ct::CtSource, dns_cname::DnsCnameSource,
+    http_probe::HttpProbeSource,
+};
 use tracing::info;
 
-pub const WIRED_SOURCES: [SourceName; 3] = [
+pub const WIRED_SOURCES: [SourceName; 4] = [
     SourceName::CertificateTransparency,
     SourceName::DnsCname,
     SourceName::HttpProbe,
+    SourceName::PublicPage,
 ];
 
 pub type DnsCname = DnsCnameSource<HickoryResolver, PgCandidateHosts>;
 pub type HttpProbe = HttpProbeSource<PoliteFetcher, PgCandidateHosts, LodestoneUseCase>;
 pub type CertificateTransparency = CtSource<PoliteFetcher, PgCandidateHosts, PgCtCursors>;
 
+pub struct ContactFinders {
+    pub public_page: PublicPageFinder<PoliteFetcher>,
+    pub targets: PgContactTargets,
+    pub settings: ContactRunSettings,
+}
+
 pub struct WiredSources {
     pub certificate_transparency: CertificateTransparency,
     pub dns_cname: DnsCname,
     pub http_probe: HttpProbe,
+    pub contacts: ContactFinders,
 }
 
 pub struct Intervals {
@@ -55,20 +67,32 @@ impl JobRouter {
     async fn run_source(&self, job: &Job) -> Result<JobOutcome, JobError> {
         let source = source_of_job(job)?;
         let result = match source {
-            SourceName::CertificateTransparency => {
+            SourceName::CertificateTransparency => self
+                .usecase
+                .run_source(&self.sources.certificate_transparency, &SystemClock)
+                .await
+                .map(|report| (report.items, report.signals)),
+            SourceName::DnsCname => self
+                .usecase
+                .run_source(&self.sources.dns_cname, &SystemClock)
+                .await
+                .map(|report| (report.items, report.signals)),
+            SourceName::HttpProbe => self
+                .usecase
+                .run_source(&self.sources.http_probe, &SystemClock)
+                .await
+                .map(|report| (report.items, report.signals)),
+            SourceName::PublicPage => {
+                let contacts = &self.sources.contacts;
                 self.usecase
-                    .run_source(&self.sources.certificate_transparency, &SystemClock)
+                    .run_contact_finder(
+                        &contacts.public_page,
+                        &contacts.targets,
+                        contacts.settings,
+                        &SystemClock,
+                    )
                     .await
-            }
-            SourceName::DnsCname => {
-                self.usecase
-                    .run_source(&self.sources.dns_cname, &SystemClock)
-                    .await
-            }
-            SourceName::HttpProbe => {
-                self.usecase
-                    .run_source(&self.sources.http_probe, &SystemClock)
-                    .await
+                    .map(|report| (report.domains, report.contacts))
             }
             other => {
                 return Err(JobError::Permanent(format!(
@@ -83,8 +107,8 @@ impl JobRouter {
         let next_run = SystemClock.now()
             + chrono::Duration::from_std(interval).unwrap_or(chrono::Duration::hours(1));
         match result {
-            Ok(report) => {
-                info!(%source, items = report.items, signals = report.signals, "source run finished");
+            Ok((items, signals)) => {
+                info!(%source, items, signals, "source run finished");
                 Ok(JobOutcome::RescheduleAt(next_run))
             }
             Err(error) if job.attempts >= job.max_attempts.get() => {
