@@ -224,7 +224,13 @@ async fn dedup_key_allows_one_active_job(pool: PgPool) {
     );
     assert!(
         queue
-            .enqueue(&keyed_job("source:dns_cname"), at(0))
+            .enqueue(
+                &NewJob {
+                    run_at: at(10),
+                    ..keyed_job("source:dns_cname")
+                },
+                at(0),
+            )
             .await
             .unwrap()
             .is_some()
