@@ -22,8 +22,8 @@ docker compose up -d postgres
 cargo build --workspace
 cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
-cargo nextest run --workspace
-cargo nextest run --workspace --run-ignored all   # docker-dependent tests
+export DATABASE_URL=postgres://ferriskey:ferriskey@localhost:5433/lodestone
+cargo nextest run --workspace --run-ignored all   # #[sqlx::test] tests need DATABASE_URL and fail without it
 cargo sqlx prepare --workspace                    # after changing a query, needs DATABASE_URL
 ```
 
@@ -40,6 +40,8 @@ pnpm build
 
 - Hexagonal: the domain imports nothing from infrastructure. Repository traits live in `domain/<context>/ports.rs`, adapters in `infrastructure/<context>/postgres/`.
 - Errors: `thiserror` enums per boundary, `CoreError` in `libs/common`.
+- Repository adapters are tested in `libs/<crate>/tests/` with `#[sqlx::test(migrations = "../../migrations")]`: one fresh database per test.
+- Detection profiles: `docs/profiles.md`. Definition types in `libs/core/src/domain/profile/definition.rs`; the JSON Schema is generated (ADR 0002).
 - Market-specific criteria (keywords, filters, weights, prompts) never live in code: they belong to detection profiles in Postgres.
 
 ## Frontend conventions

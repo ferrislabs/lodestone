@@ -1,4 +1,5 @@
 pub(crate) mod normalized_domain;
+pub(crate) mod profile;
 pub(crate) mod user;
 
 pub use normalized_domain::{NormalizedDomain, NormalizedDomainError};

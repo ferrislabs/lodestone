@@ -23,6 +23,9 @@ psl = { workspace = true }
 idna = { workspace = true }
 url = { workspace = true }
 thiserror = { workspace = true }
+regex = { workspace = true }
+schemars = { workspace = true }
+serde_path_to_error = { workspace = true }
 
 [dev-dependencies]
 proptest = { workspace = true }

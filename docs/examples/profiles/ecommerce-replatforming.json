@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "identity": {
+    "offer": "Migration of Magento 1 and Magento 2 shops to a modern e-commerce platform, by a web agency",
+    "target_customer": "Merchants and organizations running an outdated Magento storefront"
+  },
+  "sources": {
+    "http_probe": {
+      "fingerprints": [
+        {
+          "id": "magento-version",
+          "path": "/magento_version",
+          "product": "magento",
+          "matchers": [
+            { "kind": "status", "equals": 200 },
+            { "kind": "body", "pattern": "^Magento/" }
+          ],
+          "version": { "from": "body", "pattern": "^Magento/(\\d+\\.\\d+)" },
+          "debt_markers": [
+            { "id": "outdated_magento", "rule": { "kind": "version_below", "version": "2.4" } }
+          ]
+        }
+      ]
+    },
+    "boamp": {
+      "keywords": ["site e-commerce", "Magento", "refonte de site marchand", "boutique en ligne", "plateforme de vente en ligne"]
+    },
+    "france_travail": {
+      "keywords": ["Magento", "développeur Magento", "e-commerce", "refonte de site marchand", "migration Magento"]
+    }
+  },
+  "scoring": {
+    "factors": [
+      { "signal": "product_detected", "value": "magento", "weight": 30 },
+      { "signal": "debt_marker", "value": "outdated_magento", "weight": 30 },
+      { "signal": "job_offer", "weight": 20 },
+      { "signal": "public_tender", "weight": 20 },
+      { "signal": "role_contact_found", "weight": 5 }
+    ]
+  },
+  "contact_ranking": {
+    "preferred_local_parts": ["contact", "commercial", "info"]
+  },
+  "llm": {
+    "qualification_threshold": 55,
+    "relevance_criteria": "The organization runs an online shop on Magento, preferably an outdated version, or is hiring or tendering for a rebuild of its merchant site."
+  }
+}
