@@ -16,16 +16,17 @@ use lodestone_core::{
 };
 use sources::{
     contact_pages::PublicPageFinder, ct::CtSource, dns_cname::DnsCnameSource,
-    http_probe::HttpProbeSource, security_txt::SecurityTxtFinder,
+    http_probe::HttpProbeSource, role_guess::RoleGuessFinder, security_txt::SecurityTxtFinder,
 };
 use tracing::info;
 
-pub const WIRED_SOURCES: [SourceName; 5] = [
+pub const WIRED_SOURCES: [SourceName; 6] = [
     SourceName::CertificateTransparency,
     SourceName::DnsCname,
     SourceName::HttpProbe,
     SourceName::PublicPage,
     SourceName::SecurityTxt,
+    SourceName::RoleGuess,
 ];
 
 pub type DnsCname = DnsCnameSource<HickoryResolver, PgCandidateHosts>;
@@ -35,6 +36,7 @@ pub type CertificateTransparency = CtSource<PoliteFetcher, PgCandidateHosts, PgC
 pub struct ContactFinders {
     pub public_page: PublicPageFinder<PoliteFetcher>,
     pub security_txt: SecurityTxtFinder<PoliteFetcher>,
+    pub role_guess: RoleGuessFinder<HickoryResolver>,
     pub targets: PgContactTargets,
     pub settings: ContactRunSettings,
 }
@@ -101,6 +103,18 @@ impl JobRouter {
                 self.usecase
                     .run_contact_finder(
                         &contacts.security_txt,
+                        &contacts.targets,
+                        contacts.settings,
+                        &SystemClock,
+                    )
+                    .await
+                    .map(|report| (report.domains, report.contacts))
+            }
+            SourceName::RoleGuess => {
+                let contacts = &self.sources.contacts;
+                self.usecase
+                    .run_contact_finder(
+                        &contacts.role_guess,
                         &contacts.targets,
                         contacts.settings,
                         &SystemClock,

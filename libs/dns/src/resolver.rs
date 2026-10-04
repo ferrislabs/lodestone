@@ -6,7 +6,7 @@ use hickory_resolver::{
     net::{NetError, runtime::TokioRuntimeProvider},
     proto::rr::{RData, RecordType},
 };
-use lodestone_core::{DnsError, DnsResolver, Hostname};
+use lodestone_core::{DnsError, DnsResolver, Hostname, MxLookup, NormalizedDomain};
 use thiserror::Error;
 
 #[derive(Debug, Clone, Copy)]
@@ -107,6 +107,21 @@ fn classify(error: &NetError) -> Result<Option<String>, DnsError> {
         other => {
             tracing::debug!(error = %other, "dns lookup failed");
             Err(DnsError::Failure(other.to_string()))
+        }
+    }
+}
+
+impl MxLookup for HickoryResolver {
+    async fn has_mx(&self, domain: &NormalizedDomain) -> Result<bool, DnsError> {
+        match self.inner.lookup(domain.as_str(), RecordType::MX).await {
+            Ok(lookup) => Ok(lookup.answers().iter().any(|record| match &record.data {
+                RData::MX(mx) => {
+                    let exchange = mx.exchange.to_utf8();
+                    !exchange.trim_end_matches('.').is_empty()
+                }
+                _ => false,
+            })),
+            Err(error) => classify(&error).map(|_| false),
         }
     }
 }

@@ -117,7 +117,7 @@ async fn name_is_public_page() {
 #[tokio::test]
 async fn paths_are_fetched_in_order_with_crawl_purpose() {
     let (finder, fetcher) = finder(FakeFetcher::new(vec![]), &["/", "/contact", "about"], 10);
-    finder.find(&domain(), now()).await.unwrap();
+    finder.find(&domain(), &[], now()).await.unwrap();
     assert_eq!(
         fetcher.urls(),
         [
@@ -140,7 +140,7 @@ async fn paths_are_fetched_in_order_with_crawl_purpose() {
 #[tokio::test]
 async fn fetching_is_capped_at_max_pages() {
     let (finder, fetcher) = finder(FakeFetcher::new(vec![]), &["/a", "/b", "/c"], 2);
-    finder.find(&domain(), now()).await.unwrap();
+    finder.find(&domain(), &[], now()).await.unwrap();
     assert_eq!(fetcher.urls(), ["https://acme.fr/a", "https://acme.fr/b"]);
 }
 
@@ -167,7 +167,7 @@ async fn failing_pages_are_skipped() {
         &["/a", "/b", "/c", "/d", "/e", "/f", "/g", "/h"],
         10,
     );
-    let found = finder.find(&domain(), now()).await.unwrap();
+    let found = finder.find(&domain(), &[], now()).await.unwrap();
     assert_eq!(fetcher.urls().len(), 8);
     assert_eq!(found.len(), 1);
     assert_eq!(found[0].address.as_str(), "ok@acme.fr");
@@ -185,7 +185,7 @@ async fn rate_limit_stops_and_fails() {
         ),
     ];
     let (finder, fetcher) = finder(FakeFetcher::new(script), &["/a", "/b", "/c"], 10);
-    let error = finder.find(&domain(), now()).await.unwrap_err();
+    let error = finder.find(&domain(), &[], now()).await.unwrap_err();
     assert_eq!(
         error,
         SourceError::RateLimited {
@@ -213,7 +213,7 @@ async fn non_text_content_is_ignored() {
         ),
     ];
     let (finder, _) = finder(FakeFetcher::new(script), &["/a", "/b", "/c", "/d"], 10);
-    let found = finder.find(&domain(), now()).await.unwrap();
+    let found = finder.find(&domain(), &[], now()).await.unwrap();
     let addresses: Vec<&str> = found.iter().map(|f| f.address.as_str()).collect();
     assert_eq!(addresses, ["b@acme.fr", "c@acme.fr"]);
 }
@@ -226,7 +226,7 @@ async fn provenance_is_the_final_url_and_method_is_public_page() {
         "https://www.acme.fr/nous-contacter".to_owned(),
     );
     let (finder, _) = finder(fetcher, &["/contact"], 10);
-    let found = finder.find(&domain(), now()).await.unwrap();
+    let found = finder.find(&domain(), &[], now()).await.unwrap();
     assert_eq!(
         found[0].provenance.as_str(),
         "https://www.acme.fr/nous-contacter"
@@ -244,7 +244,7 @@ async fn duplicates_keep_first_provenance_and_highest_confidence() {
         ),
     ];
     let (finder, _) = finder(FakeFetcher::new(script), &["/a", "/b"], 10);
-    let found = finder.find(&domain(), now()).await.unwrap();
+    let found = finder.find(&domain(), &[], now()).await.unwrap();
     assert_eq!(found.len(), 2);
     assert_eq!(found[0].address.as_str(), "a@acme.fr");
     assert_eq!(found[0].provenance.as_str(), "https://acme.fr/a");
@@ -273,7 +273,7 @@ async fn short_rate_limit_waits_then_retries_the_same_page() {
         },
     );
     let started = tokio::time::Instant::now();
-    let found = finder.find(&domain(), now()).await.unwrap();
+    let found = finder.find(&domain(), &[], now()).await.unwrap();
     assert_eq!(found.len(), 2);
     assert!(started.elapsed() >= Duration::from_secs(20));
     assert_eq!(
@@ -303,7 +303,7 @@ async fn long_rate_limit_is_not_waited_for() {
         },
     );
     assert!(matches!(
-        finder.find(&domain(), now()).await,
+        finder.find(&domain(), &[], now()).await,
         Err(SourceError::RateLimited { .. })
     ));
     assert_eq!(fetcher.urls().len(), 1);

@@ -68,6 +68,7 @@ impl ContactFinder for FakeFinder {
     async fn find(
         &self,
         _domain: &NormalizedDomain,
+        _profiles: &[lodestone_core::ActiveProfile],
         _now: DateTime<Utc>,
     ) -> Result<Vec<FoundAddress>, SourceError> {
         self.calls.fetch_add(1, Ordering::SeqCst);

@@ -66,7 +66,7 @@ impl ProfileDefinition {
             SourceName::Ted => sources.ted.is_some(),
             SourceName::FranceTravail => sources.france_travail.is_some(),
             SourceName::Ats => sources.ats.is_some(),
-            SourceName::PublicPage | SourceName::SecurityTxt => true,
+            SourceName::PublicPage | SourceName::SecurityTxt | SourceName::RoleGuess => true,
         }
     }
 }
