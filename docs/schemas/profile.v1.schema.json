@@ -241,6 +241,13 @@
     "KeywordSource": {
       "type": "object",
       "properties": {
+        "accept_min_keywords": {
+          "type": "integer",
+          "format": "uint8",
+          "default": 2,
+          "maximum": 255,
+          "minimum": 0
+        },
         "exclusions": {
           "type": "array",
           "default": [],

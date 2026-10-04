@@ -144,7 +144,7 @@ impl LodestoneUseCase {
     }
 
     #[transactional(lead, contact, signal, suppression)]
-    async fn record_contacts(
+    pub(crate) async fn record_contacts(
         &self,
         active: &ActiveProfile,
         domain: &NormalizedDomain,

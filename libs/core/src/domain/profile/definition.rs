@@ -117,6 +117,12 @@ pub struct KeywordSource {
     pub keywords: Vec<String>,
     #[serde(default)]
     pub exclusions: Vec<String>,
+    #[serde(default = "default_accept_min_keywords")]
+    pub accept_min_keywords: u8,
+}
+
+fn default_accept_min_keywords() -> u8 {
+    2
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
