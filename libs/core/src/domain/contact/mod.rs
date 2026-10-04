@@ -1,3 +1,5 @@
+pub mod recipient;
+
 use chrono::{DateTime, Utc};
 use common::CoreError;
 
@@ -66,8 +68,9 @@ pub fn select_for_profile<'a>(
 ) -> Vec<&'a FoundAddress> {
     let mut selected: Vec<&FoundAddress> = Vec::with_capacity(found.len());
     for candidate in found {
-        if !belongs_to(&candidate.address, domain) || rank_of(&candidate.address, ranking).is_none()
-        {
+        let ranked = rank_of(&candidate.address, ranking).is_some();
+        let hint = candidate.method == ContactMethod::SecurityTxt;
+        if !belongs_to(&candidate.address, domain) || !(ranked || hint) {
             continue;
         }
         match selected
@@ -80,14 +83,13 @@ pub fn select_for_profile<'a>(
         }
     }
     selected.sort_by(|a, b| {
-        rank_of(&a.address, ranking)
-            .cmp(&rank_of(&b.address, ranking))
-            .then_with(|| {
-                b.confidence
-                    .get()
-                    .partial_cmp(&a.confidence.get())
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            })
+        let rank = |found: &FoundAddress| rank_of(&found.address, ranking).unwrap_or(usize::MAX);
+        rank(a).cmp(&rank(b)).then_with(|| {
+            b.confidence
+                .get()
+                .partial_cmp(&a.confidence.get())
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
     });
     selected
 }
@@ -168,6 +170,24 @@ mod tests {
         let selected = select_for_profile(&found, &domain(), &ranking(&["contact"]));
         assert_eq!(selected.len(), 1);
         assert_eq!(selected[0].confidence.get(), 0.9);
+    }
+
+    #[test]
+    fn security_txt_hints_on_the_lead_domain_are_kept_unranked_and_last() {
+        let hint = FoundAddress {
+            method: ContactMethod::SecurityTxt,
+            ..found("psirt@example.com", 0.7)
+        };
+        let foreign_hint = FoundAddress {
+            method: ContactMethod::SecurityTxt,
+            ..found("security@bugbounty-platform.example.org", 0.7)
+        };
+        let found = [hint, foreign_hint, found("contact@example.com", 0.8)];
+        let selected = select_for_profile(&found, &domain(), &ranking(&["contact"]));
+        assert_eq!(
+            addresses(&selected),
+            ["contact@example.com", "psirt@example.com"]
+        );
     }
 
     #[test]
