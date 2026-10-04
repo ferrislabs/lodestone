@@ -47,6 +47,14 @@ pub trait JobQueue: Send + Sync {
         now: DateTime<Utc>,
     ) -> impl Future<Output = Result<bool, CoreError>> + Send;
 
+    fn reschedule(
+        &self,
+        id: JobId,
+        token: LeaseToken,
+        run_at: DateTime<Utc>,
+        now: DateTime<Utc>,
+    ) -> impl Future<Output = Result<bool, CoreError>> + Send;
+
     fn release(
         &self,
         id: JobId,

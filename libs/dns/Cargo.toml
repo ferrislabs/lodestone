@@ -1,0 +1,12 @@
+[package]
+name = "dns"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+
+[dependencies]
+lodestone-core = { workspace = true }
+hickory-resolver = { version = "0.26.3", features = ["tokio", "system-config"] }
+tokio = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }

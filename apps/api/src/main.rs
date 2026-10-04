@@ -10,22 +10,29 @@ use args::Args;
 use axum::Router;
 use axum_server::Handle;
 use clap::Parser;
-use common::JobsConfig;
+use common::{JobsConfig, OutboundConfig};
+use dns::{DnsSettings, HickoryResolver};
 use dotenvy::dotenv;
 use handlers::state;
 use lodestone_core::{
     RetryPolicy,
-    infrastructure::job::postgres::PgJobQueue,
+    infrastructure::{candidate_host::postgres::PgCandidateHosts, job::postgres::PgJobQueue},
     jobs::{SystemClock, WorkerPool, WorkerSettings},
 };
 use server::{get_addr, run_server, shutdown_signal};
+use sources::dns_cname::{DnsCnameSettings, DnsCnameSource};
 use tokio::sync::watch;
 use tracing::{error, info};
 
 use crate::{
-    internal_router::internal_router, jobs::JobRouter, logger::init_tracing_and_logging,
+    internal_router::internal_router,
+    jobs::{JobRouter, schedule_wired_sources},
+    logger::init_tracing_and_logging,
     router::router,
 };
+
+const DNS_BATCH_SIZE: u32 = 500;
+const DNS_CONCURRENCY: usize = 16;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -35,7 +42,24 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let jobs_config = JobsConfig::try_from(args.jobs.clone())?;
     let app_state = state(Arc::clone(&args)).await?;
-    let queue = PgJobQueue::new(app_state.usecase.pool().clone());
+    let outbound_config = OutboundConfig::try_from(args.outbound.clone())?;
+    let pool = app_state.usecase.pool().clone();
+    let queue = Arc::new(PgJobQueue::new(pool.clone()));
+    let dns_cname = DnsCnameSource::new(
+        Arc::new(HickoryResolver::from_system(DnsSettings::default())?),
+        Arc::new(PgCandidateHosts::new(pool)),
+        DnsCnameSettings {
+            batch_size: DNS_BATCH_SIZE,
+            concurrency: DNS_CONCURRENCY,
+            revisit_interval: outbound_config.revisit_interval,
+        },
+    );
+    let job_router = JobRouter::new(
+        app_state.usecase.clone(),
+        dns_cname,
+        jobs_config.source_interval,
+    );
+    schedule_wired_sources(&queue).await?;
 
     let router = router(app_state)?;
     let internal_router = internal_router()?;
@@ -48,8 +72,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
 
     let workers = WorkerPool::new(
-        Arc::new(queue),
-        Arc::new(JobRouter),
+        queue,
+        Arc::new(job_router),
         Arc::new(SystemClock),
         WorkerSettings {
             workers: jobs_config.workers,

@@ -57,6 +57,15 @@ pub struct JobsArgs {
         long_help = "Seconds running jobs get to finish on shutdown before their lease is released"
     )]
     pub shutdown_grace_seconds: u64,
+
+    #[arg(
+        long = "jobs-source-interval-minutes",
+        env = "JOBS_SOURCE_INTERVAL_MINUTES",
+        name = "JOBS_SOURCE_INTERVAL_MINUTES",
+        default_value_t = 60,
+        long_help = "Minutes between two runs of the same source"
+    )]
+    pub source_interval_minutes: u64,
 }
 
 impl TryFrom<JobsArgs> for JobsConfig {
@@ -70,6 +79,7 @@ impl TryFrom<JobsArgs> for JobsConfig {
             max_attempts: value.max_attempts,
             retry_base_delay: Duration::from_secs(value.retry_base_seconds),
             shutdown_grace: Duration::from_secs(value.shutdown_grace_seconds),
+            source_interval: Duration::from_secs(value.source_interval_minutes.saturating_mul(60)),
         }
         .validated()
     }

@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO host_source_checks (host, source, checked_at)\n            SELECT host, $2, $3 FROM UNNEST($1::text[]) AS t(host)\n            ON CONFLICT (host, source) DO UPDATE SET checked_at = EXCLUDED.checked_at\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "TextArray",
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "8e603ad65615167be7eb8321041d3d2ec54563693d108ba38b096af37dad83ab"
+}

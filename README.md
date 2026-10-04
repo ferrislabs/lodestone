@@ -82,6 +82,7 @@ Common flags / env vars (see `libs/args/src/`):
 | `JOBS_MAX_ATTEMPTS` | `--jobs-max-attempts` | `5` |
 | `JOBS_RETRY_BASE_SECONDS` | `--jobs-retry-base-seconds` | `10` |
 | `JOBS_SHUTDOWN_GRACE_SECONDS` | `--jobs-shutdown-grace-seconds` | `20` |
+| `JOBS_SOURCE_INTERVAL_MINUTES` | `--jobs-source-interval-minutes` | `60` |
 | `OUTBOUND_CONTACT` | `--outbound-contact` | required, email or https URL |
 | `OUTBOUND_REQUESTS_PER_HOST_PER_MINUTE` | `--outbound-requests-per-host-per-minute` | `6` |
 | `OUTBOUND_REVISIT_INTERVAL_HOURS` | `--outbound-revisit-interval-hours` | `720` |
