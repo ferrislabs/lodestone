@@ -124,6 +124,15 @@ mod tests {
     }
 
     #[test]
+    fn a_public_suffix_alone_has_no_registrable_domain() {
+        assert_eq!(
+            parse("tm.fr"),
+            Err(NormalizedDomainError::NoRegistrableDomain)
+        );
+        assert_eq!(parse("www.tm.fr").as_deref(), Ok("www.tm.fr"));
+    }
+
+    #[test]
     fn trailing_dot_and_wildcard_are_ignored() {
         assert_eq!(parse("*.sso.example.fr.").as_deref(), Ok("example.fr"));
     }
@@ -215,7 +224,9 @@ mod tests {
     proptest! {
         #[test]
         fn normalization_is_idempotent(host in hostname()) {
-            let once = parse(&host).unwrap();
+            let parsed = parse(&host);
+            prop_assume!(parsed.is_ok());
+            let once = parsed.unwrap();
             prop_assert_eq!(parse(&once).unwrap(), once);
         }
 
