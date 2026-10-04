@@ -1,0 +1,24 @@
+{
+  "name": "triage_iam_job_offer",
+  "template": "triage",
+  "documents": [
+    {
+      "source": "https://jobs.example-retail.fr/offres/ingenieur-iam",
+      "content": "Ingénieur IAM (H/F) - Example Retail\nVous maintiendrez notre plateforme Keycloak 18 auto-hébergée et préparerez sa migration. Contact recrutement : rh@example-retail.fr"
+    }
+  ],
+  "expect": {
+    "relevant": true
+  },
+  "recorded_output": {
+    "relevant": true,
+    "reason": "The company runs a self-hosted Keycloak 18 and is hiring to maintain and migrate it.",
+    "evidence": [
+      {
+        "document_index": 0,
+        "quote": "Vous maintiendrez notre plateforme Keycloak 18 auto-hébergée et préparerez sa migration."
+      }
+    ],
+    "contact_email": null
+  }
+}
