@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO llm_cache (cache_key, profile_id, profile_revision, prompt, domain, output, model, created_at)\n            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)\n            ON CONFLICT (cache_key) DO UPDATE SET\n                output = EXCLUDED.output, model = EXCLUDED.model, created_at = EXCLUDED.created_at\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Bytea",
+        "Uuid",
+        "Int4",
+        "Text",
+        "Text",
+        "Jsonb",
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ef37206040d1d4f029a81544b645bf1ab370f8cc2f5b472b737f0a1fc3292dbd"
+}

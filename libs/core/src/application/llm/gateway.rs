@@ -5,8 +5,14 @@ use serde::de::DeserializeOwned;
 use thiserror::Error;
 use tracing::warn;
 
+use aws_lc_rs::digest::{Context, SHA256};
+use chrono::Utc;
+use serde::Serialize;
+
 use crate::domain::llm::{
-    LlmError, LlmProvider, LlmRequest, TokenUsage, UntrustedDocument, provider::TokenPricing,
+    LlmError, LlmProvider, LlmRequest, TokenUsage, UntrustedDocument,
+    cache::{CacheScope, CachedOutput, LlmCache},
+    provider::TokenPricing,
 };
 
 const MICROCENTS_PER_CENT: u64 = 1_000_000;
@@ -67,6 +73,7 @@ pub struct Structured<T> {
     pub value: T,
     pub model: String,
     pub usage: TokenUsage,
+    pub from_cache: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -142,6 +149,7 @@ where
                             value,
                             model: response.model,
                             usage: response.usage,
+                            from_cache: false,
                         });
                     }
                     Err(error) => LlmError::InvalidOutput(error.to_string()),
@@ -159,6 +167,74 @@ where
         tokio::time::sleep(backoff(&settings, attempt, &failure)).await;
         attempt += 1;
     }
+}
+
+fn hash_field(context: &mut Context, field: &[u8]) {
+    context.update(&(field.len() as u64).to_be_bytes());
+    context.update(field);
+}
+
+pub fn cache_key(scope: &CacheScope, prompt: &Prompt<'_>, schema: &serde_json::Value) -> Vec<u8> {
+    let mut context = Context::new(&SHA256);
+    hash_field(&mut context, scope.profile_id.0.as_bytes());
+    hash_field(&mut context, &scope.revision.get().to_be_bytes());
+    hash_field(&mut context, scope.prompt.as_bytes());
+    hash_field(&mut context, scope.domain.as_str().as_bytes());
+    hash_field(&mut context, prompt.system.as_bytes());
+    hash_field(&mut context, prompt.instruction.as_bytes());
+    hash_field(&mut context, schema.to_string().as_bytes());
+    for document in prompt.documents {
+        hash_field(&mut context, document.source.as_bytes());
+        hash_field(&mut context, document.content.as_bytes());
+    }
+    context.finish().as_ref().to_vec()
+}
+
+pub async fn call_structured_cached<T, P, C>(
+    provider: &P,
+    cache: &C,
+    scope: &CacheScope,
+    prompt: Prompt<'_>,
+    settings: CallSettings,
+    budget: &mut RunBudget,
+) -> Result<Structured<T>, LlmCallError>
+where
+    T: DeserializeOwned + JsonSchema + Serialize,
+    P: LlmProvider,
+    C: LlmCache,
+{
+    let schema = output_schema::<T>()?;
+    let key = cache_key(scope, &prompt, &schema);
+    match cache.get(&key).await {
+        Ok(Some(hit)) => match serde_json::from_value::<T>(hit.output) {
+            Ok(value) => {
+                return Ok(Structured {
+                    value,
+                    model: hit.model,
+                    usage: TokenUsage::default(),
+                    from_cache: true,
+                });
+            }
+            Err(error) => warn!(%error, "cached llm output no longer matches its type"),
+        },
+        Ok(None) => {}
+        Err(error) => warn!(%error, "llm cache read failed"),
+    }
+    let fresh = call_structured::<T, P>(provider, prompt, settings, budget).await?;
+    match serde_json::to_value(&fresh.value) {
+        Ok(output) => {
+            let entry = CachedOutput {
+                output,
+                model: fresh.model.clone(),
+                created_at: Utc::now(),
+            };
+            if let Err(error) = cache.put(&key, scope, &entry).await {
+                warn!(%error, "llm cache write failed");
+            }
+        }
+        Err(error) => warn!(%error, "llm output could not be cached"),
+    }
+    Ok(fresh)
 }
 
 #[cfg(test)]

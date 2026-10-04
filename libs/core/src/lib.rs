@@ -34,6 +34,7 @@ pub use domain::{
     llm::{
         LlmError, LlmProvider, LlmRequest, LlmResponse, ProviderDefinition, ProviderKind,
         TokenUsage, UntrustedDocument,
+        cache::{CacheScope, CachedOutput, LlmCache},
         provider::{
             CipherError, LlmProviderRecord, LlmProviderRepository, ProviderId, ResolvedProvider,
             SealedSecret, SecretCipher, Tier, TierError, TokenPricing,
