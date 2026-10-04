@@ -11,6 +11,7 @@ pub(crate) mod run;
 pub(crate) mod scoring;
 pub(crate) mod source;
 pub(crate) mod suppression;
+pub(crate) mod triage;
 pub(crate) mod user;
 pub(crate) mod values;
 

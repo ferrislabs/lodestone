@@ -45,6 +45,8 @@ pub enum ProfileProblem {
     NotFinite,
     #[error("must be a dotted numeric version")]
     InvalidVersion,
+    #[error("must be at least 1")]
+    MustBePositive,
     #[error("`version_below` needs a version extractor on the fingerprint")]
     VersionBelowWithoutExtractor,
 }
@@ -381,6 +383,11 @@ fn validate_keyword_source(source: &KeywordSource, path: &Path) -> Check {
     for (index, keyword) in source.keywords.iter().enumerate() {
         non_empty(keyword, &keywords.index(index))?;
     }
+    if source.accept_min_keywords < 1 {
+        return Err(path
+            .field("accept_min_keywords")
+            .fail(ProfileProblem::MustBePositive));
+    }
     let exclusions = path.field("exclusions");
     for (index, exclusion) in source.exclusions.iter().enumerate() {
         non_empty(exclusion, &exclusions.index(index))?;
@@ -598,6 +605,23 @@ mod tests {
         let error = error_for(|v| v["sources"]["boamp"] = json!({"keywords": []}));
         assert_eq!(error.path, "sources.boamp.keywords");
         assert_eq!(error.problem, ProfileProblem::Empty);
+    }
+
+    #[test]
+    fn keyword_source_accept_threshold_defaults_and_must_be_positive() {
+        let profile = ValidatedProfile::parse({
+            let mut value = minimal();
+            value["sources"]["boamp"] = json!({"keywords": ["sso"]});
+            value
+        })
+        .unwrap();
+        let boamp = profile.definition().sources.boamp.as_ref().unwrap();
+        assert_eq!(boamp.accept_min_keywords, 2);
+        let error = error_for(|v| {
+            v["sources"]["boamp"] = json!({"keywords": ["sso"], "accept_min_keywords": 0})
+        });
+        assert_eq!(error.path, "sources.boamp.accept_min_keywords");
+        assert_eq!(error.problem, ProfileProblem::MustBePositive);
     }
 
     #[test]

@@ -58,6 +58,7 @@ pub use domain::{
     suppression::{
         SuppressionEntry, SuppressionId, SuppressionTarget, ports::SuppressionRepository,
     },
+    triage::{Candidate, Route, route},
     user::commands::CreateUserCommand,
     values::{EmailAddress, Provenance, SignalKind, SourceName, UnitInterval, ValueError},
 };
