@@ -8,6 +8,7 @@ use serde_json::json;
 use crate::{
     application::{LodestoneUseCase, jobs::JobError},
     domain::{
+        NormalizedDomain,
         job::{Job, JobKind, NewJob, ports::Clock},
         lead::{
             LeadId, Signal, SignalId,
@@ -17,6 +18,7 @@ use crate::{
         run::{Run, RunId, RunOutcome, ports::RunRepository},
         scoring::score,
         source::{Observation, Source, SourceError},
+        suppression::ports::SuppressionRepository,
         values::SourceName,
     },
 };
@@ -174,7 +176,7 @@ impl LodestoneUseCase {
         Ok(())
     }
 
-    #[transactional(lead, signal)]
+    #[transactional(lead, signal, suppression)]
     pub async fn record_observations(
         &self,
         active: &ActiveProfile,
@@ -183,8 +185,26 @@ impl LodestoneUseCase {
     ) -> Result<(), CoreError> {
         let mut leads = lead_repository;
         let mut signals = signal_repository;
+        let mut suppressions = suppression_repository;
         let mut touched = Vec::new();
+        let mut suppressed: Vec<(NormalizedDomain, bool)> = Vec::new();
         for observation in observations {
+            let blocked = match suppressed
+                .iter()
+                .find(|(domain, _)| *domain == observation.domain)
+            {
+                Some((_, blocked)) => *blocked,
+                None => {
+                    let blocked = suppressions
+                        .is_domain_suppressed(&observation.domain)
+                        .await?;
+                    suppressed.push((observation.domain.clone(), blocked));
+                    blocked
+                }
+            };
+            if blocked {
+                continue;
+            }
             let lead = leads
                 .record_seen(
                     active.profile.id,

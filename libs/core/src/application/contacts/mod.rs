@@ -22,6 +22,7 @@ use crate::{
         profile::ActiveProfile,
         run::{Run, RunId, RunOutcome, ports::RunRepository},
         source::SourceError,
+        suppression::ports::SuppressionRepository,
         values::{SignalKind, SourceName},
     },
 };
@@ -142,7 +143,7 @@ impl LodestoneUseCase {
         Ok(())
     }
 
-    #[transactional(lead, contact, signal)]
+    #[transactional(lead, contact, signal, suppression)]
     async fn record_contacts(
         &self,
         active: &ActiveProfile,
@@ -154,6 +155,10 @@ impl LodestoneUseCase {
         let mut leads = lead_repository;
         let mut contacts = contact_repository;
         let mut signals = signal_repository;
+        let mut suppressions = suppression_repository;
+        if suppressions.is_domain_suppressed(domain).await? {
+            return Ok(0);
+        }
         let Some(lead) = leads
             .list_by_domain(domain)
             .await?
@@ -178,6 +183,7 @@ impl LodestoneUseCase {
         for candidate in select_for_profile(found, domain, ranking) {
             if known.contains(&candidate.address.to_string())
                 || (candidate.method == ContactMethod::RoleGuess && has_real_address)
+                || suppressions.is_email_suppressed(&candidate.address).await?
             {
                 continue;
             }

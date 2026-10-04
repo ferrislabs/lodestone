@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO candidate_hosts (host, domain, origin, first_seen_at, last_seen_at)\n            SELECT * FROM UNNEST($1::text[], $2::text[], $3::text[], $4::timestamptz[], $5::timestamptz[])\n                AS incoming(host, domain, origin, first_seen_at, last_seen_at)\n            WHERE NOT EXISTS (\n                SELECT 1 FROM suppression_list s WHERE s.kind = 'domain' AND s.value = incoming.domain\n            )\n            ON CONFLICT (host) DO UPDATE SET\n                last_seen_at = GREATEST(candidate_hosts.last_seen_at, EXCLUDED.last_seen_at),\n                first_seen_at = LEAST(candidate_hosts.first_seen_at, EXCLUDED.first_seen_at)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "TextArray",
+        "TextArray",
+        "TextArray",
+        "TimestamptzArray",
+        "TimestamptzArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f17ae470b1f41880a5352d441a2f4d4bddcc4f460a27d39b6eb8076dafb4805c"
+}

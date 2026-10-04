@@ -35,6 +35,10 @@ impl CandidateHosts for PgCandidateHosts {
             r#"
             INSERT INTO candidate_hosts (host, domain, origin, first_seen_at, last_seen_at)
             SELECT * FROM UNNEST($1::text[], $2::text[], $3::text[], $4::timestamptz[], $5::timestamptz[])
+                AS incoming(host, domain, origin, first_seen_at, last_seen_at)
+            WHERE NOT EXISTS (
+                SELECT 1 FROM suppression_list s WHERE s.kind = 'domain' AND s.value = incoming.domain
+            )
             ON CONFLICT (host) DO UPDATE SET
                 last_seen_at = GREATEST(candidate_hosts.last_seen_at, EXCLUDED.last_seen_at),
                 first_seen_at = LEAST(candidate_hosts.first_seen_at, EXCLUDED.first_seen_at)
@@ -64,7 +68,10 @@ impl CandidateHosts for PgCandidateHosts {
             SELECT h.host, h.domain, h.origin, h.first_seen_at, h.last_seen_at
             FROM candidate_hosts h
             LEFT JOIN host_source_checks c ON c.host = h.host AND c.source = $1
-            WHERE c.checked_at IS NULL OR c.checked_at < $2
+            WHERE (c.checked_at IS NULL OR c.checked_at < $2)
+              AND NOT EXISTS (
+                  SELECT 1 FROM suppression_list s WHERE s.kind = 'domain' AND s.value = h.domain
+              )
             ORDER BY c.checked_at ASC NULLS FIRST, h.host ASC
             LIMIT $3
             "#,
