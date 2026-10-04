@@ -6,6 +6,8 @@ use url::Url;
 
 use crate::domain::lead::str_enum;
 
+pub mod provider;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ProviderKind {
     Anthropic,
