@@ -61,7 +61,7 @@ mod tests {
 
         let svc = RateLimitService::new(limiter);
         let d = svc
-            .check(&RateLimitKey::organization("org-1"), Quota::per_minute(3))
+            .check(&RateLimitKey::ip("ip-1"), Quota::per_minute(3))
             .await
             .unwrap();
 
@@ -78,7 +78,7 @@ mod tests {
 
         let svc = RateLimitService::new(limiter);
         let d = svc
-            .check(&RateLimitKey::organization("org-1"), Quota::per_minute(2))
+            .check(&RateLimitKey::ip("ip-1"), Quota::per_minute(2))
             .await
             .unwrap();
 
@@ -91,14 +91,12 @@ mod tests {
         let mut limiter = MockRateLimiter::new();
         limiter
             .expect_check()
-            .withf(|key, quota| {
-                key.scope == "org" && key.identifier == "org-42" && quota.limit == 10
-            })
+            .withf(|key, quota| key.scope == "ip" && key.identifier == "ip-42" && quota.limit == 10)
             .times(1)
             .returning(|_, _| Box::pin(async { Ok(allowed(10, 9)) }));
 
         let svc = RateLimitService::new(limiter);
-        svc.check(&RateLimitKey::organization("org-42"), Quota::per_minute(10))
+        svc.check(&RateLimitKey::ip("ip-42"), Quota::per_minute(10))
             .await
             .unwrap();
     }
@@ -116,7 +114,7 @@ mod tests {
 
         let svc = RateLimitService::new(limiter);
         let err = svc
-            .check(&RateLimitKey::organization("o"), Quota::per_minute(1))
+            .check(&RateLimitKey::ip("o"), Quota::per_minute(1))
             .await
             .unwrap_err();
 

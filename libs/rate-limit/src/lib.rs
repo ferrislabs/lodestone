@@ -7,4 +7,4 @@ pub use domain::ports::*;
 
 pub use application::RateLimitService;
 
-pub use infrastructure::redis::RedisRateLimiter;
+pub use infrastructure::memory::{InMemoryRateLimiter, SystemClock};

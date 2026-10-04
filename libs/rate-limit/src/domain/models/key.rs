@@ -7,13 +7,6 @@ pub struct RateLimitKey {
 }
 
 impl RateLimitKey {
-    pub fn organization(org_id: impl Into<String>) -> Self {
-        Self {
-            scope: "org".to_string(),
-            identifier: org_id.into(),
-        }
-    }
-
     pub fn ip(addr: impl Into<String>) -> Self {
         Self {
             scope: "ip".to_string(),
@@ -31,13 +24,6 @@ impl fmt::Display for RateLimitKey {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn organization_key_formats_with_org_scope() {
-        let key = RateLimitKey::organization("org-123");
-        assert_eq!(key.scope, "org");
-        assert_eq!(key.to_string(), "ratelimit:org:org-123");
-    }
 
     #[test]
     fn ip_key_formats_with_ip_scope() {
