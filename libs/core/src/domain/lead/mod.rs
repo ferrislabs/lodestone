@@ -6,6 +6,7 @@ use thiserror::Error;
 use crate::domain::{
     NormalizedDomain,
     profile::{ProfileId, RevisionNumber},
+    prompt::DraftMessage,
     values::{EmailAddress, Provenance, SignalKind, SourceName, UnitInterval},
 };
 
@@ -223,6 +224,7 @@ pub struct Assessment {
     pub evidence: Vec<Evidence>,
     pub model: String,
     pub prompt_version: String,
+    pub draft: Option<DraftMessage>,
     pub created_at: DateTime<Utc>,
 }
 

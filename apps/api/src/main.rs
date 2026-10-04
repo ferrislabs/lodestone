@@ -10,7 +10,7 @@ use args::Args;
 use axum::Router;
 use axum_server::Handle;
 use clap::Parser;
-use common::{JobsConfig, OutboundConfig};
+use common::{JobsConfig, LlmConfig, OutboundConfig};
 use dns::{DnsSettings, HickoryResolver};
 use dotenvy::dotenv;
 use fetch::{FetchSettings, PoliteFetcher};
@@ -20,7 +20,8 @@ use lodestone_core::{
     contacts::ContactRunSettings,
     infrastructure::{
         candidate_host::postgres::PgCandidateHosts, contact_target::postgres::PgContactTargets,
-        ct_cursor::postgres::PgCtCursors, job::postgres::PgJobQueue,
+        crypto::AesGcmCipher, ct_cursor::postgres::PgCtCursors, job::postgres::PgJobQueue,
+        llm_cache::postgres::PgLlmCache,
     },
     jobs::{SystemClock, WorkerPool, WorkerSettings},
 };
@@ -38,7 +39,9 @@ use tracing::{error, info};
 
 use crate::{
     internal_router::internal_router,
-    jobs::{ContactFinders, Intervals, JobRouter, WiredSources, schedule_wired_sources},
+    jobs::{
+        ContactFinders, Intervals, JobRouter, LlmRuntime, WiredSources, schedule_wired_sources,
+    },
     logger::init_tracing_and_logging,
     router::router,
 };
@@ -56,9 +59,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let observability = init_tracing_and_logging(&args.log, "lodestone", &args.observability)?;
 
     let jobs_config = JobsConfig::try_from(args.jobs.clone())?;
+    let llm_config = LlmConfig::try_from(args.llm.clone())?;
     let app_state = state(Arc::clone(&args)).await?;
     let outbound_config = OutboundConfig::try_from(args.outbound.clone())?;
     let pool = app_state.usecase.pool().clone();
+    let llm_runtime = LlmRuntime {
+        cipher: AesGcmCipher::new(&llm_config.encryption_key)?,
+        cache: PgLlmCache::new(pool.clone()),
+        budget_cents: llm_config.run_budget_cents,
+    };
     let queue = Arc::new(PgJobQueue::new(pool.clone()));
     let resolver = Arc::new(HickoryResolver::from_system(DnsSettings::default())?);
     let dns_cname = DnsCnameSource::new(
@@ -130,6 +139,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             certificate_transparency: args.ct.interval(),
             other_sources: jobs_config.source_interval,
         },
+        llm_runtime,
     );
     schedule_wired_sources(&queue).await?;
 

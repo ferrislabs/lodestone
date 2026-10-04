@@ -12,6 +12,7 @@ pub mod llm;
 pub mod policy;
 pub mod probe;
 pub mod profile;
+pub mod qualification;
 pub mod sources;
 pub mod suppression;
 pub mod triage;
