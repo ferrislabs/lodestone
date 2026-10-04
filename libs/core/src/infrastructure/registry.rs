@@ -9,7 +9,13 @@ use crate::infrastructure::postgres::SharedTx;
 
 /// Domain markers — one zero-sized type per aggregate root.
 pub mod domain {
+    pub struct Assessment;
+    pub struct Contact;
+    pub struct Lead;
     pub struct Profile;
+    pub struct Run;
+    pub struct Signal;
+    pub struct Suppression;
     pub struct User;
 }
 

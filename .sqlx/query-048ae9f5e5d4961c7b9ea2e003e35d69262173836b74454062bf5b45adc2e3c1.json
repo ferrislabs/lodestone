@@ -1,0 +1,70 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT id, lead_id, kind, value, source, raw, provenance, strength, observed_at\n            FROM signals\n            WHERE lead_id = $1\n            ORDER BY observed_at ASC, id ASC\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "lead_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "kind",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "value",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "source",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "raw",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 6,
+        "name": "provenance",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "strength",
+        "type_info": "Float8"
+      },
+      {
+        "ordinal": 8,
+        "name": "observed_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "048ae9f5e5d4961c7b9ea2e003e35d69262173836b74454062bf5b45adc2e3c1"
+}
