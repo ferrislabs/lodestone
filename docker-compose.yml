@@ -1,4 +1,4 @@
-name: oxid
+name: lodestone
 
 x-common: &common
   networks:
@@ -56,38 +56,15 @@ services:
     environment:
       POSTGRES_USER: ferriskey
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ferriskey}
-      POSTGRES_DB: oxid
+      POSTGRES_DB: lodestone
     ports:
       - "127.0.0.1:5433:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ferriskey -d oxid"]
+      test: ["CMD-SHELL", "pg_isready -U ferriskey -d lodestone"]
       interval: 10s
       timeout: 5s
-      retries: 5
-
-  redis:
-    <<: *common
-    image: redis:8.6.2-alpine
-    command:
-      [
-        "redis-server",
-        "--appendonly",
-        "yes",
-        "--maxmemory",
-        "256mb",
-        "--maxmemory-policy",
-        "allkeys-lru",
-      ]
-    ports:
-      - "127.0.0.1:6379:6379"
-    volumes:
-      - redis-data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 3s
       retries: 5
 
   init-clickhouse:
@@ -209,7 +186,6 @@ networks:
 
 volumes:
   postgres-data:
-  redis-data:
   clickhouse:
     name: signoz-clickhouse
   sqlite:

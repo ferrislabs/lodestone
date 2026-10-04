@@ -15,7 +15,6 @@ pub struct Config {
 
 #[derive(Clone, Debug)]
 pub struct RateLimitConfig {
-    pub redis_url: Secret,
     pub per_minute: u32,
 }
 

@@ -1,5 +1,5 @@
 use common::CoreError;
-use oxid_macros::repository;
+use lodestone_macros::repository;
 
 use crate::{
     User,

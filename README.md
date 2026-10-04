@@ -1,6 +1,8 @@
-# Oxid
+# Lodestone
 
-Open-source, high-performance ERP for artisans and SMEs.
+Open-source lead detection. Lodestone finds companies likely to buy a product, qualifies them, and queues message drafts for a human to approve. It never sends a message itself.
+
+Market criteria live in detection profiles stored in Postgres. The first profile targets IAM for FerrisKey and Autharie. Plan: `docs/plan.md`. Vocabulary: `docs/glossary.md`.
 
 Backend in Rust (Axum + SQLx + PostgreSQL), frontend in React 19 + TanStack.
 
@@ -8,16 +10,21 @@ Backend in Rust (Axum + SQLx + PostgreSQL), frontend in React 19 + TanStack.
 
 ```
 apps/
-  api/                 # Rust HTTP API binary (Axum)
+  api/                 # Rust HTTP API binary (Axum), composition root
   webapp/              # React 19 frontend (TanStack Router/Query/Table/Form)
 libs/
   args/                # CLI / env args (clap)
-  auth/                # Auth integration (Ferriskey)
-  common/              # Shared config & utilities
-  core/                # Domain (User, Organization, Role, Membership)
-  macros/              # Internal proc-macros
-  server/              # Axum server runtime helpers
-deploy/                # docker-compose configs (SigNoz, OTel collector)
+  auth/                # OIDC token validation (FerrisKey)
+  authz/               # In-process policy engine (AuthZen types)
+  common/              # Shared config, Secret, CoreError
+  core/                # Domain, use cases, Postgres adapters
+  handlers/            # Axum middleware, error mapping, response envelope
+  macros/              # #[repository] and #[transactional]
+  pagination/          # Pagination types
+  rate-limit/          # Rate limiter port, in-process adapter
+  server/              # Axum server helpers
+docs/                  # Plan, glossary, ADRs
+deploy/                # Local observability configs (SigNoz, OTel collector)
 migrations/            # SQLx migrations
 ```
 
@@ -64,7 +71,7 @@ Common flags / env vars (see `libs/args/src/`):
 | `SERVER_HOST`          | `--server-host`            | `0.0.0.0`                          |
 | `SERVER_PORT`          | `--server-port`            | `3456`                             |
 | `SERVER_INTERNAL_PORT` | `--server-internal-port`   | `3457`                             |
-| `DATABASE_URL`         | —                          | `postgres://…@localhost:5433/oxid` |
+| `DATABASE_NAME`        | `--database-name`          | required                           |
 | `ACTIVE_OBSERVABILITY` | `--active-observability`   | `false`                            |
 | `OTLP_ENDPOINT`        | `--otlp-endpoint`          | `http://localhost:4317`            |
 | `METRICS_ENDPOINT`     | `--metrics-endpoint`       | `http://localhost:4317`            |

@@ -1,4 +1,4 @@
-//! Authorization domain for Oxid.
+//! Authorization domain for Lodestone.
 //!
 //! Exposes a port trait ([`Authorizer`]) and a set of types that mirror
 //! the [OpenID AuthZen 1.0] Access Evaluation API on the wire. Concrete

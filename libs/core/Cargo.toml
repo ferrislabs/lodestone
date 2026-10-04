@@ -1,5 +1,5 @@
 [package]
-name = "oxid-core"
+name = "lodestone-core"
 version.workspace = true
 authors.workspace = true
 edition.workspace = true
@@ -8,7 +8,7 @@ edition.workspace = true
 common = { workspace = true }
 auth = { workspace = true }
 authz = { workspace = true }
-oxid-macros = { workspace = true }
+lodestone-macros = { workspace = true }
 rate-limit = { workspace = true }
 
 uuid = { workspace = true }

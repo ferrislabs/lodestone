@@ -70,7 +70,7 @@ mod tests {
     fn sample() -> Sample {
         Sample {
             id: 42,
-            name: "oxid".to_owned(),
+            name: "lodestone".to_owned(),
         }
     }
 
@@ -95,7 +95,7 @@ mod tests {
         let json = serde_json::to_value(&envelope).unwrap();
 
         assert_eq!(json["data"]["id"], 42);
-        assert_eq!(json["data"]["name"], "oxid");
+        assert_eq!(json["data"]["name"], "lodestone");
         assert_eq!(json.as_object().unwrap().len(), 1);
     }
 
@@ -107,7 +107,7 @@ mod tests {
         let json = json.expect("OK must have a body");
 
         assert_eq!(json["data"]["id"], 42);
-        assert_eq!(json["data"]["name"], "oxid");
+        assert_eq!(json["data"]["name"], "lodestone");
     }
 
     #[tokio::test]

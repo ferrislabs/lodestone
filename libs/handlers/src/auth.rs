@@ -5,7 +5,7 @@ use axum::{
     response::Response,
 };
 use http::{HeaderValue, header::AUTHORIZATION};
-use oxid_core::{CreateUserCommand, UserId};
+use lodestone_core::{CreateUserCommand, UserId};
 use tracing::error;
 
 use crate::{
@@ -13,7 +13,7 @@ use crate::{
     state::AppState,
 };
 
-/// Oxid's own identity for the authenticated caller, resolved from the OIDC
+/// Lodestone's own identity for the authenticated caller, resolved from the OIDC
 /// subject by [`auth_middleware`] and carried in the request extensions.
 ///
 /// Handlers take this rather than reading the subject off the [`Identity`].
@@ -49,7 +49,7 @@ pub async fn auth_middleware(
         let name = user.name.as_deref().unwrap_or_else(|| &user.username);
 
         // Resolving the subject to a `users` row is what makes the caller
-        // addressable in Oxid's own tables. A failure here leaves us unable to
+        // addressable in Lodestone's own tables. A failure here leaves us unable to
         // say who is calling, so it must stop the request rather than let a
         // handler run against an identity it cannot map.
         let resolved = state

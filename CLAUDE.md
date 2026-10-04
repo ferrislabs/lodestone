@@ -1,59 +1,50 @@
-# CLAUDE.md - Oxid ERP
+# CLAUDE.md - Lodestone
 
-This file provides guidance to Claude Code (claude.ai/code) when working with the **Oxid** repository. Oxid is an open-source, high-performance ERP for artisans and SMEs.
+Lodestone is an open-source lead detection service by Ferrislabs. It detects companies likely to buy a product, qualifies them, and queues message drafts for human approval. It never sends a message itself. Plan: `docs/plan.md`. Vocabulary: `docs/glossary.md`. Decisions: `docs/adr/`.
 
 ## Repository layout
 
-Monorepo-style workspace:
-
+- `apps/api` — Rust binary, composition root. Public server (`SERVER_PORT`) and internal server (`SERVER_INTERNAL_PORT`, `/health`, `/metrics`).
 - `apps/webapp` — React 19 + TanStack (Router, Query, Table, Form).
-- `libs/` — Shared logic and types (TBD).
+- `libs/core` — domain, use cases and Postgres adapters (`domain/ → application/ → infrastructure/`).
+- `libs/macros` — `#[repository]` registers a Postgres adapter in `infrastructure/registry.rs`; `#[transactional]` opens a transaction and injects repositories into a use case.
+- `libs/auth`, `libs/authz`, `libs/handlers`, `libs/rate-limit`, `libs/args`, `libs/common`, `libs/server`, `libs/pagination` — plumbing.
+- `migrations/` — SQLx migrations. `.sqlx/` is regenerated with `cargo sqlx prepare --workspace`, never edited by hand.
 
-## Commands (Webapp - `apps/webapp`)
+## Runtime constraint
 
-Package manager is **pnpm**.
+One binary and one Postgres. No Redis, no broker. Background work goes through the Postgres job queue.
+
+## Commands
+
+```bash
+docker compose up -d postgres
+cargo build --workspace
+cargo fmt --all --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo nextest run --workspace
+cargo nextest run --workspace --run-ignored all   # docker-dependent tests
+cargo sqlx prepare --workspace                    # after changing a query, needs DATABASE_URL
+```
+
+Webapp (`apps/webapp`), package manager pnpm:
 
 ```bash
 pnpm install
 pnpm dev           # vite dev on port 3000
-pnpm build          # production build
-pnpm check          # biome check (lint + format + organize imports)
-pnpm dlx shadcn@latest add <component>
+pnpm check         # biome lint + format + organize imports
+pnpm build
 ```
 
-## Architecture & Conventions (Frontend)
+## Backend conventions
 
-### Separation of Concerns (Domain-Driven)
-For every page in `src/pages/<domain>/`, we apply a strict Feature/UI split:
+- Hexagonal: the domain imports nothing from infrastructure. Repository traits live in `domain/<context>/ports.rs`, adapters in `infrastructure/<context>/postgres/`.
+- Errors: `thiserror` enums per boundary, `CoreError` in `libs/common`.
+- Market-specific criteria (keywords, filters, weights, prompts) never live in code: they belong to detection profiles in Postgres.
 
-1. **Feature (`feature/`)**: Handler business logic, data fetching (Tanstack Query), state management, and side effects.
-2. **UI (`ui/`)**: Pure presentational components. No hooks, no fetch. Receives data and callbacks via props.
+## Frontend conventions
 
-### Example: `src/pages/inventory/`
-- `feature/inventory-list-feature.tsx`: Manages filters, pagination state, and calls `useQuery`
-- `ui/inventory-list.tsx`: Receives inventory items and renders the table. No hooks or data fetching logic.
-
-
-### Routing (`src/routes/`)
-- TanStack Router (file-based).
-- Route files must be thin. They call the Feature component of a page.
-- Layouts: _app.tsx for authenticated artisan space (uses Ferriskey for auth).
-
-### Tech Stack Highlights
-- TanStack Table: Crucial for ERP grids (inventory, customer lists).
-- TanStack Form: Used for all complex business inputs (quotes, invoices).
-- React 19: Use use and Action patterns for form submissions.
-- Tailwind v4: Styling with utility-first approach.
-
-### Backend Context (Rust - apps/server)
-- Framework: Axum (Asynchronous, Type-safe).
-- Database: PostgreSQL with SQLx (compile-time checked queries).
-- Auth: Ferriskey (WebAuthn/FIDO2) integration.
-- Convention: Logic should be split into handlers/, models/, and services/ (for heavy business/IA logic).
-
-
-### Development Guidelines
-- Imports: Always use `#/*` alias for `src/*.
-- Naming: PascalCase for components, kebab-case for files.
-- Formatting: Biome is the source of truth (tabs, double quotes).
-- ERP Logic: Every price calculation or rentability metric must be computed in the backend or a dedicated lib to ensure single source of truth between UI and PDF exports.
+- `src/pages/<domain>/feature/`: data fetching (TanStack Query), state, side effects.
+- `src/pages/<domain>/ui/`: pure presentational components, no hooks, no fetch.
+- Route files in `src/routes/` are thin and call the Feature component. `_app.tsx` is the authenticated layout (FerrisKey OIDC).
+- Imports use the `#/*` alias for `src/*`. PascalCase components, kebab-case files. Biome is the source of truth (tabs, double quotes).

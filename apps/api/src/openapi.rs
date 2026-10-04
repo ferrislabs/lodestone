@@ -3,8 +3,6 @@ use utoipa::{
     openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme},
 };
 
-use handlers_organization as organization;
-
 pub struct SecurityAddon;
 
 impl Modify for SecurityAddon {
@@ -24,21 +22,7 @@ impl Modify for SecurityAddon {
 
 #[derive(OpenApi)]
 #[openapi(
-    info(title = "Oxid API", description = "API for Oxid", version = "0.1.0"),
-    paths(
-        organization::bootstrap::handler,
-        organization::create::handler,
-        organization::list_mine::handler,
-        organization::update::handler,
-    ),
-    components(schemas(
-        organization::create::CreateOrganizationRequest,
-        organization::update::UpdateOrganizationRequest,
-        organization::response::OrganizationResponse,
-    )),
+    info(title = "Lodestone API", description = "Lead detection API", version = "0.1.0"),
     modifiers(&SecurityAddon),
-    tags(
-        (name = "organizations", description = "Organizations management"),
-    )
 )]
 pub struct ApiDoc;

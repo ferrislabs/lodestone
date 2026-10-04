@@ -1,5 +1,7 @@
 use common::Config;
-use oxid_core::{OxidAuthService, OxidRateLimitService, OxidUseCase, create_service};
+use lodestone_core::{
+    LodestoneAuthService, LodestoneRateLimitService, LodestoneUseCase, create_service,
+};
 use rate_limit::Quota;
 use server::errors::ServerError;
 use std::sync::Arc;
@@ -10,9 +12,9 @@ use args::Args;
 pub struct AppState {
     pub args: Arc<Args>,
 
-    pub auth: OxidAuthService,
-    pub usecase: OxidUseCase,
-    pub rate_limit: OxidRateLimitService,
+    pub auth: LodestoneAuthService,
+    pub usecase: LodestoneUseCase,
+    pub rate_limit: LodestoneRateLimitService,
     pub rate_limit_quota: Quota,
 }
 

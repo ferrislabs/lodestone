@@ -226,7 +226,7 @@ mod realm_role_tests {
         Claims {
             sub: Subject("user-1".to_owned()),
             iss: "https://issuer.example".to_owned(),
-            aud: Some(Audience::Single("oxid".to_owned())),
+            aud: Some(Audience::Single("lodestone".to_owned())),
             exp: None,
             email: None,
             email_verified: None,
@@ -245,12 +245,12 @@ mod realm_role_tests {
         let mut extra = serde_json::Map::new();
         extra.insert(
             "realm_access".to_owned(),
-            json!({ "roles": ["oxid:admin"] }),
+            json!({ "roles": ["lodestone:admin"] }),
         );
 
         let identity: Identity = claims_with(extra).into();
 
-        assert!(identity.has_role("oxid:admin"));
+        assert!(identity.has_role("lodestone:admin"));
     }
 
     #[test]
@@ -264,8 +264,8 @@ mod realm_role_tests {
         // A provider sending the wrong shape must not grant anything, and must
         // not panic either.
         for shape in [
-            json!({ "roles": "oxid:admin" }),
-            json!("oxid:admin"),
+            json!({ "roles": "lodestone:admin" }),
+            json!("lodestone:admin"),
             json!(null),
         ] {
             let mut extra = serde_json::Map::new();

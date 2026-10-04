@@ -10,7 +10,7 @@ use crate::domain::types::Properties;
 /// { "type": "organization", "id": "01HZ...", "properties": { ... } }
 /// ```
 ///
-/// Oxid convention: `type` is the singular domain noun (`organization`,
+/// Lodestone convention: `type` is the singular domain noun (`organization`,
 /// `member`, `role`, `invoice`, ...) and `id` is the stable database
 /// identifier as a string.
 ///
