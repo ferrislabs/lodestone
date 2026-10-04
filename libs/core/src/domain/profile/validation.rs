@@ -39,6 +39,8 @@ pub enum ProfileProblem {
     InvalidSuffix,
     #[error("must be the local part of an email address, without `@`")]
     InvalidLocalPart,
+    #[error("must also be listed in `preferred_local_parts`")]
+    GuessNotRanked,
     #[error("must be a finite number")]
     NotFinite,
     #[error("must be a dotted numeric version")]
@@ -416,6 +418,20 @@ fn validate_contact_ranking(ranking: &ContactRanking, path: &Path) -> Check {
             .map(String::as_str)
             .enumerate(),
         |index| parts.index(index),
+    )?;
+    let guesses = path.field("guess_local_parts");
+    for (index, guess) in ranking.guess_local_parts.iter().enumerate() {
+        if !ranking.preferred_local_parts.contains(guess) {
+            return Err(guesses.index(index).fail(ProfileProblem::GuessNotRanked));
+        }
+    }
+    unique(
+        ranking
+            .guess_local_parts
+            .iter()
+            .map(String::as_str)
+            .enumerate(),
+        |index| guesses.index(index),
     )
 }
 
@@ -599,6 +615,14 @@ mod tests {
             error_for(|v| v["contact_ranking"]["preferred_local_parts"] = json!(["it", "it"]));
         assert_eq!(error.path, "contact_ranking.preferred_local_parts[1]");
         assert!(matches!(error.problem, ProfileProblem::Duplicate(_)));
+    }
+
+    #[test]
+    fn guessed_local_parts_must_be_ranked() {
+        let error =
+            error_for(|v| v["contact_ranking"]["guess_local_parts"] = json!(["contact", "sales"]));
+        assert_eq!(error.path, "contact_ranking.guess_local_parts[1]");
+        assert_eq!(error.problem, ProfileProblem::GuessNotRanked);
     }
 
     #[test]

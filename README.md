@@ -92,6 +92,9 @@ Common flags / env vars (see `libs/args/src/`):
 | `CT_TILES_PER_RUN` | `--ct-tiles-per-run` | `16` |
 | `CT_MAX_LAG_TILES` | `--ct-max-lag-tiles` | `256` |
 | `CT_INTERVAL_SECONDS` | `--ct-interval-seconds` | `60` |
+| `CONTACT_PAGE_PATHS` | `--contact-page-paths` | `/,/contact,/mentions-legales,/legal,/about` |
+| `CONTACT_BATCH_SIZE` | `--contact-batch-size` | `10` |
+| `CONTACT_MAX_RATE_LIMIT_WAIT_SECONDS` | `--contact-max-rate-limit-wait-seconds` | `75` |
 | `LLM_SECRETS_ENCRYPTION_KEY` | `--llm-secrets-encryption-key` | required, base64 of 32 bytes |
 | `LLM_RUN_BUDGET_CENTS` | `--llm-run-budget-cents` | `500` |
 

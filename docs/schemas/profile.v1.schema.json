@@ -68,6 +68,13 @@
     "ContactRanking": {
       "type": "object",
       "properties": {
+        "guess_local_parts": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        },
         "preferred_local_parts": {
           "type": "array",
           "items": {
