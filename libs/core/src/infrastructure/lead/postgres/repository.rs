@@ -3,7 +3,7 @@ use common::CoreError;
 use lodestone_macros::repository;
 
 use crate::{
-    Lead, LeadId, LeadStatus, NormalizedDomain, ProfileId, Score,
+    Lead, LeadId, LeadStatus, NormalizedDomain, ProfileId, ScoreBreakdown,
     domain::lead::ports::LeadRepository,
     infrastructure::{
         lead::postgres::model::LeadRow,
@@ -40,7 +40,7 @@ impl<'tx> LeadRepository for PgLeadRepository<'tx> {
                 last_seen_at  = GREATEST(leads.last_seen_at, EXCLUDED.last_seen_at),
                 first_seen_at = LEAST(leads.first_seen_at, EXCLUDED.first_seen_at),
                 updated_at    = EXCLUDED.updated_at
-            RETURNING id, profile_id, domain, status, score, first_seen_at, last_seen_at, updated_at
+            RETURNING id, profile_id, domain, status, score, score_breakdown, first_seen_at, last_seen_at, updated_at
             "#,
             common::generate_uuid_v7(),
             profile_id.0,
@@ -60,7 +60,7 @@ impl<'tx> LeadRepository for PgLeadRepository<'tx> {
         let row = sqlx::query_as!(
             LeadRow,
             r#"
-            SELECT id, profile_id, domain, status, score, first_seen_at, last_seen_at, updated_at
+            SELECT id, profile_id, domain, status, score, score_breakdown, first_seen_at, last_seen_at, updated_at
             FROM leads
             WHERE id = $1
             "#,
@@ -83,7 +83,7 @@ impl<'tx> LeadRepository for PgLeadRepository<'tx> {
         let row = sqlx::query_as!(
             LeadRow,
             r#"
-            SELECT id, profile_id, domain, status, score, first_seen_at, last_seen_at, updated_at
+            SELECT id, profile_id, domain, status, score, score_breakdown, first_seen_at, last_seen_at, updated_at
             FROM leads
             WHERE profile_id = $1 AND domain = $2
             "#,
@@ -103,7 +103,7 @@ impl<'tx> LeadRepository for PgLeadRepository<'tx> {
         let rows = sqlx::query_as!(
             LeadRow,
             r#"
-            SELECT id, profile_id, domain, status, score, first_seen_at, last_seen_at, updated_at
+            SELECT id, profile_id, domain, status, score, score_breakdown, first_seen_at, last_seen_at, updated_at
             FROM leads
             WHERE domain = $1
             ORDER BY profile_id
@@ -131,7 +131,7 @@ impl<'tx> LeadRepository for PgLeadRepository<'tx> {
             UPDATE leads
             SET status = $3, updated_at = $4
             WHERE id = $1 AND status = $2
-            RETURNING id, profile_id, domain, status, score, first_seen_at, last_seen_at, updated_at
+            RETURNING id, profile_id, domain, status, score, score_breakdown, first_seen_at, last_seen_at, updated_at
             "#,
             id.0,
             from.as_str(),
@@ -149,21 +149,24 @@ impl<'tx> LeadRepository for PgLeadRepository<'tx> {
     async fn update_score(
         &mut self,
         id: LeadId,
-        score: Score,
+        breakdown: &ScoreBreakdown,
         at: DateTime<Utc>,
     ) -> Result<Option<Lead>, CoreError> {
+        let contributions = serde_json::to_value(&breakdown.contributions)
+            .map_err(|_| CoreError::Internal("score breakdown is not serializable".to_owned()))?;
         let mut tx = self.tx.lock().await;
         let row = sqlx::query_as!(
             LeadRow,
             r#"
             UPDATE leads
-            SET score = $2, updated_at = $3
+            SET score = $2, score_breakdown = $4, updated_at = $3
             WHERE id = $1
-            RETURNING id, profile_id, domain, status, score, first_seen_at, last_seen_at, updated_at
+            RETURNING id, profile_id, domain, status, score, score_breakdown, first_seen_at, last_seen_at, updated_at
             "#,
             id.0,
-            score.get(),
+            breakdown.total.get(),
             at,
+            contributions,
         )
         .fetch_optional(&mut ***tx)
         .await
@@ -178,7 +181,7 @@ impl<'tx> LeadRepository for PgLeadRepository<'tx> {
         let rows = sqlx::query_as!(
             LeadRow,
             r#"
-            SELECT id, profile_id, domain, status, score, first_seen_at, last_seen_at, updated_at
+            SELECT id, profile_id, domain, status, score, score_breakdown, first_seen_at, last_seen_at, updated_at
             FROM leads
             WHERE profile_id = $1
             ORDER BY score DESC, domain ASC

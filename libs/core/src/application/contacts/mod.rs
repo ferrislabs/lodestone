@@ -7,7 +7,10 @@ use serde_json::json;
 use tracing::{debug, info};
 
 use crate::{
-    application::{LodestoneUseCase, sources::SourceRunError},
+    application::{
+        LodestoneUseCase,
+        sources::{SourceRunError, rescore},
+    },
     domain::{
         NormalizedDomain,
         contact::{ContactFinder, ContactTargets, FoundAddress, select_for_profile},
@@ -210,6 +213,16 @@ impl LodestoneUseCase {
                 })
                 .await?;
             stored += 1;
+        }
+        if stored > 0 {
+            rescore(
+                &mut leads,
+                &mut signals,
+                lead.id,
+                &active.revision.definition.definition().scoring,
+                now,
+            )
+            .await?;
         }
         Ok(stored)
     }

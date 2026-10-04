@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            UPDATE leads\n            SET status = $3, updated_at = $4\n            WHERE id = $1 AND status = $2\n            RETURNING id, profile_id, domain, status, score, first_seen_at, last_seen_at, updated_at\n            ",
+  "query": "\n            UPDATE leads\n            SET status = $3, updated_at = $4\n            WHERE id = $1 AND status = $2\n            RETURNING id, profile_id, domain, status, score, score_breakdown, first_seen_at, last_seen_at, updated_at\n            ",
   "describe": {
     "columns": [
       {
@@ -30,16 +30,21 @@
       },
       {
         "ordinal": 5,
+        "name": "score_breakdown",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 6,
         "name": "first_seen_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 6,
+        "ordinal": 7,
         "name": "last_seen_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 7,
+        "ordinal": 8,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
@@ -60,8 +65,9 @@
       false,
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "40f98c1cffc288a1894fee3bf493871c46e6a206c3af4a6db0efc0fa3ea3d3d8"
+  "hash": "43ecacc6500ceeef6962edc3033a01ac27bc74e45f40ee81d41e9e15b979c171"
 }
