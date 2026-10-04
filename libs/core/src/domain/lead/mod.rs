@@ -47,6 +47,7 @@ pub enum LeadStatus {
     Validated,
     Rejected,
     Contacted,
+    Uncertain,
 }
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -61,12 +62,13 @@ pub struct InvalidTransition {
 pub struct UnknownLeadStatus(pub String);
 
 impl LeadStatus {
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::New,
         Self::Qualified,
         Self::Validated,
         Self::Rejected,
         Self::Contacted,
+        Self::Uncertain,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -76,11 +78,12 @@ impl LeadStatus {
             Self::Validated => "validated",
             Self::Rejected => "rejected",
             Self::Contacted => "contacted",
+            Self::Uncertain => "uncertain",
         }
     }
 
     pub fn can_move_to(self, to: Self) -> bool {
-        use LeadStatus::{Contacted, New, Qualified, Rejected, Validated};
+        use LeadStatus::{Contacted, New, Qualified, Rejected, Uncertain, Validated};
         matches!(
             (self, to),
             (New, Qualified)
@@ -91,6 +94,9 @@ impl LeadStatus {
                 | (Validated, Contacted)
                 | (Validated, Rejected)
                 | (Rejected, New)
+                | (New, Uncertain)
+                | (Uncertain, New)
+                | (Uncertain, Rejected)
         )
     }
 
@@ -277,6 +283,9 @@ mod tests {
             (Validated, Contacted),
             (Validated, Rejected),
             (Rejected, New),
+            (New, Uncertain),
+            (Uncertain, New),
+            (Uncertain, Rejected),
         ];
         for from in LeadStatus::ALL {
             for to in LeadStatus::ALL {

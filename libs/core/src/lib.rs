@@ -49,8 +49,8 @@ pub use domain::{
         ports::ProfileRepository,
     },
     prompt::{
-        DraftMessage, EvidenceQuote, PromptTemplate, QUALIFICATION_V1, QualificationOutput,
-        TRIAGE_V1, TriageVerdict, market_context,
+        DraftMessage, EvidenceProblem, EvidenceQuote, PromptTemplate, QUALIFICATION_V1,
+        QualificationOutput, TRIAGE_V1, TriageVerdict, market_context, verified_evidence,
     },
     run::{Run, RunId, RunOutcome, RunStatus, ports::RunRepository},
     scoring::{DISTINCT_SIGNALS_FACTOR, ScoreBreakdown, ScoreContribution, score},

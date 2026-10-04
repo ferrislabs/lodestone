@@ -7,7 +7,7 @@
 | active profile | A profile whose latest revision is scheduled by workers. | enabled profile |
 | normalized domain | The registrable domain of a company, lowercase, IDNA-encoded, public suffix aware. Lead key with the profile. | root domain, apex |
 | lead | A company, identified by profile and normalized domain, that may buy the profile's product. | prospect, account |
-| lead status | One of new, qualified, validated, rejected, contacted. | stage |
+| lead status | One of new, uncertain, qualified, validated, rejected, contacted. A lead whose LLM evidence cannot be verified twice becomes uncertain and never reaches validation. | stage |
 | signal | One observed fact about a lead, with source, type, raw data, date, provenance URL and strength. | event, hit |
 | source | An adapter that fetches external data: CT, HTTP probe, DNS, BOAMP, DECP, TED, France Travail, ATS. | connector, provider |
 | run | One execution of a source for one profile, with start, end, volume and errors. | crawl, batch |
