@@ -1,0 +1,86 @@
+{
+  "schema_version": 1,
+  "identity": {
+    "offer": "FerrisKey (open source IAM/CIAM in Rust) and Autharie (managed IAM), both by Ferrislabs",
+    "target_customer": "Organizations running self-hosted Keycloak or a similar IAM, or paying for a SaaS IAM"
+  },
+  "sources": {
+    "certificate_transparency": {
+      "labels": ["auth", "sso", "login", "iam", "keycloak", "id", "accounts", "identity", "idp"]
+    },
+    "http_probe": {
+      "fingerprints": [
+        {
+          "id": "keycloak-realm",
+          "path": "/realms/master",
+          "product": "keycloak",
+          "matchers": [
+            { "kind": "status", "equals": 200 },
+            { "kind": "body", "pattern": "\"realm\"\\s*:\\s*\"master\"" }
+          ]
+        },
+        {
+          "id": "keycloak-legacy-realm",
+          "path": "/auth/realms/master",
+          "product": "keycloak",
+          "matchers": [
+            { "kind": "status", "equals": 200 },
+            { "kind": "body", "pattern": "\"realm\"\\s*:\\s*\"master\"" }
+          ],
+          "debt_markers": [
+            {
+              "id": "legacy_auth_path",
+              "rule": { "kind": "matches", "matcher": { "kind": "body", "pattern": "/auth/realms/master" } }
+            }
+          ]
+        }
+      ],
+      "excluded_products": ["ferriskey"]
+    },
+    "dns_cname": {
+      "patterns": [
+        { "provider": "auth0", "target_suffix": "auth0.com" },
+        { "provider": "okta", "target_suffix": "okta.com" },
+        { "provider": "okta", "target_suffix": "oktapreview.com" },
+        { "provider": "azure_ad_b2c", "target_suffix": "b2clogin.com" },
+        { "provider": "entra_external_id", "target_suffix": "ciamlogin.com" }
+      ]
+    },
+    "boamp": {
+      "keywords": ["SSO", "IAM", "gestion des identités et des accès", "fédération d'identité", "annuaire", "MFA", "Keycloak", "authentification"],
+      "exclusions": ["badge", "contrôle d'accès physique", "annuaire téléphonique"]
+    },
+    "decp": {
+      "keywords": ["SSO", "IAM", "gestion des identités et des accès", "fédération d'identité", "annuaire", "MFA", "Keycloak", "authentification"],
+      "exclusions": ["badge", "contrôle d'accès physique", "annuaire téléphonique"]
+    },
+    "ted": {
+      "keywords": ["SSO", "IAM", "gestion des identités et des accès", "fédération d'identité", "annuaire", "MFA", "Keycloak", "authentification"],
+      "exclusions": ["badge", "contrôle d'accès physique", "annuaire téléphonique"]
+    },
+    "france_travail": {
+      "keywords": ["Keycloak", "IAM", "ingénieur IAM", "migration Okta", "migration Auth0", "gestion des identités"]
+    },
+    "ats": {
+      "keywords": ["Keycloak", "IAM", "ingénieur IAM", "migration Okta", "migration Auth0", "gestion des identités"]
+    }
+  },
+  "scoring": {
+    "factors": [
+      { "signal": "product_detected", "value": "keycloak", "weight": 30 },
+      { "signal": "debt_marker", "value": "legacy_auth_path", "weight": 15 },
+      { "signal": "saas_provider", "weight": 10 },
+      { "signal": "job_offer", "weight": 25 },
+      { "signal": "public_tender", "weight": 20 },
+      { "signal": "role_contact_found", "weight": 5 },
+      { "signal": "distinct_signals", "weight": 5 }
+    ]
+  },
+  "contact_ranking": {
+    "preferred_local_parts": ["security", "it", "dsi", "tech", "contact", "info"]
+  },
+  "llm": {
+    "qualification_threshold": 50,
+    "relevance_criteria": "The organization operates its own identity infrastructure, such as a self-hosted Keycloak, or pays for a SaaS IAM, and shows signs of migration, staffing or procurement around it. Physical access control and unrelated directories are not relevant."
+  }
+}

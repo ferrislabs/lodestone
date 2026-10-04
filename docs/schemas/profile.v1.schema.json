@@ -1,0 +1,502 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ProfileDefinition",
+  "type": "object",
+  "properties": {
+    "contact_ranking": {
+      "$ref": "#/$defs/ContactRanking"
+    },
+    "identity": {
+      "$ref": "#/$defs/Identity"
+    },
+    "llm": {
+      "$ref": "#/$defs/LlmSettings"
+    },
+    "schema_version": {
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "scoring": {
+      "$ref": "#/$defs/Scoring"
+    },
+    "sources": {
+      "$ref": "#/$defs/Sources"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "identity",
+    "sources",
+    "scoring",
+    "contact_ranking",
+    "llm"
+  ],
+  "$defs": {
+    "CertificateTransparency": {
+      "type": "object",
+      "properties": {
+        "labels": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "labels"
+      ]
+    },
+    "CnamePattern": {
+      "type": "object",
+      "properties": {
+        "provider": {
+          "type": "string"
+        },
+        "target_suffix": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "provider",
+        "target_suffix"
+      ]
+    },
+    "ContactRanking": {
+      "type": "object",
+      "properties": {
+        "preferred_local_parts": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "preferred_local_parts"
+      ]
+    },
+    "DebtMarker": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "rule": {
+          "$ref": "#/$defs/DebtRule"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "rule"
+      ]
+    },
+    "DebtRule": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "matches"
+            },
+            "matcher": {
+              "$ref": "#/$defs/Matcher"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "matcher"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "version_below"
+            },
+            "version": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "version"
+          ]
+        }
+      ]
+    },
+    "DnsCname": {
+      "type": "object",
+      "properties": {
+        "patterns": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CnamePattern"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "patterns"
+      ]
+    },
+    "Fingerprint": {
+      "type": "object",
+      "properties": {
+        "debt_markers": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/DebtMarker"
+          }
+        },
+        "id": {
+          "type": "string"
+        },
+        "matchers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Matcher"
+          }
+        },
+        "path": {
+          "type": "string"
+        },
+        "product": {
+          "type": "string"
+        },
+        "version": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/VersionExtractor"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "path",
+        "product",
+        "matchers"
+      ]
+    },
+    "HttpProbe": {
+      "type": "object",
+      "properties": {
+        "excluded_products": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        },
+        "fingerprints": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Fingerprint"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "fingerprints"
+      ]
+    },
+    "Identity": {
+      "type": "object",
+      "properties": {
+        "offer": {
+          "type": "string"
+        },
+        "target_customer": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "offer",
+        "target_customer"
+      ]
+    },
+    "KeywordSource": {
+      "type": "object",
+      "properties": {
+        "exclusions": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        },
+        "keywords": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "keywords"
+      ]
+    },
+    "LlmSettings": {
+      "type": "object",
+      "properties": {
+        "qualification_threshold": {
+          "type": "number",
+          "format": "double"
+        },
+        "relevance_criteria": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "qualification_threshold",
+        "relevance_criteria"
+      ]
+    },
+    "Matcher": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "equals": {
+              "type": "integer",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0
+            },
+            "kind": {
+              "type": "string",
+              "const": "status"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "equals"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "header"
+            },
+            "name": {
+              "type": "string"
+            },
+            "pattern": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "name",
+            "pattern"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "body"
+            },
+            "pattern": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "pattern"
+          ]
+        }
+      ]
+    },
+    "Scoring": {
+      "type": "object",
+      "properties": {
+        "factors": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ScoringFactor"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "factors"
+      ]
+    },
+    "ScoringFactor": {
+      "type": "object",
+      "properties": {
+        "signal": {
+          "type": "string"
+        },
+        "value": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "weight": {
+          "type": "number",
+          "format": "double"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "signal",
+        "weight"
+      ]
+    },
+    "Sources": {
+      "type": "object",
+      "properties": {
+        "ats": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/KeywordSource"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "boamp": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/KeywordSource"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "certificate_transparency": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CertificateTransparency"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "decp": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/KeywordSource"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "dns_cname": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DnsCname"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "france_travail": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/KeywordSource"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "http_probe": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HttpProbe"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ted": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/KeywordSource"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "VersionExtractor": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "from": {
+              "type": "string",
+              "const": "header"
+            },
+            "name": {
+              "type": "string"
+            },
+            "pattern": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "from",
+            "name",
+            "pattern"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "from": {
+              "type": "string",
+              "const": "body"
+            },
+            "pattern": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "from",
+            "pattern"
+          ]
+        }
+      ]
+    }
+  }
+}

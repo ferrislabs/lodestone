@@ -7,6 +7,7 @@ use sqlx::postgres::PgPoolOptions;
 use crate::infrastructure::postgres::error::map_sqlx_error;
 
 pub mod policy;
+pub mod profile;
 pub mod user;
 
 pub type LodestoneAuthService = AuthService<FerrisKeyRepository>;
