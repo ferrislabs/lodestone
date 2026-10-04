@@ -13,7 +13,7 @@ use crate::{
         contact::{ContactFinder, ContactTargets, FoundAddress, select_for_profile},
         job::ports::Clock,
         lead::{
-            ContactEmail, ContactId, ContactKind, Lead, Signal, SignalId,
+            ContactEmail, ContactId, ContactKind, ContactMethod, Lead, Signal, SignalId,
             ports::{ContactRepository, LeadRepository, SignalRepository},
         },
         profile::ActiveProfile,
@@ -24,6 +24,7 @@ use crate::{
 };
 
 pub const CONTACT_SIGNAL: &str = "role_contact_found";
+pub const SECURITY_TXT_SIGNAL: &str = "security_txt_contact";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ContactRunSettings {
@@ -164,8 +165,6 @@ impl LodestoneUseCase {
             .into_iter()
             .map(|contact| contact.address.to_string())
             .collect();
-        let kind = SignalKind::parse(CONTACT_SIGNAL)
-            .map_err(|_| CoreError::Internal("invalid contact signal kind".to_owned()))?;
         let mut stored = 0;
         for candidate in select_for_profile(found, domain, ranking) {
             if known.contains(&candidate.address.to_string()) {
@@ -183,11 +182,16 @@ impl LodestoneUseCase {
                     found_at: now,
                 })
                 .await?;
+            let kind = SignalKind::parse(match candidate.method {
+                ContactMethod::SecurityTxt => SECURITY_TXT_SIGNAL,
+                _ => CONTACT_SIGNAL,
+            })
+            .map_err(|_| CoreError::Internal("invalid contact signal kind".to_owned()))?;
             signals
                 .insert(&Signal {
                     id: SignalId(generate_uuid_v7()),
                     lead_id: lead.id,
-                    kind: kind.clone(),
+                    kind,
                     value: Some(candidate.address.local_part().to_owned()),
                     source,
                     raw: json!({ "address": candidate.address.as_str(), "method": candidate.method.as_str() }),

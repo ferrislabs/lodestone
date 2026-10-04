@@ -7,7 +7,11 @@ pub mod infrastructure;
 pub use application::*;
 pub use domain::{
     NormalizedDomain, NormalizedDomainError, User, UserId,
-    contact::{ContactFinder, ContactTargets, FoundAddress, rank_of, select_for_profile},
+    contact::{
+        ContactFinder, ContactTargets, FoundAddress, rank_of,
+        recipient::{NotARecipient, Recipient},
+        select_for_profile,
+    },
     fetch::{
         FetchError, FetchPurpose, FetchRequest, FetchResponse,
         ports::{Fetcher, HostVisitRepository},

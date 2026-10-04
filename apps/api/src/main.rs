@@ -30,6 +30,7 @@ use sources::{
     ct::{CtSettings, CtSource},
     dns_cname::{DnsCnameSettings, DnsCnameSource},
     http_probe::{HttpProbeSettings, HttpProbeSource, ProbeScheme},
+    security_txt::SecurityTxtFinder,
 };
 use tokio::sync::watch;
 use tracing::{error, info};
@@ -90,6 +91,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 paths: args.contacts.page_paths.clone(),
                 max_rate_limit_wait: args.contacts.max_rate_limit_wait(),
             },
+        ),
+        security_txt: SecurityTxtFinder::new(
+            Arc::clone(&fetcher),
+            args.contacts.max_rate_limit_wait(),
         ),
         targets: PgContactTargets::new(pool.clone()),
         settings: ContactRunSettings {
