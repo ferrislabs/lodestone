@@ -3,7 +3,7 @@
 set -eu
 
 HTML_DIR=/usr/share/nginx/html
-TEMPLATE=/usr/local/share/oxid/config.json
+TEMPLATE=/usr/local/share/lodestone/config.json
 CONFIG_FILE="$HTML_DIR/config.json"
 
 # Only the runtime configuration is rewritten. The assets are placed at build
