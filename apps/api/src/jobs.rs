@@ -3,32 +3,39 @@ use std::{sync::Arc, time::Duration};
 use chrono::Utc;
 use common::CoreError;
 use dns::HickoryResolver;
+use fetch::PoliteFetcher;
 use lodestone_core::{
     Clock, Job, JobQueue, LodestoneUseCase, SourceName,
     infrastructure::{candidate_host::postgres::PgCandidateHosts, job::postgres::PgJobQueue},
     jobs::{JobError, JobHandler, JobOutcome, SystemClock},
     sources::{SOURCE_JOB_KIND, source_job, source_of_job},
 };
-use sources::dns_cname::DnsCnameSource;
+use sources::{dns_cname::DnsCnameSource, http_probe::HttpProbeSource};
 use tracing::info;
 
-pub const WIRED_SOURCES: [SourceName; 1] = [SourceName::DnsCname];
+pub const WIRED_SOURCES: [SourceName; 2] = [SourceName::DnsCname, SourceName::HttpProbe];
+
+pub type DnsCname = DnsCnameSource<HickoryResolver, PgCandidateHosts>;
+pub type HttpProbe = HttpProbeSource<PoliteFetcher, PgCandidateHosts, LodestoneUseCase>;
 
 pub struct JobRouter {
     usecase: LodestoneUseCase,
-    dns_cname: DnsCnameSource<HickoryResolver, PgCandidateHosts>,
+    dns_cname: DnsCname,
+    http_probe: HttpProbe,
     source_interval: Duration,
 }
 
 impl JobRouter {
     pub fn new(
         usecase: LodestoneUseCase,
-        dns_cname: DnsCnameSource<HickoryResolver, PgCandidateHosts>,
+        dns_cname: DnsCname,
+        http_probe: HttpProbe,
         source_interval: Duration,
     ) -> Self {
         Self {
             usecase,
             dns_cname,
+            http_probe,
             source_interval,
         }
     }
@@ -37,6 +44,11 @@ impl JobRouter {
         let source = source_of_job(job)?;
         let result = match source {
             SourceName::DnsCname => self.usecase.run_source(&self.dns_cname, &SystemClock).await,
+            SourceName::HttpProbe => {
+                self.usecase
+                    .run_source(&self.http_probe, &SystemClock)
+                    .await
+            }
             other => {
                 return Err(JobError::Permanent(format!(
                     "source `{other}` is not wired"

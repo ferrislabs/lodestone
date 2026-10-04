@@ -100,6 +100,7 @@ dependencies = [
  "common",
  "dns",
  "dotenvy",
+ "fetch",
  "handlers",
  "http 1.4.0",
  "lodestone-core",
@@ -3754,11 +3755,15 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "common",
+ "fetch",
+ "httpmock",
  "lodestone-core",
+ "regex",
  "serde_json",
  "sqlx",
  "tokio",
  "tracing",
+ "url",
  "uuid",
 ]
 

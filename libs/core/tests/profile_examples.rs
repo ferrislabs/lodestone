@@ -37,7 +37,7 @@ fn iam_example_is_valid_and_has_expected_content() {
         .as_ref()
         .expect("iam example has a probe");
     assert_eq!(probe.excluded_products, ["ferriskey"]);
-    assert_eq!(probe.fingerprints.len(), 2);
+    assert_eq!(probe.fingerprints.len(), 5);
 }
 
 #[test]
