@@ -6,6 +6,7 @@ use sqlx::postgres::PgPoolOptions;
 
 use crate::infrastructure::postgres::error::map_sqlx_error;
 
+pub mod jobs;
 pub mod policy;
 pub mod profile;
 pub mod user;
@@ -21,6 +22,10 @@ pub struct LodestoneUseCase {
 impl LodestoneUseCase {
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
+    }
+
+    pub fn pool(&self) -> &PgPool {
+        &self.pool
     }
 }
 

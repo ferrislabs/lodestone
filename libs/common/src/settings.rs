@@ -60,26 +60,15 @@ pub struct JobsConfig {
     pub poll_interval: Duration,
     pub max_attempts: NonZeroU16,
     pub retry_base_delay: Duration,
+    pub shutdown_grace: Duration,
 }
 
 impl JobsConfig {
-    pub fn new(
-        workers: NonZeroU16,
-        lease: Duration,
-        poll_interval: Duration,
-        max_attempts: NonZeroU16,
-        retry_base_delay: Duration,
-    ) -> Result<Self, SettingsError> {
-        if lease <= poll_interval {
+    pub fn validated(self) -> Result<Self, SettingsError> {
+        if self.lease <= self.poll_interval {
             return Err(SettingsError::LeaseNotLongerThanPoll);
         }
-        Ok(Self {
-            workers,
-            lease,
-            poll_interval,
-            max_attempts,
-            retry_base_delay,
-        })
+        Ok(self)
     }
 }
 
@@ -176,13 +165,15 @@ mod tests {
 
     #[test]
     fn jobs_lease_must_exceed_poll_interval() {
-        let result = JobsConfig::new(
-            nz16(4),
-            Duration::from_secs(1),
-            Duration::from_secs(1),
-            nz16(5),
-            Duration::from_secs(10),
-        );
+        let result = JobsConfig {
+            workers: nz16(4),
+            lease: Duration::from_secs(1),
+            poll_interval: Duration::from_secs(1),
+            max_attempts: nz16(5),
+            retry_base_delay: Duration::from_secs(10),
+            shutdown_grace: Duration::from_secs(20),
+        }
+        .validated();
         assert_eq!(result.unwrap_err(), SettingsError::LeaseNotLongerThanPoll);
     }
 

@@ -8,6 +8,9 @@ edition.workspace = true
 handlers = { workspace = true }
 server = { workspace = true }
 args = { workspace = true }
+common = { workspace = true }
+lodestone-core = { workspace = true }
+axum-server = { workspace = true }
 
 axum = { workspace = true }
 clap = { workspace = true }

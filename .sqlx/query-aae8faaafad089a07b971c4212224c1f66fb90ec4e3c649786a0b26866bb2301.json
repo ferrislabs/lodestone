@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE jobs\n            SET status = 'failed', last_error = 'lease expired',\n                lease_token = NULL, lease_until = NULL, updated_at = $1\n            WHERE status = 'running' AND lease_until < $1 AND attempts >= max_attempts\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "aae8faaafad089a07b971c4212224c1f66fb90ec4e3c649786a0b26866bb2301"
+}

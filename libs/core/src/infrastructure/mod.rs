@@ -1,5 +1,6 @@
 pub mod assessment;
 pub mod contact;
+pub mod job;
 pub mod lead;
 pub mod postgres;
 pub mod profile;

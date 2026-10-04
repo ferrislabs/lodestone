@@ -1,4 +1,5 @@
 use axum::Router;
+use axum_server::Handle;
 use std::net::{SocketAddr, ToSocketAddrs};
 use tracing::info;
 
@@ -24,11 +25,35 @@ pub async fn get_addr(host: &str, port: u16) -> Result<SocketAddr, ServerError> 
     Ok(socket)
 }
 
-pub async fn run_server(addr: SocketAddr, router: Router) {
+pub async fn run_server(
+    addr: SocketAddr,
+    router: Router,
+    handle: Handle<SocketAddr>,
+) -> Result<(), ServerError> {
     info!("listening on {addr}");
 
     axum_server::bind(addr)
+        .handle(handle)
         .serve(router.into_make_service_with_connect_info::<SocketAddr>())
         .await
-        .expect("Failed to start server");
+        .map_err(|e| ServerError::Internal {
+            message: e.to_string(),
+        })
+}
+
+pub async fn shutdown_signal() {
+    let interrupt = tokio::signal::ctrl_c();
+    let mut terminate =
+        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+            Ok(stream) => stream,
+            Err(error) => {
+                tracing::warn!(%error, "cannot listen for SIGTERM, only Ctrl-C stops the process");
+                let _ = interrupt.await;
+                return;
+            }
+        };
+    tokio::select! {
+        _ = interrupt => info!("received Ctrl-C"),
+        _ = terminate.recv() => info!("received SIGTERM"),
+    }
 }

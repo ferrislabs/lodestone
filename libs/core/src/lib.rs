@@ -7,6 +7,11 @@ pub mod infrastructure;
 pub use application::*;
 pub use domain::{
     NormalizedDomain, NormalizedDomainError, User, UserId,
+    job::{
+        ClaimedJob, FailureDecision, InvalidJobKind, Job, JobId, JobKind, JobStatus, LeaseToken,
+        NewJob, RetryPolicy, new_lease_token,
+        ports::{Clock, JobFailure, JobQueue},
+    },
     lead::{
         Assessment, AssessmentId, ContactEmail, ContactId, ContactKind, ContactMethod, Evidence,
         InvalidScore, InvalidTransition, Lead, LeadId, LeadStatus, Score, Signal, SignalId,

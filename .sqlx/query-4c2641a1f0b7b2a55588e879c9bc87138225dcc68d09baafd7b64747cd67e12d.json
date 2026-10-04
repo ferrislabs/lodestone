@@ -1,0 +1,90 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            WITH next AS (\n                SELECT id FROM jobs\n                WHERE (status = 'pending' AND run_at <= $1)\n                   OR (status = 'running' AND lease_until < $1 AND attempts < max_attempts)\n                ORDER BY run_at, id\n                FOR UPDATE SKIP LOCKED\n                LIMIT 1\n            )\n            UPDATE jobs\n            SET status = 'running', attempts = attempts + 1,\n                lease_token = $2, lease_until = $3, updated_at = $1\n            FROM next\n            WHERE jobs.id = next.id\n            RETURNING jobs.id, jobs.kind, jobs.payload, jobs.status, jobs.attempts,\n                jobs.max_attempts, jobs.run_at, jobs.lease_token, jobs.lease_until,\n                jobs.last_error, jobs.created_at, jobs.updated_at\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "kind",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "payload",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 3,
+        "name": "status",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "attempts",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 5,
+        "name": "max_attempts",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 6,
+        "name": "run_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 7,
+        "name": "lease_token",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 8,
+        "name": "lease_until",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 9,
+        "name": "last_error",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 11,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Uuid",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "4c2641a1f0b7b2a55588e879c9bc87138225dcc68d09baafd7b64747cd67e12d"
+}
