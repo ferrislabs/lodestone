@@ -35,6 +35,7 @@ use sources::{
     http_probe::{HttpProbeSettings, HttpProbeSource, ProbeScheme},
     role_guess::RoleGuessFinder,
     security_txt::SecurityTxtFinder,
+    ted::{TedSettings, TedSource},
 };
 use tokio::sync::watch;
 use tracing::{error, info};
@@ -54,6 +55,8 @@ const PROBE_BATCH_SIZE: u32 = 200;
 const PROBE_CONCURRENCY: usize = 8;
 const BOAMP_MAX_BODY_BYTES: usize = 16 * 1024 * 1024;
 const BOAMP_REQUESTS_PER_MINUTE: u32 = 30;
+const TED_MAX_BODY_BYTES: usize = 16 * 1024 * 1024;
+const TED_REQUESTS_PER_MINUTE: u32 = 30;
 const DECP_REQUESTS_PER_MINUTE: u32 = 120;
 const DECP_REQUEST_TIMEOUT: Duration = Duration::from_secs(900);
 const DECP_MAX_RATE_LIMIT_WAIT: Duration = Duration::from_secs(75);
@@ -100,6 +103,20 @@ async fn main() -> Result<(), Box<dyn Error>> {
             base_url: args.boamp.base_url.clone(),
             lookback_days: args.boamp.lookback_days.get(),
             max_pages: args.boamp.max_pages.get(),
+        },
+    );
+    let mut ted_fetch = FetchSettings::from_outbound(&outbound_config);
+    ted_fetch.max_body_bytes = TED_MAX_BODY_BYTES;
+    ted_fetch.requests_per_host_per_minute = ted_fetch
+        .requests_per_host_per_minute
+        .max(NonZeroU32::new(TED_REQUESTS_PER_MINUTE).unwrap_or(NonZeroU32::MIN));
+    let ted = TedSource::new(
+        Arc::new(PoliteFetcher::new(ted_fetch)?),
+        TedSettings {
+            base_url: args.ted.base_url.clone(),
+            lookback_days: args.ted.lookback_days.get(),
+            max_pages: args.ted.max_pages.get(),
+            buyer_countries: args.ted.buyer_countries.clone(),
         },
     );
     let mut decp_fetch = FetchSettings::from_outbound(&outbound_config);
@@ -173,6 +190,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             http_probe,
             boamp,
             decp,
+            ted,
             contacts,
         },
         Intervals {

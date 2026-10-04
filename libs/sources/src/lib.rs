@@ -7,3 +7,4 @@ pub mod dns_cname;
 pub mod http_probe;
 pub mod role_guess;
 pub mod security_txt;
+pub mod ted;

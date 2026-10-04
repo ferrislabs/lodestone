@@ -4,8 +4,11 @@ use std::{
     time::{Duration, Instant},
 };
 
-use fetch::{FetchSettings, PoliteFetcher};
-use httpmock::{Method::GET, MockServer};
+use fetch::{FetchSettings, PoliteFetcher, PostFetcher, PostRequest};
+use httpmock::{
+    Method::{GET, POST},
+    MockServer,
+};
 use lodestone_core::{FetchError, FetchPurpose, FetchRequest, Fetcher, SourceName};
 use rate_limit::{Clock, InMemoryRateLimiter, Quota};
 use url::Url;
@@ -556,4 +559,74 @@ async fn documented_api_requests_skip_robots_while_crawl_is_refused() {
     assert_eq!(response.status, 200);
     api.assert_hits_async(1).await;
     robots.assert_hits_async(1).await;
+}
+
+fn post_request(server: &MockServer, path: &str, body: &str) -> PostRequest {
+    PostRequest {
+        url: Url::parse(&server.url(path)).unwrap(),
+        body: body.as_bytes().to_vec(),
+        source: SourceName::Ted,
+    }
+}
+
+#[tokio::test]
+async fn json_post_sends_body_and_skips_robots() {
+    let server = MockServer::start_async().await;
+    let robots = server
+        .mock_async(|when, then| {
+            when.method(GET).path("/robots.txt");
+            then.status(200).body("User-agent: *\nDisallow: /");
+        })
+        .await;
+    let search = server
+        .mock_async(|when, then| {
+            when.method(POST)
+                .path("/search")
+                .header("content-type", "application/json")
+                .matches(has_expected_user_agent)
+                .body("{\"query\":\"x\"}");
+            then.status(200).body("{\"ok\":true}");
+        })
+        .await;
+    let response = fetcher(settings())
+        .post(&post_request(&server, "/search", "{\"query\":\"x\"}"))
+        .await
+        .unwrap();
+    assert_eq!(response.status, 200);
+    assert_eq!(response.body, b"{\"ok\":true}");
+    search.assert_async().await;
+    robots.assert_hits_async(0).await;
+}
+
+#[tokio::test]
+async fn json_post_keeps_the_safeguards() {
+    let server = MockServer::start_async().await;
+    server
+        .mock_async(|when, then| {
+            when.method(POST).path("/big");
+            then.status(200).body("x".repeat(4096));
+        })
+        .await;
+    server
+        .mock_async(|when, then| {
+            when.method(POST).path("/moved");
+            then.status(302).header("location", "/big");
+        })
+        .await;
+    let capped = fetcher(settings())
+        .post(&post_request(&server, "/big", "{}"))
+        .await
+        .unwrap();
+    assert!(capped.truncated);
+    assert_eq!(capped.body.len(), 1024);
+    let redirected = fetcher(settings())
+        .post(&post_request(&server, "/moved", "{}"))
+        .await;
+    assert_eq!(redirected.unwrap_err(), FetchError::Redirect);
+    let mut strict = settings();
+    strict.allow_private_targets = false;
+    let refused = fetcher(strict)
+        .post(&post_request(&server, "/big", "{}"))
+        .await;
+    assert_eq!(refused.unwrap_err(), FetchError::NonPublicTarget);
 }
