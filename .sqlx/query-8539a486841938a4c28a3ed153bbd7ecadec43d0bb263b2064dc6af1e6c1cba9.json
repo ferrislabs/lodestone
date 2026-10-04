@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO jobs (id, kind, payload, status, attempts, max_attempts, run_at, dedup_key, created_at, updated_at)\n            VALUES ($1, $2, $3, 'pending', 0, $4, $5, $6, $7, $7)\n            ON CONFLICT (dedup_key) WHERE dedup_key IS NOT NULL AND status IN ('pending', 'running')\n            DO NOTHING\n            RETURNING id\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Jsonb",
+        "Int4",
+        "Timestamptz",
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "8539a486841938a4c28a3ed153bbd7ecadec43d0bb263b2064dc6af1e6c1cba9"
+}

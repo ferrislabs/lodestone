@@ -50,7 +50,7 @@ fn chrono_of(duration: Duration) -> chrono::Duration {
 }
 
 impl JobQueue for MemoryQueue {
-    async fn enqueue(&self, job: &NewJob, now: DateTime<Utc>) -> Result<JobId, CoreError> {
+    async fn enqueue(&self, job: &NewJob, now: DateTime<Utc>) -> Result<Option<JobId>, CoreError> {
         let id = JobId(uuid::Uuid::new_v4());
         let stored = Job {
             id,
@@ -65,7 +65,7 @@ impl JobQueue for MemoryQueue {
             updated_at: now,
         };
         self.jobs.lock().unwrap().insert(id, (stored, None));
-        Ok(id)
+        Ok(Some(id))
     }
 
     async fn claim(
@@ -275,10 +275,12 @@ async fn enqueue(queue: &MemoryQueue, clock: &TestClock, max_attempts: u16) -> J
                 payload: serde_json::Value::Null,
                 run_at: clock.now(),
                 max_attempts: NonZeroU16::new(max_attempts).unwrap(),
+                dedup_key: None,
             },
             clock.now(),
         )
         .await
+        .unwrap()
         .unwrap()
 }
 

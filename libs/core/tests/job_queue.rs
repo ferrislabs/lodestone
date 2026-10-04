@@ -17,6 +17,7 @@ fn new_job(run_at: i64, max_attempts: u16) -> NewJob {
         payload: serde_json::json!({"host": "example.com"}),
         run_at: at(run_at),
         max_attempts: NonZeroU16::new(max_attempts).unwrap(),
+        dedup_key: None,
     }
 }
 
@@ -24,6 +25,7 @@ async fn enqueue(queue: &PgJobQueue, run_at: i64, max_attempts: u16) -> JobId {
     queue
         .enqueue(&new_job(run_at, max_attempts), at(0))
         .await
+        .unwrap()
         .unwrap()
 }
 
@@ -196,4 +198,80 @@ async fn extended_lease_blocks_reclaim(pool: PgPool) {
     );
     assert!(queue.claim(at(31), LEASE).await.unwrap().is_none());
     assert!(queue.claim(at(51), LEASE).await.unwrap().is_some());
+}
+
+fn keyed_job(key: &str) -> NewJob {
+    NewJob {
+        dedup_key: Some(key.to_owned()),
+        ..new_job(0, 3)
+    }
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn dedup_key_allows_one_active_job(pool: PgPool) {
+    let queue = PgJobQueue::new(pool);
+    let first = queue
+        .enqueue(&keyed_job("source:http_probe"), at(0))
+        .await
+        .unwrap();
+    assert!(first.is_some());
+    assert_eq!(
+        queue
+            .enqueue(&keyed_job("source:http_probe"), at(0))
+            .await
+            .unwrap(),
+        None
+    );
+    assert!(
+        queue
+            .enqueue(
+                &NewJob {
+                    run_at: at(10),
+                    ..keyed_job("source:dns_cname")
+                },
+                at(0),
+            )
+            .await
+            .unwrap()
+            .is_some()
+    );
+
+    let claimed = queue.claim(at(1), LEASE).await.unwrap().unwrap();
+    assert_eq!(
+        queue
+            .enqueue(&keyed_job("source:http_probe"), at(1))
+            .await
+            .unwrap(),
+        None
+    );
+
+    queue
+        .complete(claimed.job.id, claimed.token, at(2))
+        .await
+        .unwrap();
+    let after_completion = queue
+        .enqueue(&keyed_job("source:http_probe"), at(3))
+        .await
+        .unwrap();
+    assert_eq!(claimed.job.id, first.unwrap());
+    assert!(after_completion.is_some());
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn jobs_without_dedup_key_never_conflict(pool: PgPool) {
+    let queue = PgJobQueue::new(pool);
+    assert!(
+        queue
+            .enqueue(&new_job(0, 3), at(0))
+            .await
+            .unwrap()
+            .is_some()
+    );
+    assert!(
+        queue
+            .enqueue(&new_job(0, 3), at(0))
+            .await
+            .unwrap()
+            .is_some()
+    );
 }

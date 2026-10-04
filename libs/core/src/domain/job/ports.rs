@@ -16,7 +16,7 @@ pub trait JobQueue: Send + Sync {
         &self,
         job: &NewJob,
         now: DateTime<Utc>,
-    ) -> impl Future<Output = Result<JobId, CoreError>> + Send;
+    ) -> impl Future<Output = Result<Option<JobId>, CoreError>> + Send;
 
     fn claim(
         &self,

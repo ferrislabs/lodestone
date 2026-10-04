@@ -59,6 +59,7 @@ pub struct NewJob {
     pub payload: serde_json::Value,
     pub run_at: DateTime<Utc>,
     pub max_attempts: NonZeroU16,
+    pub dedup_key: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
