@@ -275,3 +275,44 @@ async fn jobs_without_dedup_key_never_conflict(pool: PgPool) {
             .is_some()
     );
 }
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn reschedule_turns_a_job_into_a_recurring_one(pool: PgPool) {
+    let queue = PgJobQueue::new(pool);
+    let id = queue
+        .enqueue(&keyed_job("source:dns_cname"), at(0))
+        .await
+        .unwrap()
+        .unwrap();
+    let claimed = queue.claim(at(1), LEASE).await.unwrap().unwrap();
+
+    assert!(
+        queue
+            .reschedule(id, claimed.token, at(3600), at(2))
+            .await
+            .unwrap()
+    );
+    assert!(
+        !queue
+            .reschedule(id, claimed.token, at(3600), at(2))
+            .await
+            .unwrap()
+    );
+
+    let job = queue.find(id).await.unwrap().unwrap();
+    assert_eq!(job.status, JobStatus::Pending);
+    assert_eq!(job.attempts, 0);
+    assert_eq!(job.run_at, at(3600));
+    assert!(queue.claim(at(3599), LEASE).await.unwrap().is_none());
+    assert_eq!(
+        queue
+            .enqueue(&keyed_job("source:dns_cname"), at(5))
+            .await
+            .unwrap(),
+        None
+    );
+    assert_eq!(
+        queue.claim(at(3600), LEASE).await.unwrap().unwrap().job.id,
+        id
+    );
+}

@@ -7,7 +7,7 @@ use url::Url;
 pub enum ValueError {
     #[error("value must be a finite number between 0 and 1")]
     OutOfUnitInterval,
-    #[error("provenance must be an absolute http or https URL")]
+    #[error("provenance must be an absolute http, https or dns URL")]
     InvalidProvenance,
     #[error("email address is malformed")]
     InvalidEmail,
@@ -42,6 +42,7 @@ impl Provenance {
         let url = Url::parse(raw).map_err(|_| ValueError::InvalidProvenance)?;
         match url.scheme() {
             "http" | "https" if url.host().is_some() => Ok(Self(url)),
+            "dns" if !url.path().is_empty() => Ok(Self(url)),
             _ => Err(ValueError::InvalidProvenance),
         }
     }
@@ -194,6 +195,11 @@ mod tests {
     fn provenance_accepts_only_web_urls() {
         assert!(Provenance::parse("https://example.com/legal").is_ok());
         assert!(Provenance::parse("http://example.com").is_ok());
+        assert!(Provenance::parse("dns:sso.example.com?type=CNAME").is_ok());
+        assert_eq!(
+            Provenance::parse("dns:"),
+            Err(ValueError::InvalidProvenance)
+        );
         assert_eq!(
             Provenance::parse("file:///etc/passwd"),
             Err(ValueError::InvalidProvenance)

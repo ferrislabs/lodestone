@@ -61,6 +61,7 @@ pub struct JobsConfig {
     pub max_attempts: NonZeroU16,
     pub retry_base_delay: Duration,
     pub shutdown_grace: Duration,
+    pub source_interval: Duration,
 }
 
 impl JobsConfig {
@@ -172,6 +173,7 @@ mod tests {
             max_attempts: nz16(5),
             retry_base_delay: Duration::from_secs(10),
             shutdown_grace: Duration::from_secs(20),
+            source_interval: Duration::from_secs(3600),
         }
         .validated();
         assert_eq!(result.unwrap_err(), SettingsError::LeaseNotLongerThanPoll);

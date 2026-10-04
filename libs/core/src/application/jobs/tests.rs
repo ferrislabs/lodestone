@@ -168,6 +168,27 @@ impl JobQueue for MemoryQueue {
         }
     }
 
+    async fn reschedule(
+        &self,
+        id: JobId,
+        token: LeaseToken,
+        run_at: DateTime<Utc>,
+        now: DateTime<Utc>,
+    ) -> Result<bool, CoreError> {
+        let mut jobs = self.jobs.lock().unwrap();
+        match jobs.get_mut(&id) {
+            Some((job, held)) if held.is_some_and(|(t, _)| t == token) => {
+                job.status = JobStatus::Pending;
+                job.attempts = 0;
+                job.run_at = run_at;
+                job.updated_at = now;
+                *held = None;
+                Ok(true)
+            }
+            _ => Ok(false),
+        }
+    }
+
     async fn release(
         &self,
         id: JobId,
@@ -214,20 +235,20 @@ impl Clock for TestClock {
 
 struct ScriptedHandler {
     delay: Duration,
-    results: Mutex<VecDeque<Result<(), JobError>>>,
-    fallback: Result<(), JobError>,
+    results: Mutex<VecDeque<Result<JobOutcome, JobError>>>,
+    fallback: Result<JobOutcome, JobError>,
     seen: Mutex<Vec<JobId>>,
 }
 
 impl ScriptedHandler {
-    fn new(delay: Duration, results: Vec<Result<(), JobError>>) -> Self {
-        Self::with_fallback(delay, results, Ok(()))
+    fn new(delay: Duration, results: Vec<Result<JobOutcome, JobError>>) -> Self {
+        Self::with_fallback(delay, results, Ok(JobOutcome::Done))
     }
 
     fn with_fallback(
         delay: Duration,
-        results: Vec<Result<(), JobError>>,
-        fallback: Result<(), JobError>,
+        results: Vec<Result<JobOutcome, JobError>>,
+        fallback: Result<JobOutcome, JobError>,
     ) -> Self {
         Self {
             delay,
@@ -243,7 +264,7 @@ impl ScriptedHandler {
 }
 
 impl JobHandler for ScriptedHandler {
-    async fn handle(&self, job: &Job) -> Result<(), JobError> {
+    async fn handle(&self, job: &Job) -> Result<JobOutcome, JobError> {
         self.seen.lock().unwrap().push(job.id);
         tokio::time::sleep(self.delay).await;
         self.results
@@ -461,5 +482,22 @@ async fn workers_handle_each_job_exactly_once() {
     expected.sort_by_key(|id| id.0);
     assert_eq!(seen, expected);
     assert_eq!(h.queue.total_claims(), 20);
+    h.shutdown().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn rescheduled_job_runs_again_at_the_requested_time() {
+    let next_run = Utc::now() + chrono::Duration::days(3650);
+    let handler = ScriptedHandler::new(
+        Duration::from_millis(10),
+        vec![Ok(JobOutcome::RescheduleAt(next_run))],
+    );
+    let (h, ids) = Harness::start(handler, settings(1), &[3]).await;
+    tokio::time::sleep(Duration::from_secs(5)).await;
+    let job = h.queue.snapshot(ids[0]).unwrap();
+    assert_eq!(job.status, JobStatus::Pending);
+    assert_eq!(job.attempts, 0);
+    assert_eq!(job.run_at, next_run);
+    assert_eq!(h.queue.claim_count(ids[0]), 1);
     h.shutdown().await;
 }

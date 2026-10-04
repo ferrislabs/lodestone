@@ -203,6 +203,32 @@ impl JobQueue for PgJobQueue {
     }
 
     #[tracing::instrument(skip(self), fields(db.system = "postgresql", db.operation = "update", db.table = "jobs", job.id = %id), err)]
+    async fn reschedule(
+        &self,
+        id: JobId,
+        token: LeaseToken,
+        run_at: DateTime<Utc>,
+        now: DateTime<Utc>,
+    ) -> Result<bool, CoreError> {
+        let result = sqlx::query!(
+            r#"
+            UPDATE jobs
+            SET status = 'pending', run_at = $3, attempts = 0,
+                lease_token = NULL, lease_until = NULL, updated_at = $4
+            WHERE id = $1 AND status = 'running' AND lease_token = $2
+            "#,
+            id.0,
+            token.0,
+            run_at,
+            now,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+        Ok(result.rows_affected() == 1)
+    }
+
+    #[tracing::instrument(skip(self), fields(db.system = "postgresql", db.operation = "update", db.table = "jobs", job.id = %id), err)]
     async fn release(
         &self,
         id: JobId,

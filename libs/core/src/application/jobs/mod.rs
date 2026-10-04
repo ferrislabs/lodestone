@@ -24,8 +24,14 @@ pub enum JobError {
     Permanent(String),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum JobOutcome {
+    Done,
+    RescheduleAt(chrono::DateTime<chrono::Utc>),
+}
+
 pub trait JobHandler: Send + Sync {
-    fn handle(&self, job: &Job) -> impl Future<Output = Result<(), JobError>> + Send;
+    fn handle(&self, job: &Job) -> impl Future<Output = Result<JobOutcome, JobError>> + Send;
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -96,7 +102,7 @@ where
 }
 
 enum Outcome {
-    Finished(Result<(), JobError>),
+    Finished(Result<JobOutcome, JobError>),
     LeaseLost,
     Abandoned,
 }
@@ -162,12 +168,19 @@ where
     async fn process(&self, claimed: &ClaimedJob, shutdown: &mut watch::Receiver<bool>) {
         let job = &claimed.job;
         match self.drive(claimed, shutdown).await {
-            Outcome::Finished(Ok(())) => {
+            Outcome::Finished(Ok(JobOutcome::Done)) => {
                 let result = self
                     .queue
                     .complete(job.id, claimed.token, self.clock.now())
                     .await;
                 report("complete", result);
+            }
+            Outcome::Finished(Ok(JobOutcome::RescheduleAt(at))) => {
+                let result = self
+                    .queue
+                    .reschedule(job.id, claimed.token, at, self.clock.now())
+                    .await;
+                report("reschedule", result);
             }
             Outcome::Finished(Err(error)) => {
                 let failure = self.failure(job, error);

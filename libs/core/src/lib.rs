@@ -11,6 +11,10 @@ pub use domain::{
         FetchError, FetchPurpose, FetchRequest, FetchResponse,
         ports::{Fetcher, HostVisitRepository},
     },
+    host::{
+        CandidateHost, HostOrigin, Hostname, InvalidHostname,
+        ports::{CandidateHosts, DnsError, DnsResolver},
+    },
     job::{
         ClaimedJob, FailureDecision, InvalidJobKind, Job, JobId, JobKind, JobStatus, LeaseToken,
         NewJob, RetryPolicy, new_lease_token,

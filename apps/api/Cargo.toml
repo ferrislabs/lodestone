@@ -10,6 +10,8 @@ server = { workspace = true }
 args = { workspace = true }
 common = { workspace = true }
 lodestone-core = { workspace = true }
+dns = { workspace = true }
+sources = { workspace = true }
 axum-server = { workspace = true }
 
 axum = { workspace = true }
@@ -29,3 +31,9 @@ utoipa = { workspace = true }
 utoipa-scalar = { workspace = true }
 utoipa-swagger-ui = { workspace = true }
 thiserror = { workspace = true }
+sqlx = { workspace = true }
+chrono = { workspace = true }
+
+[[bin]]
+name = "import-hosts"
+path = "src/bin/import_hosts.rs"

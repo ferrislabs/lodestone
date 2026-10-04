@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO candidate_hosts (host, domain, origin, first_seen_at, last_seen_at)\n            SELECT * FROM UNNEST($1::text[], $2::text[], $3::text[], $4::timestamptz[], $5::timestamptz[])\n            ON CONFLICT (host) DO UPDATE SET\n                last_seen_at = GREATEST(candidate_hosts.last_seen_at, EXCLUDED.last_seen_at),\n                first_seen_at = LEAST(candidate_hosts.first_seen_at, EXCLUDED.first_seen_at)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "TextArray",
+        "TextArray",
+        "TextArray",
+        "TimestamptzArray",
+        "TimestamptzArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e31924956e675c0e38ed0276612c99ea0e9dbfc33588a7453ea983a5da298c23"
+}
