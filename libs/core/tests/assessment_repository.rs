@@ -17,6 +17,7 @@ fn assessment(lead: lodestone_core::LeadId, created: i64, evidence: Vec<Evidence
         evidence,
         model: "model-x".to_owned(),
         prompt_version: "v1".to_owned(),
+        draft: None,
         created_at: at(created),
     }
 }

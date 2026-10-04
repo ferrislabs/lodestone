@@ -103,6 +103,7 @@ dependencies = [
  "fetch",
  "handlers",
  "http 1.4.0",
+ "llm",
  "lodestone-core",
  "opentelemetry",
  "opentelemetry-appender-tracing",

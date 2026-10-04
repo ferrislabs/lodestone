@@ -3,7 +3,7 @@ use common::CoreError;
 use lodestone_macros::repository;
 
 use crate::{
-    Lead, LeadId, LeadStatus, NormalizedDomain, ProfileId, ScoreBreakdown,
+    Lead, LeadId, LeadStatus, NormalizedDomain, ProfileId, RevisionNumber, ScoreBreakdown,
     domain::lead::ports::LeadRepository,
     infrastructure::{
         lead::postgres::model::LeadRow,
@@ -187,6 +187,48 @@ impl<'tx> LeadRepository for PgLeadRepository<'tx> {
             ORDER BY score DESC, domain ASC
             "#,
             profile_id.0,
+        )
+        .fetch_all(&mut ***tx)
+        .await
+        .map_err(map_sqlx_error)?;
+
+        rows.into_iter().map(Lead::try_from).collect()
+    }
+
+    #[tracing::instrument(skip(self), fields(db.system = "postgresql", db.operation = "select", db.table = "leads", profile.id = %profile_id), err)]
+    async fn list_to_qualify(
+        &mut self,
+        profile_id: ProfileId,
+        threshold: f64,
+        revision: RevisionNumber,
+        prompt: &str,
+        limit: u32,
+    ) -> Result<Vec<Lead>, CoreError> {
+        let revision = i32::try_from(revision.get())
+            .map_err(|_| CoreError::Internal("profile revision number out of range".to_owned()))?;
+        let mut tx = self.tx.lock().await;
+        let rows = sqlx::query_as!(
+            LeadRow,
+            r#"
+            SELECT id, profile_id, domain, status, score, score_breakdown, first_seen_at, last_seen_at, updated_at
+            FROM leads
+            WHERE profile_id = $1
+              AND score >= $2
+              AND status = 'new'
+              AND NOT EXISTS (
+                  SELECT 1 FROM assessments
+                  WHERE assessments.lead_id = leads.id
+                    AND assessments.profile_revision = $3
+                    AND assessments.prompt_version = $4
+              )
+            ORDER BY score DESC, domain ASC
+            LIMIT $5
+            "#,
+            profile_id.0,
+            threshold,
+            revision,
+            prompt,
+            i64::from(limit),
         )
         .fetch_all(&mut ***tx)
         .await

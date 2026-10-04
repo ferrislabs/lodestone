@@ -3,7 +3,7 @@ use common::CoreError;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{Assessment, AssessmentId, Evidence, LeadId, Provenance, RevisionNumber};
+use crate::{Assessment, AssessmentId, DraftMessage, Evidence, LeadId, Provenance, RevisionNumber};
 
 #[derive(Debug, Clone)]
 pub struct AssessmentRow {
@@ -15,6 +15,8 @@ pub struct AssessmentRow {
     pub evidence: serde_json::Value,
     pub model: String,
     pub prompt_version: String,
+    pub draft_subject: Option<String>,
+    pub draft_body: Option<String>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -71,6 +73,10 @@ impl TryFrom<AssessmentRow> for Assessment {
             evidence: evidence_from_json(row.evidence)?,
             model: row.model,
             prompt_version: row.prompt_version,
+            draft: match (row.draft_subject, row.draft_body) {
+                (Some(subject), Some(body)) => Some(DraftMessage { subject, body }),
+                _ => None,
+            },
             created_at: row.created_at,
         })
     }

@@ -30,8 +30,8 @@ impl<'tx> AssessmentRepository for PgAssessmentRepository<'tx> {
         let mut tx = self.tx.lock().await;
         sqlx::query!(
             r#"
-            INSERT INTO assessments (id, lead_id, profile_revision, summary, approach_angle, evidence, model, prompt_version, created_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            INSERT INTO assessments (id, lead_id, profile_revision, summary, approach_angle, evidence, model, prompt_version, draft_subject, draft_body, created_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
             "#,
             assessment.id.0,
             assessment.lead_id.0,
@@ -41,6 +41,8 @@ impl<'tx> AssessmentRepository for PgAssessmentRepository<'tx> {
             evidence,
             assessment.model,
             assessment.prompt_version,
+            assessment.draft.as_ref().map(|draft| draft.subject.as_str()),
+            assessment.draft.as_ref().map(|draft| draft.body.as_str()),
             assessment.created_at,
         )
         .execute(&mut ***tx)
@@ -56,7 +58,7 @@ impl<'tx> AssessmentRepository for PgAssessmentRepository<'tx> {
         let rows = sqlx::query_as!(
             AssessmentRow,
             r#"
-            SELECT id, lead_id, profile_revision, summary, approach_angle, evidence, model, prompt_version, created_at
+            SELECT id, lead_id, profile_revision, summary, approach_angle, evidence, model, prompt_version, draft_subject, draft_body, created_at
             FROM assessments
             WHERE lead_id = $1
             ORDER BY created_at DESC, id DESC
