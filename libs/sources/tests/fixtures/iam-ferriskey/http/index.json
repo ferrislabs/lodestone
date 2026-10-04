@@ -1,0 +1,644 @@
+{
+ "address_rewrite": "container addresses (localhost:<port>, 127.0.0.1:<port>, localhost:8080) replaced by https://sso.example.test (bare host:port by sso.example.test); Date and Set-Cookie headers and x-authentik-id dropped; images pulled and run locally",
+ "files": [
+  {
+   "file": "authentik/ak---health-live-slash.json",
+   "product": "authentik",
+   "image": "ghcr.io/goauthentik/server:2026.8",
+   "case": "ak---health-live-slash",
+   "path": "/-/health/live/",
+   "status": 200,
+   "notes": ""
+  },
+  {
+   "file": "authentik/ak---health-ready-slash.json",
+   "product": "authentik",
+   "image": "ghcr.io/goauthentik/server:2026.8",
+   "case": "ak---health-ready-slash",
+   "path": "/-/health/ready/",
+   "status": 200,
+   "notes": ""
+  },
+  {
+   "file": "authentik/ak-api-v3-admin-version-slash.json",
+   "product": "authentik",
+   "image": "ghcr.io/goauthentik/server:2026.8",
+   "case": "ak-api-v3-admin-version-slash",
+   "path": "/api/v3/admin/version/",
+   "status": 403,
+   "notes": ""
+  },
+  {
+   "file": "authentik/ak-api-v3-root-config-slash.json",
+   "product": "authentik",
+   "image": "ghcr.io/goauthentik/server:2026.8",
+   "case": "ak-api-v3-root-config-slash",
+   "path": "/api/v3/root/config/",
+   "status": 200,
+   "notes": ""
+  },
+  {
+   "file": "authentik/ak-api-v3-slash.json",
+   "product": "authentik",
+   "image": "ghcr.io/goauthentik/server:2026.8",
+   "case": "ak-api-v3-slash",
+   "path": "/api/v3/",
+   "status": 200,
+   "notes": ""
+  },
+  {
+   "file": "authentik/ak-application-o--well-known-openid-configuration.json",
+   "product": "authentik",
+   "image": "ghcr.io/goauthentik/server:2026.8",
+   "case": "ak-application-o--well-known-openid-configuration",
+   "path": "/application/o/.well-known/openid-configuration",
+   "status": 404,
+   "notes": ""
+  },
+  {
+   "file": "authentik/ak-application-o-slash.json",
+   "product": "authentik",
+   "image": "ghcr.io/goauthentik/server:2026.8",
+   "case": "ak-application-o-slash",
+   "path": "/application/o/",
+   "status": 404,
+   "notes": ""
+  },
+  {
+   "file": "authentik/ak-if-flow-initial-setup-slash.json",
+   "product": "authentik",
+   "image": "ghcr.io/goauthentik/server:2026.8",
+   "case": "ak-if-flow-initial-setup-slash",
+   "path": "/if/flow/initial-setup/",
+   "status": 404,
+   "notes": ""
+  },
+  {
+   "file": "authentik/ak-realms-master.json",
+   "product": "authentik",
+   "image": "ghcr.io/goauthentik/server:2026.8",
+   "case": "ak-realms-master",
+   "path": "/realms/master",
+   "status": 404,
+   "notes": ""
+  },
+  {
+   "file": "authentik/ak-root.json",
+   "product": "authentik",
+   "image": "ghcr.io/goauthentik/server:2026.8",
+   "case": "ak-root",
+   "path": "/",
+   "status": 302,
+   "notes": ""
+  },
+  {
+   "file": "authentik/ak-setup.json",
+   "product": "authentik",
+   "image": "ghcr.io/goauthentik/server:2026.8",
+   "case": "ak-setup",
+   "path": "/setup",
+   "status": 503,
+   "notes": ""
+  },
+  {
+   "file": "authentik/ak-static-dist-custom-css.json",
+   "product": "authentik",
+   "image": "ghcr.io/goauthentik/server:2026.8",
+   "case": "ak-static-dist-custom-css",
+   "path": "/static/dist/custom.css",
+   "status": 404,
+   "notes": ""
+  },
+  {
+   "file": "ferriskey/fk-auth-realms-master.json",
+   "product": "ferriskey",
+   "image": "ghcr.io/ferriskey/ferriskey-api:latest",
+   "case": "fk-auth-realms-master",
+   "path": "/auth/realms/master",
+   "status": 404,
+   "notes": ""
+  },
+  {
+   "file": "ferriskey/fk-health.json",
+   "product": "ferriskey",
+   "image": "ghcr.io/ferriskey/ferriskey-api:latest",
+   "case": "fk-health",
+   "path": "/health",
+   "status": 404,
+   "notes": ""
+  },
+  {
+   "file": "ferriskey/fk-master-certs.json",
+   "product": "ferriskey",
+   "image": "ghcr.io/ferriskey/ferriskey-api:latest",
+   "case": "fk-master-certs",
+   "path": "/realms/master/protocol/openid-connect/certs",
+   "status": 200,
+   "notes": ""
+  },
+  {
+   "file": "ferriskey/fk-master-openid-configuration.json",
+   "product": "ferriskey",
+   "image": "ghcr.io/ferriskey/ferriskey-api:latest",
+   "case": "fk-master-openid-configuration",
+   "path": "/realms/master/.well-known/openid-configuration",
+   "status": 200,
+   "notes": ""
+  },
+  {
+   "file": "ferriskey/fk-openapi.json",
+   "product": "ferriskey",
+   "image": "ghcr.io/ferriskey/ferriskey-api:latest",
+   "case": "fk-openapi",
+   "path": "/api-docs/openapi.json",
+   "status": 200,
+   "notes": "truncated to 64KiB"
+  },
+  {
+   "file": "ferriskey/fk-realm-nonexistent.json",
+   "product": "ferriskey",
+   "image": "ghcr.io/ferriskey/ferriskey-api:latest",
+   "case": "fk-realm-nonexistent",
+   "path": "/realms/nope/.well-known/openid-configuration",
+   "status": 200,
+   "notes": ""
+  },
+  {
+   "file": "ferriskey/fk-realms-master.json",
+   "product": "ferriskey",
+   "image": "ghcr.io/ferriskey/ferriskey-api:latest",
+   "case": "fk-realms-master",
+   "path": "/realms/master",
+   "status": 401,
+   "notes": ""
+  },
+  {
+   "file": "ferriskey/fk-root.json",
+   "product": "ferriskey",
+   "image": "ghcr.io/ferriskey/ferriskey-api:latest",
+   "case": "fk-root",
+   "path": "/",
+   "status": 404,
+   "notes": ""
+  },
+  {
+   "file": "keycloak/kc17-legacy-auth-health.json",
+   "product": "keycloak",
+   "image": "quay.io/keycloak/keycloak:17.0.1-legacy",
+   "case": "kc17-legacy-auth-health",
+   "path": "/auth/health",
+   "status": 404,
+   "notes": "legacy WildFly distribution 17.0.1"
+  },
+  {
+   "file": "keycloak/kc17-legacy-auth-realms-master--well-known-openid-configuration.json",
+   "product": "keycloak",
+   "image": "quay.io/keycloak/keycloak:17.0.1-legacy",
+   "case": "kc17-legacy-auth-realms-master--well-known-openid-configuration",
+   "path": "/auth/realms/master/.well-known/openid-configuration",
+   "status": 200,
+   "notes": "legacy WildFly distribution 17.0.1"
+  },
+  {
+   "file": "keycloak/kc17-legacy-auth-realms-master-protocol-openid-connect-certs.json",
+   "product": "keycloak",
+   "image": "quay.io/keycloak/keycloak:17.0.1-legacy",
+   "case": "kc17-legacy-auth-realms-master-protocol-openid-connect-certs",
+   "path": "/auth/realms/master/protocol/openid-connect/certs",
+   "status": 200,
+   "notes": "legacy WildFly distribution 17.0.1"
+  },
+  {
+   "file": "keycloak/kc17-legacy-auth-realms-master.json",
+   "product": "keycloak",
+   "image": "quay.io/keycloak/keycloak:17.0.1-legacy",
+   "case": "kc17-legacy-auth-realms-master",
+   "path": "/auth/realms/master",
+   "status": 200,
+   "notes": "legacy WildFly distribution 17.0.1"
+  },
+  {
+   "file": "keycloak/kc17-legacy-auth-slash.json",
+   "product": "keycloak",
+   "image": "quay.io/keycloak/keycloak:17.0.1-legacy",
+   "case": "kc17-legacy-auth-slash",
+   "path": "/auth/",
+   "status": 200,
+   "notes": "legacy WildFly distribution 17.0.1"
+  },
+  {
+   "file": "keycloak/kc17-legacy-health-ready.json",
+   "product": "keycloak",
+   "image": "quay.io/keycloak/keycloak:17.0.1-legacy",
+   "case": "kc17-legacy-health-ready",
+   "path": "/health/ready",
+   "status": 404,
+   "notes": "legacy WildFly distribution 17.0.1"
+  },
+  {
+   "file": "keycloak/kc17-legacy-health.json",
+   "product": "keycloak",
+   "image": "quay.io/keycloak/keycloak:17.0.1-legacy",
+   "case": "kc17-legacy-health",
+   "path": "/health",
+   "status": 404,
+   "notes": "legacy WildFly distribution 17.0.1"
+  },
+  {
+   "file": "keycloak/kc17-legacy-realms-master--well-known-openid-configuration.json",
+   "product": "keycloak",
+   "image": "quay.io/keycloak/keycloak:17.0.1-legacy",
+   "case": "kc17-legacy-realms-master--well-known-openid-configuration",
+   "path": "/realms/master/.well-known/openid-configuration",
+   "status": 404,
+   "notes": "legacy WildFly distribution 17.0.1"
+  },
+  {
+   "file": "keycloak/kc17-legacy-realms-master.json",
+   "product": "keycloak",
+   "image": "quay.io/keycloak/keycloak:17.0.1-legacy",
+   "case": "kc17-legacy-realms-master",
+   "path": "/realms/master",
+   "status": 404,
+   "notes": "legacy WildFly distribution 17.0.1"
+  },
+  {
+   "file": "keycloak/kc17-legacy-root.json",
+   "product": "keycloak",
+   "image": "quay.io/keycloak/keycloak:17.0.1-legacy",
+   "case": "kc17-legacy-root",
+   "path": "/",
+   "status": 200,
+   "notes": "legacy WildFly distribution 17.0.1"
+  },
+  {
+   "file": "keycloak/kc24-auth-health.json",
+   "product": "keycloak",
+   "image": "quay.io/keycloak/keycloak:24.0",
+   "case": "kc24-auth-health",
+   "path": "/auth/health",
+   "status": 404,
+   "notes": ""
+  },
+  {
+   "file": "keycloak/kc24-auth-realms-master--well-known-openid-configuration.json",
+   "product": "keycloak",
+   "image": "quay.io/keycloak/keycloak:24.0",
+   "case": "kc24-auth-realms-master--well-known-openid-configuration",
+   "path": "/auth/realms/master/.well-known/openid-configuration",
+   "status": 404,
+   "notes": ""
+  },
+  {
+   "file": "keycloak/kc24-auth-realms-master.json",
+   "product": "keycloak",
+   "image": "quay.io/keycloak/keycloak:24.0",
+   "case": "kc24-auth-realms-master",
+   "path": "/auth/realms/master",
+   "status": 404,
+   "notes": ""
+  },
+  {
+   "file": "keycloak/kc24-auth-slash.json",
+   "product": "keycloak",
+   "image": "quay.io/keycloak/keycloak:24.0",
+   "case": "kc24-auth-slash",
+   "path": "/auth/",
+   "status": 404,
+   "notes": ""
+  },
+  {
+   "file": "keycloak/kc24-health-ready.json",
+   "product": "keycloak",
+   "image": "quay.io/keycloak/keycloak:24.0",
+   "case": "kc24-health-ready",
+   "path": "/health/ready",
+   "status": 404,
+   "notes": ""
+  },
+  {
+   "file": "keycloak/kc24-health.json",
+   "product": "keycloak",
+   "image": "quay.io/keycloak/keycloak:24.0",
+   "case": "kc24-health",
+   "path": "/health",
+   "status": 404,
+   "notes": ""
+  },
+  {
+   "file": "keycloak/kc24-realms-master--well-known-openid-configuration.json",
+   "product": "keycloak",
+   "image": "quay.io/keycloak/keycloak:24.0",
+   "case": "kc24-realms-master--well-known-openid-configuration",
+   "path": "/realms/master/.well-known/openid-configuration",
+   "status": 200,
+   "notes": ""
+  },
+  {
+   "file": "keycloak/kc24-realms-master.json",
+   "product": "keycloak",
+   "image": "quay.io/keycloak/keycloak:24.0",
+   "case": "kc24-realms-master",
+   "path": "/realms/master",
+   "status": 200,
+   "notes": ""
+  },
+  {
+   "file": "keycloak/kc24-root.json",
+   "product": "keycloak",
+   "image": "quay.io/keycloak/keycloak:24.0",
+   "case": "kc24-root",
+   "path": "/",
+   "status": 302,
+   "notes": ""
+  },
+  {
+   "file": "keycloak/kc26-auth-health.json",
+   "product": "keycloak",
+   "image": "quay.io/keycloak/keycloak:26.4",
+   "case": "kc26-auth-health",
+   "path": "/auth/health",
+   "status": 404,
+   "notes": ""
+  },
+  {
+   "file": "keycloak/kc26-auth-realms-master--well-known-openid-configuration.json",
+   "product": "keycloak",
+   "image": "quay.io/keycloak/keycloak:26.4",
+   "case": "kc26-auth-realms-master--well-known-openid-configuration",
+   "path": "/auth/realms/master/.well-known/openid-configuration",
+   "status": 404,
+   "notes": ""
+  },
+  {
+   "file": "keycloak/kc26-auth-realms-master.json",
+   "product": "keycloak",
+   "image": "quay.io/keycloak/keycloak:26.4",
+   "case": "kc26-auth-realms-master",
+   "path": "/auth/realms/master",
+   "status": 404,
+   "notes": ""
+  },
+  {
+   "file": "keycloak/kc26-auth-slash.json",
+   "product": "keycloak",
+   "image": "quay.io/keycloak/keycloak:26.4",
+   "case": "kc26-auth-slash",
+   "path": "/auth/",
+   "status": 404,
+   "notes": ""
+  },
+  {
+   "file": "keycloak/kc26-authprefix-auth-health.json",
+   "product": "keycloak",
+   "image": "quay.io/keycloak/keycloak:26.4",
+   "case": "kc26-authprefix-auth-health",
+   "path": "/auth/health",
+   "status": 404,
+   "notes": "keycloak 26.4 started with --http-relative-path=/auth"
+  },
+  {
+   "file": "keycloak/kc26-authprefix-auth-realms-master--well-known-openid-configuration.json",
+   "product": "keycloak",
+   "image": "quay.io/keycloak/keycloak:26.4",
+   "case": "kc26-authprefix-auth-realms-master--well-known-openid-configuration",
+   "path": "/auth/realms/master/.well-known/openid-configuration",
+   "status": 200,
+   "notes": "keycloak 26.4 started with --http-relative-path=/auth"
+  },
+  {
+   "file": "keycloak/kc26-authprefix-auth-realms-master.json",
+   "product": "keycloak",
+   "image": "quay.io/keycloak/keycloak:26.4",
+   "case": "kc26-authprefix-auth-realms-master",
+   "path": "/auth/realms/master",
+   "status": 200,
+   "notes": "keycloak 26.4 started with --http-relative-path=/auth"
+  },
+  {
+   "file": "keycloak/kc26-authprefix-auth-slash.json",
+   "product": "keycloak",
+   "image": "quay.io/keycloak/keycloak:26.4",
+   "case": "kc26-authprefix-auth-slash",
+   "path": "/auth/",
+   "status": 302,
+   "notes": "keycloak 26.4 started with --http-relative-path=/auth"
+  },
+  {
+   "file": "keycloak/kc26-authprefix-health-ready.json",
+   "product": "keycloak",
+   "image": "quay.io/keycloak/keycloak:26.4",
+   "case": "kc26-authprefix-health-ready",
+   "path": "/health/ready",
+   "status": 404,
+   "notes": "keycloak 26.4 started with --http-relative-path=/auth"
+  },
+  {
+   "file": "keycloak/kc26-authprefix-health.json",
+   "product": "keycloak",
+   "image": "quay.io/keycloak/keycloak:26.4",
+   "case": "kc26-authprefix-health",
+   "path": "/health",
+   "status": 404,
+   "notes": "keycloak 26.4 started with --http-relative-path=/auth"
+  },
+  {
+   "file": "keycloak/kc26-authprefix-realms-master--well-known-openid-configuration.json",
+   "product": "keycloak",
+   "image": "quay.io/keycloak/keycloak:26.4",
+   "case": "kc26-authprefix-realms-master--well-known-openid-configuration",
+   "path": "/realms/master/.well-known/openid-configuration",
+   "status": 404,
+   "notes": "keycloak 26.4 started with --http-relative-path=/auth"
+  },
+  {
+   "file": "keycloak/kc26-authprefix-realms-master.json",
+   "product": "keycloak",
+   "image": "quay.io/keycloak/keycloak:26.4",
+   "case": "kc26-authprefix-realms-master",
+   "path": "/realms/master",
+   "status": 404,
+   "notes": "keycloak 26.4 started with --http-relative-path=/auth"
+  },
+  {
+   "file": "keycloak/kc26-authprefix-root.json",
+   "product": "keycloak",
+   "image": "quay.io/keycloak/keycloak:26.4",
+   "case": "kc26-authprefix-root",
+   "path": "/",
+   "status": 302,
+   "notes": "keycloak 26.4 started with --http-relative-path=/auth"
+  },
+  {
+   "file": "keycloak/kc26-health-ready.json",
+   "product": "keycloak",
+   "image": "quay.io/keycloak/keycloak:26.4",
+   "case": "kc26-health-ready",
+   "path": "/health/ready",
+   "status": 404,
+   "notes": ""
+  },
+  {
+   "file": "keycloak/kc26-health.json",
+   "product": "keycloak",
+   "image": "quay.io/keycloak/keycloak:26.4",
+   "case": "kc26-health",
+   "path": "/health",
+   "status": 404,
+   "notes": ""
+  },
+  {
+   "file": "keycloak/kc26-realms-master--well-known-openid-configuration.json",
+   "product": "keycloak",
+   "image": "quay.io/keycloak/keycloak:26.4",
+   "case": "kc26-realms-master--well-known-openid-configuration",
+   "path": "/realms/master/.well-known/openid-configuration",
+   "status": 200,
+   "notes": ""
+  },
+  {
+   "file": "keycloak/kc26-realms-master.json",
+   "product": "keycloak",
+   "image": "quay.io/keycloak/keycloak:26.4",
+   "case": "kc26-realms-master",
+   "path": "/realms/master",
+   "status": 200,
+   "notes": ""
+  },
+  {
+   "file": "keycloak/kc26-root.json",
+   "product": "keycloak",
+   "image": "quay.io/keycloak/keycloak:26.4",
+   "case": "kc26-root",
+   "path": "/",
+   "status": 302,
+   "notes": ""
+  },
+  {
+   "file": "none/httpd-realms-master.json",
+   "product": "none",
+   "image": "httpd:alpine",
+   "case": "httpd-realms-master",
+   "path": "/realms/master",
+   "status": 404,
+   "notes": ""
+  },
+  {
+   "file": "none/httpd-root.json",
+   "product": "none",
+   "image": "httpd:alpine",
+   "case": "httpd-root",
+   "path": "/",
+   "status": 200,
+   "notes": ""
+  },
+  {
+   "file": "none/nginx-realms-master.json",
+   "product": "none",
+   "image": "nginx:alpine",
+   "case": "nginx-realms-master",
+   "path": "/realms/master",
+   "status": 404,
+   "notes": ""
+  },
+  {
+   "file": "none/nginx-root.json",
+   "product": "none",
+   "image": "nginx:alpine",
+   "case": "nginx-root",
+   "path": "/",
+   "status": 200,
+   "notes": ""
+  },
+  {
+   "file": "zitadel/zitadel-debug-healthz.json",
+   "product": "zitadel",
+   "image": "ghcr.io/zitadel/zitadel:latest",
+   "case": "zitadel-debug-healthz",
+   "path": "/debug/healthz",
+   "status": 200,
+   "notes": "requested with Host: localhost:18191 (instance domain); issuer without port"
+  },
+  {
+   "file": "zitadel/zitadel-debug-ready.json",
+   "product": "zitadel",
+   "image": "ghcr.io/zitadel/zitadel:latest",
+   "case": "zitadel-debug-ready",
+   "path": "/debug/ready",
+   "status": 200,
+   "notes": "requested with Host: localhost:18191 (instance domain); issuer without port"
+  },
+  {
+   "file": "zitadel/zitadel-debug-validate.json",
+   "product": "zitadel",
+   "image": "ghcr.io/zitadel/zitadel:latest",
+   "case": "zitadel-debug-validate",
+   "path": "/debug/validate",
+   "status": 200,
+   "notes": "requested with Host: localhost:18191 (instance domain); issuer without port"
+  },
+  {
+   "file": "zitadel/zitadel-oauth-keys.json",
+   "product": "zitadel",
+   "image": "ghcr.io/zitadel/zitadel:latest",
+   "case": "zitadel-oauth-keys",
+   "path": "/oauth/v2/keys",
+   "status": 200,
+   "notes": "requested with Host: localhost:18191 (instance domain); issuer without port"
+  },
+  {
+   "file": "zitadel/zitadel-openid-configuration.json",
+   "product": "zitadel",
+   "image": "ghcr.io/zitadel/zitadel:latest",
+   "case": "zitadel-openid-configuration",
+   "path": "/.well-known/openid-configuration",
+   "status": 200,
+   "notes": "requested with Host: localhost:18191 (instance domain); issuer without port"
+  },
+  {
+   "file": "zitadel/zitadel-realms-master.json",
+   "product": "zitadel",
+   "image": "ghcr.io/zitadel/zitadel:latest",
+   "case": "zitadel-realms-master",
+   "path": "/realms/master",
+   "status": 404,
+   "notes": "requested with Host: localhost:18191 (instance domain); issuer without port"
+  },
+  {
+   "file": "zitadel/zitadel-root.json",
+   "product": "zitadel",
+   "image": "ghcr.io/zitadel/zitadel:latest",
+   "case": "zitadel-root",
+   "path": "/",
+   "status": 302,
+   "notes": "requested with Host: localhost:18191 (instance domain); issuer without port"
+  },
+  {
+   "file": "zitadel/zitadel-ui-console.json",
+   "product": "zitadel",
+   "image": "ghcr.io/zitadel/zitadel:latest",
+   "case": "zitadel-ui-console",
+   "path": "/ui/console",
+   "status": 200,
+   "notes": "body truncated to 2 KiB; requested with Host: localhost:18191 (instance domain); issuer without port"
+  }
+ ],
+ "not_captured": [
+  {
+   "product": "keycloak jboss/keycloak:16.x",
+   "reason": "image jboss/keycloak not pullable (access denied); quay 17.0.1-legacy and 26.4 --http-relative-path=/auth used instead"
+  },
+  {
+   "product": "ferriskey (docker hub)",
+   "reason": "no official docker hub image; official image is ghcr.io/ferriskey/ferriskey-api (captured)"
+  },
+  {
+   "product": "authentik latest",
+   "reason": "ghcr.io/goauthentik/server:latest does not exist; 2026.8 captured"
+  },
+  {
+   "product": "zitadel /ui/console full body",
+   "reason": "truncated to 2 KiB as requested"
+  }
+ ]
+}

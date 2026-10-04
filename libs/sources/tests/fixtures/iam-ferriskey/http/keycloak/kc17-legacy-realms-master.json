@@ -1,0 +1,29 @@
+{
+ "product": "keycloak",
+ "image": "quay.io/keycloak/keycloak:17.0.1-legacy",
+ "image_digest": "quay.io/keycloak/keycloak@sha256:68f9f38c8f3005eb1c7f5afade9d28975f03022500d7b42c9a9a11d1f4b606ab",
+ "captured_at": "2026-10-04T13:10:18Z",
+ "request": {
+  "method": "GET",
+  "path": "/realms/master"
+ },
+ "response": {
+  "status": 404,
+  "headers": [
+   [
+    "connection",
+    "keep-alive"
+   ],
+   [
+    "content-length",
+    "74"
+   ],
+   [
+    "content-type",
+    "text/html"
+   ]
+  ],
+  "body": "<html><head><title>Error</title></head><body>404 - Not Found</body></html>",
+  "body_truncated": false
+ }
+}

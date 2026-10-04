@@ -1,0 +1,33 @@
+{
+ "product": "none",
+ "image": "nginx:alpine",
+ "image_digest": "nginx@sha256:df221db836e1754089190208cee7eeda94f233197056426eda74a43ab1abeac2",
+ "captured_at": "2026-10-04T13:08:53Z",
+ "request": {
+  "method": "GET",
+  "path": "/realms/master"
+ },
+ "response": {
+  "status": 404,
+  "headers": [
+   [
+    "server",
+    "nginx/1.31.6"
+   ],
+   [
+    "content-type",
+    "text/html"
+   ],
+   [
+    "content-length",
+    "153"
+   ],
+   [
+    "connection",
+    "keep-alive"
+   ]
+  ],
+  "body": "<html>\r\n<head><title>404 Not Found</title></head>\r\n<body>\r\n<center><h1>404 Not Found</h1></center>\r\n<hr><center>nginx/1.31.6</center>\r\n</body>\r\n</html>\r\n",
+  "body_truncated": false
+ }
+}

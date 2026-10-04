@@ -1,0 +1,57 @@
+{
+ "product": "authentik",
+ "image": "ghcr.io/goauthentik/server:2026.8",
+ "image_digest": "ghcr.io/goauthentik/server@sha256:ab9b4e8cc4ab3f8d1198d2db6aeea66bafea1963b3f2843589e0d163f97d9849",
+ "captured_at": "2026-10-04T13:28:56Z",
+ "request": {
+  "method": "GET",
+  "path": "/api/v3/root/config/"
+ },
+ "response": {
+  "status": 200,
+  "headers": [
+   [
+    "server",
+    "uvicorn"
+   ],
+   [
+    "content-type",
+    "application/json; charset=utf-8"
+   ],
+   [
+    "allow",
+    "GET, HEAD, OPTIONS"
+   ],
+   [
+    "x-frame-options",
+    "DENY"
+   ],
+   [
+    "content-length",
+    "359"
+   ],
+   [
+    "x-content-type-options",
+    "nosniff"
+   ],
+   [
+    "referrer-policy",
+    "same-origin"
+   ],
+   [
+    "vary",
+    "Accept-Language, Cookie"
+   ],
+   [
+    "content-language",
+    "en"
+   ],
+   [
+    "x-powered-by",
+    "authentik"
+   ]
+  ],
+  "body": "{\"error_reporting\":{\"enabled\":false,\"sentry_dsn\":\"https://redacted@error-reporting.example.test/0\",\"environment\":\"customer\",\"send_pii\":false,\"traces_sample_rate\":0.1},\"capabilities\":[\"can_asn\",\"can_geo_ip\",\"can_impersonate\",\"is_enterprise\"],\"cache_timeout\":300,\"cache_timeout_flows\":300,\"cache_timeout_policies\":300}",
+  "body_truncated": false
+ }
+}

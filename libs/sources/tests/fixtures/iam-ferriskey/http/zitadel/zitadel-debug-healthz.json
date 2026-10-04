@@ -1,0 +1,29 @@
+{
+ "product": "zitadel",
+ "image": "ghcr.io/zitadel/zitadel:latest",
+ "image_digest": "ghcr.io/zitadel/zitadel@sha256:90a3045b80a2b5b395e1e770302076906af3a5911225af7c464b4f3bd00d0a1b",
+ "captured_at": "2026-10-04T13:25:22Z",
+ "request": {
+  "method": "GET",
+  "path": "/debug/healthz"
+ },
+ "response": {
+  "status": 200,
+  "headers": [
+   [
+    "x-robots-tag",
+    "none"
+   ],
+   [
+    "content-length",
+    "2"
+   ],
+   [
+    "content-type",
+    "text/plain; charset=utf-8"
+   ]
+  ],
+  "body": "ok",
+  "body_truncated": false
+ }
+}

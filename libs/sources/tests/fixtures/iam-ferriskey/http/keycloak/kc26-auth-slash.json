@@ -1,0 +1,25 @@
+{
+ "product": "keycloak",
+ "image": "quay.io/keycloak/keycloak:26.4",
+ "image_digest": "quay.io/keycloak/keycloak@sha256:9409c59bdfb65dbffa20b11e6f18b8abb9281d480c7ca402f51ed3d5977e6007",
+ "captured_at": "2026-10-04T13:10:11Z",
+ "request": {
+  "method": "GET",
+  "path": "/auth/"
+ },
+ "response": {
+  "status": 404,
+  "headers": [
+   [
+    "content-length",
+    "58"
+   ],
+   [
+    "content-type",
+    "application/json"
+   ]
+  ],
+  "body": "{\"error\":\"Unable to find matching target resource method\"}",
+  "body_truncated": false
+ }
+}

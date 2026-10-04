@@ -1,0 +1,33 @@
+{
+ "product": "ferriskey",
+ "image": "ghcr.io/ferriskey/ferriskey-api:latest",
+ "image_digest": "ghcr.io/ferriskey/ferriskey-api@sha256:785b526f2cc3e33614a0cae6d754d8d98158fcaea5e0dda3836df0866ade0da0",
+ "captured_at": "2026-10-04T13:29:34Z",
+ "request": {
+  "method": "GET",
+  "path": "/auth/realms/master"
+ },
+ "response": {
+  "status": 404,
+  "headers": [
+   [
+    "vary",
+    "origin, access-control-request-method, access-control-request-headers"
+   ],
+   [
+    "access-control-allow-credentials",
+    "true"
+   ],
+   [
+    "access-control-expose-headers",
+    "content-disposition"
+   ],
+   [
+    "content-length",
+    "0"
+   ]
+  ],
+  "body": "",
+  "body_truncated": false
+ }
+}

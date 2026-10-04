@@ -1,0 +1,53 @@
+{
+ "product": "authentik",
+ "image": "ghcr.io/goauthentik/server:2026.8",
+ "image_digest": "ghcr.io/goauthentik/server@sha256:ab9b4e8cc4ab3f8d1198d2db6aeea66bafea1963b3f2843589e0d163f97d9849",
+ "captured_at": "2026-10-04T13:28:57Z",
+ "request": {
+  "method": "GET",
+  "path": "/api/v3/"
+ },
+ "response": {
+  "status": 200,
+  "headers": [
+   [
+    "server",
+    "uvicorn"
+   ],
+   [
+    "content-type",
+    "text/html; charset=utf-8"
+   ],
+   [
+    "x-frame-options",
+    "DENY"
+   ],
+   [
+    "content-length",
+    "2798"
+   ],
+   [
+    "x-content-type-options",
+    "nosniff"
+   ],
+   [
+    "referrer-policy",
+    "same-origin"
+   ],
+   [
+    "vary",
+    "Accept-Language, Cookie"
+   ],
+   [
+    "content-language",
+    "en"
+   ],
+   [
+    "x-powered-by",
+    "authentik"
+   ]
+  ],
+  "body": "\n\n\n\n\n<!DOCTYPE html>\n<html\n    lang=\"en\"\n    \n    data-theme=\"light\"\n    data-theme-choice=\"auto\"\n>\n    <head>\n        <meta charset=\"UTF-8\">\n        <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n        \n        <meta name=\"darkreader-lock\">\n        <title>\nAPI Browser - authentik\n</title>\n        <link rel=\"icon\" href=\"/static/dist/assets/icons/icon.png\">\n        <link rel=\"shortcut icon\" href=\"/static/dist/assets/icons/icon.png\">\n\n        \n        \n\n        \n        <link rel=\"stylesheet\" type=\"text/css\" href=\"/static/dist/styles/interface-2026.8.3.css\" />\n        \n\n        \n\n\n\n  <script data-id=\"theme-script\">\n    \"use strict\";\n\n    (function () {\n        try {\n          const { documentElement } = document;\n\n            /* Ignore older theme names */\n            let locallyStoredTheme = window.localStorage?.getItem(\"theme\") || null;\n\n            if (typeof locallyStoredTheme === \"string\") {\n                locallyStoredTheme = locallyStoredTheme.trim();\n            }\n            if (!([\"auto\", \"light\", \"dark\"].includes(locallyStoredTheme))) {\n                locallyStoredTheme = null;\n            }\n\n            const initialThemeChoice =\n                new URLSearchParams(window.location.search).get(\"theme\") || locallyStoredTheme;\n\n            const themeChoice =\n                initialThemeChoice || documentElement.dataset.themeChoice || \"auto\";\n\n            documentElement.dataset.themeChoice = themeChoice;\n\n            if (themeChoice === \"auto\") {\n                documentElement.dataset.theme = window.matchMedia(\n                    \"(prefers-color-scheme: dark)\",\n                ).matches\n                    ? \"dark\"\n                    : \"light\";\n            } else {\n                documentElement.dataset.theme = themeChoice;\n            }\n\n            documentElement.classList.toggle(\"pf-theme-dark\", documentElement.dataset.theme === \"dark\");\n        } catch (e) {\n            console.error(\"Failed to apply theme\", e);\n        }\n    })();\n  </script>\n\n  <meta name=\"color-scheme\" content=\"light dark\" />\n  <meta name=\"theme-color\" content=\"#ffffff\" media=\"(prefers-color-scheme: light)\">\n  <meta name=\"theme-color\" content=\"#18191a\" media=\"(prefers-color-scheme: dark)\">\n\n\n\n        <style data-id=\"brand-css\"></style>\n        <script src=\"/static/dist/poly-2026.8.3.js\" type=\"module\"></script>\n        \n<script src=\"/static/dist/standalone/api-browser/index-2026.8.3.js\" type=\"module\"></script>\n\n        \n        <meta name=\"sentry-trace\" content=\"50dd564b8a144b3f9479793f367cfcc3-a07b811e3c12f218\" />\n        \n        <meta name=\"baggage\" content=\"\" />\n        \n    </head>\n    <body>\n        \n<ak-api-browser schemaPath=\"https://sso.example.test/api/v3/schema/\"></ak-api-browser>\n\n        \n        \n        \n    </body>\n</html>\n",
+  "body_truncated": false
+ }
+}

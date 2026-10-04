@@ -1,0 +1,53 @@
+{
+ "product": "authentik",
+ "image": "ghcr.io/goauthentik/server:2026.8",
+ "image_digest": "ghcr.io/goauthentik/server@sha256:ab9b4e8cc4ab3f8d1198d2db6aeea66bafea1963b3f2843589e0d163f97d9849",
+ "captured_at": "2026-10-04T13:28:57Z",
+ "request": {
+  "method": "GET",
+  "path": "/setup"
+ },
+ "response": {
+  "status": 503,
+  "headers": [
+   [
+    "server",
+    "uvicorn"
+   ],
+   [
+    "content-type",
+    "text/html; charset=utf-8"
+   ],
+   [
+    "x-frame-options",
+    "DENY"
+   ],
+   [
+    "content-length",
+    "6476"
+   ],
+   [
+    "x-content-type-options",
+    "nosniff"
+   ],
+   [
+    "referrer-policy",
+    "same-origin"
+   ],
+   [
+    "vary",
+    "Accept-Language, Cookie"
+   ],
+   [
+    "content-language",
+    "en"
+   ],
+   [
+    "x-powered-by",
+    "authentik"
+   ]
+  ],
+  "body": "<!doctype html>\n<html lang=\"en\">\n    <head>\n        <meta charset=\"utf-8\" />\n        <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />\n        <meta name=\"robots\" content=\"noindex\" />\n        <meta name=\"color-scheme\" content=\"light dark\" />\n\n        <title>authentik</title>\n        <style>\n            *,\n            *::before,\n            *::after {\n                box-sizing: border-box;\n            }\n\n            html {\n                font-size: 100%;\n            }\n\n            body {\n                font-size: clamp(16px, 3dvw, 20px);\n                background-color: #000;\n                background-color: Canvas;\n                color: #fff;\n                color: CanvasText;\n                font-family: system-ui, ui-sans-serif, sans-serif;\n                text-align: center;\n                display: grid;\n                place-content: center;\n                place-items: center;\n                min-height: 100dvh;\n                margin: 0;\n                padding-block: 0 6em;\n                padding-inline: 0.5em;\n            }\n\n            .logo {\n                height: 3.5em;\n                max-width: 90dvw;\n            }\n\n            .container {\n                position: absolute;\n                left: 0;\n                top: 50%;\n                right: 0;\n                bottom: 0;\n                z-index: -1;\n                overflow: hidden;\n            }\n\n            .container canvas {\n                display: block;\n            }\n        </style>\n    </head>\n    <body>\n        <svg\n            class=\"logo\"\n            xmlns=\"http://www.w3.org/2000/svg\"\n            viewBox=\"0 0 1000 144.29\"\n            aria-label=\"authentik\"\n            aria-role=\"heading\"\n            aria-level=\"1\"\n            preserveAspectRatio=\"xMidYMid meet\"\n        >\n            <path\n                fill=\"currentColor\"\n                d=\"M106 41.08h25.39v101.2H106v-10.7a50 50 0 0 1-14.92 10.19 41.84 41.84 0 0 1-16.21 3.11q-19.61 0-33.91-15.21T26.64 91.86q0-23.43 13.85-38.41t33.63-15a42.78 42.78 0 0 1 17.09 3.44A46.82 46.82 0 0 1 106 52.24ZM79.29 61.91a25.65 25.65 0 0 0-19.56 8.33q-7.78 8.33-7.79 21.34t7.93 21.58a25.66 25.66 0 0 0 19.51 8.47 26.15 26.15 0 0 0 19.84-8.33q7.88-8.33 7.88-21.81 0-13.2-7.88-21.39t-19.93-8.19ZM168.39 41.08h25.67v48.74q0 14.22 2 19.76a17.24 17.24 0 0 0 6.29 8.61 18.06 18.06 0 0 0 10.65 3.07 18.6 18.6 0 0 0 10.77-3 17.7 17.7 0 0 0 6.57-8.88q1.59-4.36 1.59-18.7v-49.6h25.39V84q0 26.51-4.18 36.27a39.6 39.6 0 0 1-15.07 18.28q-10 6.38-25.3 6.37-16.65 0-26.93-7.44t-14.48-20.78q-3-9.21-3-33.49ZM297.3 3.78h25.39v37.3h15.07v21.85h-15.07v79.35H297.3V62.93h-13V41.08h13ZM362.86 2h25.21v49.3a57.74 57.74 0 0 1 15-9.63 38.56 38.56 0 0 1 15.25-3.21 34.36 34.36 0 0 1 25.39 10.42q8.83 9 8.84 26.51v66.88h-25V97.91q0-17.58-1.68-23.81t-5.71-9.3a16.07 16.07 0 0 0-10-3.07 18.85 18.85 0 0 0-13.26 5.11q-5.53 5.11-7.67 14-1.12 4.56-1.12 20.84v40.65h-25.25ZM589.91 99h-81.58q1.77 10.78 9.44 17.16t19.58 6.37a33.86 33.86 0 0 0 24.46-10l21.4 10a50.54 50.54 0 0 1-19.16 16.79q-11.16 5.44-26.51 5.44-23.82 0-38.79-15t-15-37.63q0-23.16 14.93-38.46t37.44-15.3q23.91 0 38.88 15.3t15 40.42Zm-25.4-20a25.48 25.48 0 0 0-9.92-13.77A28.81 28.81 0 0 0 537.4 60a30.42 30.42 0 0 0-18.64 5.95q-5 3.72-9.31 13.12ZM621.89 41.08h25.39v10.37q8.64-7.29 15.65-10.13a37.82 37.82 0 0 1 14.35-2.85A34.77 34.77 0 0 1 702.83 49q8.82 8.94 8.82 26.42v66.88h-25.11V98q0-18.12-1.63-24.06a16.44 16.44 0 0 0-5.66-9.06 15.8 15.8 0 0 0-10-3.11 18.73 18.73 0 0 0-13.23 5.15q-5.49 5.08-7.62 14.22-1.12 4.74-1.12 20.54v40.6h-25.39ZM750.71 3.78h25.39v37.3h15.07v21.85H776.1v79.35h-25.39V62.93h-13V41.08h13ZM826.09-.6a15.55 15.55 0 0 1 11.45 4.84A16.08 16.08 0 0 1 842.31 16a15.87 15.87 0 0 1-4.72 11.58 15.34 15.34 0 0 1-11.32 4.79 15.6 15.6 0 0 1-11.55-4.88 16.35 16.35 0 0 1-4.72-11.9 15.57 15.57 0 0 1 4.73-11.44A15.53 15.53 0 0 1 826.09-.6ZM813.39 41.08h25.39v101.2h-25.39zM873.47 2h25.39v80.8l37.39-41.72h31.89l-43.59 48.5 48.81 52.7h-31.53l-43-46.64v46.64h-25.36Z\"\n            />\n        </svg>\n\n        <p>Server is starting up. Refreshing in a few seconds...</p>\n\n        <div class=\"container\" aria-hidden=\"true\">\n            <canvas id=\"waves-canvas\"></canvas>\n        </div>\n\n        <script type=\"text/javascript\">\n            \"use strict\";\n\n            let timeoutID = -1;\n\n            function checkStatus() {\n                console.log(\"Checking server status...\");\n\n                return fetch(window.location.href, {\n                    method: \"HEAD\",\n                    headers: {\n                        \"content-type\": \"application/json\",\n                    },\n                })\n                    .then((response) => {\n                        if (response.ok) {\n                            console.log(\"Server is ready! Reloading...\");\n                            clearTimeout(timeoutID);\n                            window.location.reload();\n                            return;\n                        }\n\n                        if (response.status === 503) {\n                            throw new Error(\"Server is still starting up...\");\n                        }\n                    })\n                    .catch((error) => {\n                        console.warn(`Checking server status failed: ${error}`);\n                        timeoutID = setTimeout(checkStatus, 2000);\n                    });\n            }\n\n            const queryParams = new URLSearchParams(window.location.search);\n\n            if (window.location.origin.startsWith(\"http\") && !queryParams.has(\"debug\")) {\n                console.log(\"Checking server status...\");\n                checkStatus();\n            }\n        </script>\n\n        <script type=\"module\">\n            import(\"/static/dist/standalone/loading/wave-boi.mjs\")\n                .then(({ WavesCanvas }) => {\n                    function drawAnimation() {\n                        const canvas = document.getElementById(\"waves-canvas\");\n                        const waves = new WavesCanvas(canvas);\n                        waves.play();\n                    }\n\n                    if (document.readyState === \"loading\") {\n                        document.addEventListener(\"DOMContentLoaded\", drawAnimation);\n                    } else {\n                        drawAnimation();\n                    }\n                })\n                .catch((error) => {\n                    console.debug(\"Skipping waves canvas:\", error);\n                });\n        </script>\n    </body>\n</html>\n",
+  "body_truncated": false
+ }
+}

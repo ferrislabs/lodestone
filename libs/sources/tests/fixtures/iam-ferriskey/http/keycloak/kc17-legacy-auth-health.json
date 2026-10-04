@@ -1,0 +1,49 @@
+{
+ "product": "keycloak",
+ "image": "quay.io/keycloak/keycloak:17.0.1-legacy",
+ "image_digest": "quay.io/keycloak/keycloak@sha256:68f9f38c8f3005eb1c7f5afade9d28975f03022500d7b42c9a9a11d1f4b606ab",
+ "captured_at": "2026-10-04T13:10:19Z",
+ "request": {
+  "method": "GET",
+  "path": "/auth/health"
+ },
+ "response": {
+  "status": 404,
+  "headers": [
+   [
+    "x-xss-protection",
+    "1; mode=block"
+   ],
+   [
+    "x-frame-options",
+    "SAMEORIGIN"
+   ],
+   [
+    "referrer-policy",
+    "no-referrer"
+   ],
+   [
+    "connection",
+    "keep-alive"
+   ],
+   [
+    "strict-transport-security",
+    "max-age=31536000; includeSubDomains"
+   ],
+   [
+    "x-content-type-options",
+    "nosniff"
+   ],
+   [
+    "content-type",
+    "application/json"
+   ],
+   [
+    "content-length",
+    "101"
+   ]
+  ],
+  "body": "{\"error\":\"RESTEASY003210: Could not find resource for full path: https://sso.example.test/auth/health\"}",
+  "body_truncated": false
+ }
+}

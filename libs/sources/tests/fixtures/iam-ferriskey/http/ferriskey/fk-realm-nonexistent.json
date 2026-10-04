@@ -1,0 +1,37 @@
+{
+ "product": "ferriskey",
+ "image": "ghcr.io/ferriskey/ferriskey-api:latest",
+ "image_digest": "ghcr.io/ferriskey/ferriskey-api@sha256:785b526f2cc3e33614a0cae6d754d8d98158fcaea5e0dda3836df0866ade0da0",
+ "captured_at": "2026-10-04T13:29:34Z",
+ "request": {
+  "method": "GET",
+  "path": "/realms/nope/.well-known/openid-configuration"
+ },
+ "response": {
+  "status": 200,
+  "headers": [
+   [
+    "content-type",
+    "application/json"
+   ],
+   [
+    "vary",
+    "origin, access-control-request-method, access-control-request-headers"
+   ],
+   [
+    "access-control-allow-credentials",
+    "true"
+   ],
+   [
+    "access-control-expose-headers",
+    "content-disposition"
+   ],
+   [
+    "content-length",
+    "1401"
+   ]
+  ],
+  "body": "{\"issuer\":\"https://sso.example.test/realms/nope\",\"authorization_endpoint\":\"https://sso.example.test/realms/nope/protocol/openid-connect/auth\",\"token_endpoint\":\"https://sso.example.test/realms/nope/protocol/openid-connect/token\",\"revocation_endpoint\":\"https://sso.example.test/realms/nope/protocol/openid-connect/revoke\",\"end_session_endpoint\":\"https://sso.example.test/realms/nope/protocol/openid-connect/logout\",\"introspection_endpoint\":\"https://sso.example.test/realms/nope/protocol/openid-connect/token/introspect\",\"device_authorization_endpoint\":\"https://sso.example.test/realms/nope/protocol/openid-connect/auth/device\",\"userinfo_endpoint\":\"https://sso.example.test/realms/nope/protocol/openid-connect/userinfo\",\"jwks_uri\":\"https://sso.example.test/realms/nope/protocol/openid-connect/jwks.json\",\"grant_types_supported\":[\"authorization_code\",\"refresh_token\",\"client_credentials\",\"password\",\"urn:ietf:params:oauth:grant-type:device_code\",\"urn:ietf:params:oauth:grant-type:token-exchange\"],\"response_types_supported\":[\"code\",\"none\",\"id_token\",\"token\",\"id_token token\",\"code id_token\",\"code token\",\"code id_token token\"],\"subject_types_supported\":[\"public\"],\"id_token_signing_alg_values_supported\":[\"RS256\"],\"token_endpoint_auth_methods_supported\":[\"client_secret_basic\",\"client_secret_post\"],\"code_challenge_methods_supported\":[\"S256\"],\"backchannel_logout_supported\":true,\"backchannel_logout_session_supported\":true}",
+  "body_truncated": false
+ }
+}

@@ -1,0 +1,45 @@
+{
+ "product": "keycloak",
+ "image": "quay.io/keycloak/keycloak:26.4",
+ "image_digest": "quay.io/keycloak/keycloak@sha256:9409c59bdfb65dbffa20b11e6f18b8abb9281d480c7ca402f51ed3d5977e6007",
+ "captured_at": "2026-10-04T13:10:17Z",
+ "request": {
+  "method": "GET",
+  "path": "/auth/realms/master"
+ },
+ "response": {
+  "status": 200,
+  "headers": [
+   [
+    "content-length",
+    "602"
+   ],
+   [
+    "cache-control",
+    "no-cache"
+   ],
+   [
+    "content-type",
+    "application/json;charset=UTF-8"
+   ],
+   [
+    "referrer-policy",
+    "no-referrer"
+   ],
+   [
+    "strict-transport-security",
+    "max-age=31536000; includeSubDomains"
+   ],
+   [
+    "x-content-type-options",
+    "nosniff"
+   ],
+   [
+    "x-frame-options",
+    "SAMEORIGIN"
+   ]
+  ],
+  "body": "{\"realm\":\"master\",\"public_key\":\"MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAnsY7vZQ9tNIjURIri0rBBtIrKzbymIaMMaDf7bruyq61dAKOAw3dpbHEv6k4kV8lc9Zm/aXqNjdY/kNmswxuoCHCFKVAUElz1DsOQNZibHNGTz6uCRbbv42WI9T3kU2PcEXaHWKFKGlpepKFdQVBVQzIqEcEOYUOEsWWkkyYYRmTKzUFiGI7qhnUz4QJ9YLJDg9m2XoNvp0bMA4KEQVI6WhMtZKON++L8EPUoegKZKUbogFMwL6ow/McZF24UYO+3dLiK1ZzpdXyc+J6IzxZMuFupB+rKaq8K4EEUZEtumgr5Xn7GZTpVlm5ijkv3SjQH53RYlaunBb9UDTOA3JENQIDAQAB\",\"token-service\":\"https://sso.example.test/auth/realms/master/protocol/openid-connect\",\"account-service\":\"https://sso.example.test/auth/realms/master/account\",\"tokens-not-before\":0}",
+  "body_truncated": false
+ }
+}

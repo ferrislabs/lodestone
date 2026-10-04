@@ -1,0 +1,37 @@
+{
+ "product": "keycloak",
+ "image": "quay.io/keycloak/keycloak:17.0.1-legacy",
+ "image_digest": "quay.io/keycloak/keycloak@sha256:68f9f38c8f3005eb1c7f5afade9d28975f03022500d7b42c9a9a11d1f4b606ab",
+ "captured_at": "2026-10-04T13:10:19Z",
+ "request": {
+  "method": "GET",
+  "path": "/"
+ },
+ "response": {
+  "status": 200,
+  "headers": [
+   [
+    "connection",
+    "keep-alive"
+   ],
+   [
+    "last-modified",
+    "Wed, 23 Mar 2022 07:48:05 GMT"
+   ],
+   [
+    "content-length",
+    "1087"
+   ],
+   [
+    "content-type",
+    "text/html"
+   ],
+   [
+    "accept-ranges",
+    "bytes"
+   ]
+  ],
+  "body": "<!--\n  ~ Copyright 2016 Red Hat, Inc. and/or its affiliates\n  ~ and other contributors as indicated by the @author tags.\n  ~\n  ~ Licensed under the Apache License, Version 2.0 (the \"License\");\n  ~ you may not use this file except in compliance with the License.\n  ~ You may obtain a copy of the License at\n  ~\n  ~ http://www.apache.org/licenses/LICENSE-2.0\n  ~\n  ~ Unless required by applicable law or agreed to in writing, software\n  ~ distributed under the License is distributed on an \"AS IS\" BASIS,\n  ~ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.\n  ~ See the License for the specific language governing permissions and\n  ~ limitations under the License.\n  -->\n<!DOCTYPE html PUBLIC \"-//W3C//DTD HTML 4.01 Transitional//EN\">\n\n<html>\n<head>\n    <meta http-equiv=\"refresh\" content=\"0; url=/auth/\" />\n    <meta name=\"robots\" content=\"noindex, nofollow\">\n    <script type=\"text/javascript\">\n        window.location.href = \"/auth/\"\n    </script>\n</head>\n<body>\n    If you are not redirected automatically, follow this <a href='/auth'>link</a>.\n</body>\n</html>\n",
+  "body_truncated": false
+ }
+}

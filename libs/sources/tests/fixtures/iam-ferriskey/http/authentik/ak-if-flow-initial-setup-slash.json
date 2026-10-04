@@ -1,0 +1,53 @@
+{
+ "product": "authentik",
+ "image": "ghcr.io/goauthentik/server:2026.8",
+ "image_digest": "ghcr.io/goauthentik/server@sha256:ab9b4e8cc4ab3f8d1198d2db6aeea66bafea1963b3f2843589e0d163f97d9849",
+ "captured_at": "2026-10-04T13:28:57Z",
+ "request": {
+  "method": "GET",
+  "path": "/if/flow/initial-setup/"
+ },
+ "response": {
+  "status": 404,
+  "headers": [
+   [
+    "server",
+    "uvicorn"
+   ],
+   [
+    "content-type",
+    "text/html; charset=utf-8"
+   ],
+   [
+    "x-frame-options",
+    "DENY"
+   ],
+   [
+    "content-length",
+    "5562"
+   ],
+   [
+    "x-content-type-options",
+    "nosniff"
+   ],
+   [
+    "referrer-policy",
+    "same-origin"
+   ],
+   [
+    "vary",
+    "Accept-Language, Cookie"
+   ],
+   [
+    "content-language",
+    "en"
+   ],
+   [
+    "x-powered-by",
+    "authentik"
+   ]
+  ],
+  "body": "\n\n\n\n\n<!DOCTYPE html>\n<html\n    lang=\"en\"\n    \n    data-theme=\"light\"\n    data-theme-choice=\"auto\"\n>\n    <head>\n        <meta charset=\"UTF-8\">\n        <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n        \n        <meta name=\"darkreader-lock\">\n        <title>\nauthentik\n</title>\n        <link rel=\"icon\" href=\"/static/dist/assets/icons/icon.png\">\n        <link rel=\"shortcut icon\" href=\"/static/dist/assets/icons/icon.png\">\n\n        \n<link rel=\"prefetch\" href=\"/static/dist/assets/images/flow_background.jpg\" />\n\n\n\n<script data-id=\"authentik-config\">\n    \"use strict\";\n\n    window.authentik = {\n        locale: \"en\",\n        config: JSON.parse('' || \"{}\"),\n        brand: JSON.parse('' || \"{}\"),\n        versionFamily: \"\",\n        versionSubdomain: \"\",\n        build: \"\",\n        api: {\n            base: \"\",\n            relBase: \"\",\n        },\n    };\n</script>\n\n<script data-id=\"authentik-messages\" type=\"application/json\">\n  []\n</script>\n\n\n\n\n        \n        <link rel=\"stylesheet\" type=\"text/css\" href=\"/static/dist/styles/interface-2026.8.3.css\" />\n        \n\n        \n\n\n\n  <script data-id=\"theme-script\">\n    \"use strict\";\n\n    (function () {\n        try {\n          const { documentElement } = document;\n\n            /* Ignore older theme names */\n            let locallyStoredTheme = window.localStorage?.getItem(\"theme\") || null;\n\n            if (typeof locallyStoredTheme === \"string\") {\n                locallyStoredTheme = locallyStoredTheme.trim();\n            }\n            if (!([\"auto\", \"light\", \"dark\"].includes(locallyStoredTheme))) {\n                locallyStoredTheme = null;\n            }\n\n            const initialThemeChoice =\n                new URLSearchParams(window.location.search).get(\"theme\") || locallyStoredTheme;\n\n            const themeChoice =\n                initialThemeChoice || documentElement.dataset.themeChoice || \"auto\";\n\n            documentElement.dataset.themeChoice = themeChoice;\n\n            if (themeChoice === \"auto\") {\n                documentElement.dataset.theme = window.matchMedia(\n                    \"(prefers-color-scheme: dark)\",\n                ).matches\n                    ? \"dark\"\n                    : \"light\";\n            } else {\n                documentElement.dataset.theme = themeChoice;\n            }\n\n            documentElement.classList.toggle(\"pf-theme-dark\", documentElement.dataset.theme === \"dark\");\n        } catch (e) {\n            console.error(\"Failed to apply theme\", e);\n        }\n    })();\n  </script>\n\n  <meta name=\"color-scheme\" content=\"light dark\" />\n  <meta name=\"theme-color\" content=\"#ffffff\" media=\"(prefers-color-scheme: light)\">\n  <meta name=\"theme-color\" content=\"#18191a\" media=\"(prefers-color-scheme: dark)\">\n\n\n\n        <style data-id=\"brand-css\"></style>\n        <script src=\"/static/dist/poly-2026.8.3.js\" type=\"module\"></script>\n        \n<style data-id=\"static-styles\">\n    :root {\n        --ak-global--background-image: url(\"/static/dist/assets/images/flow_background.jpg\");\n    }\n</style>\n\n<link rel=\"stylesheet\" type=\"text/css\" href=\"/static/dist/styles/static-2026.8.3.css\" />\n\n        \n        <meta name=\"sentry-trace\" content=\"28f9a67191064308a383428ffd1e1d80-ac5b86424d7c6cd0\" />\n        \n        <meta name=\"baggage\" content=\"\" />\n        \n    </head>\n    <body>\n        \n<ak-skip-to-content></ak-skip-to-content>\n<ak-message-container></ak-message-container>\n\n<div class=\"pf-c-page__drawer\">\n    <div class=\"pf-c-drawer pf-m-collapsed\">\n        <div class=\"pf-c-drawer__main\">\n            <div class=\"pf-c-drawer__content\">\n                <div class=\"pf-c-drawer__body\">\n                    <div class=\"pf-c-login\" data-layout=\"stacked\">\n                        <main class=\"pf-c-login__main\" aria-label=\"Authentication form\">\n                            <div class=\"pf-c-login__main-header pf-c-brand\">\n                                <img class=\"branding-logo\" src=\"/static/dist/assets/icons/icon_left_brand.svg\" alt=\"authentik Logo\" />\n                            </div>\n                            <div class=\"pf-c-login__main-header\">\n                                <h1 class=\"pf-c-title pf-m-3xl\" data-test-id=\"card-title\">\n                                    \nNot Found\n\n                                </h1>\n                            </div>\n                            <div class=\"pf-c-login__main-body\">\n                                \n<div class=\"pf-c-form\">\n    <p></p>\n\n    <div class=\"pf-c-form__group\">\n        <a id=\"ak-back-home\" href=\"/\" class=\"pf-c-button pf-m-primary pf-m-block\">\n            Go home\n        </a>\n    </div>\n</div>\n\n                            </div>\n                        </main>\n                        <footer\n                            name=\"site-footer\"\n                            aria-label=\"Site footer\"\n                            class=\"pf-c-login__footer pf-m-dark\">\n                            <div name=\"flow-links\" aria-label=\"Flow links\">\n                                <ul class=\"pf-c-list pf-m-inline\" part=\"list\">\n                                    \n                                    <li part=\"list-item\">\n                                        <span>\n                                            Powered by authentik\n                                        </span>\n                                    </li>\n                                </ul>\n                            </div>\n                        </footer>\n                    </div>\n                </div>\n            </div>\n        </div>\n    </div>\n</div>\n\n        \n        \n        \n    </body>\n</html>\n",
+  "body_truncated": false
+ }
+}
