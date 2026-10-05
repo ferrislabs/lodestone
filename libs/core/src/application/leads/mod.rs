@@ -4,7 +4,7 @@ use lodestone_macros::transactional;
 
 use crate::{
     UserId,
-    application::LodestoneUseCase,
+    application::{LodestoneUseCase, output::schedule_webhook},
     domain::{
         lead::{
             Lead, LeadId, LeadStatus,
@@ -14,6 +14,7 @@ use crate::{
         profile::{ProfileId, ports::ProfileRepository},
         suppression::ports::SuppressionRepository,
     },
+    infrastructure::job::postgres::PgJobOutbox,
 };
 
 impl LodestoneUseCase {
@@ -87,6 +88,9 @@ impl LodestoneUseCase {
             .ok_or_else(|| {
                 CoreError::Conflict("lead status changed concurrently, reload and retry".to_owned())
             })?;
+        if target == LeadStatus::Validated {
+            schedule_webhook(&mut PgJobOutbox::new(&tx), self.webhooks.as_ref(), &updated).await?;
+        }
         tracing::info!(lead.id = %lead_id, actor = %actor.0, from = from.as_str(), to = target.as_str(), "lead status changed");
         Ok(updated)
     }

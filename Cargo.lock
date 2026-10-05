@@ -94,6 +94,7 @@ version = "0.1.0"
 dependencies = [
  "args",
  "auth",
+ "aws-lc-rs",
  "axum",
  "axum-server",
  "base64 0.22.1",
@@ -114,7 +115,9 @@ dependencies = [
  "opentelemetry-otlp",
  "opentelemetry_sdk",
  "rate-limit",
+ "reqwest",
  "rsa",
+ "serde",
  "serde_json",
  "server",
  "sources",
@@ -129,6 +132,7 @@ dependencies = [
  "utoipa",
  "utoipa-scalar",
  "utoipa-swagger-ui",
+ "uuid",
 ]
 
 [[package]]
@@ -155,7 +159,9 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "common",
+ "thiserror 2.0.18",
  "url",
+ "uuid",
 ]
 
 [[package]]
@@ -1588,6 +1594,7 @@ dependencies = [
  "args",
  "auth",
  "axum",
+ "chrono",
  "codspeed-divan-compat",
  "common",
  "http 1.4.0",
@@ -1604,6 +1611,7 @@ dependencies = [
  "tracing",
  "url",
  "utoipa",
+ "uuid",
 ]
 
 [[package]]

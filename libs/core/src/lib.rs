@@ -48,6 +48,11 @@ pub use domain::{
         },
         render_user_content,
     },
+    output::{
+        AssessmentRecord, ContactRecord, DraftOutput, EvidenceRecord, LeadEvent, LeadEventKind,
+        LeadRecord, LeadSink, ProfileRecord, SignalRecord, SinkError, WEBHOOK_JOB_KIND,
+        WebhookJobPayload, WebhookPolicy, webhook_job,
+    },
     partner::{InvalidSiret, Partner, PartnerAward, PartnerId, Siret, ports::PartnerRepository},
     profile::{
         ActiveProfile, Profile, ProfileId, ProfileName, ProfileNameError, ProfileProblem,
