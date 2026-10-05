@@ -10,6 +10,7 @@ use crate::domain::{
     values::{EmailAddress, Provenance, SignalKind, SourceName, UnitInterval},
 };
 
+pub mod draft;
 pub mod ports;
 pub mod query;
 
@@ -232,6 +233,7 @@ pub struct Assessment {
     pub model: String,
     pub prompt_version: String,
     pub draft: Option<DraftMessage>,
+    pub draft_review: Option<draft::DraftReview>,
     pub created_at: DateTime<Utc>,
 }
 

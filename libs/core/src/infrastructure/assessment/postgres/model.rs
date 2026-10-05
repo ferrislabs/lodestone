@@ -3,9 +3,14 @@ use common::CoreError;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{Assessment, AssessmentId, DraftMessage, Evidence, LeadId, Provenance, RevisionNumber};
+use crate::{
+    Assessment, AssessmentId, DraftMessage, DraftReview, DraftStatus, Evidence, LeadId, Provenance,
+    RevisionNumber, UserId,
+};
 
-#[derive(Debug, Clone)]
+pub const ASSESSMENT_COLUMNS: &str = "assessments.id, assessments.lead_id, assessments.profile_revision, assessments.summary, assessments.approach_angle, assessments.evidence, assessments.model, assessments.prompt_version, assessments.draft_subject, assessments.draft_body, assessments.draft_status, assessments.draft_reviewed_by, assessments.draft_reviewed_at, assessments.draft_edited_at, assessments.draft_rejection_reason, assessments.draft_original_subject, assessments.draft_original_body, assessments.created_at";
+
+#[derive(Debug, Clone, sqlx::FromRow)]
 pub struct AssessmentRow {
     pub id: Uuid,
     pub lead_id: Uuid,
@@ -17,6 +22,13 @@ pub struct AssessmentRow {
     pub prompt_version: String,
     pub draft_subject: Option<String>,
     pub draft_body: Option<String>,
+    pub draft_status: Option<String>,
+    pub draft_reviewed_by: Option<Uuid>,
+    pub draft_reviewed_at: Option<DateTime<Utc>>,
+    pub draft_edited_at: Option<DateTime<Utc>>,
+    pub draft_rejection_reason: Option<String>,
+    pub draft_original_subject: Option<String>,
+    pub draft_original_body: Option<String>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -64,6 +76,25 @@ impl TryFrom<AssessmentRow> for Assessment {
             .ok_or_else(|| {
                 CoreError::Internal("stored assessment revision is invalid".to_owned())
             })?;
+        let draft_review = match (&row.draft_subject, row.draft_status.as_deref()) {
+            (Some(_), Some(raw)) => Some(DraftReview {
+                status: DraftStatus::parse(raw).ok_or_else(|| {
+                    CoreError::Internal("stored draft status is invalid".to_owned())
+                })?,
+                original: match (row.draft_original_subject, row.draft_original_body) {
+                    (Some(subject), Some(body)) => Some(DraftMessage { subject, body }),
+                    _ => None,
+                },
+                edited_at: row.draft_edited_at,
+                reviewed_by: row.draft_reviewed_by.map(UserId),
+                reviewed_at: row.draft_reviewed_at,
+                rejection_reason: row.draft_rejection_reason,
+            }),
+            (Some(_), None) => {
+                return Err(CoreError::Internal("stored draft has no status".to_owned()));
+            }
+            (None, _) => None,
+        };
         Ok(Self {
             id: AssessmentId(row.id),
             lead_id: LeadId(row.lead_id),
@@ -77,6 +108,7 @@ impl TryFrom<AssessmentRow> for Assessment {
                 (Some(subject), Some(body)) => Some(DraftMessage { subject, body }),
                 _ => None,
             },
+            draft_review,
             created_at: row.created_at,
         })
     }

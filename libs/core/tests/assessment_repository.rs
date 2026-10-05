@@ -18,6 +18,7 @@ fn assessment(lead: lodestone_core::LeadId, created: i64, evidence: Vec<Evidence
         model: "model-x".to_owned(),
         prompt_version: "v1".to_owned(),
         draft: None,
+        draft_review: None,
         created_at: at(created),
     }
 }
@@ -73,4 +74,26 @@ async fn list_returns_newest_first(pool: PgPool) {
     .unwrap();
 
     assert_eq!(listed, [new, old]);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_stored_draft_comes_back_pending(pool: PgPool) {
+    let profile = create_profile(&pool, "alpha").await;
+    let lead = lead_id(&pool, profile, "example.com").await;
+    let mut stored = assessment(lead, 0, Vec::new());
+    stored.draft = Some(lodestone_core::DraftMessage {
+        subject: "Hello".to_owned(),
+        body: "Body".to_owned(),
+    });
+    stored.draft_review = Some(lodestone_core::DraftReview::pending());
+
+    let listed = with_tx(&pool, async |shared| {
+        let mut repo = PgAssessmentRepository::new(&shared);
+        repo.insert(&stored).await?;
+        repo.list_for_lead(lead).await
+    })
+    .await
+    .unwrap();
+
+    assert_eq!(listed, [stored]);
 }

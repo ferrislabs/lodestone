@@ -5,8 +5,8 @@ use axum::{
     extract::{Path, Query, State, rejection::JsonRejection},
 };
 use lodestone_core::{
-    Assessment, ContactEmail, Lead, LeadDetail, LeadId, LeadQuery, LeadSort, LeadStatus, Profile,
-    ProfileId, ScoreContribution, Signal, SignalKind,
+    Assessment, ContactEmail, DraftMessage, DraftReview, DraftStatus, Lead, LeadDetail, LeadId,
+    LeadQuery, LeadSort, LeadStatus, Profile, ProfileId, ScoreContribution, Signal, SignalKind,
 };
 use pagination::{MAX_PAGE, MAX_PER_PAGE, Page, PaginationMetadata, PaginationParams};
 use serde::{Deserialize, Serialize};
@@ -147,10 +147,62 @@ pub struct EvidenceDto {
     pub provenance: String,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum DraftStatusDto {
+    Pending,
+    Approved,
+    Rejected,
+}
+
+impl From<DraftStatus> for DraftStatusDto {
+    fn from(status: DraftStatus) -> Self {
+        match status {
+            DraftStatus::Pending => Self::Pending,
+            DraftStatus::Approved => Self::Approved,
+            DraftStatus::Rejected => Self::Rejected,
+        }
+    }
+}
+
 #[derive(Debug, Serialize, PartialEq, Eq, ToSchema)]
 pub struct DraftDto {
     pub subject: String,
     pub body: String,
+    pub status: DraftStatusDto,
+    /// Text produced by the model, present once the draft has been edited.
+    pub original_subject: Option<String>,
+    pub original_body: Option<String>,
+    #[schema(format = DateTime)]
+    pub edited_at: Option<String>,
+    pub reviewed_by: Option<String>,
+    #[schema(format = DateTime)]
+    pub reviewed_at: Option<String>,
+    pub rejection_reason: Option<String>,
+}
+
+impl DraftDto {
+    pub fn new(draft: &DraftMessage, review: Option<&DraftReview>) -> Self {
+        let pending = DraftReview::pending();
+        let review = review.unwrap_or(&pending);
+        Self {
+            subject: draft.subject.clone(),
+            body: draft.body.clone(),
+            status: review.status.into(),
+            original_subject: review
+                .original
+                .as_ref()
+                .map(|original| original.subject.clone()),
+            original_body: review
+                .original
+                .as_ref()
+                .map(|original| original.body.clone()),
+            edited_at: review.edited_at.map(|at| at.to_rfc3339()),
+            reviewed_by: review.reviewed_by.map(|user| user.to_string()),
+            reviewed_at: review.reviewed_at.map(|at| at.to_rfc3339()),
+            rejection_reason: review.rejection_reason.clone(),
+        }
+    }
 }
 
 #[derive(Debug, Serialize, PartialEq, ToSchema)]
@@ -184,10 +236,10 @@ impl From<&Assessment> for AssessmentDto {
                 .collect(),
             model: assessment.model.clone(),
             prompt_version: assessment.prompt_version.clone(),
-            draft: assessment.draft.as_ref().map(|draft| DraftDto {
-                subject: draft.subject.clone(),
-                body: draft.body.clone(),
-            }),
+            draft: assessment
+                .draft
+                .as_ref()
+                .map(|draft| DraftDto::new(draft, assessment.draft_review.as_ref())),
             created_at: assessment.created_at.to_rfc3339(),
         }
     }
@@ -263,14 +315,33 @@ pub struct ListLeadsParams {
     per_page: Option<String>,
 }
 
-fn invalid(field: &str, reason: &str) -> ApiError {
+pub(crate) fn invalid(field: &str, reason: &str) -> ApiError {
     ApiError::Validation(format!("{field}: {reason}"))
 }
 
-fn parse_number<T: FromStr>(field: &str, raw: &str) -> Result<T, ApiError> {
+pub(crate) fn parse_number<T: FromStr>(field: &str, raw: &str) -> Result<T, ApiError> {
     raw.trim()
         .parse()
         .map_err(|_| invalid(field, "must be a number"))
+}
+
+pub(crate) fn parse_pagination(
+    page: Option<&str>,
+    per_page: Option<&str>,
+) -> Result<PaginationParams, ApiError> {
+    let page = page
+        .map(|raw| parse_number::<u64>("page", raw))
+        .transpose()?;
+    if page.is_some_and(|page| page == 0 || page > MAX_PAGE) {
+        return Err(invalid("page", "must be between 1 and 1000000"));
+    }
+    let per_page = per_page
+        .map(|raw| parse_number::<u64>("per_page", raw))
+        .transpose()?;
+    if per_page.is_some_and(|per_page| per_page == 0 || per_page > MAX_PER_PAGE) {
+        return Err(invalid("per_page", "must be between 1 and 100"));
+    }
+    Ok(PaginationParams { page, per_page })
 }
 
 impl ListLeadsParams {
@@ -328,23 +399,7 @@ impl ListLeadsParams {
             })?,
         };
 
-        let page = self
-            .page
-            .as_deref()
-            .map(|raw| parse_number::<u64>("page", raw))
-            .transpose()?;
-        if page.is_some_and(|page| page == 0 || page > MAX_PAGE) {
-            return Err(invalid("page", "must be between 1 and 1000000"));
-        }
-        let per_page = self
-            .per_page
-            .as_deref()
-            .map(|raw| parse_number::<u64>("per_page", raw))
-            .transpose()?;
-        if per_page.is_some_and(|per_page| per_page == 0 || per_page > MAX_PER_PAGE) {
-            return Err(invalid("per_page", "must be between 1 and 100"));
-        }
-        let pagination = PaginationParams { page, per_page };
+        let pagination = parse_pagination(self.page.as_deref(), self.per_page.as_deref())?;
 
         Ok(LeadQuery {
             status,

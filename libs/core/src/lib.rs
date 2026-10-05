@@ -30,6 +30,11 @@ pub use domain::{
         Assessment, AssessmentId, ContactEmail, ContactId, ContactKind, ContactMethod, Evidence,
         InvalidScore, InvalidTransition, Lead, LeadId, LeadStatus, Score, Signal, SignalId,
         UnknownLeadStatus,
+        draft::{
+            DraftEdit, DraftEntry, DraftPage, DraftProblem, DraftQueue, DraftRecord, DraftReview,
+            DraftStatus, InvalidDraftTransition, MAX_BODY_CHARS, MAX_REASON_CHARS,
+            MAX_SUBJECT_CHARS, normalize_reason,
+        },
         ports::{AssessmentRepository, ContactRepository, LeadRepository, SignalRepository},
         query::{LeadDetail, LeadListing, LeadPage, LeadQuery, LeadSort, ProfileSummary},
     },
