@@ -125,9 +125,17 @@ export function ProfileNewFeature() {
 					}
 					problems={unmatchedProblems(editor.value, problems)}
 					notice={null}
-					dirty
+					dirty={editor.dirty}
 					saving={create.isPending}
 					saveLabel="Créer le profil"
+					confirmingReset={editor.confirmingReset}
+					onRequestReset={editor.requestReset}
+					onCancelReset={editor.cancelReset}
+					onConfirmReset={() => {
+						if (create.isError) create.reset()
+						setLocalProblems([])
+						editor.reset()
+					}}
 					onSave={save}
 				/>
 			}

@@ -62,25 +62,93 @@ describe('SchemaForm', () => {
 		)
 	})
 
-	it('adds and removes a row of a list', () => {
-		render(<Harness />)
-		fireEvent.click(
-			screen.getByLabelText('Ajouter : Parties locales préférées'),
-		)
-		const input = screen.getByLabelText('Parties locales préférées 1')
+	it('edits a list of strings as tags', () => {
+		const seen = vi.fn()
+		render(<Harness onValue={seen} />)
+		const input = screen.getByLabelText('Parties locales préférées')
 		fireEvent.change(input, { target: { value: 'contact' } })
-		expect(screen.getByLabelText('Parties locales préférées 1')).toHaveProperty(
-			'value',
-			'contact',
+		fireEvent.keyDown(input, { key: 'Enter' })
+		fireEvent.keyDown(input, { key: ',' })
+		;(input as HTMLInputElement).value = 'sales'
+		fireEvent.keyDown(input, { key: ',' })
+		expect(seen.mock.calls.at(-1)?.[0]).toMatchObject({
+			contact_ranking: { preferred_local_parts: ['contact', 'sales'] },
+		})
+		fireEvent.click(screen.getByLabelText('Retirer sales'))
+		expect(seen.mock.calls.at(-1)?.[0]).toMatchObject({
+			contact_ranking: { preferred_local_parts: ['contact'] },
+		})
+		expect(screen.queryByLabelText('Parties locales préférées 1')).toBeNull()
+	})
+
+	it('uses tags for keywords and rows for objects', () => {
+		const initial = setIn(
+			defaultValue(root, root, PROFILE_HINTS),
+			['agents'],
+			[
+				{
+					id: 'a',
+					name: 'A',
+					enabled: true,
+					source: { kind: 'ats', keywords: ['x', 'y'], exclusions: [] },
+				},
+				{
+					id: 'b',
+					name: 'B',
+					enabled: true,
+					source: {
+						kind: 'dns_cname',
+						patterns: [{ provider: 'Okta', target_suffix: 'okta.com' }],
+					},
+				},
+			],
 		)
-		fireEvent.click(
-			screen.getByLabelText('Ajouter : Parties locales préférées'),
+		render(<Harness initial={initial} />)
+		expect(screen.getByLabelText('Retirer x')).toBeTruthy()
+		expect(screen.getByLabelText('Retirer y')).toBeTruthy()
+		expect(screen.queryByLabelText('Mots-clés 1')).toBeNull()
+		const row = document.querySelector<HTMLElement>(
+			'[data-row="agents[1].source.patterns[0]"]',
 		)
-		expect(screen.getByLabelText('Parties locales préférées 2')).toBeTruthy()
-		fireEvent.click(
-			screen.getByLabelText('Supprimer : Parties locales préférées 1'),
+		expect(row).toBeTruthy()
+		expect(
+			within(row as HTMLElement).getByLabelText('Fournisseur'),
+		).toHaveProperty('value', 'Okta')
+		expect(
+			within(row as HTMLElement).getByLabelText('Suffixe cible'),
+		).toHaveProperty('value', 'okta.com')
+		expect(screen.getByText('Ajouter un motif')).toBeTruthy()
+	})
+
+	it('marks the faulty chip and lists the message under the field', () => {
+		const initial = setIn(
+			defaultValue(root, root, PROFILE_HINTS),
+			['agents'],
+			[
+				{
+					id: 'a',
+					name: 'A',
+					enabled: true,
+					source: { kind: 'ats', keywords: ['a', 'b', ''], exclusions: [] },
+				},
+			],
 		)
-		expect(screen.queryByLabelText('Parties locales préférées 2')).toBeNull()
+		render(
+			<Harness
+				initial={initial}
+				problems={[
+					{
+						path: 'agents[0].source.keywords[2]',
+						message: 'Ne doit pas être vide',
+					},
+				]}
+			/>,
+		)
+		const chips = document.querySelectorAll<HTMLElement>('[data-tag]')
+		expect(chips).toHaveLength(3)
+		expect(chips[2]?.getAttribute('aria-invalid')).toBe('true')
+		expect(chips[0]?.getAttribute('aria-invalid')).toBe('false')
+		expect(screen.getByText('Ne doit pas être vide')).toBeTruthy()
 	})
 
 	it('adds a card for lists of objects', () => {
