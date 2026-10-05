@@ -11,6 +11,7 @@ import {
 import { AgentCard } from '#/pages/profiles/ui/agent-card'
 import { AgentPicker } from '#/pages/profiles/ui/agent-picker'
 import { AgentSheet } from '#/pages/profiles/ui/agent-sheet'
+import type { SourceTrigger } from '#/pages/sources/feature/use-source-trigger'
 
 interface AgentsEditorProps {
 	context: FormContext
@@ -19,6 +20,7 @@ interface AgentsEditorProps {
 	editing: number | null
 	confirmingRemove: number | null
 	picking: boolean
+	sourceTrigger?: SourceTrigger
 	onOpenPicker: () => void
 	onClosePicker: () => void
 	onAdd: (kind: AgentKind) => void
@@ -40,6 +42,7 @@ export function AgentsEditor({
 	editing,
 	confirmingRemove,
 	picking,
+	sourceTrigger,
 	onOpenPicker,
 	onClosePicker,
 	onAdd,
@@ -70,6 +73,7 @@ export function AgentsEditor({
 				{Object.keys(agents).map((slot) => {
 					const index = Number(slot)
 					const agent = agents[index]
+					const kind = agentKind(agent)
 					return (
 						<AgentCard
 							key={slot}
@@ -79,6 +83,17 @@ export function AgentsEditor({
 							note={dependencyNote(agentKind(agent), agents)}
 							editing={editing === index}
 							confirmingRemove={confirmingRemove === index}
+							runPending={
+								kind !== null && sourceTrigger?.pending.has(kind) === true
+							}
+							runResult={
+								kind === null ? null : (sourceTrigger?.results[kind] ?? null)
+							}
+							onRunSource={
+								sourceTrigger && kind
+									? () => sourceTrigger.trigger(kind)
+									: undefined
+							}
 							onEdit={() => onEdit(index)}
 							onEnabled={(enabled) => onEnabled(index, enabled)}
 							onRequestRemove={() => onRequestRemove(index)}

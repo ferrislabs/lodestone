@@ -28,6 +28,7 @@ import { AgentsHelp } from '#/pages/profiles/ui/agents-help'
 import { ScoringExplainer } from '#/pages/profiles/ui/scoring-explainer'
 import { ScoringGrid } from '#/pages/profiles/ui/scoring-grid'
 import { ThresholdField } from '#/pages/profiles/ui/threshold-field'
+import type { SourceTrigger } from '#/pages/sources/feature/use-source-trigger'
 
 const DEFINITION_HINTS: UiHints = {
 	...PROFILE_HINTS,
@@ -48,6 +49,7 @@ interface DefinitionTabContentProps {
 	problems: readonly Problem[]
 	onChange: (next: JsonObject) => void
 	onNavigate?: (tab: EditorTab) => void
+	sourceTrigger?: SourceTrigger
 }
 
 function section(key: string) {
@@ -64,6 +66,7 @@ export function DefinitionTabContent({
 	problems,
 	onChange,
 	onNavigate,
+	sourceTrigger,
 }: DefinitionTabContentProps) {
 	const agents = useAgentsUi(value, onChange)
 	const scoring = useScoringUi(value, onChange)
@@ -160,6 +163,7 @@ export function DefinitionTabContent({
 							editing={agents.editing}
 							confirmingRemove={agents.confirmingRemove}
 							picking={agents.picking}
+							sourceTrigger={sourceTrigger}
 							onOpenPicker={agents.openPicker}
 							onClosePicker={agents.closePicker}
 							onAdd={agents.add}

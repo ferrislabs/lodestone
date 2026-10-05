@@ -73,6 +73,10 @@ const EXACT_MESSAGES: Readonly<Record<string, string>> = {
 		'Un fournisseur portant ce nom existe déjà',
 	'a profile with this name already exists':
 		'Un profil portant ce nom existe déjà',
+	'source is already running': 'La source est déjà en cours',
+	'source has no scheduled job': "La source n'a pas de tâche planifiée",
+	'must be a lowercase source name': 'Doit être un nom de source en minuscules',
+	'source is not scheduled': "La source n'est plus planifiée",
 	'provider is assigned to a tier': 'Le fournisseur est affecté à un niveau',
 	'lead status changed concurrently, reload and retry':
 		'Le statut du lead a changé entre-temps, rechargez la page et réessayez',

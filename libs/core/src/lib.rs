@@ -25,6 +25,7 @@ pub use domain::{
         ClaimedJob, FailureDecision, InvalidJobKind, Job, JobId, JobKind, JobStatus, LeaseToken,
         NewJob, RetryPolicy, new_lease_token,
         ports::{Clock, JobFailure, JobQueue},
+        schedule::{JobSchedule, ScheduledJob, SourceRunRecord, SourceSchedule},
     },
     lead::{
         Assessment, AssessmentId, ContactEmail, ContactId, ContactKind, ContactMethod, Evidence,

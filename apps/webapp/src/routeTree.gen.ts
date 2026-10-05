@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as AppRouteImport } from './routes/_app'
 import { Route as AppIndexRouteImport } from './routes/_app.index'
+import { Route as AppSourcesIndexRouteImport } from './routes/_app.sources.index'
 import { Route as AppProfilesIndexRouteImport } from './routes/_app.profiles.index'
 import { Route as AppLlmIndexRouteImport } from './routes/_app.llm.index'
 import { Route as AppLeadsIndexRouteImport } from './routes/_app.leads.index'
@@ -29,6 +30,11 @@ const AppRoute = AppRouteImport.update({
 const AppIndexRoute = AppIndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppSourcesIndexRoute = AppSourcesIndexRouteImport.update({
+  id: '/sources/',
+  path: '/sources/',
   getParentRoute: () => AppRoute,
 } as any)
 const AppProfilesIndexRoute = AppProfilesIndexRouteImport.update({
@@ -94,6 +100,7 @@ export interface FileRoutesByFullPath {
   '/leads/': typeof AppLeadsIndexRoute
   '/llm/': typeof AppLlmIndexRoute
   '/profiles/': typeof AppProfilesIndexRoute
+  '/sources/': typeof AppSourcesIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof AppIndexRoute
@@ -107,6 +114,7 @@ export interface FileRoutesByTo {
   '/leads': typeof AppLeadsIndexRoute
   '/llm': typeof AppLlmIndexRoute
   '/profiles': typeof AppProfilesIndexRoute
+  '/sources': typeof AppSourcesIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -122,6 +130,7 @@ export interface FileRoutesById {
   '/_app/leads/': typeof AppLeadsIndexRoute
   '/_app/llm/': typeof AppLlmIndexRoute
   '/_app/profiles/': typeof AppProfilesIndexRoute
+  '/_app/sources/': typeof AppSourcesIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -137,6 +146,7 @@ export interface FileRouteTypes {
     | '/leads/'
     | '/llm/'
     | '/profiles/'
+    | '/sources/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -150,6 +160,7 @@ export interface FileRouteTypes {
     | '/leads'
     | '/llm'
     | '/profiles'
+    | '/sources'
   id:
     | '__root__'
     | '/_app'
@@ -164,6 +175,7 @@ export interface FileRouteTypes {
     | '/_app/leads/'
     | '/_app/llm/'
     | '/_app/profiles/'
+    | '/_app/sources/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -184,6 +196,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof AppIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/sources/': {
+      id: '/_app/sources/'
+      path: '/sources'
+      fullPath: '/sources/'
+      preLoaderRoute: typeof AppSourcesIndexRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/profiles/': {
@@ -271,6 +290,7 @@ interface AppRouteChildren {
   AppLeadsIndexRoute: typeof AppLeadsIndexRoute
   AppLlmIndexRoute: typeof AppLlmIndexRoute
   AppProfilesIndexRoute: typeof AppProfilesIndexRoute
+  AppSourcesIndexRoute: typeof AppSourcesIndexRoute
 }
 
 const AppRouteChildren: AppRouteChildren = {
@@ -285,6 +305,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppLeadsIndexRoute: AppLeadsIndexRoute,
   AppLlmIndexRoute: AppLlmIndexRoute,
   AppProfilesIndexRoute: AppProfilesIndexRoute,
+  AppSourcesIndexRoute: AppSourcesIndexRoute,
 }
 
 const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)

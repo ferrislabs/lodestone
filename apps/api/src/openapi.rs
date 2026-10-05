@@ -55,6 +55,8 @@ impl Modify for SecurityAddon {
         handlers::llm::list_tiers,
         handlers::llm::assign_tier,
         handlers::llm::unassign_tier,
+        handlers::sources::list_sources,
+        handlers::sources::run_source,
     ),
     modifiers(&SecurityAddon),
 )]

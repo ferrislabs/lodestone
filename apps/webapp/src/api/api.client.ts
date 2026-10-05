@@ -172,6 +172,33 @@ export namespace Schemas {
     data: RevisionSummaryDto & { definition: Record<string, unknown> };
     pagination?: (null | PaginationMetadata) | undefined;
   };
+  export type SourceRunDto = {
+    agent_id?: (string | null) | undefined;
+    error?: (string | null) | undefined;
+    finished_at?: (string | null) | undefined;
+    profile_id: string;
+    profile_name: string;
+    signals: number;
+    started_at: string;
+    status: string;
+    volume: number;
+  };
+  export type DataEnvelope_SourceDto = {
+    data: {
+      attempts: number;
+      kind: string;
+      label_key: string;
+      last_error?: (string | null) | undefined;
+      last_runs: Array<SourceRunDto>;
+      lease_until?: (string | null) | undefined;
+      next_run_at?: (string | null) | undefined;
+      running_since?: (string | null) | undefined;
+      source: string;
+      status: string;
+      unavailable_reason?: (string | null) | undefined;
+    };
+    pagination?: (null | PaginationMetadata) | undefined;
+  };
   export type TestErrorDto = { kind: string; message: string };
   export type DataEnvelope_TestResultDto = {
     data: {
@@ -242,6 +269,22 @@ export namespace Schemas {
   };
   export type DataEnvelope_Vec_RevisionSummaryDto = {
     data: Array<{ created_at: string; created_by?: (string | null) | undefined; number: number }>;
+    pagination?: (null | PaginationMetadata) | undefined;
+  };
+  export type DataEnvelope_Vec_SourceDto = {
+    data: Array<{
+      attempts: number;
+      kind: string;
+      label_key: string;
+      last_error?: (string | null) | undefined;
+      last_runs: Array<SourceRunDto>;
+      lease_until?: (string | null) | undefined;
+      next_run_at?: (string | null) | undefined;
+      running_since?: (string | null) | undefined;
+      source: string;
+      status: string;
+      unavailable_reason?: (string | null) | undefined;
+    }>;
     pagination?: (null | PaginationMetadata) | undefined;
   };
   export type DataEnvelope_Vec_TierDto = {
@@ -320,6 +363,19 @@ export namespace Schemas {
   };
   export type RejectDraftRequest = Partial<{ reason: string | null }>;
   export type RevisionDto = RevisionSummaryDto & { definition: Record<string, unknown> };
+  export type SourceDto = {
+    attempts: number;
+    kind: string;
+    label_key: string;
+    last_error?: (string | null) | undefined;
+    last_runs: Array<SourceRunDto>;
+    lease_until?: (string | null) | undefined;
+    next_run_at?: (string | null) | undefined;
+    running_since?: (string | null) | undefined;
+    source: string;
+    status: string;
+    unavailable_reason?: (string | null) | undefined;
+  };
   export type TestResultDto = {
     error?: (null | TestErrorDto) | undefined;
     latency_ms?: (number | null) | undefined;
@@ -711,6 +767,29 @@ export namespace Endpoints {
     };
     responses: { 200: Schemas.DataEnvelope_RevisionDto; 400: unknown; 401: unknown; 404: unknown };
   };
+  export type get_List_sources = {
+    method: "GET";
+    path: "/api/v1/sources";
+    requestFormat: "json";
+    parameters: never;
+    responses: { 200: Schemas.DataEnvelope_Vec_SourceDto; 401: unknown };
+  };
+  export type post_Run_source = {
+    method: "POST";
+    path: "/api/v1/sources/{source}/run";
+    requestFormat: "json";
+    parameters: {
+      path: { source: string };
+    };
+    responses: {
+      202: Schemas.DataEnvelope_SourceDto;
+      400: unknown;
+      401: unknown;
+      403: unknown;
+      404: unknown;
+      409: unknown;
+    };
+  };
 
   // </Endpoints>
 }
@@ -732,6 +811,7 @@ export type EndpointByMethod = {
     "/api/v1/profiles/{profile_id}/leads/export": Endpoints.get_Export_leads;
     "/api/v1/profiles/{profile_id}/revisions": Endpoints.get_List_revisions;
     "/api/v1/profiles/{profile_id}/revisions/{number}": Endpoints.get_Get_revision;
+    "/api/v1/sources": Endpoints.get_List_sources;
   };
   patch: {
     "/api/v1/drafts/{assessment_id}": Endpoints.patch_Edit_draft;
@@ -749,6 +829,7 @@ export type EndpointByMethod = {
     "/api/v1/profiles/import": Endpoints.post_Import_profile;
     "/api/v1/profiles/{profile_id}/activate": Endpoints.post_Activate_profile;
     "/api/v1/profiles/{profile_id}/deactivate": Endpoints.post_Deactivate_profile;
+    "/api/v1/sources/{source}/run": Endpoints.post_Run_source;
   };
   delete: {
     "/api/v1/llm/providers/{provider_id}": Endpoints.delete_Delete_provider;

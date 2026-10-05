@@ -1,5 +1,5 @@
 import { Link } from '@tanstack/react-router'
-import { Cpu, FileText, Hammer, Layers, Users } from 'lucide-react'
+import { Cpu, FileText, Hammer, Layers, Radar, Users } from 'lucide-react'
 import type * as React from 'react'
 
 import { type NavItem, NavMain } from '#/components/nav-main'
@@ -23,6 +23,7 @@ export function AppSidebar(props: React.ComponentProps<typeof Sidebar>) {
 	]
 	const configItems: NavItem[] = [
 		{ title: 'Profils', to: '/profiles', icon: Layers },
+		{ title: 'Sources', to: '/sources', icon: Radar },
 		{ title: 'Fournisseurs LLM', to: '/llm', icon: Cpu },
 	]
 	return (

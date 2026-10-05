@@ -14,6 +14,7 @@ use crate::{
     errors::ApiError,
     exports, leads, llm, profiles,
     response::{DataEnvelope, Response},
+    sources,
     state::AppState,
 };
 
@@ -83,6 +84,8 @@ pub fn router(state: AppState) -> Router<AppState> {
             "/llm/tiers/{tier}",
             axum::routing::put(llm::assign_tier).delete(llm::unassign_tier),
         )
+        .route("/sources", get(sources::list_sources))
+        .route("/sources/{source}/run", post(sources::run_source))
         .route("/drafts", get(drafts::list_drafts))
         .route(
             "/drafts/{assessment_id}",
