@@ -1,3 +1,4 @@
+pub mod ats;
 pub mod boamp;
 pub(crate) mod buyer_domain;
 pub mod contact_pages;

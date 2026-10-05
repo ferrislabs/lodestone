@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT l.domain AS \"domain!\"\n            FROM (\n                SELECT DISTINCT leads.domain\n                FROM leads\n                JOIN profiles ON profiles.id = leads.profile_id AND profiles.active\n                JOIN LATERAL (\n                    SELECT definition FROM profile_revisions\n                    WHERE profile_id = profiles.id\n                    ORDER BY revision DESC\n                    LIMIT 1\n                ) r ON jsonb_typeof(r.definition #> '{sources,ats}') = 'object'\n                WHERE EXISTS (\n                    SELECT 1 FROM signals s\n                    WHERE s.lead_id = leads.id AND s.source = ANY($3::text[])\n                )\n            ) l\n            LEFT JOIN lead_domain_checks c ON c.domain = l.domain AND c.source = $1\n            WHERE (c.checked_at IS NULL OR c.checked_at < $2)\n              AND NOT EXISTS (\n                  SELECT 1 FROM suppression_list s WHERE s.kind = 'domain' AND s.value = l.domain\n              )\n            ORDER BY c.checked_at NULLS FIRST, l.domain\n            LIMIT $4\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "domain!",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Timestamptz",
+        "TextArray",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "2634045c8e009f2764cad09845c9afd3604cf35a07d8f1a37fc246b2333204d5"
+}

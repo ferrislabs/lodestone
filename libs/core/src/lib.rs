@@ -7,6 +7,7 @@ pub mod infrastructure;
 pub use application::*;
 pub use domain::{
     NormalizedDomain, NormalizedDomainError, User, UserId,
+    ats_target::AtsTargets,
     contact::{
         ContactFinder, ContactTargets, FoundAddress, rank_contacts, rank_of,
         recipient::{NotARecipient, Recipient},
