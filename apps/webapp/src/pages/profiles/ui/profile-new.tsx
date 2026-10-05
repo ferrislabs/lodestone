@@ -7,6 +7,7 @@ interface ProfileNewProps {
 	name: string
 	nameError: string | null
 	formError: string | null
+	tabs: ReactNode
 	editor: ReactNode
 	onNameChange: (name: string) => void
 	onBack: () => void
@@ -16,6 +17,7 @@ export function ProfileNew({
 	name,
 	nameError,
 	formError,
+	tabs,
 	editor,
 	onNameChange,
 	onBack,
@@ -53,6 +55,7 @@ export function ProfileNew({
 					{formError}
 				</p>
 			) : null}
+			{tabs}
 			{editor}
 		</div>
 	)

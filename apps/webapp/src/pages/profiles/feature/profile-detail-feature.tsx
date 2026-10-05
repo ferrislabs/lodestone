@@ -1,11 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useNavigate, useParams } from '@tanstack/react-router'
+import { useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import { useMemo, useState } from 'react'
 
 import { errorMessage, lodestoneApi } from '#/api/lodestone'
 import { toJsonObject } from '#/lib/schema-form'
 import {
-	renderDefinitionForm,
+	DefinitionTabContent,
 	unmatchedProblems,
 } from '#/pages/profiles/feature/definition-form'
 import { invalidateProfiles } from '#/pages/profiles/feature/invalidate'
@@ -18,12 +18,15 @@ import {
 } from '#/pages/profiles/lib/definition'
 import { problemsFromError } from '#/pages/profiles/lib/problems'
 import { prepareSave } from '#/pages/profiles/lib/save'
+import {
+	editorTabItems,
+	type ProfileTab,
+	TAB_LABELS,
+	type TabItem,
+} from '#/pages/profiles/lib/tabs'
 import type { Problem, RevisionSummary } from '#/pages/profiles/lib/types'
 import { ProfileActivation } from '#/pages/profiles/ui/profile-activation'
-import {
-	ProfileDetail,
-	type ProfileTab,
-} from '#/pages/profiles/ui/profile-detail'
+import { ProfileDetail } from '#/pages/profiles/ui/profile-detail'
 import { ProfileEditor } from '#/pages/profiles/ui/profile-editor'
 import { RevisionHistory } from '#/pages/profiles/ui/revision-history'
 
@@ -34,7 +37,15 @@ export function ProfileDetailFeature() {
 	const navigate = useNavigate()
 	const queryClient = useQueryClient()
 	const activation = useProfileActivation()
-	const [tab, setTab] = useState<ProfileTab>('definition')
+	const search = useSearch({ from: '/_app/profiles/$profileId' })
+	const tab = search.tab ?? 'identity'
+	const setTab = (next: ProfileTab) =>
+		void navigate({
+			to: '/profiles/$profileId',
+			params: { profileId },
+			search: { tab: next },
+			replace: true,
+		})
 	const [localProblems, setLocalProblems] = useState<Problem[]>([])
 	const [notice, setNotice] = useState<string | null>(null)
 	const [selected, setSelected] = useState<number | null>(null)
@@ -101,14 +112,28 @@ export function ProfileDetailFeature() {
 			? 'loading'
 			: 'ready'
 
+	const tabItems: TabItem[] = [
+		...editorTabItems(problems),
+		{ id: 'history', label: TAB_LABELS.history, problems: 0 },
+	]
+
 	const definition = (
 		<ProfileEditor
-			form={renderDefinitionForm(editor.value, problems, (next) => {
-				if (update.isError) update.reset()
-				setLocalProblems([])
-				setNotice(null)
-				editor.set(next)
-			})}
+			form={
+				tab === 'history' ? null : (
+					<DefinitionTabContent
+						tab={tab}
+						value={editor.value}
+						problems={problems}
+						onChange={(next) => {
+							if (update.isError) update.reset()
+							setLocalProblems([])
+							setNotice(null)
+							editor.set(next)
+						}}
+					/>
+				)
+			}
 			problems={unmatchedProblems(editor.value, problems)}
 			notice={notice}
 			dirty={editor.dirty}
@@ -134,7 +159,7 @@ export function ProfileDetailFeature() {
 				setLocalProblems([])
 				setNotice(`Revision ${revision.number} loaded, save to apply it`)
 				editor.set(toJsonObject(revision.definition))
-				setTab('definition')
+				setTab('identity')
 			}}
 		/>
 	)
@@ -160,6 +185,7 @@ export function ProfileDetailFeature() {
 				) : null
 			}
 			tab={tab}
+			tabs={tabItems}
 			exporting={exporting}
 			exportError={exportError ?? activation.error}
 			definition={definition}
