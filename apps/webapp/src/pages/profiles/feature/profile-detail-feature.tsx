@@ -1,19 +1,23 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useParams } from '@tanstack/react-router'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 
 import { errorMessage, lodestoneApi } from '#/api/lodestone'
+import { toJsonObject } from '#/lib/schema-form'
+import {
+	renderDefinitionForm,
+	unmatchedProblems,
+} from '#/pages/profiles/feature/definition-form'
 import { invalidateProfiles } from '#/pages/profiles/feature/invalidate'
 import { downloadProfileExport } from '#/pages/profiles/feature/profile-export'
+import { useDefinitionEditor } from '#/pages/profiles/feature/use-definition-editor'
 import { useProfileActivation } from '#/pages/profiles/feature/use-profile-activation'
 import {
 	prettyDefinition,
 	saveResultMessage,
 } from '#/pages/profiles/lib/definition'
-import {
-	parseDefinition,
-	problemsFromError,
-} from '#/pages/profiles/lib/problems'
+import { problemsFromError } from '#/pages/profiles/lib/problems'
+import { prepareSave } from '#/pages/profiles/lib/save'
 import type { Problem, RevisionSummary } from '#/pages/profiles/lib/types'
 import { ProfileActivation } from '#/pages/profiles/ui/profile-activation'
 import {
@@ -31,7 +35,6 @@ export function ProfileDetailFeature() {
 	const queryClient = useQueryClient()
 	const activation = useProfileActivation()
 	const [tab, setTab] = useState<ProfileTab>('definition')
-	const [text, setText] = useState<string | null>(null)
 	const [localProblems, setLocalProblems] = useState<Problem[]>([])
 	const [notice, setNotice] = useState<string | null>(null)
 	const [selected, setSelected] = useState<number | null>(null)
@@ -56,14 +59,17 @@ export function ProfileDetailFeature() {
 	})
 
 	const profile = profileQuery.data?.data ?? null
-	const currentText = profile ? prettyDefinition(profile.definition) : ''
-	const editorText = text ?? currentText
+	const initial = useMemo(
+		() => toJsonObject(profile?.definition ?? {}),
+		[profile?.definition],
+	)
+	const editor = useDefinitionEditor(initial)
 
 	const update = useMutation({
 		...lodestoneApi().mutation('put', '/api/v1/profiles/{profile_id}')
 			.mutationOptions,
 		onSuccess: async (response) => {
-			setText(prettyDefinition(response.data.definition))
+			editor.set(toJsonObject(response.data.definition))
 			setNotice(saveResultMessage(profile?.revision ?? 0, response.data.number))
 			await invalidateProfiles(queryClient)
 		},
@@ -76,7 +82,7 @@ export function ProfileDetailFeature() {
 
 	const save = () => {
 		setNotice(null)
-		const parsed = parseDefinition(editorText)
+		const parsed = prepareSave(editor.value)
 		if (!parsed.ok) {
 			setLocalProblems(parsed.problems)
 			return
@@ -97,18 +103,17 @@ export function ProfileDetailFeature() {
 
 	const definition = (
 		<ProfileEditor
-			text={editorText}
-			problems={problems}
-			notice={notice}
-			dirty={editorText !== currentText}
-			saving={update.isPending}
-			saveLabel="Save as new revision"
-			onTextChange={(value) => {
+			form={renderDefinitionForm(editor.value, problems, (next) => {
 				if (update.isError) update.reset()
 				setLocalProblems([])
 				setNotice(null)
-				setText(value)
-			}}
+				editor.set(next)
+			})}
+			problems={unmatchedProblems(editor.value, problems)}
+			notice={notice}
+			dirty={editor.dirty}
+			saving={update.isPending}
+			saveLabel="Save as new revision"
 			onSave={save}
 		/>
 	)
@@ -128,7 +133,7 @@ export function ProfileDetailFeature() {
 				update.reset()
 				setLocalProblems([])
 				setNotice(`Revision ${revision.number} loaded, save to apply it`)
-				setText(prettyDefinition(revision.definition))
+				editor.set(toJsonObject(revision.definition))
 				setTab('definition')
 			}}
 		/>

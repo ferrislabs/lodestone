@@ -1,0 +1,543 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"title": "Detection profile",
+	"description": "Describes one market: what is sold, which sources to scan, how leads are scored, which contacts to prefer and how the LLM qualifies a lead.",
+	"type": "object",
+	"properties": {
+		"contact_ranking": {
+			"$ref": "#/$defs/ContactRanking"
+		},
+		"identity": {
+			"$ref": "#/$defs/Identity"
+		},
+		"llm": {
+			"$ref": "#/$defs/LlmSettings"
+		},
+		"schema_version": {
+			"description": "Profile format version. Must be 1.",
+			"type": "integer",
+			"format": "uint32",
+			"minimum": 0
+		},
+		"scoring": {
+			"$ref": "#/$defs/Scoring"
+		},
+		"sources": {
+			"$ref": "#/$defs/Sources"
+		}
+	},
+	"additionalProperties": false,
+	"required": [
+		"schema_version",
+		"identity",
+		"sources",
+		"scoring",
+		"contact_ranking",
+		"llm"
+	],
+	"$defs": {
+		"CertificateTransparency": {
+			"title": "Certificate transparency",
+			"description": "Hostname labels to look for in certificate logs.",
+			"type": "object",
+			"properties": {
+				"labels": {
+					"description": "Hostname labels to look for, for example auth or sso.",
+					"type": "array",
+					"items": {
+						"type": "string"
+					}
+				}
+			},
+			"additionalProperties": false,
+			"required": ["labels"]
+		},
+		"CnamePattern": {
+			"title": "CNAME pattern",
+			"description": "A provider name with the CNAME target suffix that identifies it.",
+			"type": "object",
+			"properties": {
+				"provider": {
+					"description": "Provider name.",
+					"type": "string"
+				},
+				"target_suffix": {
+					"description": "CNAME target suffix identifying the provider.",
+					"type": "string"
+				}
+			},
+			"additionalProperties": false,
+			"required": ["provider", "target_suffix"]
+		},
+		"ContactRanking": {
+			"title": "Contact ranking",
+			"description": "Preferred email local parts, most preferred first.",
+			"type": "object",
+			"properties": {
+				"guess_local_parts": {
+					"description": "Local parts to guess when no address is found.",
+					"type": "array",
+					"default": [],
+					"items": {
+						"type": "string"
+					}
+				},
+				"preferred_local_parts": {
+					"description": "Preferred email local parts, most preferred first.",
+					"type": "array",
+					"items": {
+						"type": "string"
+					}
+				}
+			},
+			"additionalProperties": false,
+			"required": ["preferred_local_parts"]
+		},
+		"DebtMarker": {
+			"title": "Debt marker",
+			"description": "A technical debt signal raised when its rule holds.",
+			"type": "object",
+			"properties": {
+				"id": {
+					"description": "Unique identifier.",
+					"type": "string"
+				},
+				"rule": {
+					"description": "Condition raising the marker.",
+					"$ref": "#/$defs/DebtRule"
+				}
+			},
+			"additionalProperties": false,
+			"required": ["id", "rule"]
+		},
+		"DebtRule": {
+			"title": "Debt rule",
+			"description": "Condition raising a debt marker.",
+			"oneOf": [
+				{
+					"title": "Matches",
+					"type": "object",
+					"properties": {
+						"kind": {
+							"type": "string",
+							"const": "matches"
+						},
+						"matcher": {
+							"description": "Response condition that must hold.",
+							"$ref": "#/$defs/Matcher"
+						}
+					},
+					"additionalProperties": false,
+					"required": ["kind", "matcher"]
+				},
+				{
+					"title": "Version below",
+					"type": "object",
+					"properties": {
+						"kind": {
+							"type": "string",
+							"const": "version_below"
+						},
+						"version": {
+							"description": "Raised when the extracted version is lower than this one.",
+							"type": "string"
+						}
+					},
+					"additionalProperties": false,
+					"required": ["kind", "version"]
+				}
+			]
+		},
+		"DnsCname": {
+			"title": "DNS CNAME",
+			"description": "Providers identified by the CNAME target of a domain.",
+			"type": "object",
+			"properties": {
+				"patterns": {
+					"description": "Provider and target suffix pairs.",
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/CnamePattern"
+					}
+				}
+			},
+			"additionalProperties": false,
+			"required": ["patterns"]
+		},
+		"Fingerprint": {
+			"title": "Fingerprint",
+			"description": "A product fingerprint: path to request, matchers, optional version extractor and debt markers.",
+			"type": "object",
+			"properties": {
+				"debt_markers": {
+					"description": "Technical debt signals for this product.",
+					"type": "array",
+					"default": [],
+					"items": {
+						"$ref": "#/$defs/DebtMarker"
+					}
+				},
+				"id": {
+					"description": "Unique identifier.",
+					"type": "string"
+				},
+				"matchers": {
+					"description": "Conditions on the response. All must hold.",
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/Matcher"
+					}
+				},
+				"path": {
+					"description": "URL path to request, for example /login.",
+					"type": "string"
+				},
+				"product": {
+					"description": "Product name raised as a signal.",
+					"type": "string"
+				},
+				"version": {
+					"description": "Optional extractor for the product version.",
+					"anyOf": [
+						{
+							"$ref": "#/$defs/VersionExtractor"
+						},
+						{
+							"type": "null"
+						}
+					]
+				}
+			},
+			"additionalProperties": false,
+			"required": ["id", "path", "product", "matchers"]
+		},
+		"HttpProbe": {
+			"title": "HTTP probe",
+			"description": "Fingerprints probed over HTTP and products to ignore.",
+			"type": "object",
+			"properties": {
+				"excluded_products": {
+					"description": "Products to ignore, for example your own.",
+					"type": "array",
+					"default": [],
+					"items": {
+						"type": "string"
+					}
+				},
+				"fingerprints": {
+					"description": "Fingerprints to probe on each domain.",
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/Fingerprint"
+					}
+				}
+			},
+			"additionalProperties": false,
+			"required": ["fingerprints"]
+		},
+		"Identity": {
+			"title": "Identity",
+			"description": "The offer and the target customer, in free text.",
+			"type": "object",
+			"properties": {
+				"offer": {
+					"description": "What is sold, in free text.",
+					"type": "string"
+				},
+				"target_customer": {
+					"description": "Who buys it, in free text.",
+					"type": "string"
+				}
+			},
+			"additionalProperties": false,
+			"required": ["offer", "target_customer"]
+		},
+		"KeywordSource": {
+			"title": "Keyword source",
+			"description": "Source searched with keywords and exclusions.",
+			"type": "object",
+			"properties": {
+				"accept_min_keywords": {
+					"description": "Distinct keywords needed to accept a candidate without the LLM. Fewer, or any exclusion, sends it to LLM triage.",
+					"type": "integer",
+					"format": "uint8",
+					"default": 2,
+					"maximum": 255,
+					"minimum": 0
+				},
+				"exclusions": {
+					"description": "Keywords that send a candidate to LLM triage when present.",
+					"type": "array",
+					"default": [],
+					"items": {
+						"type": "string"
+					}
+				},
+				"keywords": {
+					"description": "Keywords to search for.",
+					"type": "array",
+					"items": {
+						"type": "string"
+					}
+				}
+			},
+			"additionalProperties": false,
+			"required": ["keywords"]
+		},
+		"LlmSettings": {
+			"title": "LLM settings",
+			"description": "Qualification threshold and relevance criteria given to the model.",
+			"type": "object",
+			"properties": {
+				"qualification_threshold": {
+					"description": "Score from which a lead is qualified.",
+					"type": "number",
+					"format": "double"
+				},
+				"relevance_criteria": {
+					"description": "Criteria given to the LLM to judge a lead relevance.",
+					"type": "string"
+				}
+			},
+			"additionalProperties": false,
+			"required": ["qualification_threshold", "relevance_criteria"]
+		},
+		"Matcher": {
+			"title": "Matcher",
+			"description": "A condition on the HTTP response.",
+			"oneOf": [
+				{
+					"title": "Status",
+					"type": "object",
+					"properties": {
+						"equals": {
+							"description": "Expected HTTP status code.",
+							"type": "integer",
+							"format": "uint16",
+							"maximum": 65535,
+							"minimum": 0
+						},
+						"kind": {
+							"type": "string",
+							"const": "status"
+						}
+					},
+					"additionalProperties": false,
+					"required": ["kind", "equals"]
+				},
+				{
+					"title": "Header",
+					"type": "object",
+					"properties": {
+						"kind": {
+							"type": "string",
+							"const": "header"
+						},
+						"name": {
+							"description": "Header name.",
+							"type": "string"
+						},
+						"pattern": {
+							"description": "Regular expression matched against the header value.",
+							"type": "string"
+						}
+					},
+					"additionalProperties": false,
+					"required": ["kind", "name", "pattern"]
+				},
+				{
+					"title": "Body",
+					"type": "object",
+					"properties": {
+						"kind": {
+							"type": "string",
+							"const": "body"
+						},
+						"pattern": {
+							"description": "Regular expression matched against the body.",
+							"type": "string"
+						}
+					},
+					"additionalProperties": false,
+					"required": ["kind", "pattern"]
+				}
+			]
+		},
+		"Scoring": {
+			"title": "Scoring",
+			"description": "Weighted factors. A lead score is the sum of weight times measure over the factors.",
+			"type": "object",
+			"properties": {
+				"factors": {
+					"description": "Weighted factors.",
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/ScoringFactor"
+					}
+				}
+			},
+			"additionalProperties": false,
+			"required": ["factors"]
+		},
+		"ScoringFactor": {
+			"title": "Scoring factor",
+			"description": "One weighted signal kind.",
+			"type": "object",
+			"properties": {
+				"signal": {
+					"description": "Signal kind. The reserved distinct_signals measures how many distinct signal kinds a lead has.",
+					"type": "string"
+				},
+				"value": {
+					"description": "Signal value to match. Any value when absent.",
+					"type": ["string", "null"]
+				},
+				"weight": {
+					"description": "Weight applied to the measure of the signal.",
+					"type": "number",
+					"format": "double"
+				}
+			},
+			"additionalProperties": false,
+			"required": ["signal", "weight"]
+		},
+		"Sources": {
+			"title": "Sources",
+			"description": "The enabled sources. At least one is required.",
+			"type": "object",
+			"properties": {
+				"ats": {
+					"description": "Applicant tracking system job boards.",
+					"anyOf": [
+						{
+							"$ref": "#/$defs/KeywordSource"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"boamp": {
+					"description": "BOAMP public tenders.",
+					"anyOf": [
+						{
+							"$ref": "#/$defs/KeywordSource"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"certificate_transparency": {
+					"description": "Hostname labels to look for in certificate logs.",
+					"anyOf": [
+						{
+							"$ref": "#/$defs/CertificateTransparency"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"decp": {
+					"description": "DECP public procurement data.",
+					"anyOf": [
+						{
+							"$ref": "#/$defs/KeywordSource"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"dns_cname": {
+					"description": "Providers identified by CNAME target suffix.",
+					"anyOf": [
+						{
+							"$ref": "#/$defs/DnsCname"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"france_travail": {
+					"description": "France Travail job offers.",
+					"anyOf": [
+						{
+							"$ref": "#/$defs/KeywordSource"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"http_probe": {
+					"description": "Fingerprints probed over HTTP.",
+					"anyOf": [
+						{
+							"$ref": "#/$defs/HttpProbe"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"ted": {
+					"description": "TED European tenders.",
+					"anyOf": [
+						{
+							"$ref": "#/$defs/KeywordSource"
+						},
+						{
+							"type": "null"
+						}
+					]
+				}
+			},
+			"additionalProperties": false
+		},
+		"VersionExtractor": {
+			"title": "Version extractor",
+			"description": "Extracts a product version from the response. The pattern needs a capture group.",
+			"oneOf": [
+				{
+					"title": "Header",
+					"type": "object",
+					"properties": {
+						"from": {
+							"type": "string",
+							"const": "header"
+						},
+						"name": {
+							"description": "Header name.",
+							"type": "string"
+						},
+						"pattern": {
+							"description": "Regular expression with a capture group for the version.",
+							"type": "string"
+						}
+					},
+					"additionalProperties": false,
+					"required": ["from", "name", "pattern"]
+				},
+				{
+					"title": "Body",
+					"type": "object",
+					"properties": {
+						"from": {
+							"type": "string",
+							"const": "body"
+						},
+						"pattern": {
+							"description": "Regular expression with a capture group for the version.",
+							"type": "string"
+						}
+					},
+					"additionalProperties": false,
+					"required": ["from", "pattern"]
+				}
+			]
+		}
+	}
+}
