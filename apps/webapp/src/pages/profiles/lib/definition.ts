@@ -1,10 +1,19 @@
 export const NEW_PROFILE_TEMPLATE = `{
-  "schema_version": 3,
+  "schema_version": 4,
   "identity": {
     "offer": "",
     "target_customer": ""
   },
   "agents": [],
+  "qualification_agents": [],
+  "aggregator": {
+    "provider_id": null,
+    "system_prompt": ""
+  },
+  "verdict": {
+    "reliable_from": 70,
+    "discard_below": 30
+  },
   "scoring": {
     "factors": []
   },

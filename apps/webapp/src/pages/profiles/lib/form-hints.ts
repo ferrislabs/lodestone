@@ -4,6 +4,7 @@ import {
 	FORM_MESSAGES,
 	VARIANT_TITLES,
 } from '#/pages/profiles/lib/field-copy'
+import { DEFAULT_AGGREGATOR_PROMPT } from '#/pages/profiles/lib/qualification-templates'
 
 export const PROFILE_HINTS: UiHints = {
 	hidden: ['schema_version'],
@@ -12,9 +13,12 @@ export const PROFILE_HINTS: UiHints = {
 		'identity.target_customer',
 		'llm.relevance_criteria',
 		'agents.llm.relevance_criteria',
+		'qualification_agents.system_prompt',
+		'aggregator.system_prompt',
 	],
 	defaults: {
-		schema_version: 3,
+		schema_version: 4,
+		'aggregator.system_prompt': DEFAULT_AGGREGATOR_PROMPT,
 		'llm.qualification_threshold': 50,
 		'scoring.factors.weight': 5,
 		'agents.source.fingerprints.matchers.equals': 200,

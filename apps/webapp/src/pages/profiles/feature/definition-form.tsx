@@ -10,9 +10,11 @@ import {
 	type UiHints,
 } from '#/lib/schema-form'
 import { useAgentsUi } from '#/pages/profiles/feature/use-agents-ui'
+import { useQualificationUi } from '#/pages/profiles/feature/use-qualification-ui'
 import { useScoringUi } from '#/pages/profiles/feature/use-scoring-ui'
 import { PROFILE_HINTS } from '#/pages/profiles/lib/form-hints'
 import { PROFILE_SCHEMA } from '#/pages/profiles/lib/profile-schema'
+import type { ProviderOption } from '#/pages/profiles/lib/qualification'
 import {
 	isValidThreshold,
 	qualificationPoints,
@@ -25,6 +27,8 @@ import type { EditorTab } from '#/pages/profiles/lib/tabs'
 import type { Problem } from '#/pages/profiles/lib/types'
 import { AgentsEditor } from '#/pages/profiles/ui/agents-editor'
 import { AgentsHelp } from '#/pages/profiles/ui/agents-help'
+import { QualificationEditor } from '#/pages/profiles/ui/qualification-editor'
+import { QualificationHelp } from '#/pages/profiles/ui/qualification-help'
 import { ScoringExplainer } from '#/pages/profiles/ui/scoring-explainer'
 import { ScoringGrid } from '#/pages/profiles/ui/scoring-grid'
 import { ThresholdField } from '#/pages/profiles/ui/threshold-field'
@@ -53,7 +57,10 @@ interface DefinitionTabContentProps {
 	sourceTrigger?: SourceTrigger
 	listeners?: Readonly<Record<string, ListenerSummary>>
 	now?: number
+	providers?: readonly ProviderOption[]
 }
+
+const NO_PROVIDERS: readonly ProviderOption[] = []
 
 function section(key: string) {
 	return resolve(PROFILE_SCHEMA, PROFILE_SCHEMA.properties?.[key] ?? {})
@@ -72,8 +79,10 @@ export function DefinitionTabContent({
 	sourceTrigger,
 	listeners,
 	now,
+	providers = NO_PROVIDERS,
 }: DefinitionTabContentProps) {
 	const agents = useAgentsUi(value, onChange)
+	const qualification = useQualificationUi(value, onChange)
 	const scoring = useScoringUi(value, onChange)
 	const [helpCollapsed, setHelpCollapsed] = useState(false)
 	const context: FormContext = {
@@ -150,7 +159,32 @@ export function DefinitionTabContent({
 					</section>
 				</div>
 			)
-		case 'agents':
+		case 'qualification':
+			return (
+				<div
+					data-testid="help-layout"
+					className="flex flex-col gap-4 lg:grid lg:grid-cols-4 lg:gap-6"
+				>
+					<QualificationHelp
+						collapsed={helpCollapsed}
+						onToggle={() => setHelpCollapsed((current) => !current)}
+					/>
+					<div className="lg:order-1 lg:col-span-3">
+						<QualificationEditor
+							value={value}
+							agents={qualification.agents}
+							problems={problems}
+							providers={providers}
+							editing={qualification.editing}
+							confirmingRemove={qualification.confirmingRemove}
+							picking={qualification.picking}
+							previewing={qualification.previewing}
+							actions={qualification.actions}
+						/>
+					</div>
+				</div>
+			)
+		case 'sourcing':
 			return (
 				<div
 					data-testid="help-layout"

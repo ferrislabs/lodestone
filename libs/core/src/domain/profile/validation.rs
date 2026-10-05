@@ -6,11 +6,13 @@ use thiserror::Error;
 
 use super::{
     definition::{
-        Agent, AgentSource, CertificateTransparency, CnamePattern, ContactRanking, DebtRule,
-        DnsCname, Fingerprint, HttpProbe, Identity, KeywordSource, LlmSettings, Matcher,
-        PROFILE_SCHEMA_VERSION, ProfileDefinition, Scoring, VersionExtractor,
+        Agent, AgentSource, Aggregator, CertificateTransparency, CnamePattern, ContactRanking,
+        DebtRule, DnsCname, Fingerprint, HttpProbe, Identity, KeywordSource, LlmSettings,
+        MAX_OPTIONS, MAX_PROMPT_CHARS, MIN_OPTIONS, Matcher, PROFILE_SCHEMA_VERSION,
+        ProfileDefinition, QualificationAgent, Question, Scoring, VerdictThresholds,
+        VersionExtractor,
     },
-    legacy::{ProfileDefinitionV1, ProfileDefinitionV2},
+    legacy::{ProfileDefinitionV1, ProfileDefinitionV2, ProfileDefinitionV3},
 };
 
 const REGEX_SIZE_LIMIT: usize = 1 << 20;
@@ -20,7 +22,7 @@ const MAX_PATTERN_LENGTH: usize = 1024;
 pub enum ProfileProblem {
     #[error("malformed: {0}")]
     Malformed(String),
-    #[error("unsupported schema version {found}, expected 1, 2 or {PROFILE_SCHEMA_VERSION}")]
+    #[error("unsupported schema version {found}, expected 1, 2, 3 or {PROFILE_SCHEMA_VERSION}")]
     UnsupportedSchemaVersion { found: u32 },
     #[error("must not be empty")]
     Empty,
@@ -28,8 +30,20 @@ pub enum ProfileProblem {
     Duplicate(String),
     #[error("at least one agent is required")]
     NoAgent,
+    #[error("at least one qualification agent is required")]
+    NoQualificationAgent,
     #[error("must be a slug of lowercase letters, digits and hyphens, at most 63 characters")]
     InvalidAgentId,
+    #[error("must be lowercase letters, digits, hyphens and underscores, at most 63 characters")]
+    InvalidIdentifier,
+    #[error("must have from {MIN_OPTIONS} to {MAX_OPTIONS} options")]
+    InvalidOptionCount,
+    #[error("must be a number from 0 to 1")]
+    InvalidScore,
+    #[error("must be at most {MAX_PROMPT_CHARS} characters")]
+    TooLong,
+    #[error("must be higher than `discard_below`")]
+    ThresholdOrder,
     #[error("invalid regular expression")]
     InvalidPattern,
     #[error("regular expression needs one capture group")]
@@ -84,6 +98,7 @@ impl ValidatedProfile {
         let definition = match version {
             Some(1) => decode::<ProfileDefinitionV1>(value)?.upgrade(),
             Some(2) => decode::<ProfileDefinitionV2>(value)?.upgrade(),
+            Some(3) => decode::<ProfileDefinitionV3>(value)?.upgrade(),
             Some(PROFILE_SCHEMA_VERSION) | None => decode::<ProfileDefinition>(value)?,
             Some(found) => {
                 return Err(Path::root()
@@ -169,6 +184,13 @@ fn validate(definition: &ProfileDefinition) -> Check {
     }
     validate_identity(&definition.identity, &root.field("identity"))?;
     validate_agents(&definition.agents, &root.field("agents"))?;
+    validate_qualification_agents(
+        &definition.qualification_agents,
+        &definition.agents,
+        &root.field("qualification_agents"),
+    )?;
+    validate_aggregator(&definition.aggregator, &root.field("aggregator"))?;
+    validate_verdict(&definition.verdict, &root.field("verdict"))?;
     validate_scoring(&definition.scoring, &root.field("scoring"))?;
     validate_contact_ranking(&definition.contact_ranking, &root.field("contact_ranking"))?;
     validate_llm(&definition.llm, &root.field("llm"))
@@ -230,6 +252,140 @@ fn validate_agents(agents: &[Agent], path: &Path) -> Check {
     )?;
     for (index, agent) in agents.iter().enumerate() {
         validate_agent(agent, &path.index(index))?;
+    }
+    Ok(())
+}
+
+fn is_identifier(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    (1..=63).contains(&bytes.len())
+        && (bytes[0].is_ascii_lowercase() || bytes[0].is_ascii_digit())
+        && bytes
+            .iter()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || *b == b'-' || *b == b'_')
+}
+
+fn bounded_prompt(prompt: &str, path: &Path) -> Check {
+    non_empty(prompt, path)?;
+    if prompt.chars().count() > MAX_PROMPT_CHARS {
+        return Err(path.fail(ProfileProblem::TooLong));
+    }
+    Ok(())
+}
+
+fn valid_weight(weight: u8, path: &Path) -> Check {
+    if (1..=10).contains(&weight) {
+        Ok(())
+    } else {
+        Err(path.fail(ProfileProblem::InvalidWeight))
+    }
+}
+
+fn validate_qualification_agents(
+    agents: &[QualificationAgent],
+    sourcing: &[Agent],
+    path: &Path,
+) -> Check {
+    non_empty_list(agents, path).map_err(|_| path.fail(ProfileProblem::NoQualificationAgent))?;
+    for (index, agent) in agents.iter().enumerate() {
+        if !agent.id.is_slug() {
+            return Err(path
+                .index(index)
+                .field("id")
+                .fail(ProfileProblem::InvalidAgentId));
+        }
+    }
+    let mut seen: HashSet<&str> = sourcing.iter().map(|agent| agent.id.as_str()).collect();
+    for (index, agent) in agents.iter().enumerate() {
+        if !seen.insert(agent.id.as_str()) {
+            return Err(path
+                .index(index)
+                .field("id")
+                .fail(ProfileProblem::Duplicate(agent.id.as_str().to_owned())));
+        }
+    }
+    for (index, agent) in agents.iter().enumerate() {
+        validate_qualification_agent(agent, &path.index(index))?;
+    }
+    Ok(())
+}
+
+fn validate_qualification_agent(agent: &QualificationAgent, path: &Path) -> Check {
+    non_empty(&agent.name, &path.field("name"))?;
+    bounded_prompt(&agent.system_prompt, &path.field("system_prompt"))?;
+    valid_weight(agent.weight, &path.field("weight"))?;
+    let questions = path.field("questions");
+    non_empty_list(&agent.questions, &questions)?;
+    for (index, question) in agent.questions.iter().enumerate() {
+        if !is_identifier(&question.id) {
+            return Err(questions
+                .index(index)
+                .field("id")
+                .fail(ProfileProblem::InvalidIdentifier));
+        }
+    }
+    unique(
+        agent
+            .questions
+            .iter()
+            .map(|question| question.id.as_str())
+            .enumerate(),
+        |index| questions.index(index).field("id"),
+    )?;
+    for (index, question) in agent.questions.iter().enumerate() {
+        validate_question(question, &questions.index(index))?;
+    }
+    Ok(())
+}
+
+fn validate_question(question: &Question, path: &Path) -> Check {
+    non_empty(&question.wording, &path.field("wording"))?;
+    valid_weight(question.weight, &path.field("weight"))?;
+    let options = path.field("options");
+    if !(MIN_OPTIONS..=MAX_OPTIONS).contains(&question.options.len()) {
+        return Err(options.fail(ProfileProblem::InvalidOptionCount));
+    }
+    for (index, option) in question.options.iter().enumerate() {
+        let option_path = options.index(index);
+        if !is_identifier(&option.value) {
+            return Err(option_path
+                .field("value")
+                .fail(ProfileProblem::InvalidIdentifier));
+        }
+        non_empty(&option.label, &option_path.field("label"))?;
+        if !(0.0..=1.0).contains(&option.score) {
+            return Err(option_path
+                .field("score")
+                .fail(ProfileProblem::InvalidScore));
+        }
+    }
+    unique(
+        question
+            .options
+            .iter()
+            .map(|option| option.value.as_str())
+            .enumerate(),
+        |index| options.index(index).field("value"),
+    )
+}
+
+fn validate_aggregator(aggregator: &Aggregator, path: &Path) -> Check {
+    bounded_prompt(&aggregator.system_prompt, &path.field("system_prompt"))
+}
+
+fn validate_verdict(verdict: &VerdictThresholds, path: &Path) -> Check {
+    for (name, value) in [
+        ("reliable_from", verdict.reliable_from),
+        ("discard_below", verdict.discard_below),
+    ] {
+        if value > 100 {
+            return Err(path.field(name).fail(ProfileProblem::InvalidThreshold));
+        }
+    }
+    if verdict.reliable_from <= verdict.discard_below {
+        return Err(path
+            .field("reliable_from")
+            .fail(ProfileProblem::ThresholdOrder));
     }
     Ok(())
 }
@@ -589,10 +745,10 @@ mod tests {
             v["scoring"] = iam_scoring_v2();
             v["llm"]["qualification_threshold"] = json!(50);
         });
-        assert_eq!(profile.definition().schema_version, 3);
+        assert_eq!(profile.definition().schema_version, 4);
         assert_eq!(weights(&profile), [10, 5, 3, 8, 7, 2, 2]);
         assert_eq!(profile.definition().llm.qualification_threshold, 37);
-        assert_eq!(profile.to_json()["schema_version"], 3);
+        assert_eq!(profile.to_json()["schema_version"], 4);
     }
 
     #[test]
@@ -691,11 +847,11 @@ mod tests {
 
     #[test]
     fn unsupported_schema_version_is_rejected() {
-        let error = error_for(|v| v["schema_version"] = json!(4));
+        let error = error_for(|v| v["schema_version"] = json!(5));
         assert_eq!(error.path, "schema_version");
         assert_eq!(
             error.problem,
-            ProfileProblem::UnsupportedSchemaVersion { found: 4 }
+            ProfileProblem::UnsupportedSchemaVersion { found: 5 }
         );
         let error = error_for(|v| v["schema_version"] = json!(0));
         assert_eq!(
@@ -1021,7 +1177,7 @@ mod tests {
         value["sources"] = json!({"http_probe": source, "ats": {"keywords": ["sso"]}});
         let profile = ValidatedProfile::parse(value).unwrap();
         let definition = profile.definition();
-        assert_eq!(definition.schema_version, 3);
+        assert_eq!(definition.schema_version, 4);
         let summary: Vec<_> = definition
             .agents
             .iter()
@@ -1031,7 +1187,7 @@ mod tests {
             summary,
             [("http-probe", "HTTP probe", true), ("ats", "ATS", true)]
         );
-        assert_eq!(profile.to_json()["schema_version"], 3);
+        assert_eq!(profile.to_json()["schema_version"], 4);
         assert_eq!(profile.to_json()["agents"][0]["source"], agent);
     }
 
@@ -1079,6 +1235,307 @@ mod tests {
             error_for(|v| v["contact_ranking"]["guess_local_parts"] = json!(["contact", "sales"]));
         assert_eq!(error.path, "contact_ranking.guess_local_parts[1]");
         assert_eq!(error.problem, ProfileProblem::GuessNotRanked);
+    }
+
+    fn v4() -> Value {
+        ValidatedProfile::parse(minimal()).unwrap().to_json()
+    }
+
+    fn v4_error(mutate: impl FnOnce(&mut Value)) -> ProfileValidationError {
+        let mut value = v4();
+        mutate(&mut value);
+        ValidatedProfile::parse(value).unwrap_err()
+    }
+
+    fn v4_ok(mutate: impl FnOnce(&mut Value)) -> ValidatedProfile {
+        let mut value = v4();
+        mutate(&mut value);
+        ValidatedProfile::parse(value).unwrap()
+    }
+
+    const OPTION0: &str = "qualification_agents[0].questions[0].options[0]";
+
+    #[test]
+    fn version_three_is_upgraded_with_a_default_qualification_agent() {
+        let profile = ValidatedProfile::parse(minimal()).unwrap();
+        let definition = profile.definition();
+        assert_eq!(definition.schema_version, 4);
+        assert_eq!(definition.qualification_agents.len(), 1);
+        let agent = &definition.qualification_agents[0];
+        assert_eq!(agent.id.as_str(), "pertinence");
+        assert_eq!(agent.name, "Pertinence");
+        assert!(agent.enabled);
+        assert_eq!(agent.provider_id, None);
+        assert_eq!(agent.weight, 5);
+        assert!(agent.system_prompt.contains("Self-hosts an IAM product"));
+        assert!(agent.system_prompt.contains("Managed IAM"));
+        assert_eq!(agent.questions.len(), 1);
+        let question = &agent.questions[0];
+        assert_eq!(question.id, "pertinence");
+        assert_eq!(question.wording, "Ce lead est-il pertinent pour l'offre ?");
+        let options: Vec<_> = question
+            .options
+            .iter()
+            .map(|option| (option.value.as_str(), option.score))
+            .collect();
+        assert_eq!(options, [("forte", 1.0), ("moyenne", 0.5), ("faible", 0.0)]);
+        assert_eq!(definition.aggregator.provider_id, None);
+        assert!(!definition.aggregator.system_prompt.is_empty());
+        assert_eq!(definition.verdict.reliable_from, 70);
+        assert_eq!(definition.verdict.discard_below, 30);
+        assert_eq!(definition.llm.qualification_threshold, 50);
+    }
+
+    #[test]
+    fn upgraded_prompt_stays_within_the_limit() {
+        let profile = error_for_ok(|v| v["llm"]["relevance_criteria"] = json!("x".repeat(20_000)));
+        let prompt = &profile.definition().qualification_agents[0].system_prompt;
+        assert_eq!(prompt.chars().count(), 8000);
+    }
+
+    #[test]
+    fn version_four_round_trips_with_a_null_provider() {
+        let value = v4();
+        assert_eq!(value["qualification_agents"][0]["provider_id"], Value::Null);
+        assert_eq!(value["aggregator"]["provider_id"], Value::Null);
+        let profile = ValidatedProfile::parse(value.clone()).unwrap();
+        assert_eq!(profile.to_json(), value);
+    }
+
+    #[test]
+    fn provider_id_must_be_a_uuid() {
+        let error = v4_error(|v| v["qualification_agents"][0]["provider_id"] = json!("nope"));
+        assert_eq!(error.path, "qualification_agents[0].provider_id");
+        let id = "0192f3a0-7b5e-7c1a-9d3e-0a1b2c3d4e5f";
+        let profile = v4_ok(|v| v["aggregator"]["provider_id"] = json!(id));
+        assert_eq!(
+            profile
+                .definition()
+                .aggregator
+                .provider_id
+                .unwrap()
+                .to_string(),
+            id
+        );
+    }
+
+    #[test]
+    fn qualification_agent_is_required() {
+        let error = v4_error(|v| v["qualification_agents"] = json!([]));
+        assert_eq!(error.path, "qualification_agents");
+        assert_eq!(error.problem, ProfileProblem::NoQualificationAgent);
+        let error = v4_error(|v| {
+            v.as_object_mut().unwrap().remove("qualification_agents");
+        });
+        assert_eq!(error.path, "$");
+    }
+
+    #[test]
+    fn qualification_agent_defaults() {
+        let profile = v4_ok(|v| {
+            let agent = v["qualification_agents"][0].as_object_mut().unwrap();
+            agent.remove("enabled");
+            agent.remove("weight");
+            agent.remove("provider_id");
+            v["qualification_agents"][0]["questions"][0]
+                .as_object_mut()
+                .unwrap()
+                .remove("weight");
+        });
+        let agent = &profile.definition().qualification_agents[0];
+        assert!(agent.enabled);
+        assert_eq!(agent.weight, 5);
+        assert_eq!(agent.provider_id, None);
+        assert_eq!(agent.questions[0].weight, 5);
+    }
+
+    #[test]
+    fn qualification_agent_ids_are_slugs() {
+        let error = v4_error(|v| v["qualification_agents"][0]["id"] = json!("Bad Id"));
+        assert_eq!(error.path, "qualification_agents[0].id");
+        assert_eq!(error.problem, ProfileProblem::InvalidAgentId);
+    }
+
+    #[test]
+    fn ids_are_unique_across_sourcing_and_qualification_agents() {
+        let error = v4_error(|v| v["qualification_agents"][0]["id"] = json!("http-probe"));
+        assert_eq!(error.path, "qualification_agents[0].id");
+        assert_eq!(
+            error.problem,
+            ProfileProblem::Duplicate("http-probe".to_owned())
+        );
+        let error = v4_error(|v| {
+            let first = v["qualification_agents"][0].clone();
+            v["qualification_agents"]
+                .as_array_mut()
+                .unwrap()
+                .push(first);
+        });
+        assert_eq!(error.path, "qualification_agents[1].id");
+        assert_eq!(
+            error.problem,
+            ProfileProblem::Duplicate("pertinence".to_owned())
+        );
+    }
+
+    #[test]
+    fn qualification_agent_fields_are_checked_with_their_paths() {
+        let error = v4_error(|v| v["qualification_agents"][0]["name"] = json!(" "));
+        assert_eq!(error.path, "qualification_agents[0].name");
+        assert_eq!(error.problem, ProfileProblem::Empty);
+        let error = v4_error(|v| v["qualification_agents"][0]["system_prompt"] = json!(" "));
+        assert_eq!(error.path, "qualification_agents[0].system_prompt");
+        assert_eq!(error.problem, ProfileProblem::Empty);
+        let error =
+            v4_error(|v| v["qualification_agents"][0]["system_prompt"] = json!("x".repeat(8001)));
+        assert_eq!(error.problem, ProfileProblem::TooLong);
+        let ok = v4_ok(|v| v["qualification_agents"][0]["system_prompt"] = json!("x".repeat(8000)));
+        assert_eq!(
+            ok.definition().qualification_agents[0].system_prompt.len(),
+            8000
+        );
+        for weight in [0, 11] {
+            let error = v4_error(|v| v["qualification_agents"][0]["weight"] = json!(weight));
+            assert_eq!(error.path, "qualification_agents[0].weight");
+            assert_eq!(error.problem, ProfileProblem::InvalidWeight);
+        }
+    }
+
+    #[test]
+    fn at_least_one_question_is_required() {
+        let error = v4_error(|v| v["qualification_agents"][0]["questions"] = json!([]));
+        assert_eq!(error.path, "qualification_agents[0].questions");
+        assert_eq!(error.problem, ProfileProblem::Empty);
+    }
+
+    #[test]
+    fn question_fields_are_checked_with_their_paths() {
+        let error =
+            v4_error(|v| v["qualification_agents"][0]["questions"][0]["id"] = json!("Bad Id"));
+        assert_eq!(error.path, "qualification_agents[0].questions[0].id");
+        assert_eq!(error.problem, ProfileProblem::InvalidIdentifier);
+        let error =
+            v4_error(|v| v["qualification_agents"][0]["questions"][0]["wording"] = json!(" "));
+        assert_eq!(error.path, "qualification_agents[0].questions[0].wording");
+        assert_eq!(error.problem, ProfileProblem::Empty);
+        let error =
+            v4_error(|v| v["qualification_agents"][0]["questions"][0]["weight"] = json!(11));
+        assert_eq!(error.path, "qualification_agents[0].questions[0].weight");
+        assert_eq!(error.problem, ProfileProblem::InvalidWeight);
+    }
+
+    #[test]
+    fn question_ids_are_unique_within_an_agent() {
+        let error = v4_error(|v| {
+            let first = v["qualification_agents"][0]["questions"][0].clone();
+            v["qualification_agents"][0]["questions"]
+                .as_array_mut()
+                .unwrap()
+                .push(first);
+        });
+        assert_eq!(error.path, "qualification_agents[0].questions[1].id");
+        assert_eq!(
+            error.problem,
+            ProfileProblem::Duplicate("pertinence".to_owned())
+        );
+    }
+
+    #[test]
+    fn options_count_is_between_two_and_ten() {
+        let options = |count: usize| {
+            (0..count)
+                .map(|i| json!({"value": format!("o{i}"), "label": "L", "score": 0.5}))
+                .collect::<Vec<_>>()
+        };
+        for count in [0, 1, 11] {
+            let error = v4_error(|v| {
+                v["qualification_agents"][0]["questions"][0]["options"] = json!(options(count))
+            });
+            assert_eq!(error.path, "qualification_agents[0].questions[0].options");
+            assert_eq!(error.problem, ProfileProblem::InvalidOptionCount);
+        }
+        for count in [2, 10] {
+            let _ = v4_ok(|v| {
+                v["qualification_agents"][0]["questions"][0]["options"] = json!(options(count))
+            });
+        }
+    }
+
+    #[test]
+    fn option_values_are_unique_identifiers() {
+        let error = v4_error(|v| {
+            v["qualification_agents"][0]["questions"][0]["options"][1]["value"] = json!("forte")
+        });
+        assert_eq!(
+            error.path,
+            format!("{OPTION0}.value").replace("[0].value", "[1].value")
+        );
+        assert_eq!(error.problem, ProfileProblem::Duplicate("forte".to_owned()));
+        let error = v4_error(|v| {
+            v["qualification_agents"][0]["questions"][0]["options"][0]["value"] = json!("A b")
+        });
+        assert_eq!(error.path, format!("{OPTION0}.value"));
+        assert_eq!(error.problem, ProfileProblem::InvalidIdentifier);
+        let _ = v4_ok(|v| {
+            v["qualification_agents"][0]["questions"][0]["options"][0]["value"] =
+                json!("legacy_auto_heberge")
+        });
+    }
+
+    #[test]
+    fn option_scores_are_between_zero_and_one() {
+        for score in [json!(1.5), json!(-0.1)] {
+            let error = v4_error(|v| {
+                v["qualification_agents"][0]["questions"][0]["options"][0]["score"] = score
+            });
+            assert_eq!(error.path, format!("{OPTION0}.score"));
+            assert_eq!(error.problem, ProfileProblem::InvalidScore);
+        }
+        for score in [json!(0), json!(1), json!(0.3)] {
+            let _ = v4_ok(|v| {
+                v["qualification_agents"][0]["questions"][0]["options"][0]["score"] = score
+            });
+        }
+        let error = v4_error(|v| {
+            v["qualification_agents"][0]["questions"][0]["options"][0]["label"] = json!(" ")
+        });
+        assert_eq!(error.path, format!("{OPTION0}.label"));
+    }
+
+    #[test]
+    fn aggregator_prompt_is_required_and_bounded() {
+        let error = v4_error(|v| v["aggregator"]["system_prompt"] = json!(""));
+        assert_eq!(error.path, "aggregator.system_prompt");
+        assert_eq!(error.problem, ProfileProblem::Empty);
+        let error = v4_error(|v| v["aggregator"]["system_prompt"] = json!("x".repeat(8001)));
+        assert_eq!(error.problem, ProfileProblem::TooLong);
+    }
+
+    #[test]
+    fn verdict_thresholds_default_and_are_ordered() {
+        let profile = v4_ok(|v| {
+            v.as_object_mut().unwrap().remove("verdict");
+        });
+        assert_eq!(profile.definition().verdict.reliable_from, 70);
+        assert_eq!(profile.definition().verdict.discard_below, 30);
+        let error = v4_error(|v| v["verdict"] = json!({"reliable_from": 30, "discard_below": 30}));
+        assert_eq!(error.path, "verdict.reliable_from");
+        assert_eq!(error.problem, ProfileProblem::ThresholdOrder);
+        let error = v4_error(|v| v["verdict"] = json!({"reliable_from": 101}));
+        assert_eq!(error.path, "verdict.reliable_from");
+        assert_eq!(error.problem, ProfileProblem::InvalidThreshold);
+        let error =
+            v4_error(|v| v["verdict"] = json!({"reliable_from": 100, "discard_below": 101}));
+        assert_eq!(error.path, "verdict.discard_below");
+        let _ = v4_ok(|v| v["verdict"] = json!({"reliable_from": 1, "discard_below": 0}));
+    }
+
+    #[test]
+    fn version_four_rejects_unknown_fields_in_new_objects() {
+        let error = v4_error(|v| v["aggregator"]["extra"] = json!(1));
+        assert_eq!(error.path, "aggregator.extra");
+        let error = v4_error(|v| v["qualification_agents"][0]["questions"][0]["x"] = json!(1));
+        assert_eq!(error.path, "qualification_agents[0].questions[0].x");
     }
 
     #[test]

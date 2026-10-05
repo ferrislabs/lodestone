@@ -178,6 +178,114 @@ export const FIELD_COPY: Readonly<Record<string, FieldCopy>> = {
 		description:
 			"Mots-clés qui envoient un candidat au tri par le LLM lorsqu'ils sont présents.",
 	},
+	qualification_agents: {
+		label: 'Agents de qualification',
+		description:
+			'Chaque agent évalue tous les leads du profil sous un angle. Au moins un est requis.',
+	},
+	'qualification_agents[]': {
+		label: 'Agent de qualification',
+		description: 'Pose une liste de questions à un modèle sur chaque lead.',
+	},
+	'qualification_agents[].id': {
+		label: 'Identifiant',
+		description:
+			'Identifiant unique parmi tous les agents du profil, par exemple maturite-technique.',
+	},
+	'qualification_agents[].name': {
+		label: 'Nom',
+		description: "Nom d'affichage.",
+	},
+	'qualification_agents[].enabled': {
+		label: 'Activé',
+		description: "Un agent désactivé est conservé mais n'est pas exécuté.",
+	},
+	'qualification_agents[].provider_id': {
+		label: 'Fournisseur LLM',
+		description:
+			"Fournisseur LLM déclaré qui répond pour cet agent. Le fournisseur par défaut s'applique à défaut.",
+	},
+	'qualification_agents[].system_prompt': {
+		label: 'Prompt système',
+		description: 'Consigne donnée au modèle, 8000 caractères au maximum.',
+	},
+	'qualification_agents[].weight': {
+		label: 'Poids',
+		description:
+			'Poids entier de 1 à 10 de cet agent dans la confiance du lead.',
+	},
+	'qualification_agents[].questions': {
+		label: 'Questions',
+		description:
+			"Questions auxquelles l'agent répond. Au moins une est requise.",
+	},
+	'qualification_agents[].questions[]': {
+		label: 'Question',
+		description: 'Une question à choix posée au modèle à propos du lead.',
+		add: 'Ajouter une question',
+	},
+	'qualification_agents[].questions[].id': {
+		label: 'Identifiant',
+		description: "Identifiant unique dans l'agent, clé de la réponse.",
+	},
+	'qualification_agents[].questions[].wording': {
+		label: 'Libellé',
+		description: 'La question posée au modèle.',
+	},
+	'qualification_agents[].questions[].weight': {
+		label: 'Poids',
+		description:
+			"Poids entier de 1 à 10 de cette question dans le score de l'agent.",
+	},
+	'qualification_agents[].questions[].options': {
+		label: 'Options',
+		description: 'Réponses possibles, de 2 à 10, de valeurs uniques.',
+	},
+	'qualification_agents[].questions[].options[]': {
+		label: 'Option',
+		description: "Une réponse possible et le score qu'elle vaut.",
+		add: 'Ajouter une option',
+	},
+	'qualification_agents[].questions[].options[].value': {
+		label: 'Valeur',
+		description: 'Valeur renvoyée par le modèle, unique dans la question.',
+	},
+	'qualification_agents[].questions[].options[].label': {
+		label: 'Libellé',
+		description: "Libellé d'affichage de l'option.",
+	},
+	'qualification_agents[].questions[].options[].score': {
+		label: 'Score',
+		description: 'Score de 0 à 1 de cette réponse.',
+	},
+	aggregator: {
+		label: 'Agrégateur',
+		description:
+			'Rédige le bilan du lead à partir des réponses de tous les agents de qualification.',
+	},
+	'aggregator.provider_id': {
+		label: 'Fournisseur LLM',
+		description:
+			"Fournisseur LLM déclaré qui rédige le bilan. Le fournisseur par défaut s'applique à défaut.",
+	},
+	'aggregator.system_prompt': {
+		label: 'Prompt système',
+		description: 'Consigne donnée au modèle, 8000 caractères au maximum.',
+	},
+	verdict: {
+		label: 'Verdicts',
+		description:
+			'Seuils de la confiance du lead qui décident de son verdict : fiable, à vérifier ou écarté.',
+	},
+	'verdict.reliable_from': {
+		label: 'Fiable à partir de',
+		description: 'Un lead est fiable à partir de ce pourcentage de confiance.',
+	},
+	'verdict.discard_below': {
+		label: 'Écarté sous',
+		description:
+			'Un lead est écarté sous ce pourcentage de confiance. Doit être inférieur au seuil fiable.',
+	},
 	scoring: {
 		label: 'Scoring',
 		description:

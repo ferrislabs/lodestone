@@ -4,7 +4,8 @@ import type { Problem } from '#/pages/profiles/lib/types'
 
 export const EDITOR_TABS = [
 	'identity',
-	'agents',
+	'sourcing',
+	'qualification',
 	'scoring',
 	'settings',
 ] as const
@@ -14,15 +15,23 @@ export type ProfileTab = EditorTab | 'history'
 
 export const TAB_LABELS: Record<ProfileTab, string> = {
 	identity: 'Identité',
-	agents: 'Agents',
+	sourcing: 'Sourcing',
+	qualification: 'Qualification',
 	scoring: 'Scoring',
 	settings: 'Réglages',
 	history: 'Historique des révisions',
 }
 
+const LEGACY_TABS: Readonly<Record<string, ProfileTab>> = {
+	agents: 'sourcing',
+}
+
 export const tabSearchSchema = z.object({
 	tab: z
-		.enum([...EDITOR_TABS, 'history'])
+		.preprocess(
+			(raw) => (typeof raw === 'string' ? (LEGACY_TABS[raw] ?? raw) : raw),
+			z.enum([...EDITOR_TABS, 'history']),
+		)
 		.optional()
 		.catch(undefined),
 })
@@ -41,7 +50,14 @@ function belongsTo(path: string, root: string): boolean {
 
 export function tabOfPath(path: string): EditorTab | null {
 	if (belongsTo(path, 'identity')) return 'identity'
-	if (belongsTo(path, 'agents')) return 'agents'
+	if (belongsTo(path, 'agents')) return 'sourcing'
+	if (
+		belongsTo(path, 'qualification_agents') ||
+		belongsTo(path, 'aggregator') ||
+		belongsTo(path, 'verdict')
+	) {
+		return 'qualification'
+	}
 	if (belongsTo(path, 'scoring')) return 'scoring'
 	if (belongsTo(path, 'llm') || belongsTo(path, 'contact_ranking')) {
 		return 'settings'
@@ -54,7 +70,8 @@ export function problemCounts(
 ): Record<EditorTab, number> {
 	const counts: Record<EditorTab, number> = {
 		identity: 0,
-		agents: 0,
+		sourcing: 0,
+		qualification: 0,
 		scoring: 0,
 		settings: 0,
 	}

@@ -21,6 +21,7 @@ import {
 } from '#/lib/schema-form'
 import { loadProfileSchema } from '#/lib/schema-form/test-schema'
 import { PROFILE_HINTS } from '#/pages/profiles/lib/form-hints'
+import { DEFAULT_AGGREGATOR_PROMPT } from '#/pages/profiles/lib/qualification-templates'
 
 const root = loadProfileSchema()
 
@@ -51,7 +52,7 @@ describe('classify', () => {
 
 	it('classifies every $def of the committed schema', () => {
 		const names = Object.keys(root.$defs ?? {})
-		expect(names.length).toBe(16)
+		expect(names.length).toBe(21)
 		for (const name of names) {
 			const node = classify(root, { $ref: `#/$defs/${name}` })
 			const expected = unions.includes(name)
@@ -136,9 +137,12 @@ describe('defaultValue', () => {
 	it('builds a new profile with every required key', () => {
 		const value = defaultValue(root, root, PROFILE_HINTS)
 		expect(value).toEqual({
-			schema_version: 3,
+			schema_version: 4,
 			identity: { offer: '', target_customer: '' },
 			agents: [],
+			qualification_agents: [],
+			aggregator: { system_prompt: DEFAULT_AGGREGATOR_PROMPT },
+			verdict: { reliable_from: 70, discard_below: 30 },
 			scoring: { factors: [] },
 			contact_ranking: { preferred_local_parts: [], guess_local_parts: [] },
 			llm: {
@@ -304,7 +308,7 @@ describe('validateValue', () => {
 	})
 
 	it('reports a missing required key', () => {
-		const problems = validateValue(root, root, { schema_version: 3 })
+		const problems = validateValue(root, root, { schema_version: 4 })
 		expect(problems.map((p) => p.path)).toContain('identity')
 	})
 })

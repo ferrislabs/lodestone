@@ -1,7 +1,7 @@
 {
 	"$schema": "https://json-schema.org/draft/2020-12/schema",
 	"title": "Detection profile",
-	"description": "Describes one market: what is sold, which agents scan which sources, how leads are scored, which contacts to prefer and how the LLM qualifies a lead.",
+	"description": "Describes one market: what is sold, which agents scan which sources, which qualification agents judge a lead and how an aggregator sums it up, how leads are scored and which contacts to prefer.",
 	"type": "object",
 	"properties": {
 		"agents": {
@@ -10,6 +10,9 @@
 			"items": {
 				"$ref": "#/$defs/Agent"
 			}
+		},
+		"aggregator": {
+			"$ref": "#/$defs/Aggregator"
 		},
 		"contact_ranking": {
 			"$ref": "#/$defs/ContactRanking"
@@ -20,14 +23,28 @@
 		"llm": {
 			"$ref": "#/$defs/LlmSettings"
 		},
+		"qualification_agents": {
+			"description": "Qualification agents. Each one evaluates every lead of the profile from one angle. At least one is required.",
+			"type": "array",
+			"items": {
+				"$ref": "#/$defs/QualificationAgent"
+			}
+		},
 		"schema_version": {
-			"description": "Profile format version. Must be 3.",
+			"description": "Profile format version. Must be 4.",
 			"type": "integer",
 			"format": "uint32",
 			"minimum": 0
 		},
 		"scoring": {
 			"$ref": "#/$defs/Scoring"
+		},
+		"verdict": {
+			"$ref": "#/$defs/VerdictThresholds",
+			"default": {
+				"discard_below": 30,
+				"reliable_from": 70
+			}
 		}
 	},
 	"additionalProperties": false,
@@ -35,6 +52,8 @@
 		"schema_version",
 		"identity",
 		"agents",
+		"qualification_agents",
+		"aggregator",
 		"scoring",
 		"contact_ranking",
 		"llm"
@@ -351,6 +370,26 @@
 				}
 			]
 		},
+		"Aggregator": {
+			"title": "Aggregator",
+			"description": "Writes the summary of a lead from the answers of every qualification agent.",
+			"type": "object",
+			"properties": {
+				"provider_id": {
+					"description": "Id of a declared LLM provider. The default provider applies when null.",
+					"type": ["string", "null"],
+					"default": null
+				},
+				"system_prompt": {
+					"description": "System prompt given to the model.",
+					"type": "string",
+					"maxLength": 8000,
+					"minLength": 1
+				}
+			},
+			"additionalProperties": false,
+			"required": ["system_prompt"]
+		},
 		"CnamePattern": {
 			"title": "CNAME pattern",
 			"description": "A provider name with the CNAME target suffix that identifies it.",
@@ -602,6 +641,119 @@
 				}
 			]
 		},
+		"QualificationAgent": {
+			"title": "Qualification agent",
+			"description": "Evaluates every lead of the profile from one angle by asking a model a list of questions.",
+			"type": "object",
+			"properties": {
+				"enabled": {
+					"description": "A disabled agent is kept but not run.",
+					"type": "boolean",
+					"default": true
+				},
+				"id": {
+					"description": "Unique slug among all agents of the profile, sourcing and qualification, for example maturite-technique.",
+					"$ref": "#/$defs/AgentId"
+				},
+				"name": {
+					"description": "Display name.",
+					"type": "string"
+				},
+				"provider_id": {
+					"description": "Id of a declared LLM provider. The default provider applies when null.",
+					"type": ["string", "null"],
+					"default": null
+				},
+				"questions": {
+					"description": "Questions the agent answers. At least one is required.",
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/Question"
+					},
+					"minItems": 1
+				},
+				"system_prompt": {
+					"description": "System prompt given to the model.",
+					"type": "string",
+					"maxLength": 8000,
+					"minLength": 1
+				},
+				"weight": {
+					"description": "Integer weight from 1 to 10 of this agent in the lead confidence.",
+					"type": "integer",
+					"format": "uint8",
+					"default": 5,
+					"maximum": 10,
+					"minimum": 1
+				}
+			},
+			"additionalProperties": false,
+			"required": ["id", "name", "system_prompt", "questions"]
+		},
+		"Question": {
+			"title": "Question",
+			"description": "A multiple choice question a qualification agent answers about a lead.",
+			"type": "object",
+			"properties": {
+				"id": {
+					"description": "Identifier unique in the agent, used as the answer key.",
+					"type": "string",
+					"maxLength": 63,
+					"minLength": 1,
+					"pattern": "^[a-z0-9][a-z0-9_-]{0,62}$"
+				},
+				"options": {
+					"description": "Possible answers, from 2 to 10, with unique values.",
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/QuestionOption"
+					},
+					"maxItems": 10,
+					"minItems": 2
+				},
+				"weight": {
+					"description": "Integer weight from 1 to 10 of this question in the agent score.",
+					"type": "integer",
+					"format": "uint8",
+					"default": 5,
+					"maximum": 10,
+					"minimum": 1
+				},
+				"wording": {
+					"description": "The question asked to the model.",
+					"type": "string"
+				}
+			},
+			"additionalProperties": false,
+			"required": ["id", "wording", "options"]
+		},
+		"QuestionOption": {
+			"title": "Question option",
+			"description": "One possible answer to a question and the score it is worth.",
+			"type": "object",
+			"properties": {
+				"label": {
+					"description": "Display label.",
+					"type": "string"
+				},
+				"score": {
+					"description": "Score from 0 to 1 of this answer.",
+					"type": "number",
+					"format": "double",
+					"maximum": 1.0,
+					"minimum": 0.0
+				},
+				"value": {
+					"description": "Value the model answers, unique in the question.",
+					"type": "string",
+					"maxLength": 63,
+					"minLength": 1,
+					"pattern": "^[a-z0-9][a-z0-9_-]{0,62}$"
+				}
+			},
+			"additionalProperties": false,
+			"required": ["value", "label", "score"]
+		},
 		"Scoring": {
 			"title": "Scoring",
 			"description": "Weighted factors. A lead score is the sum of weight times measure over the factors.",
@@ -641,6 +793,30 @@
 			},
 			"additionalProperties": false,
 			"required": ["signal", "weight"]
+		},
+		"VerdictThresholds": {
+			"title": "Verdict thresholds",
+			"description": "Percentages of the lead confidence that decide its verdict: reliable, to check or discarded.",
+			"type": "object",
+			"properties": {
+				"discard_below": {
+					"description": "A lead is discarded below this confidence percentage. Must be lower than reliable_from.",
+					"type": "integer",
+					"format": "uint8",
+					"default": 30,
+					"maximum": 100,
+					"minimum": 0
+				},
+				"reliable_from": {
+					"description": "A lead is reliable from this confidence percentage.",
+					"type": "integer",
+					"format": "uint8",
+					"default": 70,
+					"maximum": 100,
+					"minimum": 0
+				}
+			},
+			"additionalProperties": false
 		},
 		"VersionExtractor": {
 			"title": "Version extractor",

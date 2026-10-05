@@ -1,22 +1,30 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 use crate::domain::values::SourceName;
 
-pub const PROFILE_SCHEMA_VERSION: u32 = 3;
+pub const PROFILE_SCHEMA_VERSION: u32 = 4;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[schemars(
     title = "Detection profile",
-    description = "Describes one market: what is sold, which agents scan which sources, how leads are scored, which contacts to prefer and how the LLM qualifies a lead."
+    description = "Describes one market: what is sold, which agents scan which sources, which qualification agents judge a lead and how an aggregator sums it up, how leads are scored and which contacts to prefer."
 )]
 pub struct ProfileDefinition {
-    #[schemars(description = "Profile format version. Must be 3.")]
+    #[schemars(description = "Profile format version. Must be 4.")]
     pub schema_version: u32,
     pub identity: Identity,
     #[schemars(description = "Detection agents. At least one is required.")]
     pub agents: Vec<Agent>,
+    #[schemars(
+        description = "Qualification agents. Each one evaluates every lead of the profile from one angle. At least one is required."
+    )]
+    pub qualification_agents: Vec<QualificationAgent>,
+    pub aggregator: Aggregator,
+    #[serde(default)]
+    pub verdict: VerdictThresholds,
     pub scoring: Scoring,
     pub contact_ranking: ContactRanking,
     pub llm: LlmSettings,
@@ -65,6 +73,162 @@ impl AgentId {
             && bytes
                 .iter()
                 .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || *b == b'-')
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(
+    title = "Qualification agent",
+    description = "Evaluates every lead of the profile from one angle by asking a model a list of questions."
+)]
+pub struct QualificationAgent {
+    #[schemars(
+        description = "Unique slug among all agents of the profile, sourcing and qualification, for example maturite-technique."
+    )]
+    pub id: AgentId,
+    #[schemars(description = "Display name.")]
+    pub name: String,
+    #[serde(default = "default_enabled")]
+    #[schemars(description = "A disabled agent is kept but not run.")]
+    pub enabled: bool,
+    #[serde(default)]
+    #[schemars(
+        with = "Option<String>",
+        description = "Id of a declared LLM provider. The default provider applies when null."
+    )]
+    pub provider_id: Option<Uuid>,
+    #[schemars(
+        length(min = 1, max = 8000),
+        description = "System prompt given to the model."
+    )]
+    pub system_prompt: String,
+    #[serde(default = "default_weight")]
+    #[schemars(
+        range(min = 1, max = 10),
+        description = "Integer weight from 1 to 10 of this agent in the lead confidence."
+    )]
+    pub weight: u8,
+    #[schemars(
+        length(min = 1),
+        description = "Questions the agent answers. At least one is required."
+    )]
+    pub questions: Vec<Question>,
+}
+
+pub const MAX_PROMPT_CHARS: usize = 8000;
+pub const MIN_OPTIONS: usize = 2;
+pub const MAX_OPTIONS: usize = 10;
+
+fn default_weight() -> u8 {
+    5
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(
+    title = "Question",
+    description = "A multiple choice question a qualification agent answers about a lead."
+)]
+pub struct Question {
+    #[schemars(
+        length(min = 1, max = 63),
+        regex(pattern = "^[a-z0-9][a-z0-9_-]{0,62}$"),
+        description = "Identifier unique in the agent, used as the answer key."
+    )]
+    pub id: String,
+    #[schemars(description = "The question asked to the model.")]
+    pub wording: String,
+    #[serde(default = "default_weight")]
+    #[schemars(
+        range(min = 1, max = 10),
+        description = "Integer weight from 1 to 10 of this question in the agent score."
+    )]
+    pub weight: u8,
+    #[schemars(
+        length(min = 2, max = 10),
+        description = "Possible answers, from 2 to 10, with unique values."
+    )]
+    pub options: Vec<QuestionOption>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(
+    title = "Question option",
+    description = "One possible answer to a question and the score it is worth."
+)]
+pub struct QuestionOption {
+    #[schemars(
+        length(min = 1, max = 63),
+        regex(pattern = "^[a-z0-9][a-z0-9_-]{0,62}$"),
+        description = "Value the model answers, unique in the question."
+    )]
+    pub value: String,
+    #[schemars(description = "Display label.")]
+    pub label: String,
+    #[schemars(
+        range(min = 0.0, max = 1.0),
+        description = "Score from 0 to 1 of this answer."
+    )]
+    pub score: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(
+    title = "Aggregator",
+    description = "Writes the summary of a lead from the answers of every qualification agent."
+)]
+pub struct Aggregator {
+    #[serde(default)]
+    #[schemars(
+        with = "Option<String>",
+        description = "Id of a declared LLM provider. The default provider applies when null."
+    )]
+    pub provider_id: Option<Uuid>,
+    #[schemars(
+        length(min = 1, max = 8000),
+        description = "System prompt given to the model."
+    )]
+    pub system_prompt: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(
+    title = "Verdict thresholds",
+    description = "Percentages of the lead confidence that decide its verdict: reliable, to check or discarded."
+)]
+pub struct VerdictThresholds {
+    #[serde(default = "default_reliable_from")]
+    #[schemars(
+        range(min = 0, max = 100),
+        description = "A lead is reliable from this confidence percentage."
+    )]
+    pub reliable_from: u8,
+    #[serde(default = "default_discard_below")]
+    #[schemars(
+        range(min = 0, max = 100),
+        description = "A lead is discarded below this confidence percentage. Must be lower than reliable_from."
+    )]
+    pub discard_below: u8,
+}
+
+fn default_reliable_from() -> u8 {
+    70
+}
+
+fn default_discard_below() -> u8 {
+    30
+}
+
+impl Default for VerdictThresholds {
+    fn default() -> Self {
+        Self {
+            reliable_from: default_reliable_from(),
+            discard_below: default_discard_below(),
+        }
     }
 }
 

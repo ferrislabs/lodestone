@@ -12,6 +12,7 @@ import { invalidateProfiles } from '#/pages/profiles/feature/invalidate'
 import { downloadProfileExport } from '#/pages/profiles/feature/profile-export'
 import { useDefinitionEditor } from '#/pages/profiles/feature/use-definition-editor'
 import { useProfileActivation } from '#/pages/profiles/feature/use-profile-activation'
+import { useProviderOptions } from '#/pages/profiles/feature/use-provider-options'
 import {
 	prettyDefinition,
 	saveResultMessage,
@@ -41,6 +42,7 @@ export function ProfileDetailFeature() {
 	const queryClient = useQueryClient()
 	const activation = useProfileActivation()
 	const sourceTrigger = useSourceTrigger()
+	const providers = useProviderOptions()
 	const sourcesQuery = useQuery({
 		...lodestoneApi().get('/api/v1/sources').queryOptions,
 		refetchInterval: LISTENER_REFRESH_MS,
@@ -137,6 +139,7 @@ export function ProfileDetailFeature() {
 						onNavigate={setTab}
 						sourceTrigger={sourceTrigger}
 						listeners={listeners}
+						providers={providers}
 						now={Date.now()}
 						onChange={(next) => {
 							if (update.isError) update.reset()

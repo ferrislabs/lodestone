@@ -20,6 +20,14 @@ export interface ParsedApiError {
 const EXACT_MESSAGES: Readonly<Record<string, string>> = {
 	'must not be empty': 'Ne doit pas être vide',
 	'at least one agent is required': 'Au moins un agent est requis',
+	'at least one qualification agent is required':
+		'Au moins un agent de qualification est requis',
+	'must be lowercase letters, digits, hyphens and underscores, at most 63 characters':
+		'Doit être composé de minuscules, chiffres, tirets et tirets bas, 63 caractères au maximum',
+	'must have from 2 to 10 options': 'Doit avoir de 2 à 10 options',
+	'must be a number from 0 to 1': 'Doit être un nombre de 0 à 1',
+	'must be higher than `discard_below`':
+		'Doit être supérieur au seuil « Écarté sous »',
 	'must be a slug of lowercase letters, digits and hyphens, at most 63 characters':
 		'Doit être un identifiant en minuscules, chiffres et tirets, 63 caractères au maximum',
 	'invalid regular expression': 'Expression régulière invalide',
@@ -161,6 +169,11 @@ const RULES: readonly Rule[] = [
 		(m) => `Champ manquant \`${m[1]}\``,
 	],
 	[/^malformed: (.*)$/s, (m) => `Format invalide : ${m[1]}`],
+	[
+		/^unsupported schema version (\d+), expected 1, 2, 3 or (\d+)$/,
+		(m) =>
+			`Version de schéma ${m[1]} non prise en charge, attendu : 1, 2, 3 ou ${m[2]}`,
+	],
 	[
 		/^unsupported schema version (\d+), expected 1, 2 or (\d+)$/,
 		(m) =>

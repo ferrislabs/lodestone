@@ -1,5 +1,5 @@
 {
-  "schema_version": 3,
+  "schema_version": 4,
   "identity": {
     "offer": "FerrisKey (open source IAM/CIAM in Rust) and Autharie (managed IAM), both by Ferrislabs",
     "target_customer": "Organizations running self-hosted Keycloak or a similar IAM, or paying for a SaaS IAM"
@@ -155,6 +155,117 @@
       }
     }
   ],
+  "qualification_agents": [
+    {
+      "id": "pertinence",
+      "name": "Pertinence",
+      "enabled": true,
+      "provider_id": null,
+      "system_prompt": "You judge whether a company is a relevant prospect for the offer, using the relevance criteria. Base your answers only on what the documents state.\n\nRelevance criteria: The organization operates its own identity infrastructure, such as a self-hosted Keycloak, or pays for a SaaS IAM, and shows signs of migration, staffing or procurement around it. Physical access control and unrelated directories are not relevant.",
+      "weight": 5,
+      "questions": [
+        {
+          "id": "pertinence",
+          "wording": "Ce lead est-il pertinent pour l'offre ?",
+          "weight": 5,
+          "options": [
+            {
+              "value": "forte",
+              "label": "Forte",
+              "score": 1.0
+            },
+            {
+              "value": "moyenne",
+              "label": "Moyenne",
+              "score": 0.5
+            },
+            {
+              "value": "faible",
+              "label": "Faible",
+              "score": 0.0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "maturite-technique",
+      "name": "Maturité technique",
+      "enabled": true,
+      "provider_id": null,
+      "system_prompt": "You assess how the company runs its identity infrastructure from the signals and documents. Self-hosted and ageing Keycloak, or custom authentication code, means high debt and a strong opportunity. A recent SaaS IAM means a weaker one. Answer unknown when nothing shows it.",
+      "weight": 5,
+      "questions": [
+        {
+          "id": "maturite",
+          "wording": "Quelle est la maturité de l'infrastructure d'identité de l'organisation ?",
+          "weight": 5,
+          "options": [
+            {
+              "value": "legacy_auto_heberge",
+              "label": "IAM auto-hébergé ancien",
+              "score": 1.0
+            },
+            {
+              "value": "saas",
+              "label": "IAM SaaS",
+              "score": 0.7
+            },
+            {
+              "value": "inconnu",
+              "label": "Inconnue",
+              "score": 0.3
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "type-organisation",
+      "name": "Type d'organisation",
+      "enabled": true,
+      "provider_id": null,
+      "system_prompt": "You classify the organization by type from the documents. Public bodies buy through tenders, large companies run their own IT teams, small and medium businesses rarely do. Answer unknown when nothing shows it.",
+      "weight": 5,
+      "questions": [
+        {
+          "id": "type",
+          "wording": "De quel type d'organisation s'agit-il ?",
+          "weight": 5,
+          "options": [
+            {
+              "value": "public",
+              "label": "Organisation publique",
+              "score": 0.8
+            },
+            {
+              "value": "grande_entreprise",
+              "label": "Grande entreprise",
+              "score": 1.0
+            },
+            {
+              "value": "pme",
+              "label": "PME",
+              "score": 0.5
+            },
+            {
+              "value": "inconnu",
+              "label": "Inconnu",
+              "score": 0.3
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "aggregator": {
+    "provider_id": null,
+    "system_prompt": "You write the summary of a lead for a B2B lead detection tool. You receive the lead, its signals, and the answers and scores of every qualification agent. Write a short synthesis, the verdict narrative, an approach angle and a message draft for the operator to review. Quote evidence verbatim from the documents. Never change the computed confidence or the verdict. Base your text only on what is provided and do not invent facts."
+  },
+  "verdict": {
+    "reliable_from": 70,
+    "discard_below": 30
+  },
   "scoring": {
     "factors": [
       { "signal": "product_detected", "value": "keycloak", "weight": 10 },
