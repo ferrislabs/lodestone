@@ -7,11 +7,13 @@ import {
 	resolve,
 } from '#/lib/schema-form'
 import { useAgentsUi } from '#/pages/profiles/feature/use-agents-ui'
+import { useScoringUi } from '#/pages/profiles/feature/use-scoring-ui'
 import { PROFILE_HINTS } from '#/pages/profiles/lib/form-hints'
 import { PROFILE_SCHEMA } from '#/pages/profiles/lib/profile-schema'
 import type { EditorTab } from '#/pages/profiles/lib/tabs'
 import type { Problem } from '#/pages/profiles/lib/types'
 import { AgentsEditor } from '#/pages/profiles/ui/agents-editor'
+import { ScoringGrid } from '#/pages/profiles/ui/scoring-grid'
 
 export function unmatchedProblems(
 	value: JsonObject,
@@ -43,6 +45,7 @@ export function DefinitionTabContent({
 	onChange,
 }: DefinitionTabContentProps) {
 	const agents = useAgentsUi(value, onChange)
+	const scoring = useScoringUi(value, onChange)
 	const context: FormContext = {
 		root: PROFILE_SCHEMA,
 		hints: PROFILE_HINTS,
@@ -65,7 +68,20 @@ export function DefinitionTabContent({
 		case 'identity':
 			return fields('identity')
 		case 'scoring':
-			return fields('scoring')
+			return (
+				<ScoringGrid
+					factors={scoring.factors}
+					problems={problems}
+					suggestions={scoring.suggestions}
+					available={scoring.available}
+					maxWeight={scoring.maxWeight}
+					onAdd={scoring.add}
+					onRemove={scoring.remove}
+					onSignal={scoring.setSignal}
+					onWeight={scoring.setWeight}
+					onValue={scoring.setValue}
+				/>
+			)
 		case 'settings':
 			return (
 				<div className="flex flex-col gap-6">
