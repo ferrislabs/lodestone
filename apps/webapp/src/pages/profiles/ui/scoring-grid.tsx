@@ -12,7 +12,7 @@ interface ScoringGridProps {
 	onAdd: () => void
 	onRemove: (index: number) => void
 	onSignal: (index: number, signal: string) => void
-	onWeight: (index: number, weight: number) => void
+	onWeight: (index: number, weight: number | null) => void
 	onValue: (index: number, value: string) => void
 }
 
