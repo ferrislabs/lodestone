@@ -1,3 +1,4 @@
+import { translateApiMessage } from '#/lib/api-errors'
 import { type JsonObject, validateValue } from '#/lib/schema-form'
 import { validateAgents } from '#/pages/profiles/lib/agents'
 import { PROFILE_SCHEMA } from '#/pages/profiles/lib/profile-schema'
@@ -9,7 +10,10 @@ export type SaveAttempt =
 
 export function prepareSave(value: JsonObject): SaveAttempt {
 	const problems = [
-		...validateValue(PROFILE_SCHEMA, PROFILE_SCHEMA, value),
+		...validateValue(PROFILE_SCHEMA, PROFILE_SCHEMA, value).map((problem) => ({
+			...problem,
+			message: translateApiMessage(problem.message),
+		})),
 		...validateAgents(value),
 	]
 	return problems.length === 0 ? { ok: true, value } : { ok: false, problems }

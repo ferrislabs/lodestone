@@ -100,7 +100,7 @@ describe('field mapping', () => {
 	it('flags non numeric input', () => {
 		expect(
 			numericErrors({ ...EMPTY_PROVIDER_VALUES, max_retries: '2x' }),
-		).toEqual({ max_retries: 'must be a non-negative integer' })
+		).toEqual({ max_retries: 'Doit être un entier positif ou nul' })
 		expect(numericErrors(EMPTY_PROVIDER_VALUES)).toEqual({})
 	})
 })

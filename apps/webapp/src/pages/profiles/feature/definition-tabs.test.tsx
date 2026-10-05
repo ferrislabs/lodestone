@@ -74,9 +74,9 @@ function Harness({
 				notice={null}
 				dirty
 				saving={false}
-				saveLabel="Create profile"
+				saveLabel="Créer le profil"
 				blockedReason={
-					agentList(value).length === 0 ? 'Add at least one agent.' : null
+					agentList(value).length === 0 ? 'Ajouter au moins un agent.' : null
 				}
 				onSave={() => undefined}
 			/>
@@ -85,9 +85,9 @@ function Harness({
 }
 
 function addAgent(kind: AgentKind) {
-	fireEvent.click(screen.getByRole('button', { name: 'Add agent' }))
+	fireEvent.click(screen.getByRole('button', { name: 'Ajouter un agent' }))
 	fireEvent.click(
-		within(screen.getByLabelText('Choose a source')).getByText(
+		within(screen.getByLabelText('Choisir une source')).getByText(
 			KIND_META[kind].label,
 		),
 	)
@@ -96,16 +96,20 @@ function addAgent(kind: AgentKind) {
 describe('definition tabs', () => {
 	it('shows only the subtree of the selected tab', () => {
 		render(<Harness />)
-		expect(screen.getByLabelText(/Offer/)).toBeTruthy()
-		expect(screen.queryByLabelText(/Qualification threshold/)).toBeNull()
+		expect(screen.getByLabelText(/Offre/)).toBeTruthy()
+		expect(screen.queryByLabelText(/Seuil de qualification/)).toBeNull()
 		fireEvent.click(screen.getByRole('tab', { name: TAB_LABELS.settings }))
-		expect(screen.getByLabelText(/Qualification threshold/)).toBeTruthy()
-		expect(screen.queryByLabelText(/Offer/)).toBeNull()
+		expect(screen.getByLabelText(/Seuil de qualification/)).toBeTruthy()
+		expect(screen.queryByLabelText(/Offre/)).toBeNull()
 		fireEvent.click(screen.getByRole('tab', { name: TAB_LABELS.scoring }))
-		expect(screen.getByRole('button', { name: 'Add factor' })).toBeTruthy()
-		expect(screen.queryByLabelText(/Qualification threshold/)).toBeNull()
+		expect(
+			screen.getByRole('button', { name: 'Ajouter un facteur' }),
+		).toBeTruthy()
+		expect(screen.queryByLabelText(/Seuil de qualification/)).toBeNull()
 		fireEvent.click(screen.getByRole('tab', { name: TAB_LABELS.agents }))
-		expect(screen.getByRole('button', { name: 'Add agent' })).toBeTruthy()
+		expect(
+			screen.getByRole('button', { name: 'Ajouter un agent' }),
+		).toBeTruthy()
 	})
 
 	it('badges the agents tab for a server problem inside an agent', () => {
@@ -117,15 +121,15 @@ describe('definition tabs', () => {
 				problems={[
 					{
 						path: 'agents[1].source.keywords[0]',
-						message: 'must not be empty',
+						message: 'Ne doit pas être vide',
 					},
 				]}
 			/>,
 		)
 		const tab = screen.getByRole('tab', { name: /Agents/ })
-		expect(within(tab).getByLabelText('1 problems')).toBeTruthy()
+		expect(within(tab).getByLabelText('1 problème')).toBeTruthy()
 		expect(
-			within(screen.getByRole('tab', { name: /Identity/ })).queryByRole('img'),
+			within(screen.getByRole('tab', { name: /Identité/ })).queryByRole('img'),
 		).toBeNull()
 	})
 
@@ -139,30 +143,32 @@ describe('definition tabs', () => {
 				problems={[
 					{
 						path: 'agents[0].source.keywords[0]',
-						message: 'must not be empty',
+						message: 'Ne doit pas être vide',
 					},
 				]}
 			/>,
 		)
-		expect(screen.queryByText('must not be empty')).toBeNull()
-		fireEvent.click(screen.getByRole('button', { name: /Expand/ }))
-		expect(screen.getByText('must not be empty')).toBeTruthy()
+		expect(screen.queryByText('Ne doit pas être vide')).toBeNull()
+		fireEvent.click(screen.getByRole('button', { name: /Déplier/ }))
+		expect(screen.getByText('Ne doit pas être vide')).toBeTruthy()
 	})
 
 	it('shows the empty state and blocks creation without agents', () => {
 		render(<Harness startTab="agents" />)
 		expect(
-			screen.getByText('No agent yet. Add one to start searching.'),
+			screen.getByText(
+				'Aucun agent pour le moment. Ajouter un agent pour démarrer la recherche.',
+			),
 		).toBeTruthy()
 		expect(
 			screen
-				.getByRole('button', { name: 'Create profile' })
+				.getByRole('button', { name: 'Créer le profil' })
 				.hasAttribute('disabled'),
 		).toBe(true)
 		addAgent('boamp')
 		expect(
 			screen
-				.getByRole('button', { name: 'Create profile' })
+				.getByRole('button', { name: 'Créer le profil' })
 				.hasAttribute('disabled'),
 		).toBe(false)
 	})
@@ -174,33 +180,33 @@ describe('definition tabs', () => {
 			const card = document.querySelector<HTMLElement>('[data-agent="0"]')
 			if (!card) throw new Error('card missing')
 			const scoped = within(card)
-			expect(scoped.getByLabelText('Name')).toHaveProperty(
+			expect(scoped.getByLabelText('Nom')).toHaveProperty(
 				'value',
 				KIND_META[kind].label,
 			)
 			await waitFor(() =>
-				expect(document.activeElement).toBe(scoped.getByLabelText('Name')),
+				expect(document.activeElement).toBe(scoped.getByLabelText('Nom')),
 			)
-			expect(scoped.queryAllByText('LLM criteria for this agent').length).toBe(
+			expect(scoped.queryAllByText('Critères LLM de cet agent').length).toBe(
 				KIND_META[kind].triaged ? 1 : 0,
 			)
 			const has = (text: string) => scoped.queryAllByText(text).length > 0
 			if (kind === 'certificate_transparency') {
-				expect(has('Labels')).toBe(true)
-				expect(has('Keywords')).toBe(false)
+				expect(has('Libellés')).toBe(true)
+				expect(has('Mots-clés')).toBe(false)
 			} else if (kind === 'dns_cname') {
-				expect(has('Patterns')).toBe(true)
-				expect(has('Labels')).toBe(false)
+				expect(has('Motifs CNAME')).toBe(true)
+				expect(has('Libellés')).toBe(false)
 			} else if (kind === 'http_probe') {
-				expect(has('Fingerprints')).toBe(true)
-				expect(has('Excluded products')).toBe(true)
-				expect(has('Keywords')).toBe(false)
+				expect(has('Empreintes')).toBe(true)
+				expect(has('Produits exclus')).toBe(true)
+				expect(has('Mots-clés')).toBe(false)
 			} else {
-				expect(has('Keywords')).toBe(true)
+				expect(has('Mots-clés')).toBe(true)
 				expect(has('Exclusions')).toBe(true)
-				expect(has('Accept min keywords')).toBe(true)
-				expect(has('Fingerprints')).toBe(false)
-				expect(has('Labels')).toBe(false)
+				expect(has('Mots-clés minimum pour accepter')).toBe(true)
+				expect(has('Empreintes')).toBe(false)
+				expect(has('Libellés')).toBe(false)
 			}
 		})
 	}
@@ -211,7 +217,7 @@ describe('definition tabs', () => {
 		addAgent('ats')
 		expect(
 			screen
-				.getAllByLabelText('ID')
+				.getAllByLabelText('Identifiant')
 				.map((input) => (input as HTMLInputElement).value),
 		).toEqual(['ats', 'ats-2'])
 	})
@@ -219,53 +225,62 @@ describe('definition tabs', () => {
 	it('follows the name with the id until the id is edited', () => {
 		render(<Harness startTab="agents" />)
 		addAgent('ats')
-		fireEvent.change(screen.getByLabelText('Name'), {
-			target: { value: 'ATS English' },
+		fireEvent.change(screen.getByLabelText('Nom'), {
+			target: { value: 'ATS anglais' },
 		})
-		expect(screen.getByLabelText('ID')).toHaveProperty('value', 'ats-english')
-		fireEvent.change(screen.getByLabelText('ID'), { target: { value: 'mine' } })
-		fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Z' } })
-		expect(screen.getByLabelText('ID')).toHaveProperty('value', 'mine')
+		expect(screen.getByLabelText('Identifiant')).toHaveProperty(
+			'value',
+			'ats-anglais',
+		)
+		fireEvent.change(screen.getByLabelText('Identifiant'), {
+			target: { value: 'mine' },
+		})
+		fireEvent.change(screen.getByLabelText('Nom'), { target: { value: 'Z' } })
+		expect(screen.getByLabelText('Identifiant')).toHaveProperty('value', 'mine')
 	})
 
 	it('removes an agent after an inline confirmation', () => {
 		render(<Harness startTab="agents" />)
 		addAgent('ats')
-		fireEvent.click(screen.getByRole('button', { name: /Remove agent/ }))
-		fireEvent.click(screen.getByRole('button', { name: 'Keep' }))
-		expect(screen.getAllByLabelText('ID')).toHaveLength(1)
-		fireEvent.click(screen.getByRole('button', { name: /Remove agent/ }))
-		fireEvent.click(screen.getByRole('button', { name: 'Confirm remove' }))
-		expect(screen.queryAllByLabelText('ID')).toHaveLength(0)
-		expect(screen.getByText(/No agent yet/)).toBeTruthy()
+		fireEvent.click(screen.getByRole('button', { name: /Supprimer l'agent/ }))
+		fireEvent.click(screen.getByRole('button', { name: 'Conserver' }))
+		expect(screen.getAllByLabelText('Identifiant')).toHaveLength(1)
+		fireEvent.click(screen.getByRole('button', { name: /Supprimer l'agent/ }))
+		fireEvent.click(
+			screen.getByRole('button', { name: 'Confirmer la suppression' }),
+		)
+		expect(screen.queryAllByLabelText('Identifiant')).toHaveLength(0)
+		expect(screen.getByText(/Aucun agent pour le moment/)).toBeTruthy()
 	})
 
 	it('collapses and expands an agent', () => {
 		render(<Harness startTab="agents" />)
 		addAgent('ats')
-		fireEvent.click(screen.getByRole('button', { name: /Collapse/ }))
-		expect(screen.queryByLabelText('ID')).toBeNull()
-		fireEvent.click(screen.getByRole('button', { name: /Expand/ }))
-		expect(screen.getByLabelText('ID')).toBeTruthy()
+		fireEvent.click(screen.getByRole('button', { name: /Replier/ }))
+		expect(screen.queryByLabelText('Identifiant')).toBeNull()
+		fireEvent.click(screen.getByRole('button', { name: /Déplier/ }))
+		expect(screen.getByLabelText('Identifiant')).toBeTruthy()
 	})
 
 	it('warns when an http probe has no certificate transparency agent', () => {
 		render(<Harness startTab="agents" />)
 		addAgent('http_probe')
 		expect(screen.getByRole('alert').textContent).toContain(
-			'Probes hosts found by a Certificate transparency agent',
+			'Sonde les hôtes trouvés par un agent Transparence des certificats',
 		)
 		addAgent('certificate_transparency')
 		expect(screen.queryByRole('alert')).toBeNull()
 		expect(
-			screen.getByText(/Probes hosts found by a Certificate transparency/),
+			screen.getByText(
+				/Sonde les hôtes trouvés par un agent Transparence des certificats/,
+			),
 		).toBeTruthy()
 	})
 
 	it('stores agent criteria and drops them when emptied', () => {
 		render(<Harness startTab="agents" />)
 		addAgent('ats')
-		const field = screen.getByLabelText('LLM criteria for this agent')
+		const field = screen.getByLabelText('Critères LLM de cet agent')
 		fireEvent.change(field, { target: { value: 'only devs' } })
 		expect(field).toHaveProperty('value', 'only devs')
 		fireEvent.change(field, { target: { value: '' } })

@@ -54,17 +54,19 @@ describe('scoring grid', () => {
 	it('renders one card per factor with its title', () => {
 		render(<Harness initial={withFactors(FACTORS)} />)
 		expect(screen.getAllByRole('heading', { level: 3 })).toHaveLength(3)
-		expect(screen.getByText('Product detected · keycloak')).toBeTruthy()
-		expect(screen.getAllByText('3 factors · max score 22 points')).toHaveLength(
-			2,
-		)
+		expect(screen.getByText('Produit détecté · keycloak')).toBeTruthy()
+		expect(
+			screen.getAllByText('3 facteurs · score max 22 points'),
+		).toHaveLength(1)
 		expect(screen.queryByRole('textbox', { name: /json/i })).toBeNull()
 	})
 
 	it('hides the value for kinds that take none', () => {
 		render(<Harness initial={withFactors(FACTORS)} />)
-		expect(screen.getAllByLabelText('Value')).toHaveLength(1)
-		expect(screen.getByText('2 points per distinct signal kind')).toBeTruthy()
+		expect(screen.getAllByLabelText('Valeur')).toHaveLength(1)
+		expect(
+			screen.getByText('2 points par type de signal distinct'),
+		).toBeTruthy()
 	})
 
 	it('suggests values from the agents', () => {
@@ -77,17 +79,19 @@ describe('scoring grid', () => {
 
 	it('warns when no agent emits the signal', () => {
 		render(<Harness initial={withFactors(FACTORS)} />)
-		expect(screen.getAllByText('No agent emits this signal yet')).toHaveLength(
-			1,
-		)
+		expect(
+			screen.getAllByText("Aucun agent n'émet encore ce signal"),
+		).toHaveLength(1)
 	})
 
 	it('adds a factor and focuses its weight', async () => {
 		render(<Harness initial={withFactors([])} />)
 		expect(
-			screen.getByText('No scoring factor. Leads will all score 0.'),
+			screen.getByText(
+				'Aucun facteur de scoring. Tous les leads auront un score de 0.',
+			),
 		).toBeTruthy()
-		fireEvent.click(screen.getByRole('button', { name: 'Add factor' }))
+		fireEvent.click(screen.getByRole('button', { name: 'Ajouter un facteur' }))
 		expect(screen.getByTestId('json').textContent).toBe(
 			'{"factors":[{"signal":"product_detected","weight":5}]}',
 		)
@@ -101,7 +105,7 @@ describe('scoring grid', () => {
 
 	it('renders a 1 to 10 radiogroup per factor with the weight selected', () => {
 		render(<Harness initial={withFactors(FACTORS)} />)
-		const groups = screen.getAllByRole('radiogroup', { name: 'Weight' })
+		const groups = screen.getAllByRole('radiogroup', { name: 'Poids' })
 		expect(groups).toHaveLength(3)
 		const radios = within(groups[0] as HTMLElement).getAllByRole('radio')
 		expect(radios.map((radio) => radio.textContent)).toEqual(
@@ -125,7 +129,7 @@ describe('scoring grid', () => {
 				.getByRole('radio', { name: '3' })
 				.getAttribute('aria-checked'),
 		).toBe('true')
-		expect(screen.getByText('Adds up to 3 points')).toBeTruthy()
+		expect(screen.getByText("Ajoute jusqu'à 3 points")).toBeTruthy()
 	})
 
 	it('moves the selection with the arrow keys', () => {
@@ -171,21 +175,21 @@ describe('scoring grid', () => {
 				.getAllByRole('radio')
 				.some((radio) => radio.getAttribute('aria-checked') === 'true'),
 		).toBe(false)
-		expect(screen.getByText('must be an integer from 1 to 10')).toBeTruthy()
+		expect(screen.getByText('Doit être un entier de 1 à 10')).toBeTruthy()
 		expect(group.getAttribute('aria-invalid')).toBe('true')
 	})
 
 	it('explains the points a weight can bring', () => {
 		render(<Harness initial={withFactors(FACTORS)} />)
-		expect(screen.getByText('Adds up to 10 points')).toBeTruthy()
-		expect(screen.getByText('Adds up to 8 points')).toBeTruthy()
+		expect(screen.getByText("Ajoute jusqu'à 10 points")).toBeTruthy()
+		expect(screen.getByText("Ajoute jusqu'à 8 points")).toBeTruthy()
 	})
 
 	it('removes a factor', () => {
 		render(<Harness initial={withFactors(FACTORS)} />)
 		fireEvent.click(
 			screen.getByRole('button', {
-				name: 'Remove factor Product detected · keycloak',
+				name: 'Supprimer le facteur Produit détecté · keycloak',
 			}),
 		)
 		expect(screen.getAllByRole('heading', { level: 3 })).toHaveLength(2)
@@ -193,7 +197,7 @@ describe('scoring grid', () => {
 
 	it('unsets the value when cleared', () => {
 		render(<Harness initial={withFactors(FACTORS)} />)
-		fireEvent.change(screen.getByLabelText('Value'), { target: { value: '' } })
+		fireEvent.change(screen.getByLabelText('Valeur'), { target: { value: '' } })
 		expect(screen.getByTestId('json').textContent).not.toContain('"value"')
 	})
 
@@ -220,14 +224,14 @@ describe('scoring grid', () => {
 			/>,
 		)
 		const input = screen.getByLabelText(
-			'Qualification threshold',
+			'Seuil de qualification',
 		) as HTMLInputElement
 		expect(input.value).toBe('50')
 		expect(input.min).toBe('0')
 		expect(input.max).toBe('100')
 		expect(screen.getByText('%')).toBeTruthy()
 		expect(
-			screen.getByText('= 11 points with the current factors (max 22)'),
+			screen.getByText('= 11 points avec les facteurs actuels (max 22)'),
 		).toBeTruthy()
 	})
 
@@ -241,14 +245,14 @@ describe('scoring grid', () => {
 				}}
 			/>,
 		)
-		fireEvent.change(screen.getByLabelText('Qualification threshold'), {
+		fireEvent.change(screen.getByLabelText('Seuil de qualification'), {
 			target: { value: '35' },
 		})
 		expect(screen.getByTestId('llm').textContent).toContain(
 			'"qualification_threshold":35',
 		)
 		expect(
-			screen.getByText('= 7.7 points with the current factors (max 22)'),
+			screen.getByText('= 7,7 points avec les facteurs actuels (max 22)'),
 		).toBeTruthy()
 	})
 
@@ -262,8 +266,8 @@ describe('scoring grid', () => {
 				}}
 			/>,
 		)
-		expect(screen.getByText('must be a percentage from 0 to 100')).toBeTruthy()
-		expect(screen.queryByText(/points with the current factors/)).toBeNull()
+		expect(screen.getByText('Doit être un pourcentage de 0 à 100')).toBeTruthy()
+		expect(screen.queryByText(/avec les facteurs actuels/)).toBeNull()
 	})
 
 	it('explains the scoring with the live numbers of the profile', () => {
@@ -280,18 +284,15 @@ describe('scoring grid', () => {
 				onNavigate={navigate}
 			/>,
 		)
-		const panel = screen.getByLabelText('How scoring works')
+		const panel = screen.getByLabelText('Fonctionnement du scoring')
 		expect(
-			within(panel).getByText('3 factors · max score 22 points'),
-		).toBeTruthy()
-		expect(
-			within(panel).getByText('Current threshold: 50% = 11 points'),
+			within(panel).getByText('Seuil actuel : 50 % = 11 points'),
 		).toBeTruthy()
 		expect(within(panel).getByTestId('scoring-example').textContent).toContain(
-			'10 × 0.9 + 8 × 0.7 = 14.6 points',
+			'10 × 0,9 + 8 × 0,7 = 14,6 points',
 		)
 		fireEvent.click(
-			within(panel).getByRole('button', { name: 'Edit threshold' }),
+			within(panel).getByRole('button', { name: 'Modifier le seuil' }),
 		)
 		expect(navigate).toHaveBeenCalledWith('settings')
 	})
@@ -299,5 +300,26 @@ describe('scoring grid', () => {
 	it('hides the example with fewer than two factors', () => {
 		render(<Harness initial={withFactors([FACTORS[0] as JsonObject])} />)
 		expect(screen.queryByTestId('scoring-example')).toBeNull()
+	})
+
+	it.each([
+		'scoring',
+		'agents',
+	] as const)('puts the help panel in the right column of the %s tab', (tab) => {
+		render(
+			<DefinitionTabContent
+				tab={tab}
+				value={withFactors(FACTORS)}
+				problems={[]}
+				onChange={() => {}}
+			/>,
+		)
+		const panel = screen.getByRole('complementary')
+		const layout = screen.getByTestId('help-layout')
+		expect(layout.className).toContain('lg:grid-cols-4')
+		expect(layout.contains(panel)).toBe(true)
+		expect(panel.className).toContain('lg:col-span-1')
+		expect(panel.className).toContain('lg:sticky')
+		expect(screen.getAllByRole('complementary')).toHaveLength(1)
 	})
 })

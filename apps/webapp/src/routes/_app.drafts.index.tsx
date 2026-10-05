@@ -5,5 +5,6 @@ import { draftsSearchSchema } from '#/pages/drafts/lib/search'
 
 export const Route = createFileRoute('/_app/drafts/')({
 	validateSearch: draftsSearchSchema,
+	head: () => ({ meta: [{ title: 'Brouillons · Lodestone' }] }),
 	component: DraftsListFeature,
 })

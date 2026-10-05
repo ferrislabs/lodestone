@@ -83,26 +83,28 @@ export function AgentCard({
 					variant="ghost"
 					size="icon"
 					aria-expanded={!collapsed}
-					aria-label={`${collapsed ? 'Expand' : 'Collapse'} ${name || 'agent'}`}
+					aria-label={`${collapsed ? 'Déplier' : 'Replier'} ${name || 'agent'}`}
 					onClick={onToggleCollapsed}
 				>
 					{collapsed ? <ChevronRightIcon /> : <ChevronDownIcon />}
 				</Button>
-				<p className="text-sm font-medium">{name || 'Unnamed agent'}</p>
+				<p className="text-sm font-medium">{name || 'Agent sans nom'}</p>
 				{kind ? (
 					<Badge variant="secondary">{KIND_META[kind].label}</Badge>
 				) : null}
 				{own.length > 0 ? (
-					<Badge variant="destructive">{own.length} problems</Badge>
+					<Badge variant="destructive">
+						{own.length} {own.length > 1 ? 'problèmes' : 'problème'}
+					</Badge>
 				) : null}
 				<div className="ml-auto flex items-center gap-3">
 					<span className="flex items-center gap-2 text-xs text-muted-foreground">
 						<Switch
-							aria-label={`Agent ${name || index + 1} enabled`}
+							aria-label={`Agent ${name || index + 1} activé`}
 							checked={agentEnabled(agent)}
 							onCheckedChange={onEnabled}
 						/>
-						Enabled
+						Activé
 					</span>
 					{confirmingRemove ? (
 						<span className="flex items-center gap-1">
@@ -112,7 +114,7 @@ export function AgentCard({
 								size="sm"
 								onClick={onConfirmRemove}
 							>
-								Confirm remove
+								Confirmer la suppression
 							</Button>
 							<Button
 								type="button"
@@ -120,7 +122,7 @@ export function AgentCard({
 								size="sm"
 								onClick={onCancelRemove}
 							>
-								Keep
+								Conserver
 							</Button>
 						</span>
 					) : (
@@ -128,11 +130,11 @@ export function AgentCard({
 							type="button"
 							variant="ghost"
 							size="sm"
-							aria-label={`Remove agent ${name || index + 1}`}
+							aria-label={`Supprimer l'agent ${name || index + 1}`}
 							onClick={onRequestRemove}
 						>
 							<Trash2Icon />
-							Remove
+							Supprimer
 						</Button>
 					)}
 				</div>
@@ -147,14 +149,16 @@ export function AgentCard({
 					}
 				>
 					{note.text}
-					{note.warn ? ' No such agent in this profile yet.' : ''}
+					{note.warn
+						? " Aucun agent de ce type dans ce profil pour l'instant."
+						: ''}
 				</p>
 			) : null}
 			{collapsed ? null : (
 				<div className="flex flex-col gap-4">
 					<div className="grid gap-3 md:grid-cols-[2fr_1fr]">
 						<div className="flex flex-col gap-1.5">
-							<Label htmlFor={nameId}>Name</Label>
+							<Label htmlFor={nameId}>Nom</Label>
 							<Input
 								id={nameId}
 								value={name}
@@ -165,7 +169,7 @@ export function AgentCard({
 						</div>
 						<div className="flex flex-col gap-1.5">
 							<Label htmlFor={idId} className="text-xs text-muted-foreground">
-								ID
+								Identifiant
 							</Label>
 							<Input
 								id={idId}
@@ -187,10 +191,10 @@ export function AgentCard({
 					) : null}
 					{kind && KIND_META[kind].triaged ? (
 						<div className="flex flex-col gap-1.5">
-							<Label htmlFor={criteriaId}>LLM criteria for this agent</Label>
+							<Label htmlFor={criteriaId}>Critères LLM de cet agent</Label>
 							<p className="text-xs text-muted-foreground">
-								Used when this agent's candidates are triaged by the LLM. Falls
-								back to the profile criteria.
+								Utilisés lorsque les candidats de cet agent sont triés par le
+								LLM. À défaut, les critères du profil s'appliquent.
 							</p>
 							<Textarea
 								id={criteriaId}

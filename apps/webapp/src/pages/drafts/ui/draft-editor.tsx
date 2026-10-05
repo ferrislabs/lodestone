@@ -32,7 +32,7 @@ export function DraftEditor({
 			}}
 		>
 			<div className="flex flex-col gap-1.5">
-				<Label htmlFor="draft-subject">Subject</Label>
+				<Label htmlFor="draft-subject">Objet</Label>
 				<Input
 					id="draft-subject"
 					value={values.subject}
@@ -53,7 +53,7 @@ export function DraftEditor({
 				) : null}
 			</div>
 			<div className="flex flex-col gap-1.5">
-				<Label htmlFor="draft-body">Body</Label>
+				<Label htmlFor="draft-body">Corps</Label>
 				<Textarea
 					id="draft-body"
 					rows={14}
@@ -79,10 +79,12 @@ export function DraftEditor({
 			) : null}
 			<div className="flex items-center gap-3">
 				<Button type="submit" disabled={!dirty || saving}>
-					{saving ? 'Saving...' : 'Save changes'}
+					{saving ? 'Enregistrement…' : 'Enregistrer les modifications'}
 				</Button>
 				{dirty ? (
-					<span className="text-sm text-amber-600">Unsaved changes</span>
+					<span className="text-sm text-amber-600">
+						Modifications non enregistrées
+					</span>
 				) : null}
 			</div>
 		</form>

@@ -13,11 +13,11 @@ export type EditorTab = (typeof EDITOR_TABS)[number]
 export type ProfileTab = EditorTab | 'history'
 
 export const TAB_LABELS: Record<ProfileTab, string> = {
-	identity: 'Identity',
+	identity: 'Identité',
 	agents: 'Agents',
 	scoring: 'Scoring',
-	settings: 'Settings',
-	history: 'Revision history',
+	settings: 'Réglages',
+	history: 'Historique des révisions',
 }
 
 export const tabSearchSchema = z.object({

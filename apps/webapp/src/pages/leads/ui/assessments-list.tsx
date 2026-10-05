@@ -1,5 +1,6 @@
 import { Badge } from '#/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '#/components/ui/card'
+import { draftStatusLabel } from '#/pages/drafts/lib/labels'
 import { formatDateTime } from '#/pages/leads/lib/format'
 import type { Assessment } from '#/pages/leads/lib/types'
 import { ProvenanceLink } from './provenance-link'
@@ -12,23 +13,25 @@ export function AssessmentsList({ assessments }: AssessmentsListProps) {
 	return (
 		<Card>
 			<CardHeader>
-				<CardTitle>Assessments ({assessments.length})</CardTitle>
+				<CardTitle>Évaluations ({assessments.length})</CardTitle>
 			</CardHeader>
 			<CardContent className="flex flex-col gap-6">
 				{assessments.length === 0 ? (
-					<p className="text-sm text-muted-foreground">No assessment yet.</p>
+					<p className="text-sm text-muted-foreground">
+						Aucune évaluation pour le moment.
+					</p>
 				) : null}
 				{assessments.map((assessment) => (
 					<article key={assessment.id} className="flex flex-col gap-3">
 						<div className="flex flex-wrap gap-x-4 text-xs text-muted-foreground">
-							<span>Model: {assessment.model}</span>
-							<span>Prompt: {assessment.prompt_version}</span>
-							<span>Profile revision: {assessment.profile_revision}</span>
+							<span>Modèle : {assessment.model}</span>
+							<span>Prompt : {assessment.prompt_version}</span>
+							<span>Révision du profil : {assessment.profile_revision}</span>
 							<span>{formatDateTime(assessment.created_at)}</span>
 						</div>
 						<p>{assessment.summary}</p>
 						<p className="text-sm">
-							<span className="font-medium">Approach angle: </span>
+							<span className="font-medium">Angle d'approche : </span>
 							{assessment.approach_angle}
 						</p>
 						{assessment.evidence.map((item) => (
@@ -43,9 +46,9 @@ export function AssessmentsList({ assessments }: AssessmentsListProps) {
 						{assessment.draft ? (
 							<div className="flex flex-col gap-2 rounded-lg border bg-muted/30 p-3">
 								<div className="flex items-center gap-2">
-									<span className="text-sm font-medium">Draft</span>
-									<Badge variant="secondary" className="capitalize">
-										{assessment.draft.status}
+									<span className="text-sm font-medium">Brouillon</span>
+									<Badge variant="secondary">
+										{draftStatusLabel(assessment.draft.status)}
 									</Badge>
 								</div>
 								<p className="text-sm font-medium">

@@ -36,13 +36,13 @@ export function NavMain({ label, items }: NavMainProps) {
 					<SidebarMenuItem key={item.title}>
 						{item.disabled ? (
 							<SidebarMenuButton
-								tooltip={`${item.title} (coming soon)`}
+								tooltip={`${item.title} (bientôt disponible)`}
 								className="cursor-not-allowed rounded-lg opacity-50"
 							>
 								{item.icon ? <item.icon /> : null}
 								<span>{item.title}</span>
 								<span className="ml-auto rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground group-data-[collapsible=icon]:hidden">
-									soon
+									bientôt
 								</span>
 							</SidebarMenuButton>
 						) : (

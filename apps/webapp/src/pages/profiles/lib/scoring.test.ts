@@ -35,9 +35,11 @@ describe('scoring helpers', () => {
 
 	it('titles a factor', () => {
 		expect(factorTitle({ signal: 'product_detected', value: 'keycloak' })).toBe(
-			'Product detected · keycloak',
+			'Produit détecté · keycloak',
 		)
-		expect(factorTitle({ signal: 'job_offer', value: '' })).toBe('Job offer')
+		expect(factorTitle({ signal: 'job_offer', value: '' })).toBe(
+			"Offre d'emploi",
+		)
 	})
 
 	it('knows which signals an agent can emit', () => {
@@ -80,10 +82,10 @@ describe('scoring helpers', () => {
 		expect(qualificationPoints(40, 47)).toBeCloseTo(18.8)
 		expect(qualificationPoints(100, 47)).toBe(47)
 		expect(qualificationPoints(50, 0)).toBe(0)
-		expect(formatPoints(18.8)).toBe('18.8')
-		expect(formatPoints(24.5)).toBe('24.5')
+		expect(formatPoints(18.8)).toBe('18,8')
+		expect(formatPoints(24.5)).toBe('24,5')
 		expect(formatPoints(18)).toBe('18')
-		expect(formatPoints(19.6000001)).toBe('19.6')
+		expect(formatPoints(19.6000001)).toBe('19,6')
 	})
 
 	it('validates weights and thresholds', () => {

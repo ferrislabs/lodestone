@@ -70,7 +70,7 @@ describe('DraftReview', () => {
 
 	it('hides the original text when the draft was not edited', () => {
 		renderReview()
-		expect(screen.queryByText('Original text from the model')).toBeNull()
+		expect(screen.queryByText('Texte original du modèle')).toBeNull()
 	})
 
 	it('shows the original text when the draft was edited', () => {
@@ -84,20 +84,24 @@ describe('DraftReview', () => {
 				},
 			},
 		})
-		expect(screen.getByText('Original text from the model')).toBeTruthy()
+		expect(screen.getByText('Texte original du modèle')).toBeTruthy()
 		expect(screen.getByText('Model subject')).toBeTruthy()
 		expect(screen.getByText('Model body')).toBeTruthy()
 	})
 
 	it('states that approving sends nothing and approves on click', () => {
 		const props = renderReview()
-		fireEvent.click(screen.getByText('Approve (marks ready, nothing is sent)'))
+		fireEvent.click(
+			screen.getByText("Approuver (marque comme prêt, rien n'est envoyé)"),
+		)
 		expect(props.onApprove).toHaveBeenCalled()
 	})
 
 	it('blocks approval while there are unsaved changes', () => {
 		renderReview({ dirty: true })
-		const button = screen.getByText('Approve (marks ready, nothing is sent)')
+		const button = screen.getByText(
+			"Approuver (marque comme prêt, rien n'est envoyé)",
+		)
 		expect((button as HTMLButtonElement).disabled).toBe(true)
 	})
 
@@ -108,7 +112,7 @@ describe('DraftReview', () => {
 
 	it('opens the reject form', () => {
 		const props = renderReview()
-		fireEvent.click(screen.getByText('Reject'))
+		fireEvent.click(screen.getByText('Rejeter'))
 		expect(props.onStartReject).toHaveBeenCalled()
 		cleanup()
 		renderReview({ rejectOpen: true })
@@ -119,8 +123,8 @@ describe('DraftReview', () => {
 		renderReview({
 			entry: { ...entry, draft: { ...entry.draft, status: 'approved' } },
 		})
-		expect(screen.queryByText('Reject')).toBeNull()
-		expect(screen.getByText('This draft was already approved.')).toBeTruthy()
+		expect(screen.queryByText('Rejeter')).toBeNull()
+		expect(screen.getByText('Ce brouillon a déjà été approuvé.')).toBeTruthy()
 	})
 })
 
@@ -139,8 +143,8 @@ describe('DraftEditor', () => {
 				onSave={() => {}}
 			/>,
 		)
-		const subject = screen.getByLabelText('Subject')
-		const body = screen.getByLabelText('Body')
+		const subject = screen.getByLabelText('Objet')
+		const body = screen.getByLabelText('Corps')
 		expect(subject.getAttribute('aria-invalid')).toBe('true')
 		expect(
 			document.getElementById(subject.getAttribute('aria-describedby') ?? '')
@@ -164,10 +168,10 @@ describe('DraftEditor', () => {
 				onSave={() => {}}
 			/>,
 		)
-		expect(screen.getByLabelText('Subject').getAttribute('aria-invalid')).toBe(
+		expect(screen.getByLabelText('Objet').getAttribute('aria-invalid')).toBe(
 			'false',
 		)
-		expect(screen.getByLabelText('Body').getAttribute('aria-invalid')).toBe(
+		expect(screen.getByLabelText('Corps').getAttribute('aria-invalid')).toBe(
 			'true',
 		)
 	})
@@ -186,12 +190,12 @@ describe('DraftEditor', () => {
 				onSave={onSave}
 			/>,
 		)
-		expect(screen.getByText('Unsaved changes')).toBeTruthy()
-		fireEvent.change(screen.getByLabelText('Subject'), {
+		expect(screen.getByText('Modifications non enregistrées')).toBeTruthy()
+		fireEvent.change(screen.getByLabelText('Objet'), {
 			target: { value: 'New' },
 		})
 		expect(onChange).toHaveBeenCalledWith('subject', 'New')
-		fireEvent.click(screen.getByText('Save changes'))
+		fireEvent.click(screen.getByText('Enregistrer les modifications'))
 		expect(onSave).toHaveBeenCalled()
 	})
 
@@ -208,9 +212,10 @@ describe('DraftEditor', () => {
 			/>,
 		)
 		expect(
-			(screen.getByText('Save changes') as HTMLButtonElement).disabled,
+			(screen.getByText('Enregistrer les modifications') as HTMLButtonElement)
+				.disabled,
 		).toBe(true)
-		expect(screen.queryByText('Unsaved changes')).toBeNull()
+		expect(screen.queryByText('Modifications non enregistrées')).toBeNull()
 	})
 })
 
@@ -227,7 +232,7 @@ describe('RejectForm', () => {
 				onCancel={() => {}}
 			/>,
 		)
-		const reason = screen.getByLabelText('Reason (optional)')
+		const reason = screen.getByLabelText('Motif (facultatif)')
 		expect(reason.getAttribute('aria-invalid')).toBe('true')
 		expect(
 			document.getElementById(reason.getAttribute('aria-describedby') ?? '')
@@ -250,9 +255,9 @@ describe('RejectForm', () => {
 			/>,
 		)
 		expect(screen.getByText('Draft already decided')).toBeTruthy()
-		fireEvent.click(screen.getByText('Confirm rejection'))
+		fireEvent.click(screen.getByText('Confirmer le rejet'))
 		expect(onConfirm).toHaveBeenCalled()
-		fireEvent.click(screen.getByText('Cancel'))
+		fireEvent.click(screen.getByText('Annuler'))
 		expect(onCancel).toHaveBeenCalled()
 	})
 })

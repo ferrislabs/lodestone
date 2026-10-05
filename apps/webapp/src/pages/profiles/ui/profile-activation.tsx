@@ -22,7 +22,7 @@ export function ProfileActivation({
 	if (!active) {
 		return (
 			<Button size="sm" disabled={busy} onClick={onActivate}>
-				Activate
+				Activer
 			</Button>
 		)
 	}
@@ -30,7 +30,7 @@ export function ProfileActivation({
 		return (
 			<div className="flex flex-wrap items-center gap-2">
 				<span className="text-xs text-muted-foreground">
-					Stops scheduling, keeps leads.
+					Arrête la planification, conserve les leads.
 				</span>
 				<Button
 					size="sm"
@@ -38,10 +38,10 @@ export function ProfileActivation({
 					disabled={busy}
 					onClick={onConfirmDeactivate}
 				>
-					Confirm deactivate
+					Confirmer la désactivation
 				</Button>
 				<Button size="sm" variant="outline" onClick={onCancelDeactivate}>
-					Cancel
+					Annuler
 				</Button>
 			</div>
 		)
@@ -53,7 +53,7 @@ export function ProfileActivation({
 			disabled={busy}
 			onClick={onRequestDeactivate}
 		>
-			Deactivate
+			Désactiver
 		</Button>
 	)
 }

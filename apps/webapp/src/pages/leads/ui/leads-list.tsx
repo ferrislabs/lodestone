@@ -12,6 +12,7 @@ import {
 	TableHeader,
 	TableRow,
 } from '#/components/ui/table'
+import { pluralize } from '#/lib/labels'
 import type { Lead, PaginationMeta } from '#/pages/leads/lib/types'
 
 export type ExportFormat = 'json' | 'csv'
@@ -58,7 +59,7 @@ export function LeadsList({
 						onClick={() => onExport('json')}
 					>
 						<Download />
-						Export JSON
+						Exporter en JSON
 					</Button>
 					<Button
 						variant="outline"
@@ -67,13 +68,13 @@ export function LeadsList({
 						onClick={() => onExport('csv')}
 					>
 						<Download />
-						Export CSV
+						Exporter en CSV
 					</Button>
 				</div>
 			</div>
 			{exportError ? (
 				<p role="alert" className="text-sm text-destructive">
-					Export failed: {exportError}
+					Échec de l'export : {exportError}
 				</p>
 			) : null}
 			{toolbar}
@@ -110,7 +111,7 @@ export function LeadsList({
 									className="py-10 text-center text-destructive"
 									role="alert"
 								>
-									Could not load leads: {errorMessage}
+									Impossible de charger les leads : {errorMessage}
 								</TableCell>
 							</TableRow>
 						) : null}
@@ -121,8 +122,8 @@ export function LeadsList({
 									className="py-10 text-center text-muted-foreground"
 								>
 									{noProfile
-										? 'No detection profile yet.'
-										: 'No leads match these filters.'}
+										? 'Aucun profil de détection pour le moment.'
+										: 'Aucun lead ne correspond à ces filtres.'}
 								</TableCell>
 							</TableRow>
 						) : null}
@@ -147,10 +148,10 @@ export function LeadsList({
 				<div className="flex items-center justify-between text-sm text-muted-foreground">
 					<span>
 						Page {pagination.current_page}
-						{pagination.last_page ? ` of ${pagination.last_page}` : ''}
+						{pagination.last_page ? ` sur ${pagination.last_page}` : ''}
 						{pagination.total === null || pagination.total === undefined
 							? ''
-							: ` - ${pagination.total} leads`}
+							: ` - ${pagination.total} ${pluralize(pagination.total, 'lead', 'leads')}`}
 					</span>
 					<div className="flex gap-2">
 						<Button
@@ -159,7 +160,7 @@ export function LeadsList({
 							disabled={!pagination.prev_page}
 							onClick={() => onPageChange(pagination.prev_page ?? 1)}
 						>
-							Previous
+							Précédent
 						</Button>
 						<Button
 							variant="outline"
@@ -169,7 +170,7 @@ export function LeadsList({
 								onPageChange(pagination.next_page ?? pagination.current_page)
 							}
 						>
-							Next
+							Suivant
 						</Button>
 					</div>
 				</div>

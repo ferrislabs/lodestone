@@ -30,7 +30,7 @@ export function AuthGate({ children }: AuthGateProps) {
 			<FullscreenMessage
 				icon={<ShieldAlert className="size-8" />}
 				title="Authentification non configurée"
-				message="Définissez VITE_OIDC_AUTHORITY (dev) ou issuer_url dans /config.json (prod), ainsi que VITE_OIDC_CLIENT_ID."
+				message="Définir VITE_OIDC_AUTHORITY (dev) ou issuer_url dans /config.json (prod), ainsi que VITE_OIDC_CLIENT_ID."
 			/>
 		)
 	}
@@ -58,7 +58,7 @@ export function AuthGate({ children }: AuthGateProps) {
 			<FullscreenMessage
 				icon={<Loader2 className="size-8 animate-spin text-orange-600" />}
 				title="Chargement…"
-				message="Vérification de votre session"
+				message="Vérification de la session"
 			/>
 		)
 	}
@@ -68,7 +68,7 @@ export function AuthGate({ children }: AuthGateProps) {
 			<FullscreenMessage
 				icon={<Loader2 className="size-8 animate-spin text-orange-600" />}
 				title="Redirection vers le fournisseur d'identité…"
-				message="You are being redirected to sign in"
+				message="Redirection vers la page de connexion"
 			/>
 		)
 	}

@@ -3,6 +3,7 @@ import { Trash2Icon } from 'lucide-react'
 import { Button } from '#/components/ui/button'
 import { Input } from '#/components/ui/input'
 import { Label } from '#/components/ui/label'
+import { pluralize } from '#/lib/labels'
 import {
 	DISTINCT_SIGNALS,
 	type Factor,
@@ -82,8 +83,8 @@ export function FactorCard({
 	const helper = !isValidWeight(factor.weight)
 		? null
 		: factor.signal === DISTINCT_SIGNALS
-			? `${factor.weight} points per distinct signal kind`
-			: `Adds up to ${factor.weight} points`
+			? `${factor.weight} ${pluralize(factor.weight, 'point', 'points')} par type de signal distinct`
+			: `Ajoute jusqu'à ${factor.weight} ${pluralize(factor.weight, 'point', 'points')}`
 
 	return (
 		<li
@@ -98,14 +99,14 @@ export function FactorCard({
 					type="button"
 					variant="ghost"
 					size="icon"
-					aria-label={`Remove factor ${title}`}
+					aria-label={`Supprimer le facteur ${title}`}
 					onClick={onRemove}
 				>
 					<Trash2Icon />
 				</Button>
 			</div>
 			<div className="flex flex-col gap-1">
-				<Label id={weightId}>Weight</Label>
+				<Label id={weightId}>Poids</Label>
 				<WeightPicker
 					labelledBy={weightId}
 					value={factor.weight}
@@ -129,7 +130,7 @@ export function FactorCard({
 				>
 					{meta === null && (
 						<option value={factor.signal}>
-							{factor.signal === '' ? 'Choose a signal' : factor.signal}
+							{factor.signal === '' ? 'Choisir un signal' : factor.signal}
 						</option>
 					)}
 					{SIGNAL_GROUPS.map((group) => (
@@ -151,11 +152,11 @@ export function FactorCard({
 			</div>
 			{meta?.takesValue === true && (
 				<div className="flex flex-col gap-1">
-					<Label htmlFor={valueId}>Value</Label>
+					<Label htmlFor={valueId}>Valeur</Label>
 					<Input
 						id={valueId}
 						list={listId}
-						placeholder="Any value"
+						placeholder="Toute valeur"
 						value={factor.value}
 						aria-invalid={valueProblems.length > 0}
 						onChange={(event) => onValue(event.currentTarget.value)}
@@ -170,7 +171,7 @@ export function FactorCard({
 			)}
 			{!available && (
 				<p className="text-xs text-muted-foreground">
-					No agent emits this signal yet
+					Aucun agent n'émet encore ce signal
 				</p>
 			)}
 		</li>

@@ -43,10 +43,13 @@ export function ProviderEditFeature() {
 		<div className="flex flex-col gap-3 p-4 md:p-8">
 			{providerQuery.isError ? (
 				<p role="alert" className="text-destructive">
-					Could not load the provider: {errorMessage(providerQuery.error)}
+					Impossible de charger le fournisseur :{' '}
+					{errorMessage(providerQuery.error)}
 				</p>
 			) : (
-				<p className="text-sm text-muted-foreground">Loading provider...</p>
+				<p className="text-sm text-muted-foreground">
+					Chargement du fournisseur…
+				</p>
 			)}
 			<div>
 				<button
@@ -54,7 +57,7 @@ export function ProviderEditFeature() {
 					className="text-sm underline"
 					onClick={() => void navigate({ to: '/llm' })}
 				>
-					Back to providers
+					Retour aux fournisseurs
 				</button>
 			</div>
 		</div>
@@ -122,7 +125,7 @@ function ProviderFormFeature({ provider }: ProviderFormFeatureProps) {
 
 	return (
 		<ProviderForm
-			title={provider ? `Edit ${provider.name}` : 'New provider'}
+			title={provider ? `Modifier ${provider.name}` : 'Nouveau fournisseur'}
 			editing={editing}
 			hasApiKey={provider?.has_api_key ?? false}
 			values={values}

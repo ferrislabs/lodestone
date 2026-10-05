@@ -1,23 +1,18 @@
+import { formatNumber, formatPercent } from '#/lib/format'
+
+export { formatDateTime } from '#/lib/format'
+
 export function formatScore(score: number): string {
-	return Number.isInteger(score) ? String(score) : score.toFixed(1)
+	return formatNumber(score)
 }
 
 export function formatRatio(value: number): string {
-	return `${Math.round(value * 100)}%`
+	return formatPercent(value)
 }
 
 export function scoreRatio(score: number, max: number): number {
 	if (max <= 0 || score <= 0) return 0
 	return Math.min(1, score / max)
-}
-
-export function formatDateTime(iso: string): string {
-	const date = new Date(iso)
-	if (Number.isNaN(date.getTime())) return iso
-	return date.toLocaleString('en-GB', {
-		dateStyle: 'medium',
-		timeStyle: 'short',
-	})
 }
 
 export function externalHref(value: string): string | null {

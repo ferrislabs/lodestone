@@ -5,5 +5,6 @@ import { leadsSearchSchema } from '#/pages/leads/lib/search'
 
 export const Route = createFileRoute('/_app/leads/')({
 	validateSearch: leadsSearchSchema,
+	head: () => ({ meta: [{ title: 'Leads · Lodestone' }] }),
 	component: LeadsListFeature,
 })

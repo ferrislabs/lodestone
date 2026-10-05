@@ -1,3 +1,4 @@
+import { translateApiMessage } from '#/lib/api-errors'
 import type {
 	KeyMode,
 	Provider,
@@ -68,7 +69,7 @@ export function numericErrors(
 	for (const field of NUMERIC_FIELDS) {
 		const raw = values[field].trim()
 		if (raw !== '' && !/^\d+$/.test(raw)) {
-			errors[field] = 'must be a non-negative integer'
+			errors[field] = translateApiMessage('must be a non-negative integer')
 		}
 	}
 	return errors

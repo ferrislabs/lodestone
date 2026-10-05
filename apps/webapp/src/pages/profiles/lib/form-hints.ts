@@ -1,4 +1,9 @@
 import type { UiHints } from '#/lib/schema-form'
+import {
+	FIELD_COPY,
+	FORM_MESSAGES,
+	VARIANT_TITLES,
+} from '#/pages/profiles/lib/field-copy'
 
 export const PROFILE_HINTS: UiHints = {
 	hidden: ['schema_version'],
@@ -21,7 +26,10 @@ export const PROFILE_HINTS: UiHints = {
 		ted: 'TED',
 		llm: 'LLM',
 		dns_cname: 'DNS CNAME',
-		http_probe: 'HTTP probe',
+		http_probe: 'Sonde HTTP',
 		cname: 'CNAME',
 	},
+	fields: FIELD_COPY,
+	variants: VARIANT_TITLES,
+	messages: FORM_MESSAGES,
 }

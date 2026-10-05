@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { parseApiError } from './api-errors'
+import { parseApiError, translateApiMessage } from './api-errors'
 
 function apiError(status: number, data: unknown): Error {
 	return Object.assign(new Error('Request payload rejected'), { status, data })
@@ -20,11 +20,11 @@ describe('parseApiError', () => {
 			}),
 		)
 		expect(parsed.fields).toEqual({
-			subject: 'must be at most 200 characters',
-			body: 'must not be empty',
+			subject: 'Doit contenir au maximum 200 caractères',
+			body: 'Ne doit pas être vide',
 		})
 		expect(parsed.status).toBe(422)
-		expect(parsed.message).toBe('Request payload rejected')
+		expect(parsed.message).toBe('Requête rejetée')
 	})
 
 	it('keeps the first message of a repeated path', () => {
@@ -58,14 +58,100 @@ describe('parseApiError', () => {
 	it('falls back to the error message when the body is not an error body', () => {
 		const parsed = parseApiError(apiError(500, { oops: true }))
 		expect(parsed.fields).toEqual({})
-		expect(parsed.message).toBe('Request payload rejected')
+		expect(parsed.message).toBe('Requête rejetée')
 	})
 
 	it('handles non-error values', () => {
 		expect(parseApiError('boom')).toEqual({
-			message: 'Unexpected error',
+			message: 'Erreur inattendue',
 			status: null,
 			fields: {},
 		})
+	})
+})
+
+describe('translateApiMessage', () => {
+	it.each([
+		['must not be empty', 'Ne doit pas être vide'],
+		['is required', 'Champ obligatoire'],
+		['must be an integer from 1 to 10', 'Doit être un entier de 1 à 10'],
+		[
+			'must be a percentage from 0 to 100',
+			'Doit être un pourcentage de 0 à 100',
+		],
+		['at least one agent is required', 'Au moins un agent est requis'],
+		['invalid regular expression', 'Expression régulière invalide'],
+		['Authentication failed', "Échec de l'authentification"],
+		['Too many requests', 'Trop de requêtes, réessayez dans un instant'],
+		[
+			'a provider with this name already exists',
+			'Un fournisseur portant ce nom existe déjà',
+		],
+		['Internal server error', 'Erreur interne du serveur'],
+		['The test failed', 'Le test a échoué'],
+	])('translates %s', (english, french) => {
+		expect(translateApiMessage(english)).toBe(french)
+	})
+
+	it('translates parameterized messages', () => {
+		expect(translateApiMessage('must be at most 3 characters')).toBe(
+			'Doit contenir au maximum 3 caractères',
+		)
+		expect(translateApiMessage('must be between 1 and 100')).toBe(
+			'Doit être compris entre 1 et 100',
+		)
+		expect(translateApiMessage('duplicate value `ct`')).toBe(
+			'Valeur en double : `ct`',
+		)
+		expect(
+			translateApiMessage('unsupported schema version 9, expected 1, 2 or 3'),
+		).toBe('Version de schéma 9 non prise en charge, attendu : 1, 2 ou 3')
+		expect(translateApiMessage('provider is assigned to the triage tier')).toBe(
+			'Le fournisseur est affecté au niveau « Tri »',
+		)
+		expect(translateApiMessage('The provider answered with status 502.')).toBe(
+			'Le fournisseur a répondu avec le statut 502.',
+		)
+		expect(translateApiMessage('HTTP 503: Service Unavailable')).toBe(
+			'Service indisponible',
+		)
+		expect(translateApiMessage('HTTP 418: Teapot')).toBe('Erreur HTTP 418')
+	})
+
+	it('translates state conflicts with french status names', () => {
+		expect(
+			translateApiMessage('Conflict: lead cannot move from new to validated'),
+		).toBe('Le lead ne peut pas passer de « nouveau » à « validé »')
+		expect(
+			translateApiMessage(
+				'Conflict: draft cannot move from Approved to Rejected',
+			),
+		).toBe('Le brouillon ne peut pas passer de « approuvé » à « rejeté »')
+	})
+
+	it('translates prefixed field messages', () => {
+		expect(
+			translateApiMessage(
+				'Validation failed: page: must be between 1 and 1000000',
+			),
+		).toBe('Validation échouée : page : doit être compris entre 1 et 1000000')
+		expect(translateApiMessage('Bad request: profile_id: must be a UUID')).toBe(
+			'Requête invalide : profile_id : doit être un UUID',
+		)
+	})
+
+	it('translates serde problems', () => {
+		expect(
+			translateApiMessage('malformed: unknown field `extra`, expected `offer`'),
+		).toBe('Champ inconnu `extra`')
+		expect(translateApiMessage('malformed: missing field `name`')).toBe(
+			'Champ manquant `name`',
+		)
+	})
+
+	it('keeps unknown messages as they are', () => {
+		expect(translateApiMessage('something unforeseen')).toBe(
+			'something unforeseen',
+		)
 	})
 })

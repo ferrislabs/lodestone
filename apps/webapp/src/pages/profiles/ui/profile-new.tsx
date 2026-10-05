@@ -26,16 +26,16 @@ export function ProfileNew({
 		<div className="flex flex-col gap-4 p-4 md:p-8">
 			<div>
 				<Button variant="ghost" size="sm" onClick={onBack}>
-					Back to profiles
+					Retour aux profils
 				</Button>
 			</div>
-			<h1 className="text-2xl font-bold tracking-tight">New profile</h1>
+			<h1 className="text-2xl font-bold tracking-tight">Nouveau profil</h1>
 			<div className="flex max-w-md flex-col gap-1.5">
-				<Label htmlFor="profile-name">Name</Label>
+				<Label htmlFor="profile-name">Nom</Label>
 				<Input
 					id="profile-name"
 					value={name}
-					placeholder="Defaults to the offer"
+					placeholder="Par défaut, l'offre"
 					aria-invalid={nameError !== null}
 					aria-describedby={nameError ? 'profile-name-error' : undefined}
 					onChange={(event) => onNameChange(event.target.value)}

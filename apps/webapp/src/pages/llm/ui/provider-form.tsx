@@ -1,6 +1,7 @@
 import { Button } from '#/components/ui/button'
 import { Input } from '#/components/ui/input'
 import { Label } from '#/components/ui/label'
+import { providerKindLabel } from '#/pages/llm/lib/labels'
 import {
 	type KeyMode,
 	PROVIDER_KINDS,
@@ -12,9 +13,9 @@ const SELECT_CLASS =
 	'h-9 w-full rounded-md border bg-transparent px-3 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50'
 
 const KEY_MODES: { mode: KeyMode; label: string }[] = [
-	{ mode: 'keep', label: 'Keep current key' },
-	{ mode: 'replace', label: 'Replace key' },
-	{ mode: 'remove', label: 'Remove key' },
+	{ mode: 'keep', label: 'Conserver la clé actuelle' },
+	{ mode: 'replace', label: 'Remplacer la clé' },
+	{ mode: 'remove', label: 'Supprimer la clé' },
 ]
 
 interface ProviderFormProps {
@@ -100,7 +101,7 @@ export function ProviderForm({
 		<div className="flex flex-col gap-4 p-4 md:p-8">
 			<div>
 				<Button variant="ghost" size="sm" onClick={onBack}>
-					Back to providers
+					Retour aux fournisseurs
 				</Button>
 			</div>
 			<h1 className="text-2xl font-bold tracking-tight">{title}</h1>
@@ -112,9 +113,9 @@ export function ProviderForm({
 					onSave()
 				}}
 			>
-				<TextField field="name" label="Name" {...common} />
+				<TextField field="name" label="Nom" {...common} />
 				<div className="flex flex-col gap-1.5">
-					<Label htmlFor="provider-kind">Kind</Label>
+					<Label htmlFor="provider-kind">Type</Label>
 					<select
 						id="provider-kind"
 						className={SELECT_CLASS}
@@ -124,7 +125,7 @@ export function ProviderForm({
 					>
 						{PROVIDER_KINDS.map((kind) => (
 							<option key={kind} value={kind}>
-								{kind}
+								{providerKindLabel(kind)}
 							</option>
 						))}
 					</select>
@@ -136,49 +137,49 @@ export function ProviderForm({
 				</div>
 				<TextField
 					field="base_url"
-					label="Base URL"
+					label="URL de base"
 					placeholder="https://api.example.com"
 					{...common}
 				/>
-				<TextField field="model" label="Model" {...common} />
+				<TextField field="model" label="Modèle" {...common} />
 				<div className="grid gap-4 md:grid-cols-2">
 					<TextField
 						field="max_retries"
-						label="Max retries"
+						label="Nombre max. de tentatives"
 						placeholder="2"
 						inputMode="numeric"
 						{...common}
 					/>
 					<TextField
 						field="timeout_seconds"
-						label="Timeout (seconds)"
+						label="Délai d'expiration (secondes)"
 						placeholder="30"
 						inputMode="numeric"
 						{...common}
 					/>
 					<TextField
 						field="input_cents_per_mtok"
-						label="Input price (cents per Mtok)"
+						label="Prix en entrée (centimes par Mtok)"
 						placeholder="0"
 						inputMode="numeric"
 						{...common}
 					/>
 					<TextField
 						field="output_cents_per_mtok"
-						label="Output price (cents per Mtok)"
+						label="Prix en sortie (centimes par Mtok)"
 						placeholder="0"
 						inputMode="numeric"
 						{...common}
 					/>
 				</div>
 				<fieldset className="flex flex-col gap-2 rounded-md border p-3">
-					<legend className="px-1 text-sm font-medium">API key</legend>
+					<legend className="px-1 text-sm font-medium">Clé API</legend>
 					{editing ? (
 						<>
 							<p className="text-xs text-muted-foreground">
 								{hasApiKey
-									? 'A key is set. It is never shown.'
-									: 'No key is set.'}
+									? "Une clé est définie. Elle n'est jamais affichée."
+									: 'Aucune clé définie.'}
 							</p>
 							<div className="flex flex-wrap gap-4">
 								{KEY_MODES.map((item) => (
@@ -201,7 +202,7 @@ export function ProviderForm({
 					{showKeyInput ? (
 						<div className="flex flex-col gap-1.5">
 							<Label htmlFor="provider-api_key">
-								{editing ? 'New API key' : 'API key (optional)'}
+								{editing ? 'Nouvelle clé API' : 'Clé API (facultative)'}
 							</Label>
 							<Input
 								id="provider-api_key"
@@ -227,10 +228,10 @@ export function ProviderForm({
 				<div className="flex items-center gap-3">
 					<Button type="submit" disabled={saving || !dirty}>
 						{saving
-							? 'Saving...'
+							? 'Enregistrement…'
 							: editing
-								? 'Save changes'
-								: 'Create provider'}
+								? 'Enregistrer les modifications'
+								: 'Créer le fournisseur'}
 					</Button>
 				</div>
 			</form>

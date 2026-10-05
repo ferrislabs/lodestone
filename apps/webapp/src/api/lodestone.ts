@@ -1,6 +1,7 @@
 import { createApiClient } from '#/api/api.client'
 import { fetcher } from '#/api/api.fetch'
 import { TanstackQueryApiClient } from '#/api/api.tanstack'
+import { parseApiError } from '#/lib/api-errors'
 
 const client = createApiClient({ fetch: fetcher })
 const queries = new TanstackQueryApiClient(client)
@@ -15,5 +16,5 @@ export function lodestoneApi(): TanstackQueryApiClient {
 }
 
 export function errorMessage(error: unknown): string {
-	return error instanceof Error ? error.message : 'Unexpected error'
+	return parseApiError(error).message
 }

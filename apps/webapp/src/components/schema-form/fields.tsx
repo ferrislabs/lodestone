@@ -12,6 +12,7 @@ import { Textarea } from '#/components/ui/textarea'
 import {
 	appendIn,
 	classify,
+	copyFor,
 	defaultValue,
 	enabledValue,
 	fieldId,
@@ -187,7 +188,7 @@ function ScalarRows({
 								type="button"
 								variant="ghost"
 								size="icon"
-								aria-label={`Remove ${label} ${index + 1}`}
+								aria-label={context.hints.messages.removeAria(label, index + 1)}
 								onClick={() => removeAt(context, itemPath)}
 							>
 								<Trash2Icon />
@@ -217,7 +218,10 @@ function CardRows({
 	value: readonly JsonValue[]
 	label: string
 }) {
-	const title = resolve(context.root, items).title ?? label
+	const title =
+		copyFor([...path, 0], context.hints)?.label ??
+		resolve(context.root, items).title ??
+		label
 	return (
 		<ul className="flex flex-col gap-3">
 			{value.map((entry, index) => {
@@ -236,11 +240,11 @@ function CardRows({
 								type="button"
 								variant="ghost"
 								size="sm"
-								aria-label={`Remove ${title} ${index + 1}`}
+								aria-label={context.hints.messages.removeAria(title, index + 1)}
 								onClick={() => removeAt(context, itemPath)}
 							>
 								<Trash2Icon />
-								Remove
+								{context.hints.messages.remove}
 							</Button>
 						</div>
 						<FieldErrors
@@ -311,7 +315,7 @@ function ArrayField({
 					type="button"
 					variant="outline"
 					size="sm"
-					aria-label={`Add ${label}`}
+					aria-label={context.hints.messages.addAria(label)}
 					onClick={() => {
 						context.onChange(
 							appendIn(
@@ -324,7 +328,7 @@ function ArrayField({
 					}}
 				>
 					<PlusIcon />
-					Add
+					{context.hints.messages.add}
 				</Button>
 			</div>
 		</div>
@@ -345,7 +349,7 @@ function UnionField({
 		<div className="flex flex-col gap-3">
 			<select
 				id={id}
-				aria-label={`${label} type`}
+				aria-label={context.hints.messages.typeAria(label)}
 				className={SELECT_CLASS}
 				value={index}
 				onChange={(event) => {
@@ -361,7 +365,7 @@ function UnionField({
 			>
 				{node.variants.map((option, position) => (
 					<option key={String(option.value)} value={position}>
-						{option.title}
+						{context.hints.variants[String(option.value)] ?? option.title}
 					</option>
 				))}
 			</select>
@@ -456,9 +460,10 @@ function PropertyField({
 	const node = classify(context.root, property.schema)
 	if (node.kind === 'const') return null
 	if (context.hints.hidden.includes(genericPath(path))) return null
-	const label = labelFor(property.key, context.hints)
+	const copy = copyFor(path, context.hints)
+	const label = copy?.label ?? labelFor(property.key, context.hints)
 	const id = fieldId(path)
-	const description = node.schema.description
+	const description = copy?.description ?? node.schema.description
 	const problems = problemsAt(context, path)
 	const container = node.kind === 'object' || node.kind === 'array'
 	const optional = isOptionalProperty(context.root, property)
@@ -479,7 +484,7 @@ function PropertyField({
 					</div>
 					<Switch
 						id={id}
-						aria-label={`Enable ${label}`}
+						aria-label={context.hints.messages.enableAria(label)}
 						checked={enabled}
 						onCheckedChange={(checked) => {
 							if (checked) {
@@ -522,6 +527,7 @@ function PropertyField({
 			label={label}
 			description={description}
 			required={property.required}
+			requiredTitle={context.hints.messages.required}
 			problems={problems}
 			container={container || node.kind === 'union'}
 		>

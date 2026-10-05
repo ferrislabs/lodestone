@@ -9,7 +9,7 @@ export function OriginalDraft({ draft }: OriginalDraftProps) {
 	return (
 		<Card>
 			<CardHeader>
-				<CardTitle>Original text from the model</CardTitle>
+				<CardTitle>Texte original du modèle</CardTitle>
 			</CardHeader>
 			<CardContent className="grid gap-4 md:grid-cols-2">
 				<div className="flex flex-col gap-2">
@@ -25,7 +25,7 @@ export function OriginalDraft({ draft }: OriginalDraftProps) {
 				</div>
 				<div className="flex flex-col gap-2">
 					<span className="text-xs font-medium uppercase text-muted-foreground">
-						Current
+						Actuel
 					</span>
 					<p className="text-sm font-medium">{draft.subject}</p>
 					<p className="whitespace-pre-wrap text-sm">{draft.body}</p>

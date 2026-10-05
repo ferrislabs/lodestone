@@ -43,13 +43,13 @@ export function ProfileDetail({
 		<div className="flex flex-col gap-4 p-4 md:p-8">
 			<div>
 				<Button variant="ghost" size="sm" onClick={onBack}>
-					Back to profiles
+					Retour aux profils
 				</Button>
 			</div>
 			{state === 'loading' ? <Skeleton className="h-24 w-full" /> : null}
 			{state === 'error' ? (
 				<p role="alert" className="text-destructive">
-					Could not load the profile: {errorMessage}
+					Impossible de charger le profil : {errorMessage}
 				</p>
 			) : null}
 			{state === 'ready' && profile ? (
@@ -61,11 +61,11 @@ export function ProfileDetail({
 							</h1>
 							<div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
 								<Badge variant={profile.active ? 'default' : 'secondary'}>
-									{profile.active ? 'Active' : 'Inactive'}
+									{profile.active ? 'Actif' : 'Inactif'}
 								</Badge>
-								<span>Revision {profile.revision}</span>
-								<span>Created {formatDateTime(profile.created_at)}</span>
-								<span>Updated {formatDateTime(profile.updated_at)}</span>
+								<span>Révision {profile.revision}</span>
+								<span>Créé le {formatDateTime(profile.created_at)}</span>
+								<span>Mis à jour le {formatDateTime(profile.updated_at)}</span>
 							</div>
 						</div>
 						<div className="flex flex-wrap items-center gap-2">
@@ -76,7 +76,7 @@ export function ProfileDetail({
 								disabled={exporting}
 								onClick={onExport}
 							>
-								Export JSON
+								Exporter en JSON
 							</Button>
 						</div>
 					</div>

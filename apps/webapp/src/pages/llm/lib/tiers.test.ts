@@ -54,12 +54,18 @@ describe('tierDiff', () => {
 describe('labels', () => {
 	it('names the assigned tiers in the conflict message', () => {
 		expect(deleteConflictMessage(['triage'])).toBe(
-			'Cannot delete: assigned to the triage tier',
+			'Suppression impossible : affecté au niveau Tri',
+		)
+		expect(deleteConflictMessage(['triage', 'qualification'])).toBe(
+			'Suppression impossible : affecté aux niveaux Tri et Qualification',
+		)
+		expect(deleteConflictMessage([])).toBe(
+			'Suppression impossible : le fournisseur est utilisé',
 		)
 	})
 
 	it('labels the key state', () => {
-		expect(keyLabel(true)).toBe('Key set')
-		expect(keyLabel(false)).toBe('No key')
+		expect(keyLabel(true)).toBe('Clé définie')
+		expect(keyLabel(false)).toBe('Aucune clé')
 	})
 })

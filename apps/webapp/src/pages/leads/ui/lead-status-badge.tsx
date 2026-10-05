@@ -1,5 +1,6 @@
 import { Badge } from '#/components/ui/badge'
 import { cn } from '#/lib/utils'
+import { leadStatusLabel } from '#/pages/leads/lib/labels'
 import type { LeadStatus } from '#/pages/leads/lib/types'
 
 const STYLES: Record<LeadStatus, string> = {
@@ -17,8 +18,8 @@ interface LeadStatusBadgeProps {
 
 export function LeadStatusBadge({ status }: LeadStatusBadgeProps) {
 	return (
-		<Badge variant="outline" className={cn('capitalize', STYLES[status])}>
-			{status}
+		<Badge variant="outline" className={cn(STYLES[status])}>
+			{leadStatusLabel(status)}
 		</Badge>
 	)
 }

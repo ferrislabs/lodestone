@@ -27,7 +27,7 @@ function renderForm(
 	overrides: Partial<Parameters<typeof ProviderForm>[0]> = {},
 ) {
 	const props = {
-		title: 'Edit Claude',
+		title: 'Modifier Claude',
 		editing: true,
 		hasApiKey: true,
 		values: valuesFromProvider(provider),
@@ -49,26 +49,28 @@ function renderForm(
 describe('ProviderForm', () => {
 	it('shows no key input and no key value when keeping the key', () => {
 		renderForm()
-		expect(screen.queryByLabelText('New API key')).toBeNull()
+		expect(screen.queryByLabelText('Nouvelle clé API')).toBeNull()
 		expect(document.querySelector('input[type="password"]')).toBeNull()
-		expect(screen.getByText('A key is set. It is never shown.')).toBeTruthy()
+		expect(
+			screen.getByText("Une clé est définie. Elle n'est jamais affichée."),
+		).toBeTruthy()
 	})
 
 	it('defaults the tri-state to keep current key', () => {
 		renderForm()
-		const keep = screen.getByLabelText('Keep current key')
+		const keep = screen.getByLabelText('Conserver la clé actuelle')
 		expect((keep as HTMLInputElement).checked).toBe(true)
 		expect(
-			(screen.getByLabelText('Replace key') as HTMLInputElement).checked,
+			(screen.getByLabelText('Remplacer la clé') as HTMLInputElement).checked,
 		).toBe(false)
 		expect(
-			(screen.getByLabelText('Remove key') as HTMLInputElement).checked,
+			(screen.getByLabelText('Supprimer la clé') as HTMLInputElement).checked,
 		).toBe(false)
 	})
 
 	it('shows an empty write-only password input when replacing', () => {
 		renderForm({ keyMode: 'replace' })
-		const input = screen.getByLabelText('New API key') as HTMLInputElement
+		const input = screen.getByLabelText('Nouvelle clé API') as HTMLInputElement
 		expect(input.type).toBe('password')
 		expect(input.value).toBe('')
 		expect(input.getAttribute('autocomplete')).toBe('new-password')
@@ -81,7 +83,7 @@ describe('ProviderForm', () => {
 
 	it('reports key mode changes', () => {
 		const props = renderForm()
-		fireEvent.click(screen.getByLabelText('Replace key'))
+		fireEvent.click(screen.getByLabelText('Remplacer la clé'))
 		expect(props.onKeyModeChange).toHaveBeenCalledWith('replace')
 	})
 
@@ -91,8 +93,8 @@ describe('ProviderForm', () => {
 			hasApiKey: false,
 			values: { ...valuesFromProvider(provider), api_key: '' },
 		})
-		expect(screen.getByLabelText('API key (optional)')).toBeTruthy()
-		expect(screen.queryByLabelText('Keep current key')).toBeNull()
+		expect(screen.getByLabelText('Clé API (facultative)')).toBeTruthy()
+		expect(screen.queryByLabelText('Conserver la clé actuelle')).toBeNull()
 	})
 
 	it('shows server errors on the faulty fields', () => {
@@ -104,8 +106,8 @@ describe('ProviderForm', () => {
 		})
 		expect(screen.getByText('must be an http or https URL')).toBeTruthy()
 		expect(screen.getByText('must be between 0 and 2147483647')).toBeTruthy()
-		expect(screen.getByLabelText('Base URL').getAttribute('aria-invalid')).toBe(
-			'true',
-		)
+		expect(
+			screen.getByLabelText('URL de base').getAttribute('aria-invalid'),
+		).toBe('true')
 	})
 })

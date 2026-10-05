@@ -1,5 +1,6 @@
 import { Button } from '#/components/ui/button'
 import { Label } from '#/components/ui/label'
+import { tierLabel } from '#/pages/llm/lib/labels'
 import { NO_PROVIDER } from '#/pages/llm/lib/tiers'
 import {
 	type Provider,
@@ -32,20 +33,18 @@ export function TierPanel({
 }: TierPanelProps) {
 	return (
 		<div className="flex flex-col gap-3 rounded-xl border bg-card p-4">
-			<h2 className="text-sm font-semibold">Tier assignment</h2>
+			<h2 className="text-sm font-semibold">Affectation des niveaux</h2>
 			<div className="grid gap-3 md:grid-cols-2">
 				{TIERS.map((tier) => (
 					<div key={tier} className="flex flex-col gap-1.5">
-						<Label htmlFor={`tier-${tier}`} className="capitalize">
-							{tier}
-						</Label>
+						<Label htmlFor={`tier-${tier}`}>{tierLabel(tier)}</Label>
 						<select
 							id={`tier-${tier}`}
 							className={SELECT_CLASS}
 							value={selection[tier]}
 							onChange={(event) => onSelect(tier, event.target.value)}
 						>
-							<option value={NO_PROVIDER}>None</option>
+							<option value={NO_PROVIDER}>Aucun</option>
 							{providers.map((provider) => (
 								<option
 									key={provider.id}
@@ -53,7 +52,7 @@ export function TierPanel({
 									disabled={!provider.enabled}
 								>
 									{provider.name}
-									{provider.enabled ? '' : ' (disabled)'}
+									{provider.enabled ? '' : ' (désactivé)'}
 								</option>
 							))}
 						</select>
@@ -67,7 +66,7 @@ export function TierPanel({
 			) : null}
 			<div>
 				<Button size="sm" disabled={!changed || applying} onClick={onApply}>
-					{applying ? 'Applying...' : 'Apply tiers'}
+					{applying ? 'Application…' : 'Appliquer les niveaux'}
 				</Button>
 			</div>
 		</div>

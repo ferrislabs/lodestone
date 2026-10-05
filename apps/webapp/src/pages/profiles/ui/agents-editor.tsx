@@ -59,7 +59,8 @@ export function AgentsEditor({
 			/>
 			{agents.length === 0 ? (
 				<p className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
-					No agent yet. Add one to start searching.
+					Aucun agent pour le moment. Ajouter un agent pour démarrer la
+					recherche.
 				</p>
 			) : (
 				<ul className="flex flex-col gap-3">
@@ -100,7 +101,7 @@ export function AgentsEditor({
 						onClick={onOpenPicker}
 					>
 						<PlusIcon />
-						Add agent
+						Ajouter un agent
 					</Button>
 				</div>
 			)}
