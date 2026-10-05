@@ -72,7 +72,7 @@ impl Api {
     }
 }
 
-fn with_weight(mut definition: Value, weight: f64) -> Value {
+fn with_weight(mut definition: Value, weight: u8) -> Value {
     definition["scoring"]["factors"][0]["weight"] = json!(weight);
     definition
 }
@@ -134,8 +134,18 @@ async fn invalid_definitions_are_rejected_with_the_faulty_field_path(pool: PgPoo
     let mut empty_offer = iam();
     empty_offer["identity"]["offer"] = json!("");
 
+    let mut heavy_weight = iam();
+    heavy_weight["scoring"]["factors"][0]["weight"] = json!(11);
+    let mut zero_weight = iam();
+    zero_weight["scoring"]["factors"][3]["weight"] = json!(0);
+    let mut bad_threshold = iam();
+    bad_threshold["llm"]["qualification_threshold"] = json!(101);
+
     let cases = [
         (bad_weight, "scoring.factors[2].weight"),
+        (heavy_weight, "scoring.factors[0].weight"),
+        (zero_weight, "scoring.factors[3].weight"),
+        (bad_threshold, "llm.qualification_threshold"),
         (bad_version, "schema_version"),
         (unknown_field, "identity.colour"),
     ];
@@ -208,7 +218,7 @@ async fn malformed_json_and_envelopes_are_rejected_with_a_path(pool: PgPool) {
 async fn update_appends_a_revision_and_leaves_the_past_one_intact(pool: PgPool) {
     let api = Api::new(pool).await;
     let id = api.create("iam", iam()).await;
-    let changed = with_weight(iam(), 42.0);
+    let changed = with_weight(iam(), 9);
 
     let (status, body) = api.update(&id, changed.clone()).await;
 

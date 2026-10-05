@@ -9,8 +9,9 @@ export const PROFILE_HINTS: UiHints = {
 		'agents.llm.relevance_criteria',
 	],
 	defaults: {
-		schema_version: 2,
+		schema_version: 3,
 		'llm.qualification_threshold': 50,
+		'scoring.factors.weight': 5,
 		'agents.source.fingerprints.matchers.equals': 200,
 	},
 	labels: {

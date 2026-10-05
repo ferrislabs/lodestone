@@ -39,6 +39,33 @@ fn distinct_kinds(signals: &[Signal]) -> f64 {
     f64::from(u32::try_from(kinds.len()).unwrap_or(u32::MAX))
 }
 
+pub fn max_possible<'a>(factors: impl Iterator<Item = (&'a str, f64)> + Clone) -> f64 {
+    let kinds: BTreeSet<&str> = factors
+        .clone()
+        .map(|(signal, _)| signal)
+        .filter(|signal| *signal != DISTINCT_SIGNALS_FACTOR)
+        .collect();
+    let cap = f64::from(u32::try_from(kinds.len()).unwrap_or(u32::MAX));
+    factors
+        .map(|(signal, weight)| {
+            if signal == DISTINCT_SIGNALS_FACTOR {
+                weight * cap
+            } else {
+                weight
+            }
+        })
+        .sum()
+}
+
+pub fn max_score(scoring: &Scoring) -> f64 {
+    max_possible(
+        scoring
+            .factors
+            .iter()
+            .map(|factor| (factor.signal.as_str(), f64::from(factor.weight))),
+    )
+}
+
 pub fn score(signals: &[Signal], scoring: &Scoring) -> ScoreBreakdown {
     let contributions: Vec<ScoreContribution> = scoring
         .factors
@@ -52,9 +79,9 @@ pub fn score(signals: &[Signal], scoring: &Scoring) -> ScoreBreakdown {
             ScoreContribution {
                 signal: factor.signal.clone(),
                 value: factor.value.clone(),
-                weight: factor.weight,
+                weight: f64::from(factor.weight),
                 measure,
-                contribution: factor.weight * measure,
+                contribution: f64::from(factor.weight) * measure,
             }
         })
         .collect();
@@ -93,7 +120,7 @@ mod tests {
         }
     }
 
-    fn factor(signal: &str, value: Option<&str>, weight: f64) -> ScoringFactor {
+    fn factor(signal: &str, value: Option<&str>, weight: u8) -> ScoringFactor {
         ScoringFactor {
             signal: signal.to_owned(),
             value: value.map(str::to_owned),
@@ -104,11 +131,11 @@ mod tests {
     fn iam() -> Scoring {
         Scoring {
             factors: vec![
-                factor("product_detected", Some("keycloak"), 30.0),
-                factor("debt_marker", Some("legacy_auth_path"), 15.0),
-                factor("saas_provider", None, 10.0),
-                factor("job_offer", None, 25.0),
-                factor(DISTINCT_SIGNALS_FACTOR, None, 5.0),
+                factor("product_detected", Some("keycloak"), 10),
+                factor("debt_marker", Some("legacy_auth_path"), 5),
+                factor("saas_provider", None, 3),
+                factor("job_offer", None, 8),
+                factor(DISTINCT_SIGNALS_FACTOR, None, 2),
             ],
         }
     }
@@ -121,7 +148,7 @@ mod tests {
             signal("job_offer", None, 1.0),
         ];
         let breakdown = score(&signals, &iam());
-        let expected = 30.0 * 0.9 + 15.0 * 0.6 + 25.0 + 5.0 * 3.0;
+        let expected = 10.0 * 0.9 + 5.0 * 0.6 + 8.0 + 2.0 * 3.0;
         assert!((breakdown.total.get() - expected).abs() < 1e-9);
         assert_eq!(breakdown.contributions.len(), 5);
         assert_eq!(breakdown.contributions[2].measure, 0.0);
@@ -134,7 +161,7 @@ mod tests {
             &iam(),
         );
         assert_eq!(breakdown.contributions[0].contribution, 0.0);
-        assert_eq!(breakdown.total.get(), 5.0);
+        assert_eq!(breakdown.total.get(), 2.0);
     }
 
     #[test]
@@ -144,7 +171,7 @@ mod tests {
             signal("saas_provider", Some("okta"), 0.9),
         ];
         let breakdown = score(&signals, &iam());
-        assert!((breakdown.contributions[2].contribution - 9.0).abs() < 1e-9);
+        assert!((breakdown.contributions[2].contribution - 2.7).abs() < 1e-9);
     }
 
     #[test]
@@ -154,7 +181,7 @@ mod tests {
             signal("saas_provider", Some("auth0"), 0.9),
         ];
         let other = Scoring {
-            factors: vec![factor("saas_provider", None, 50.0)],
+            factors: vec![factor("saas_provider", None, 10)],
         };
         assert_ne!(score(&signals, &iam()).total, score(&signals, &other).total);
     }
@@ -162,6 +189,31 @@ mod tests {
     #[test]
     fn no_signal_scores_zero() {
         assert_eq!(score(&[], &iam()).total.get(), 0.0);
+    }
+
+    #[test]
+    fn max_score_counts_distinct_signals_once_per_other_kind() {
+        assert!((max_score(&iam()) - (10.0 + 5.0 + 3.0 + 8.0 + 2.0 * 4.0)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn max_score_ignores_the_value_when_counting_kinds() {
+        let scoring = Scoring {
+            factors: vec![
+                factor("product_detected", Some("keycloak"), 4),
+                factor("product_detected", Some("authentik"), 4),
+                factor(DISTINCT_SIGNALS_FACTOR, None, 3),
+            ],
+        };
+        assert!((max_score(&scoring) - 11.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn max_score_without_distinct_factor_is_the_weight_sum() {
+        let scoring = Scoring {
+            factors: vec![factor("a", None, 4), factor("b", None, 6)],
+        };
+        assert!((max_score(&scoring) - 10.0).abs() < 1e-9);
     }
 
     const KINDS: [&str; 4] = [
@@ -199,7 +251,7 @@ mod tests {
         }
 
         #[test]
-        fn raising_a_positive_weight_never_lowers_the_score(raw in signals_strategy(), index in 0usize..5, bump in 0.0f64..100.0) {
+        fn raising_a_positive_weight_never_lowers_the_score(raw in signals_strategy(), index in 0usize..5, bump in 0u8..=3) {
             let signals = build(&raw);
             let base = iam();
             let mut raised = base.clone();

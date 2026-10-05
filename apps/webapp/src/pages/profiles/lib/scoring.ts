@@ -40,7 +40,7 @@ export const SIGNAL_KINDS: readonly SignalKindMeta[] = [
 	{
 		kind: 'saas_provider',
 		label: 'SaaS provider',
-		description: 'A domain points to a known SaaS provider.',
+		description: 'Un domaine pointe vers un fournisseur SaaS connu.',
 		group: 'Infrastructure',
 		takesValue: true,
 		emittedBy: ['dns_cname'],
@@ -196,6 +196,66 @@ export function nextSignal(
 	return free?.kind ?? 'job_offer'
 }
 
-export function maxWeight(factors: readonly Factor[]): number {
-	return factors.reduce((max, factor) => Math.max(max, factor.weight ?? 0), 0)
+export const MIN_WEIGHT = 1
+export const MAX_WEIGHT = 10
+export const DEFAULT_WEIGHT = 5
+export const WEIGHT_ERROR = 'must be an integer from 1 to 10'
+export const THRESHOLD_ERROR = 'must be a percentage from 0 to 100'
+
+export const WEIGHTS: readonly number[] = Array.from(
+	{ length: MAX_WEIGHT },
+	(_, index) => index + MIN_WEIGHT,
+)
+
+export function isValidWeight(weight: number | null): weight is number {
+	return (
+		weight !== null &&
+		Number.isInteger(weight) &&
+		weight >= MIN_WEIGHT &&
+		weight <= MAX_WEIGHT
+	)
+}
+
+export function isValidThreshold(
+	threshold: number | null,
+): threshold is number {
+	return (
+		threshold !== null &&
+		Number.isInteger(threshold) &&
+		threshold >= 0 &&
+		threshold <= 100
+	)
+}
+
+export function maxScore(
+	factors: readonly Pick<Factor, 'signal' | 'weight'>[],
+) {
+	const kinds = new Set(
+		factors
+			.map((factor) => factor.signal)
+			.filter((signal) => signal !== DISTINCT_SIGNALS),
+	)
+	return factors.reduce((total, factor) => {
+		const weight = factor.weight ?? 0
+		return (
+			total +
+			(factor.signal === DISTINCT_SIGNALS ? weight * kinds.size : weight)
+		)
+	}, 0)
+}
+
+export function qualificationPoints(thresholdPercent: number, max: number) {
+	return (thresholdPercent * max) / 100
+}
+
+export function formatPoints(points: number): string {
+	return String(Math.round(points * 10) / 10)
+}
+
+export function readThreshold(definition: JsonObject): number | null {
+	const llm = definition.llm
+	if (!isJsonObject(llm)) return null
+	return typeof llm.qualification_threshold === 'number'
+		? llm.qualification_threshold
+		: null
 }

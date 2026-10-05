@@ -63,7 +63,7 @@ describe('agents', () => {
 
 	it('refuses to save without agents', () => {
 		const attempt = prepareSave({
-			schema_version: 2,
+			schema_version: 3,
 			identity: { offer: 'o', target_customer: 't' },
 			agents: [],
 			scoring: { factors: [] },

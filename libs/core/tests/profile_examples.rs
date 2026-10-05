@@ -8,6 +8,7 @@ use schemars::schema_for;
 
 const IAM: &str = include_str!("../../../docs/examples/profiles/iam-ferriskey.json");
 const IAM_V1: &str = include_str!("fixtures/profiles/iam-ferriskey.v1.json");
+const IAM_V2: &str = include_str!("fixtures/profiles/iam-ferriskey.v2.json");
 const ECOMMERCE: &str =
     include_str!("../../../docs/examples/profiles/ecommerce-replatforming.json");
 
@@ -113,10 +114,10 @@ fn parse_value(value: serde_json::Value) -> ValidatedProfile {
 }
 
 #[test]
-fn version_one_iam_fixture_is_upgraded_to_the_version_two_example() {
+fn version_one_iam_fixture_is_upgraded_to_the_current_example() {
     let upgraded = parse(IAM_V1);
     let current = parse(IAM);
-    assert_eq!(upgraded.definition().schema_version, 2);
+    assert_eq!(upgraded.definition().schema_version, 3);
     assert_eq!(
         agent_ids(&upgraded),
         [
@@ -158,6 +159,7 @@ fn version_one_iam_fixture_is_upgraded_to_the_version_two_example() {
     );
     let strip = |profile: &ValidatedProfile| {
         let mut value = profile.to_json();
+        value["llm"]["qualification_threshold"] = 0.into();
         let agents = value["agents"].as_array_mut().expect("agents");
         agents.retain(|agent| agent["id"] != "ats-en");
         for agent in agents.iter_mut() {
@@ -169,8 +171,52 @@ fn version_one_iam_fixture_is_upgraded_to_the_version_two_example() {
         value
     };
     assert_eq!(strip(&upgraded), strip(&current));
-    assert_eq!(upgraded.definition().llm, current.definition().llm);
+    assert_eq!(
+        upgraded.definition().llm.relevance_criteria,
+        current.definition().llm.relevance_criteria
+    );
     assert_eq!(upgraded.definition().scoring, current.definition().scoring);
+    assert_eq!(upgraded.definition().llm.qualification_threshold, 37);
+}
+
+fn iam_weights(profile: &ValidatedProfile) -> Vec<(&str, u8)> {
+    profile
+        .definition()
+        .scoring
+        .factors
+        .iter()
+        .map(|factor| (factor.signal.as_str(), factor.weight))
+        .collect()
+}
+
+#[test]
+fn version_two_iam_fixture_is_upgraded_to_version_three() {
+    let upgraded = parse(IAM_V2);
+    let definition = upgraded.definition();
+    assert_eq!(definition.schema_version, 3);
+    assert_eq!(
+        iam_weights(&upgraded),
+        [
+            ("product_detected", 10),
+            ("debt_marker", 5),
+            ("saas_provider", 3),
+            ("job_offer", 8),
+            ("public_tender", 7),
+            ("role_contact_found", 2),
+            ("distinct_signals", 2),
+        ]
+    );
+    assert_eq!(definition.llm.qualification_threshold, 37);
+    assert_eq!(definition.max_score(), 47.0);
+    assert_eq!(upgraded.to_json()["schema_version"], 3);
+    assert_eq!(parse(IAM_V1).definition().scoring, definition.scoring);
+}
+
+#[test]
+fn iam_example_max_score_and_threshold_points() {
+    let profile = parse(IAM);
+    assert_eq!(profile.definition().max_score(), 47.0);
+    assert!((profile.definition().qualification_points() - 18.8).abs() < 1e-9);
 }
 
 #[test]
@@ -179,7 +225,7 @@ fn committed_schema_matches_definition() {
         serde_json::to_string_pretty(&schema_for!(ProfileDefinition)).expect("schema serializes");
     generated.push('\n');
     let path =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../docs/schemas/profile.v2.schema.json");
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../docs/schemas/profile.v3.schema.json");
     if std::env::var("UPDATE_SCHEMA").as_deref() == Ok("1") {
         fs::write(&path, &generated).expect("schema file is writable");
         return;
@@ -188,6 +234,6 @@ fn committed_schema_matches_definition() {
         fs::read_to_string(&path).expect("schema file exists, regenerate with UPDATE_SCHEMA=1");
     assert!(
         committed == generated,
-        "docs/schemas/profile.v2.schema.json is stale, regenerate with UPDATE_SCHEMA=1"
+        "docs/schemas/profile.v3.schema.json is stale, regenerate with UPDATE_SCHEMA=1"
     );
 }

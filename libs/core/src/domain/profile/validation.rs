@@ -10,7 +10,7 @@ use super::{
         DnsCname, Fingerprint, HttpProbe, Identity, KeywordSource, LlmSettings, Matcher,
         PROFILE_SCHEMA_VERSION, ProfileDefinition, Scoring, VersionExtractor,
     },
-    legacy::ProfileDefinitionV1,
+    legacy::{ProfileDefinitionV1, ProfileDefinitionV2},
 };
 
 const REGEX_SIZE_LIMIT: usize = 1 << 20;
@@ -20,7 +20,7 @@ const MAX_PATTERN_LENGTH: usize = 1024;
 pub enum ProfileProblem {
     #[error("malformed: {0}")]
     Malformed(String),
-    #[error("unsupported schema version {found}, expected 1 or {PROFILE_SCHEMA_VERSION}")]
+    #[error("unsupported schema version {found}, expected 1, 2 or {PROFILE_SCHEMA_VERSION}")]
     UnsupportedSchemaVersion { found: u32 },
     #[error("must not be empty")]
     Empty,
@@ -46,8 +46,10 @@ pub enum ProfileProblem {
     InvalidLocalPart,
     #[error("must also be listed in `preferred_local_parts`")]
     GuessNotRanked,
-    #[error("must be a finite number")]
-    NotFinite,
+    #[error("must be an integer from 1 to 10")]
+    InvalidWeight,
+    #[error("must be a percentage from 0 to 100")]
+    InvalidThreshold,
     #[error("must be a dotted numeric version")]
     InvalidVersion,
     #[error("must be at least 1")]
@@ -81,6 +83,7 @@ impl ValidatedProfile {
             .and_then(|version| u32::try_from(version).ok());
         let definition = match version {
             Some(1) => decode::<ProfileDefinitionV1>(value)?.upgrade(),
+            Some(2) => decode::<ProfileDefinitionV2>(value)?.upgrade(),
             Some(PROFILE_SCHEMA_VERSION) | None => decode::<ProfileDefinition>(value)?,
             Some(found) => {
                 return Err(Path::root()
@@ -195,14 +198,6 @@ fn unique<'a>(values: impl Iterator<Item = (usize, &'a str)>, at: impl Fn(usize)
         }
     }
     Ok(())
-}
-
-fn finite(value: f64, path: &Path) -> Check {
-    if value.is_finite() {
-        Ok(())
-    } else {
-        Err(path.fail(ProfileProblem::NotFinite))
-    }
 }
 
 fn compile(pattern: &str, path: &Path) -> Result<regex::Regex, ProfileValidationError> {
@@ -435,7 +430,11 @@ fn validate_scoring(scoring: &Scoring, path: &Path) -> Check {
         if let Some(value) = &factor.value {
             non_empty(value, &factor_path.field("value"))?;
         }
-        finite(factor.weight, &factor_path.field("weight"))?;
+        if !(1..=10).contains(&factor.weight) {
+            return Err(factor_path
+                .field("weight")
+                .fail(ProfileProblem::InvalidWeight));
+        }
     }
     Ok(())
 }
@@ -474,10 +473,11 @@ fn validate_contact_ranking(ranking: &ContactRanking, path: &Path) -> Check {
 }
 
 fn validate_llm(llm: &LlmSettings, path: &Path) -> Check {
-    finite(
-        llm.qualification_threshold,
-        &path.field("qualification_threshold"),
-    )?;
+    if llm.qualification_threshold > 100 {
+        return Err(path
+            .field("qualification_threshold")
+            .fail(ProfileProblem::InvalidThreshold));
+    }
     non_empty(&llm.relevance_criteria, &path.field("relevance_criteria"))
 }
 
@@ -519,6 +519,158 @@ mod tests {
     }
 
     #[test]
+    fn weights_outside_one_to_ten_are_rejected() {
+        for weight in [0, 11, 255] {
+            let error = error_for(|v| v["scoring"]["factors"][0]["weight"] = json!(weight));
+            assert_eq!(error.path, "scoring.factors[0].weight");
+            assert_eq!(error.problem, ProfileProblem::InvalidWeight);
+        }
+        assert_eq!(
+            ProfileProblem::InvalidWeight.to_string(),
+            "must be an integer from 1 to 10"
+        );
+    }
+
+    #[test]
+    fn fractional_and_negative_weights_are_rejected_at_their_path() {
+        for weight in [json!(2.5), json!(-1)] {
+            let error = error_for(|v| v["scoring"]["factors"][0]["weight"] = weight);
+            assert_eq!(error.path, "scoring.factors[0].weight");
+        }
+    }
+
+    #[test]
+    fn thresholds_above_one_hundred_are_rejected() {
+        let error = error_for(|v| v["llm"]["qualification_threshold"] = json!(101));
+        assert_eq!(error.path, "llm.qualification_threshold");
+        assert_eq!(error.problem, ProfileProblem::InvalidThreshold);
+        assert_eq!(
+            ProfileProblem::InvalidThreshold.to_string(),
+            "must be a percentage from 0 to 100"
+        );
+        let error = error_for(|v| v["llm"]["qualification_threshold"] = json!(-1));
+        assert_eq!(error.path, "llm.qualification_threshold");
+        let valid = error_for_ok(|v| v["llm"]["qualification_threshold"] = json!(100));
+        assert_eq!(valid.definition().llm.qualification_threshold, 100);
+    }
+
+    fn error_for_ok(mutate: impl FnOnce(&mut Value)) -> ValidatedProfile {
+        let mut value = minimal();
+        mutate(&mut value);
+        ValidatedProfile::parse(value).unwrap()
+    }
+
+    fn iam_scoring_v2() -> Value {
+        json!({"factors": [
+            {"signal": "product_detected", "value": "keycloak", "weight": 30},
+            {"signal": "debt_marker", "value": "legacy_auth_path", "weight": 15},
+            {"signal": "saas_provider", "weight": 10},
+            {"signal": "job_offer", "weight": 25},
+            {"signal": "public_tender", "weight": 20},
+            {"signal": "role_contact_found", "weight": 5},
+            {"signal": "distinct_signals", "weight": 5}
+        ]})
+    }
+
+    fn weights(profile: &ValidatedProfile) -> Vec<u8> {
+        profile
+            .definition()
+            .scoring
+            .factors
+            .iter()
+            .map(|factor| factor.weight)
+            .collect()
+    }
+
+    #[test]
+    fn version_two_weights_and_threshold_are_rescaled() {
+        let profile = error_for_ok(|v| {
+            v["schema_version"] = json!(2);
+            v["scoring"] = iam_scoring_v2();
+            v["llm"]["qualification_threshold"] = json!(50);
+        });
+        assert_eq!(profile.definition().schema_version, 3);
+        assert_eq!(weights(&profile), [10, 5, 3, 8, 7, 2, 2]);
+        assert_eq!(profile.definition().llm.qualification_threshold, 37);
+        assert_eq!(profile.to_json()["schema_version"], 3);
+    }
+
+    #[test]
+    fn version_two_weights_within_the_new_scale_are_kept() {
+        let profile = error_for_ok(|v| {
+            v["schema_version"] = json!(2);
+            v["scoring"] = json!({"factors": [
+                {"signal": "a", "weight": 7.0},
+                {"signal": "b", "weight": 2},
+                {"signal": "distinct_signals", "weight": 1}
+            ]});
+            v["llm"]["qualification_threshold"] = json!(8.0);
+        });
+        assert_eq!(weights(&profile), [7, 2, 1]);
+        assert_eq!(profile.definition().llm.qualification_threshold, 73);
+    }
+
+    #[test]
+    fn version_two_fractional_weights_are_rescaled_and_floored_at_one() {
+        let profile = error_for_ok(|v| {
+            v["schema_version"] = json!(2);
+            v["scoring"] = json!({"factors": [
+                {"signal": "a", "weight": 2.5},
+                {"signal": "b", "weight": 100},
+                {"signal": "c", "weight": 0}
+            ]});
+        });
+        assert_eq!(weights(&profile), [1, 10, 1]);
+    }
+
+    #[test]
+    fn version_two_threshold_is_clamped_and_falls_back_without_a_maximum() {
+        let high = error_for_ok(|v| {
+            v["schema_version"] = json!(2);
+            v["llm"]["qualification_threshold"] = json!(5000);
+        });
+        assert_eq!(high.definition().llm.qualification_threshold, 100);
+        let negative = error_for_ok(|v| {
+            v["schema_version"] = json!(2);
+            v["llm"]["qualification_threshold"] = json!(-4);
+        });
+        assert_eq!(negative.definition().llm.qualification_threshold, 0);
+        let empty_max = error_for_ok(|v| {
+            v["schema_version"] = json!(2);
+            v["scoring"] = json!({"factors": [{"signal": "distinct_signals", "weight": 5}]});
+        });
+        assert_eq!(empty_max.definition().llm.qualification_threshold, 50);
+    }
+
+    #[test]
+    fn version_one_documents_get_rescaled_scoring_too() {
+        let profile = error_for_ok(|v| {
+            v["schema_version"] = json!(1);
+            v.as_object_mut().unwrap().remove("agents");
+            v["sources"] = json!({"ats": {"keywords": ["sso"]}});
+            v["scoring"] = iam_scoring_v2();
+            v["llm"]["qualification_threshold"] = json!(50);
+        });
+        assert_eq!(weights(&profile), [10, 5, 3, 8, 7, 2, 2]);
+        assert_eq!(profile.definition().llm.qualification_threshold, 37);
+    }
+
+    #[test]
+    fn max_score_and_qualification_points_follow_the_profile() {
+        let profile = error_for_ok(|v| {
+            v["scoring"] = json!({"factors": [
+                {"signal": "a", "weight": 10},
+                {"signal": "b", "weight": 4},
+                {"signal": "distinct_signals", "weight": 2}
+            ]});
+            v["llm"]["qualification_threshold"] = json!(50);
+        });
+        let definition = profile.definition();
+        assert!((definition.max_score() - 18.0).abs() < 1e-9);
+        assert!((definition.qualification_points() - 9.0).abs() < 1e-9);
+    }
+
+    #[test]
     fn missing_field_is_reported() {
         let error = error_for(|v| {
             v.as_object_mut().unwrap().remove("llm");
@@ -539,11 +691,11 @@ mod tests {
 
     #[test]
     fn unsupported_schema_version_is_rejected() {
-        let error = error_for(|v| v["schema_version"] = json!(3));
+        let error = error_for(|v| v["schema_version"] = json!(4));
         assert_eq!(error.path, "schema_version");
         assert_eq!(
             error.problem,
-            ProfileProblem::UnsupportedSchemaVersion { found: 3 }
+            ProfileProblem::UnsupportedSchemaVersion { found: 4 }
         );
         let error = error_for(|v| v["schema_version"] = json!(0));
         assert_eq!(
@@ -869,7 +1021,7 @@ mod tests {
         value["sources"] = json!({"http_probe": source, "ats": {"keywords": ["sso"]}});
         let profile = ValidatedProfile::parse(value).unwrap();
         let definition = profile.definition();
-        assert_eq!(definition.schema_version, 2);
+        assert_eq!(definition.schema_version, 3);
         let summary: Vec<_> = definition
             .agents
             .iter()
@@ -879,7 +1031,7 @@ mod tests {
             summary,
             [("http-probe", "HTTP probe", true), ("ats", "ATS", true)]
         );
-        assert_eq!(profile.to_json()["schema_version"], 2);
+        assert_eq!(profile.to_json()["schema_version"], 3);
         assert_eq!(profile.to_json()["agents"][0]["source"], agent);
     }
 

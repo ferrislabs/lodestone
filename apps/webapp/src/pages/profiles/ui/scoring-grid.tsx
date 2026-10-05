@@ -8,11 +8,11 @@ interface ScoringGridProps {
 	problems: readonly Problem[]
 	suggestions: (kind: string) => readonly string[]
 	available: (kind: string) => boolean
-	maxWeight: number
+	maxScore: number
 	onAdd: () => void
 	onRemove: (index: number) => void
 	onSignal: (index: number, signal: string) => void
-	onWeight: (index: number, weight: number | null) => void
+	onWeight: (index: number, weight: number) => void
 	onValue: (index: number, value: string) => void
 }
 
@@ -21,7 +21,7 @@ export function ScoringGrid({
 	problems,
 	suggestions,
 	available,
-	maxWeight,
+	maxScore,
 	onAdd,
 	onRemove,
 	onSignal,
@@ -33,7 +33,7 @@ export function ScoringGrid({
 			<p className="text-sm text-muted-foreground">
 				{factors.length === 0
 					? 'No scoring factor. Leads will all score 0.'
-					: `${factors.length} ${factors.length === 1 ? 'factor' : 'factors'} · max weight ${maxWeight}`}
+					: `${factors.length} ${factors.length === 1 ? 'factor' : 'factors'} · max score ${maxScore} ${maxScore === 1 ? 'point' : 'points'}`}
 			</p>
 			<ul className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
 				{factors.map((factor, index) => (

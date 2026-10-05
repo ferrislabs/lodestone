@@ -128,7 +128,7 @@ pub struct ActiveProfile {
 #[cfg(test)]
 pub(crate) mod fixtures {
     pub const MINIMAL_PROFILE: &str = r#"{
-        "schema_version": 2,
+        "schema_version": 3,
         "identity": {"offer": "Managed IAM", "target_customer": "Companies running Keycloak"},
         "agents": [{
             "id": "http-probe",
@@ -149,8 +149,8 @@ pub(crate) mod fixtures {
                 "excluded_products": ["ferriskey"]
             }
         }],
-        "scoring": {"factors": [{"signal": "product_detected", "value": "keycloak", "weight": 10.0}]},
+        "scoring": {"factors": [{"signal": "product_detected", "value": "keycloak", "weight": 10}]},
         "contact_ranking": {"preferred_local_parts": ["security", "contact"]},
-        "llm": {"qualification_threshold": 50.0, "relevance_criteria": "Self-hosts an IAM product"}
+        "llm": {"qualification_threshold": 50, "relevance_criteria": "Self-hosts an IAM product"}
     }"#;
 }
