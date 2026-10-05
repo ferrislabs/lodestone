@@ -1,6 +1,7 @@
 use chrono::{DateTime, Utc};
 use common::CoreError;
 use lodestone_macros::repository;
+use sqlx::Row;
 
 use crate::{
     domain::llm::provider::{LlmProviderRecord, LlmProviderRepository, ProviderId, Tier},
@@ -199,5 +200,53 @@ impl<'tx> LlmProviderRepository for PgLlmProviderRepository<'tx> {
         .map_err(map_sqlx_error)?;
 
         row.map(LlmProviderRecord::try_from).transpose()
+    }
+
+    #[tracing::instrument(skip(self), fields(db.system = "postgresql", db.operation = "delete", db.table = "llm_providers", provider.id = %id), err)]
+    async fn delete(&mut self, id: ProviderId) -> Result<bool, CoreError> {
+        let mut tx = self.tx.lock().await;
+        let result = sqlx::query("DELETE FROM llm_providers WHERE id = $1")
+            .bind(id.0)
+            .execute(&mut ***tx)
+            .await
+            .map_err(|error| match &error {
+                sqlx::Error::Database(db) if db.is_foreign_key_violation() => {
+                    CoreError::Conflict("provider is assigned to a tier".to_owned())
+                }
+                _ => map_sqlx_error(error),
+            })?;
+
+        Ok(result.rows_affected() > 0)
+    }
+
+    #[tracing::instrument(skip(self), fields(db.system = "postgresql", db.operation = "select", db.table = "llm_tiers"), err)]
+    async fn list_tiers(&mut self) -> Result<Vec<(Tier, ProviderId)>, CoreError> {
+        let mut tx = self.tx.lock().await;
+        let rows = sqlx::query("SELECT tier, provider_id FROM llm_tiers ORDER BY tier")
+            .fetch_all(&mut ***tx)
+            .await
+            .map_err(map_sqlx_error)?;
+
+        rows.iter()
+            .map(|row| {
+                let tier: String = row.try_get("tier").map_err(map_sqlx_error)?;
+                let provider: uuid::Uuid = row.try_get("provider_id").map_err(map_sqlx_error)?;
+                let tier = Tier::parse(&tier)
+                    .ok_or_else(|| CoreError::Internal("stored llm tier is invalid".to_owned()))?;
+                Ok((tier, ProviderId(provider)))
+            })
+            .collect()
+    }
+
+    #[tracing::instrument(skip(self), fields(db.system = "postgresql", db.operation = "delete", db.table = "llm_tiers"), err)]
+    async fn unassign_tier(&mut self, tier: Tier) -> Result<bool, CoreError> {
+        let mut tx = self.tx.lock().await;
+        let result = sqlx::query("DELETE FROM llm_tiers WHERE tier = $1")
+            .bind(tier.as_str())
+            .execute(&mut ***tx)
+            .await
+            .map_err(map_sqlx_error)?;
+
+        Ok(result.rows_affected() > 0)
     }
 }

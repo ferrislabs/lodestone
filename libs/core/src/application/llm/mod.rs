@@ -55,7 +55,10 @@ fn requires_key(kind: ProviderKind) -> bool {
 }
 
 fn missing_key() -> CoreError {
-    CoreError::Conflict("llm provider kind requires an api key".to_owned())
+    CoreError::Invalid {
+        field: "api_key".to_owned(),
+        message: "is required for this provider kind".to_owned(),
+    }
 }
 
 impl LodestoneUseCase {
@@ -155,6 +158,52 @@ impl LodestoneUseCase {
     pub async fn list_llm_providers(&self) -> Result<Vec<LlmProviderRecord>, CoreError> {
         let mut repo = llm_provider_repository;
         repo.list().await
+    }
+
+    #[transactional(llm_provider)]
+    pub async fn get_llm_provider(&self, id: ProviderId) -> Result<LlmProviderRecord, CoreError> {
+        let mut repo = llm_provider_repository;
+        repo.find(id).await?.ok_or(CoreError::NotFound)
+    }
+
+    #[transactional(llm_provider)]
+    pub async fn list_llm_tiers(&self) -> Result<Vec<(Tier, ProviderId)>, CoreError> {
+        let mut repo = llm_provider_repository;
+        repo.list_tiers().await
+    }
+
+    #[transactional(llm_provider)]
+    pub async fn unassign_llm_tier(&self, tier: Tier) -> Result<(), CoreError> {
+        let mut repo = llm_provider_repository;
+        if repo.unassign_tier(tier).await? {
+            Ok(())
+        } else {
+            Err(CoreError::NotFound)
+        }
+    }
+
+    #[transactional(llm_provider)]
+    pub async fn delete_llm_provider(&self, id: ProviderId) -> Result<(), CoreError> {
+        let mut repo = llm_provider_repository;
+        if repo.find(id).await?.is_none() {
+            return Err(CoreError::NotFound);
+        }
+        if let Some((tier, _)) = repo
+            .list_tiers()
+            .await?
+            .into_iter()
+            .find(|(_, provider)| *provider == id)
+        {
+            return Err(CoreError::Conflict(format!(
+                "provider is assigned to the {} tier",
+                tier.as_str()
+            )));
+        }
+        if repo.delete(id).await? {
+            Ok(())
+        } else {
+            Err(CoreError::NotFound)
+        }
     }
 
     #[transactional(llm_provider)]

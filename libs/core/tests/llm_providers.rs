@@ -144,7 +144,7 @@ async fn update_missing_is_not_found_and_keyless_mistral_is_refused(pool: PgPool
         .create_llm_provider(create("a", None), &c)
         .await
         .unwrap_err();
-    assert!(matches!(error, CoreError::Conflict(_)));
+    assert!(matches!(error, CoreError::Invalid { ref field, .. } if field == "api_key"));
 }
 
 #[sqlx::test(migrations = "../../migrations")]
@@ -218,4 +218,64 @@ async fn assigned_provider_cannot_be_deleted(pool: PgPool) {
         .await
         .unwrap_err();
     assert!(matches!(missing, CoreError::NotFound));
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn delete_is_refused_while_assigned_and_allowed_after_unassign(pool: PgPool) {
+    let uc = LodestoneUseCase::new(pool);
+    let c = cipher(1);
+    let a = uc
+        .create_llm_provider(create("a", Some("key-a")), &c)
+        .await
+        .unwrap();
+    uc.assign_llm_tier(Tier::Qualification, a.id).await.unwrap();
+
+    let error = uc.delete_llm_provider(a.id).await.unwrap_err();
+    assert!(matches!(
+        &error,
+        CoreError::Conflict(message) if message == "provider is assigned to the qualification tier"
+    ));
+    assert_eq!(uc.list_llm_providers().await.unwrap().len(), 1);
+
+    uc.unassign_llm_tier(Tier::Qualification).await.unwrap();
+    uc.delete_llm_provider(a.id).await.unwrap();
+    assert!(uc.list_llm_providers().await.unwrap().is_empty());
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn delete_and_get_missing_are_not_found(pool: PgPool) {
+    let uc = LodestoneUseCase::new(pool);
+    let missing = ProviderId(uuid::Uuid::nil());
+    assert!(matches!(
+        uc.delete_llm_provider(missing).await.unwrap_err(),
+        CoreError::NotFound
+    ));
+    assert!(matches!(
+        uc.get_llm_provider(missing).await.unwrap_err(),
+        CoreError::NotFound
+    ));
+    assert!(matches!(
+        uc.unassign_llm_tier(Tier::Triage).await.unwrap_err(),
+        CoreError::NotFound
+    ));
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn tiers_are_listed_and_provider_is_fetched(pool: PgPool) {
+    let uc = LodestoneUseCase::new(pool);
+    let c = cipher(1);
+    let a = uc
+        .create_llm_provider(create("a", Some("key-a")), &c)
+        .await
+        .unwrap();
+    assert!(uc.list_llm_tiers().await.unwrap().is_empty());
+    uc.assign_llm_tier(Tier::Triage, a.id).await.unwrap();
+    uc.assign_llm_tier(Tier::Qualification, a.id).await.unwrap();
+    let mut tiers = uc.list_llm_tiers().await.unwrap();
+    tiers.sort_by_key(|(tier, _)| tier.as_str());
+    assert_eq!(
+        tiers,
+        vec![(Tier::Qualification, a.id), (Tier::Triage, a.id)]
+    );
+    assert_eq!(uc.get_llm_provider(a.id).await.unwrap().name, "a");
 }
