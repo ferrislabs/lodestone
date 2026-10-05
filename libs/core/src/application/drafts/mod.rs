@@ -4,7 +4,7 @@ use lodestone_macros::transactional;
 
 use crate::{
     UserId,
-    application::LodestoneUseCase,
+    application::{LodestoneUseCase, output::schedule_webhook},
     domain::{
         lead::{
             AssessmentId, ContactEmail, Lead, LeadStatus,
@@ -17,6 +17,7 @@ use crate::{
         profile::{ProfileId, ports::ProfileRepository},
         suppression::ports::SuppressionRepository,
     },
+    infrastructure::job::postgres::PgJobOutbox,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -213,10 +214,13 @@ impl LodestoneUseCase {
         if !assessments.decide_draft(id, &decided).await? {
             return Err(conflict("draft is no longer pending"));
         }
-        leads
+        let updated = leads
             .update_status(record.lead.id, from, to, now)
             .await?
             .ok_or_else(|| conflict("lead status changed concurrently, reload and retry"))?;
+        if to == LeadStatus::Validated {
+            schedule_webhook(&mut PgJobOutbox::new(&tx), self.webhooks.as_ref(), &updated).await?;
+        }
         tracing::info!(assessment.id = %id, lead.id = %record.lead.id, actor = %actor.0, draft.status = decided.status.as_str(), lead.status = to.as_str(), "draft decided");
 
         let record = visible_draft(&mut assessments, &mut suppression, id).await?;

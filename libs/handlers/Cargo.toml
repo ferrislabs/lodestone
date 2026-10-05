@@ -17,6 +17,7 @@ llm = { workspace = true }
 axum = { workspace = true }
 http = { workspace = true }
 itoa = "1"
+chrono = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
@@ -25,6 +26,7 @@ url = { workspace = true }
 utoipa = { workspace = true }
 
 [dev-dependencies]
+uuid = { workspace = true }
 divan = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt"] }
 

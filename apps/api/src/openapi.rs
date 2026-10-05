@@ -36,6 +36,7 @@ impl Modify for SecurityAddon {
         handlers::profiles::deactivate_profile,
         handlers::profiles::export_profile,
         handlers::leads::list_leads,
+        handlers::exports::export_leads,
         handlers::leads::lead_detail,
         handlers::leads::change_lead_status,
         handlers::drafts::list_drafts,

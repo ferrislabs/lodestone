@@ -12,7 +12,7 @@ use crate::{
     auth::{AuthenticatedUser, auth_middleware},
     drafts,
     errors::ApiError,
-    leads, llm, profiles,
+    exports, leads, llm, profiles,
     response::{DataEnvelope, Response},
     state::AppState,
 };
@@ -52,6 +52,10 @@ pub fn router(state: AppState) -> Router<AppState> {
             get(profiles::export_profile),
         )
         .route("/profiles/{profile_id}/leads", get(leads::list_leads))
+        .route(
+            "/profiles/{profile_id}/leads/export",
+            get(exports::export_leads),
+        )
         .route(
             "/llm/providers",
             get(llm::list_providers).post(llm::create_provider),

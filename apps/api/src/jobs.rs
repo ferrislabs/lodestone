@@ -11,7 +11,7 @@ use fetch::PoliteFetcher;
 use llm::any::AnyProvider;
 use lodestone_core::{
     Clock, Job, JobKind, JobQueue, LodestoneUseCase, NewJob, SourceName, Tier, TierError,
-    TokenPricing,
+    TokenPricing, WEBHOOK_JOB_KIND,
     contacts::ContactRunSettings,
     infrastructure::{
         candidate_host::postgres::PgCandidateHosts,
@@ -41,6 +41,8 @@ use sources::{
     ted::TedSource,
 };
 use tracing::{info, warn};
+
+use crate::webhook::{WebhookSink, run_webhook_job};
 
 pub const WIRED_SOURCES: [SourceName; 10] = [
     SourceName::CertificateTransparency,
@@ -112,6 +114,7 @@ pub struct JobRouter {
     sources: WiredSources,
     intervals: Intervals,
     llm: LlmRuntime,
+    webhook: Option<WebhookSink>,
 }
 
 pub fn qualification_job(run_at: chrono::DateTime<Utc>) -> Result<NewJob, CoreError> {
@@ -138,7 +141,13 @@ impl JobRouter {
             sources,
             intervals,
             llm,
+            webhook: None,
         }
+    }
+
+    pub fn with_webhook(mut self, webhook: Option<WebhookSink>) -> Self {
+        self.webhook = webhook;
+        self
     }
 
     fn next_run(&self) -> chrono::DateTime<Utc> {
@@ -433,6 +442,7 @@ impl JobHandler for JobRouter {
         match job.kind.as_str() {
             SOURCE_JOB_KIND => self.run_source(job).await,
             QUALIFICATION_JOB_KIND => self.run_qualification(job).await,
+            WEBHOOK_JOB_KIND => run_webhook_job(&self.usecase, self.webhook.as_ref(), job).await,
             other => Err(JobError::Permanent(format!(
                 "no handler for job kind `{other}`"
             ))),

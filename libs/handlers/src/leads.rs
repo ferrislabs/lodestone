@@ -297,22 +297,22 @@ impl From<&LeadDetail> for LeadDetailDto {
 pub struct ListLeadsParams {
     /// One of new, qualified, validated, rejected, contacted, uncertain.
     #[param(value_type = Option<LeadStatusDto>)]
-    status: Option<String>,
+    pub(crate) status: Option<String>,
     /// Minimum score, inclusive. Must be a non-negative number.
     #[param(value_type = Option<f64>, minimum = 0)]
-    min_score: Option<String>,
+    pub(crate) min_score: Option<String>,
     /// Case-insensitive substring of the lead domain.
-    domain: Option<String>,
+    pub(crate) domain: Option<String>,
     /// Only leads having at least one signal of this kind.
-    signal: Option<String>,
+    pub(crate) signal: Option<String>,
     /// One of score_desc (default), score_asc, last_seen_desc, first_seen_desc, domain_asc.
-    sort: Option<String>,
+    pub(crate) sort: Option<String>,
     /// Page number, starting at 1.
     #[param(value_type = Option<u64>, minimum = 1)]
-    page: Option<String>,
+    pub(crate) page: Option<String>,
     /// Page size, between 1 and 100. Defaults to 20.
     #[param(value_type = Option<u64>, minimum = 1, maximum = 100)]
-    per_page: Option<String>,
+    pub(crate) per_page: Option<String>,
 }
 
 pub(crate) fn invalid(field: &str, reason: &str) -> ApiError {
@@ -345,7 +345,7 @@ pub(crate) fn parse_pagination(
 }
 
 impl ListLeadsParams {
-    fn into_query(self) -> Result<LeadQuery, ApiError> {
+    pub(crate) fn into_query(self) -> Result<LeadQuery, ApiError> {
         let status = self
             .status
             .as_deref()

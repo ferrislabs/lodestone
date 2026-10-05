@@ -5,7 +5,7 @@ use crate::{
     ats::AtsArgs, auth::AuthArgs, boamp::BoampArgs, contacts::ContactArgs, ct::CtArgs,
     database::DatabaseArgs, decp::DecpArgs, france_travail::FranceTravailArgs, jobs::JobsArgs,
     llm::LlmArgs, log::LogArgs, observability::ObservabilityArgs, outbound::OutboundArgs,
-    rate_limit::RateLimitArgs, server::ServerArgs, ted::TedArgs,
+    rate_limit::RateLimitArgs, server::ServerArgs, ted::TedArgs, webhook::WebhookArgs,
 };
 
 pub mod ats;
@@ -24,6 +24,7 @@ pub mod outbound;
 pub mod rate_limit;
 pub mod server;
 pub mod ted;
+pub mod webhook;
 
 #[derive(Debug, Clone, Parser)]
 pub struct Args {
@@ -74,6 +75,9 @@ pub struct Args {
 
     #[command(flatten)]
     pub ats: AtsArgs,
+
+    #[command(flatten)]
+    pub webhook: WebhookArgs,
 }
 
 impl TryFrom<Args> for Config {

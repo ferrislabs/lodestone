@@ -4,13 +4,14 @@ use rate_limit::{InMemoryRateLimiter, Quota, RateLimitService};
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 
-use crate::infrastructure::postgres::error::map_sqlx_error;
+use crate::{domain::output::WebhookPolicy, infrastructure::postgres::error::map_sqlx_error};
 
 pub mod contacts;
 pub mod drafts;
 pub mod jobs;
 pub mod leads;
 pub mod llm;
+pub mod output;
 pub mod partners;
 pub mod policy;
 pub mod probe;
@@ -27,11 +28,24 @@ pub type LodestoneRateLimitService = RateLimitService<InMemoryRateLimiter>;
 #[derive(Clone)]
 pub struct LodestoneUseCase {
     pub(crate) pool: PgPool,
+    pub(crate) webhooks: Option<WebhookPolicy>,
 }
 
 impl LodestoneUseCase {
     pub fn new(pool: PgPool) -> Self {
-        Self { pool }
+        Self {
+            pool,
+            webhooks: None,
+        }
+    }
+
+    pub fn with_webhooks(mut self, policy: Option<WebhookPolicy>) -> Self {
+        self.webhooks = policy;
+        self
+    }
+
+    pub fn webhooks(&self) -> Option<&WebhookPolicy> {
+        self.webhooks.as_ref()
     }
 
     pub fn pool(&self) -> &PgPool {

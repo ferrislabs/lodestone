@@ -7,6 +7,7 @@ use api::{
     },
     logger::init_tracing_and_logging,
     router::router,
+    webhook::WebhookSink,
 };
 use args::Args;
 use axum::Router;
@@ -216,6 +217,24 @@ async fn main() -> Result<(), Box<dyn Error>> {
             host_override: None,
         },
     );
+    let webhook = match args.webhook.settings()? {
+        Some(settings) => {
+            info!(
+                host = settings.url.host_str().unwrap_or_default(),
+                profiles = settings.profile_ids.len(),
+                "webhook delivery enabled"
+            );
+            Some(WebhookSink::new(
+                settings.url,
+                settings.secret,
+                settings.timeout,
+            )?)
+        }
+        None => {
+            info!("webhook delivery disabled, set WEBHOOK_URL and WEBHOOK_SECRET to enable it");
+            None
+        }
+    };
     let job_router = JobRouter::new(
         app_state.usecase.clone(),
         WiredSources {
@@ -235,7 +254,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
             decp: args.decp.interval(),
         },
         llm_runtime,
-    );
+    )
+    .with_webhook(webhook);
     schedule_wired_sources(&queue, args.france_travail.credentials().is_some()).await?;
 
     let router = router(app_state)?;
