@@ -751,7 +751,15 @@ mod tests {
             agent_json("boamp", json!({"kind": "boamp", "keywords": ["sso"]})),
         );
         let profile = ValidatedProfile::parse(value).unwrap();
-        assert_eq!(profile.definition().boamp().unwrap().accept_min_keywords, 2);
+        assert_eq!(
+            profile
+                .definition()
+                .enabled_keyword_rules(SourceName::Boamp)
+                .next()
+                .unwrap()
+                .accept_min_keywords,
+            2
+        );
         let error = error_for(|v| {
             push_agent(
                 v,
@@ -786,30 +794,53 @@ mod tests {
         value
     }
 
+    fn ats_keywords(definition: &ProfileDefinition) -> Vec<&[String]> {
+        definition
+            .enabled_keyword_rules(SourceName::Ats)
+            .map(|rules| rules.keywords.as_slice())
+            .collect()
+    }
+
     #[test]
-    fn compat_helpers_pick_the_first_enabled_agent_of_the_kind() {
+    fn enabled_agents_lists_every_enabled_agent_of_the_kind() {
         let profile = ValidatedProfile::parse(two_ats_agents(true)).unwrap();
         let definition = profile.definition();
-        assert_eq!(definition.ats().unwrap().keywords, ["iam"]);
-        assert!(definition.enables(SourceName::Ats));
-        assert!(definition.http_probe().is_some());
-        assert!(definition.boamp().is_none());
-        assert!(!definition.enables(SourceName::Boamp));
+        assert_eq!(ats_keywords(definition), [["iam"], ["sso"]]);
+        assert_eq!(definition.enabled_agents(SourceName::HttpProbe).count(), 1);
+        assert_eq!(definition.enabled_agents(SourceName::Boamp).count(), 0);
     }
 
     #[test]
-    fn compat_helpers_skip_disabled_agents() {
+    fn enabled_agents_skip_disabled_agents() {
         let profile = ValidatedProfile::parse(two_ats_agents(false)).unwrap();
-        assert_eq!(profile.definition().ats().unwrap().keywords, ["sso"]);
+        assert_eq!(ats_keywords(profile.definition()), [["sso"]]);
     }
 
     #[test]
-    fn disabled_only_kind_is_not_enabled() {
+    fn disabled_only_kind_has_no_enabled_agent() {
         let mut value = minimal();
         value["agents"][0]["enabled"] = json!(false);
         let profile = ValidatedProfile::parse(value).unwrap();
-        assert!(!profile.definition().enables(SourceName::HttpProbe));
-        assert!(profile.definition().http_probe().is_none());
+        assert_eq!(
+            profile
+                .definition()
+                .enabled_agents(SourceName::HttpProbe)
+                .count(),
+            0
+        );
+    }
+
+    #[test]
+    fn agent_criteria_are_trimmed_and_optional() {
+        let profile = ValidatedProfile::parse(minimal()).unwrap();
+        assert_eq!(profile.definition().agents[0].relevance_criteria(), None);
+        let mut value = minimal();
+        value["agents"][0]["llm"] = json!({"relevance_criteria": " tenders only "});
+        let profile = ValidatedProfile::parse(value).unwrap();
+        assert_eq!(
+            profile.definition().agents[0].relevance_criteria(),
+            Some("tenders only")
+        );
     }
 
     #[test]

@@ -2,7 +2,9 @@ use chrono::{DateTime, Utc};
 use common::CoreError;
 use uuid::Uuid;
 
-use crate::{LeadId, Provenance, Signal, SignalId, SignalKind, SourceName, UnitInterval};
+use crate::{
+    LeadId, Provenance, Signal, SignalId, SignalKind, SourceName, UnitInterval, definition::AgentId,
+};
 
 #[derive(Debug, Clone)]
 pub struct SignalRow {
@@ -15,6 +17,7 @@ pub struct SignalRow {
     pub provenance: String,
     pub strength: f64,
     pub observed_at: DateTime<Utc>,
+    pub agent_id: Option<String>,
 }
 
 impl TryFrom<SignalRow> for Signal {
@@ -31,6 +34,7 @@ impl TryFrom<SignalRow> for Signal {
             .map_err(|_| CoreError::Internal("stored signal provenance is invalid".to_owned()))?;
         let strength = UnitInterval::new(row.strength)
             .map_err(|_| CoreError::Internal("stored signal strength is invalid".to_owned()))?;
+        let agent = row.agent_id.map(AgentId::new).filter(AgentId::is_slug);
         Ok(Self {
             id: SignalId(row.id),
             lead_id: LeadId(row.lead_id),
@@ -41,6 +45,7 @@ impl TryFrom<SignalRow> for Signal {
             provenance,
             strength,
             observed_at: row.observed_at,
+            agent,
         })
     }
 }

@@ -85,7 +85,8 @@ async fn iam_profile_against_the_real_decp_dataset() {
         .revision
         .definition
         .definition()
-        .decp()
+        .enabled_keyword_rules(lodestone_core::SourceName::Decp)
+        .next()
         .cloned()
         .unwrap();
     let (candidates, stats) = source

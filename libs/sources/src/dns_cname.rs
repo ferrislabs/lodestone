@@ -3,7 +3,7 @@ use std::{sync::Arc, time::Duration};
 use chrono::{DateTime, Utc};
 use lodestone_core::{
     ActiveProfile, CandidateHost, CandidateHosts, DnsResolver, Hostname, Observation, Provenance,
-    SignalKind, Source, SourceError, SourceName, UnitInterval,
+    SignalKind, Source, SourceError, SourceName, UnitInterval, definition::Agent,
 };
 use serde_json::json;
 use tokio::{sync::Semaphore, task::JoinSet};
@@ -142,8 +142,13 @@ where
         Ok(resolved)
     }
 
-    fn evaluate(&self, item: &Self::Item, profile: &ActiveProfile) -> Vec<Observation> {
-        let Some(config) = profile.revision.definition.definition().dns_cname() else {
+    fn evaluate(
+        &self,
+        item: &Self::Item,
+        _profile: &ActiveProfile,
+        agent: &Agent,
+    ) -> Vec<Observation> {
+        let Some(config) = agent.source.dns_cname() else {
             return Vec::new();
         };
         let Ok(kind) = SignalKind::parse(SIGNAL_KIND) else {
@@ -183,6 +188,7 @@ where
                 provenance: provenance.clone(),
                 strength,
                 observed_at: item.resolved_at,
+                agent: None,
             });
         }
         observations

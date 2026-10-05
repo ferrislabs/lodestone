@@ -2,7 +2,7 @@ use std::{collections::HashMap, sync::Mutex};
 
 use chrono::TimeZone;
 use common::CoreError;
-use lodestone_core::{Route, route};
+use lodestone_core::{Route, definition::KeywordSource, route};
 
 use super::{
     discover::{Board, Vendor, careers_links, extract_boards},

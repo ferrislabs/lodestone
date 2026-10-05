@@ -2,6 +2,7 @@ mod support;
 
 use lodestone_core::{
     Provenance, Signal, SignalId, SignalKind, SignalRepository, SourceName, UnitInterval,
+    definition::AgentId,
     infrastructure::{postgres::with_tx, signal::postgres::PgSignalRepository},
 };
 use sqlx::PgPool;
@@ -24,6 +25,7 @@ fn signal(
         provenance: Provenance::parse("https://example.com/realms/master").unwrap(),
         strength: UnitInterval::new(0.8).unwrap(),
         observed_at: at(observed),
+        agent: None,
     }
 }
 
@@ -177,4 +179,44 @@ async fn different_value_or_provenance_is_a_different_signal(pool: PgPool) {
     .unwrap();
 
     assert_eq!(listed.len(), 3);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_agent_is_stored_and_the_first_one_is_kept_on_replay(pool: PgPool) {
+    let profile = create_profile(&pool, "alpha").await;
+    let lead = lead_id(&pool, profile, "example.com").await;
+    let mut first = signal(
+        lead,
+        "product_detected",
+        Some("keycloak"),
+        10,
+        serde_json::json!({}),
+    );
+    first.agent = Some(AgentId::new("probe-a"));
+    let mut second = signal(
+        lead,
+        "product_detected",
+        Some("keycloak"),
+        20,
+        serde_json::json!({}),
+    );
+    second.agent = Some(AgentId::new("probe-b"));
+    let mut legacy = signal(lead, "version_detected", None, 5, serde_json::json!({}));
+    legacy.agent = None;
+
+    let (inserted, listed) = with_tx(&pool, async |shared| {
+        let mut repo = PgSignalRepository::new(&shared);
+        let a = repo.record(&first).await?;
+        let b = repo.record(&second).await?;
+        repo.record(&legacy).await?;
+        Ok(((a, b), repo.list_for_lead(lead).await?))
+    })
+    .await
+    .unwrap();
+
+    assert_eq!(inserted, (true, false));
+    assert_eq!(first.fingerprint(), second.fingerprint());
+    assert_eq!(listed.len(), 2);
+    assert_eq!(listed[0].agent, None);
+    assert_eq!(listed[1].agent, Some(AgentId::new("probe-a")));
 }

@@ -22,7 +22,7 @@ use crate::{
         },
         profile::{
             ActiveProfile,
-            definition::{KeywordSource, ProfileDefinition},
+            definition::{Agent, KeywordSource},
         },
         prompt::{TRIAGE_V1, TriageVerdict},
         run::{Run, RunId, RunOutcome, ports::RunRepository},
@@ -40,8 +40,6 @@ const BUDGET_EXHAUSTED: &str = "llm budget exhausted";
 
 pub trait CandidateSource: Send + Sync {
     fn name(&self) -> SourceName;
-
-    fn rules<'a>(&self, profile: &'a ProfileDefinition) -> Option<&'a KeywordSource>;
 
     fn collect(
         &self,
@@ -117,23 +115,44 @@ impl LodestoneUseCase {
             .await?
             .into_iter()
             .filter(|active| {
-                source
-                    .rules(active.revision.definition.definition())
+                active
+                    .revision
+                    .definition
+                    .definition()
+                    .enabled_keyword_rules(name)
+                    .next()
                     .is_some()
             })
             .collect();
-        if profiles.is_empty() {
+        let targets: Vec<(&ActiveProfile, &Agent, &KeywordSource)> = profiles
+            .iter()
+            .flat_map(|active| {
+                active
+                    .revision
+                    .definition
+                    .definition()
+                    .enabled_agents(name)
+                    .filter_map(move |agent| {
+                        agent
+                            .source
+                            .keyword_rules()
+                            .map(|rules| (active, agent, rules))
+                    })
+            })
+            .collect();
+        if targets.is_empty() {
             return Ok(TriageReport::default());
         }
 
         let started_at = clock.now();
-        let runs: Vec<Run> = profiles
+        let runs: Vec<Run> = targets
             .iter()
-            .map(|active| {
+            .map(|(active, agent, _)| {
                 Run::start(
                     RunId(generate_uuid_v7()),
                     active.profile.id,
                     name,
+                    Some(agent.id.clone()),
                     started_at,
                 )
             })
@@ -167,12 +186,9 @@ impl LodestoneUseCase {
             settings,
         };
         let mut first_error: Option<CoreError> = None;
-        for (active, run) in profiles.iter().zip(&runs) {
-            let Some(rules) = source.rules(active.revision.definition.definition()) else {
-                continue;
-            };
+        for ((active, agent, rules), run) in targets.iter().zip(&runs) {
             let decided = match self
-                .decide(active, rules, &candidates, &llm, &mut report)
+                .decide(active, agent, rules, &candidates, &llm, &mut report)
                 .await
             {
                 Ok(decided) => decided,
@@ -241,6 +257,7 @@ impl LodestoneUseCase {
     async fn decide<P, C>(
         &self,
         active: &ActiveProfile,
+        agent: &Agent,
         rules: &KeywordSource,
         candidates: &[Candidate],
         llm: &TriageLlm<'_, P, C>,
@@ -251,7 +268,7 @@ impl LodestoneUseCase {
         C: LlmCache,
     {
         let definition = active.revision.definition.definition();
-        let system = TRIAGE_V1.system(definition);
+        let system = TRIAGE_V1.system_with(definition, agent.relevance_criteria());
         let tag = TRIAGE_V1.tag();
         let settings = llm.settings;
         let mut budget = RunBudget::new(settings.budget_cents);
@@ -279,6 +296,7 @@ impl LodestoneUseCase {
                         provenance: candidate.provenance.clone(),
                         strength: strength(RULES_STRENGTH)?,
                         observed_at: candidate.observed_at,
+                        agent: Some(agent.id.clone()),
                     });
                 }
                 Route::Ambiguous { matched, .. } => {
@@ -300,6 +318,7 @@ impl LodestoneUseCase {
                         revision: active.revision.number,
                         prompt: tag.clone(),
                         domain: candidate.domain.clone(),
+                        agent: Some(agent.id.clone()),
                     };
                     let prompt = Prompt {
                         system: &system,
@@ -360,6 +379,7 @@ impl LodestoneUseCase {
                         provenance: candidate.provenance.clone(),
                         strength: strength(LLM_STRENGTH)?,
                         observed_at: candidate.observed_at,
+                        agent: Some(agent.id.clone()),
                     });
                     if let Some(address) = verdict
                         .value

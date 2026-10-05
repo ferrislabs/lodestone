@@ -58,4 +58,11 @@ Validation paths include the agent index, for example `agents[1].source.keywords
 
 Version 1 listed sources as optional fields of a `sources` object. A version 1 document is still accepted: parsing upgrades it to version 2 with one enabled agent per configured source, in this order: certificate transparency, HTTP probe, DNS CNAME, BOAMP, DECP, TED, France Travail, ATS. The agent `id` is the kind in kebab case (`certificate-transparency`, `france-travail`) and the `name` is its display name. Stored revisions are not rewritten; they are upgraded when read, and new revisions are written in version 2.
 
-Until agents run individually, each source runs with the first enabled agent of its kind.
+## How agents run
+
+Each enabled agent of a kind runs on its own. A keyword source (BOAMP, DECP, TED, France Travail, ATS) collects once for the union of the keywords of every enabled agent of the kind, then routes each candidate with each agent's rules. Certificate transparency reads logs for the union of labels and attributes a host to the agents whose labels match. DNS CNAME and HTTP probe apply each agent's patterns, fingerprints and excluded products to the same observations.
+
+- Every run records its profile and agent, and every signal records the agent that first observed it. Evidence found by two agents of the same profile is one signal: the fingerprint ignores the agent and the first agent is kept. Rows written before agents existed have no agent.
+- A disabled agent produces no run and no signal. A profile without an enabled agent of a kind gets no run for that kind.
+- Triage uses the agent's `llm.relevance_criteria` when set, the profile's criteria otherwise. The LLM cache is scoped per agent.
+- DECP partner awards are recorded per profile, merged over the agents of the profile.

@@ -69,7 +69,8 @@ async fn iam_profile_against_the_real_boamp_api() {
         .revision
         .definition
         .definition()
-        .boamp()
+        .enabled_keyword_rules(lodestone_core::SourceName::Boamp)
+        .next()
         .cloned()
         .unwrap();
     let (candidates, stats) = source

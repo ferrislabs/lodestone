@@ -8,7 +8,7 @@ use chrono::{DateTime, Utc};
 use ct::{CtError, CtLog, TILE_WIDTH, fetch_data_tile, fetch_log_list, fetch_tree_size};
 use lodestone_core::{
     ActiveProfile, CandidateHost, CandidateHosts, CtCursors, FetchError, Fetcher, HostOrigin,
-    Hostname, Observation, Source, SourceError, SourceName,
+    Hostname, Observation, Source, SourceError, SourceName, definition::Agent,
 };
 use tracing::{info, warn};
 use url::Url;
@@ -46,13 +46,14 @@ pub struct CtSource<F: Fetcher, H: CandidateHosts, C: CtCursors> {
 pub fn label_filter(profiles: &[ActiveProfile]) -> HashSet<String> {
     profiles
         .iter()
-        .filter_map(|active| {
+        .flat_map(|active| {
             active
                 .revision
                 .definition
                 .definition()
-                .certificate_transparency()
+                .enabled_agents(SourceName::CertificateTransparency)
         })
+        .filter_map(|agent| agent.source.certificate_transparency())
         .flat_map(|ct| ct.labels.iter().cloned())
         .collect()
 }
@@ -224,7 +225,19 @@ where
         Ok(hosts)
     }
 
-    fn evaluate(&self, _item: &CandidateHost, _profile: &ActiveProfile) -> Vec<Observation> {
+    fn serves(&self, item: &CandidateHost, agent: &Agent) -> bool {
+        agent.source.certificate_transparency().is_some_and(|ct| {
+            let labels: HashSet<String> = ct.labels.iter().cloned().collect();
+            matching_host(item.host.as_str(), &labels).is_some()
+        })
+    }
+
+    fn evaluate(
+        &self,
+        _item: &CandidateHost,
+        _profile: &ActiveProfile,
+        _agent: &Agent,
+    ) -> Vec<Observation> {
         Vec::new()
     }
 }

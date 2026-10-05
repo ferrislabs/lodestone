@@ -4,6 +4,7 @@ use lodestone_macros::repository;
 
 use crate::{
     Run, RunId, RunOutcome,
+    definition::AgentId,
     domain::run::ports::RunRepository,
     infrastructure::{
         postgres::{SharedTx, error::map_sqlx_error},
@@ -30,8 +31,8 @@ impl<'tx> RunRepository for PgRunRepository<'tx> {
         let mut tx = self.tx.lock().await;
         sqlx::query!(
             r#"
-            INSERT INTO runs (id, profile_id, source, status, started_at, finished_at, volume, signals, error)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            INSERT INTO runs (id, profile_id, source, status, started_at, finished_at, volume, signals, error, agent_id)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             "#,
             run.id.0,
             run.profile_id.0,
@@ -42,6 +43,7 @@ impl<'tx> RunRepository for PgRunRepository<'tx> {
             volume,
             signals,
             run.error.as_deref(),
+            run.agent.as_ref().map(AgentId::as_str),
         )
         .execute(&mut ***tx)
         .await
@@ -74,7 +76,7 @@ impl<'tx> RunRepository for PgRunRepository<'tx> {
             UPDATE runs
             SET status = $2, volume = $3, signals = $4, error = $5, finished_at = $6
             WHERE id = $1 AND status = 'running'
-            RETURNING id, profile_id, source, status, started_at, finished_at, volume, signals, error
+            RETURNING id, profile_id, source, status, started_at, finished_at, volume, signals, error, agent_id
             "#,
             id.0,
             outcome.status().as_str(),
@@ -96,7 +98,7 @@ impl<'tx> RunRepository for PgRunRepository<'tx> {
         let row = sqlx::query_as!(
             RunRow,
             r#"
-            SELECT id, profile_id, source, status, started_at, finished_at, volume, signals, error
+            SELECT id, profile_id, source, status, started_at, finished_at, volume, signals, error, agent_id
             FROM runs
             WHERE id = $1
             "#,
@@ -115,7 +117,7 @@ impl<'tx> RunRepository for PgRunRepository<'tx> {
         let rows = sqlx::query_as!(
             RunRow,
             r#"
-            SELECT id, profile_id, source, status, started_at, finished_at, volume, signals, error
+            SELECT id, profile_id, source, status, started_at, finished_at, volume, signals, error, agent_id
             FROM runs
             ORDER BY started_at DESC, id DESC
             LIMIT $1

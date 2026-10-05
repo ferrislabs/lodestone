@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use common::CoreError;
 use uuid::Uuid;
 
-use crate::{ProfileId, Run, RunId, RunStatus, SourceName};
+use crate::{ProfileId, Run, RunId, RunStatus, SourceName, definition::AgentId};
 
 #[derive(Debug, Clone)]
 pub struct RunRow {
@@ -15,6 +15,7 @@ pub struct RunRow {
     pub volume: i64,
     pub signals: i64,
     pub error: Option<String>,
+    pub agent_id: Option<String>,
 }
 
 pub fn to_i64(value: u64) -> Result<i64, CoreError> {
@@ -46,6 +47,7 @@ impl TryFrom<RunRow> for Run {
             volume: to_u64(row.volume)?,
             signals: to_u64(row.signals)?,
             error: row.error,
+            agent: row.agent_id.map(AgentId::new).filter(AgentId::is_slug),
         })
     }
 }

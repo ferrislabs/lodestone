@@ -7,6 +7,7 @@ use lodestone_core::{
     ActiveProfile, Clock, LeadRepository, LodestoneUseCase, NormalizedDomain, Observation,
     ProfileId, Provenance, RunRepository, RunStatus, SignalKind, SignalRepository, Source,
     SourceError, SourceName, UnitInterval,
+    definition::Agent,
     infrastructure::{
         lead::postgres::PgLeadRepository, postgres::with_tx, run::postgres::PgRunRepository,
         signal::postgres::PgSignalRepository,
@@ -60,7 +61,12 @@ impl Source for FakeSource {
         Ok(self.hosts.clone())
     }
 
-    fn evaluate(&self, item: &Self::Item, profile: &ActiveProfile) -> Vec<Observation> {
+    fn evaluate(
+        &self,
+        item: &Self::Item,
+        profile: &ActiveProfile,
+        _agent: &Agent,
+    ) -> Vec<Observation> {
         let wanted = profile.profile.name.as_str() == "alpha" || item.contains("beta");
         if !wanted {
             return Vec::new();
@@ -73,6 +79,7 @@ impl Source for FakeSource {
             provenance: Provenance::parse(&format!("https://{item}/realms/master")).unwrap(),
             strength: UnitInterval::new(0.8).unwrap(),
             observed_at: at(50),
+            agent: None,
         }]
     }
 }

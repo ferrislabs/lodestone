@@ -20,6 +20,18 @@ fn at(seconds: i64) -> DateTime<Utc> {
     Utc.timestamp_opt(1_800_000_000 + seconds, 0).unwrap()
 }
 
+fn agent_of(profile: &ActiveProfile, kind: SourceName) -> Agent {
+    profile
+        .revision
+        .definition
+        .definition()
+        .agents
+        .iter()
+        .find(|agent| agent.source.source_name() == kind)
+        .cloned()
+        .unwrap()
+}
+
 fn host(name: &str) -> Hostname {
     Hostname::parse(name).unwrap()
 }
@@ -217,21 +229,31 @@ fn suffix_matches_on_label_boundary_only() {
     let evaluator = evaluator();
     let profile = auth0_profile();
     for chain in ["tenant.eu.auth0.com", "auth0.com", "TENANT.Auth0.com"] {
-        let found = evaluator.evaluate(&resolved("sso.acme.com", &[chain]), &profile);
+        let found = evaluator.evaluate(
+            &resolved("sso.acme.com", &[chain]),
+            &profile,
+            &agent_of(&profile, SourceName::DnsCname),
+        );
         assert_eq!(found.len(), 1, "{chain}");
         assert_eq!(found[0].value.as_deref(), Some("auth0"));
     }
     for chain in ["evilauth0.com", "auth0.com.evil.io", "auth0.co"] {
-        let found = evaluator.evaluate(&resolved("sso.acme.com", &[chain]), &profile);
+        let found = evaluator.evaluate(
+            &resolved("sso.acme.com", &[chain]),
+            &profile,
+            &agent_of(&profile, SourceName::DnsCname),
+        );
         assert!(found.is_empty(), "{chain}");
     }
 }
 
 #[test]
 fn observation_carries_evidence() {
+    let profile = auth0_profile();
     let found = evaluator().evaluate(
         &resolved("sso.acme.com", &["lb.example.net", "acme.eu.auth0.com"]),
-        &auth0_profile(),
+        &profile,
+        &agent_of(&profile, SourceName::DnsCname),
     );
     assert_eq!(found.len(), 1);
     let observation = &found[0];
@@ -255,12 +277,14 @@ fn observation_carries_evidence() {
 
 #[test]
 fn several_providers_match_and_are_deduplicated() {
+    let profile = auth0_profile();
     let found = evaluator().evaluate(
         &resolved(
             "sso.acme.com",
             &["a.auth0.com", "b.edge.auth0.com", "c.okta.com"],
         ),
-        &auth0_profile(),
+        &profile,
+        &agent_of(&profile, SourceName::DnsCname),
     );
     let values: Vec<_> = found.iter().filter_map(|o| o.value.as_deref()).collect();
     assert_eq!(values, vec!["auth0", "okta"]);
@@ -268,9 +292,11 @@ fn several_providers_match_and_are_deduplicated() {
 
 #[test]
 fn profile_without_dns_cname_yields_nothing() {
+    let profile = profile_with(serde_json::Value::Null);
     let found = evaluator().evaluate(
         &resolved("sso.acme.com", &["a.auth0.com"]),
-        &profile_with(serde_json::Value::Null),
+        &profile,
+        &agent_of(&profile, SourceName::HttpProbe),
     );
     assert!(found.is_empty());
 }

@@ -180,6 +180,10 @@ pub fn cache_key(scope: &CacheScope, prompt: &Prompt<'_>, schema: &serde_json::V
     hash_field(&mut context, &scope.revision.get().to_be_bytes());
     hash_field(&mut context, scope.prompt.as_bytes());
     hash_field(&mut context, scope.domain.as_str().as_bytes());
+    if let Some(agent) = &scope.agent {
+        hash_field(&mut context, b"agent");
+        hash_field(&mut context, agent.as_str().as_bytes());
+    }
     hash_field(&mut context, prompt.system.as_bytes());
     hash_field(&mut context, prompt.instruction.as_bytes());
     hash_field(&mut context, schema.to_string().as_bytes());
@@ -279,6 +283,31 @@ mod tests {
 
     use super::*;
     use crate::domain::llm::LlmResponse;
+
+    fn scope_of(agent: Option<&str>) -> CacheScope {
+        CacheScope {
+            profile_id: crate::domain::profile::ProfileId(uuid::Uuid::nil()),
+            revision: crate::domain::profile::RevisionNumber::FIRST,
+            prompt: "triage@1".to_owned(),
+            domain: crate::domain::NormalizedDomain::from_host("acme.com").unwrap(),
+            agent: agent.map(crate::domain::profile::definition::AgentId::new),
+        }
+    }
+
+    #[test]
+    fn cache_keys_differ_per_agent() {
+        let prompt = Prompt {
+            system: "system",
+            instruction: "instruction",
+            documents: &[],
+            max_tokens: 1,
+        };
+        let schema = serde_json::json!({});
+        let key = |agent| cache_key(&scope_of(agent), &prompt, &schema);
+        assert_ne!(key(Some("ats-fr")), key(Some("ats-en")));
+        assert_ne!(key(Some("ats-fr")), key(None));
+        assert_eq!(key(Some("ats-fr")), key(Some("ats-fr")));
+    }
 
     #[derive(Debug, PartialEq, Deserialize, JsonSchema)]
     #[serde(deny_unknown_fields)]

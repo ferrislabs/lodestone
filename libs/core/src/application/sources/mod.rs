@@ -14,7 +14,10 @@ use crate::{
             LeadId, Signal, SignalId,
             ports::{LeadRepository, SignalRepository},
         },
-        profile::{ActiveProfile, definition::Scoring},
+        profile::{
+            ActiveProfile,
+            definition::{Agent, Scoring},
+        },
         run::{Run, RunId, RunOutcome, ports::RunRepository},
         scoring::score,
         source::{Observation, Source, SourceError},
@@ -87,9 +90,28 @@ impl LodestoneUseCase {
             .list_active_profiles()
             .await?
             .into_iter()
-            .filter(|active| active.revision.definition.definition().enables(name))
+            .filter(|active| {
+                active
+                    .revision
+                    .definition
+                    .definition()
+                    .enabled_agents(name)
+                    .next()
+                    .is_some()
+            })
             .collect();
-        if profiles.is_empty() {
+        let targets: Vec<(&ActiveProfile, &Agent)> = profiles
+            .iter()
+            .flat_map(|active| {
+                active
+                    .revision
+                    .definition
+                    .definition()
+                    .enabled_agents(name)
+                    .map(move |agent| (active, agent))
+            })
+            .collect();
+        if targets.is_empty() {
             return Ok(SourceRunReport {
                 runs: Vec::new(),
                 items: 0,
@@ -98,13 +120,14 @@ impl LodestoneUseCase {
         }
 
         let started_at = clock.now();
-        let runs: Vec<Run> = profiles
+        let runs: Vec<Run> = targets
             .iter()
-            .map(|active| {
+            .map(|(active, agent)| {
                 Run::start(
                     RunId(generate_uuid_v7()),
                     active.profile.id,
                     name,
+                    Some(agent.id.clone()),
                     started_at,
                 )
             })
@@ -126,12 +149,20 @@ impl LodestoneUseCase {
             }
         };
 
-        let volume = count(items.len());
         let mut total_signals = 0;
-        for (active, run) in profiles.iter().zip(&runs) {
-            let observations: Vec<Observation> = items
+        for ((active, agent), run) in targets.iter().zip(&runs) {
+            let served: Vec<&S::Item> = items
                 .iter()
-                .flat_map(|item| source.evaluate(item, active))
+                .filter(|item| source.serves(item, agent))
+                .collect();
+            let volume = count(served.len());
+            let observations: Vec<Observation> = served
+                .iter()
+                .flat_map(|item| source.evaluate(item, active, agent))
+                .map(|observation| Observation {
+                    agent: Some(agent.id.clone()),
+                    ..observation
+                })
                 .collect();
             let signals = count(observations.len());
             let recorded = self.record_observations(active, name, &observations).await;
@@ -150,7 +181,7 @@ impl LodestoneUseCase {
 
         Ok(SourceRunReport {
             runs: runs.iter().map(|run| run.id).collect(),
-            items: volume,
+            items: count(items.len()),
             signals: total_signals,
         })
     }
@@ -226,6 +257,7 @@ impl LodestoneUseCase {
                     provenance: observation.provenance.clone(),
                     strength: observation.strength,
                     observed_at: observation.observed_at,
+                    agent: observation.agent.clone(),
                 })
                 .await?;
         }

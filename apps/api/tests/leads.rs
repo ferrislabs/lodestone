@@ -60,8 +60,8 @@ impl Seed {
 
     async fn signal(&self, lead: &str, kind: &str) {
         sqlx::query(
-            "INSERT INTO signals (id, lead_id, kind, value, source, raw, provenance, strength, observed_at, fingerprint)
-             VALUES ($1, $2::uuid, $3, 'keycloak', 'http_probe', '{\"status\": 200}'::jsonb, 'https://example.com/realms/master', 0.8, now(), $1::text)",
+            "INSERT INTO signals (id, lead_id, kind, value, source, raw, provenance, strength, observed_at, fingerprint, agent_id)
+             VALUES ($1, $2::uuid, $3, 'keycloak', 'http_probe', '{\"status\": 200}'::jsonb, 'https://example.com/realms/master', 0.8, now(), $1::text, 'probe-a')",
         )
         .bind(common::generate_uuid_v7())
         .bind(lead)
@@ -371,6 +371,7 @@ async fn detail_carries_profile_signals_contacts_assessments_and_breakdown(pool:
     let signal = &data["signals"][0];
     assert_eq!(signal["kind"], "product_detected");
     assert_eq!(signal["source"], "http_probe");
+    assert_eq!(signal["agent"], "probe-a");
     assert_eq!(signal["provenance"], "https://example.com/realms/master");
     assert_eq!(signal["strength"], 0.8);
     assert_eq!(signal["raw"]["status"], 200);

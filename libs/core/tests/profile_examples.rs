@@ -1,7 +1,7 @@
 use std::{fs, path::PathBuf};
 
 use lodestone_core::{
-    ValidatedProfile,
+    SourceName, ValidatedProfile,
     definition::{AgentSource, ProfileDefinition},
 };
 use schemars::schema_for;
@@ -33,7 +33,8 @@ fn iam_example_is_valid_and_has_expected_content() {
     let profile = parse(IAM);
     let definition = profile.definition();
     let labels = &definition
-        .certificate_transparency()
+        .enabled_agents(SourceName::CertificateTransparency)
+        .find_map(|agent| agent.source.certificate_transparency())
         .expect("iam example enables certificate transparency")
         .labels;
     for expected in [
@@ -44,7 +45,10 @@ fn iam_example_is_valid_and_has_expected_content() {
             "missing {expected}"
         );
     }
-    let probe = definition.http_probe().expect("iam example has a probe");
+    let probe = definition
+        .enabled_agents(SourceName::HttpProbe)
+        .find_map(|agent| agent.source.http_probe())
+        .expect("iam example has a probe");
     assert_eq!(probe.excluded_products, ["ferriskey"]);
     assert_eq!(probe.fingerprints.len(), 5);
 }
@@ -75,7 +79,8 @@ fn iam_example_has_two_job_agents_with_their_own_criteria() {
     assert_eq!(
         profile
             .definition()
-            .ats()
+            .enabled_keyword_rules(SourceName::Ats)
+            .next()
             .expect("first ats agent")
             .keywords[0],
         "Keycloak"
@@ -86,8 +91,13 @@ fn iam_example_has_two_job_agents_with_their_own_criteria() {
 fn ecommerce_example_is_valid_without_iam_fields() {
     let profile = parse(ECOMMERCE);
     let definition = profile.definition();
-    assert!(definition.certificate_transparency().is_none());
-    assert!(definition.dns_cname().is_none());
+    assert_eq!(
+        definition
+            .enabled_agents(SourceName::CertificateTransparency)
+            .count(),
+        0
+    );
+    assert_eq!(definition.enabled_agents(SourceName::DnsCname).count(), 0);
 }
 
 #[test]

@@ -173,6 +173,7 @@ async fn observe(pool: &PgPool, source: SourceName, host: &str, kind: &str, valu
                 provenance: Provenance::parse(&format!("https://{host}/probe")).unwrap(),
                 strength: UnitInterval::new(0.8).unwrap(),
                 observed_at: at(0),
+                agent: None,
             }],
         )
         .await
@@ -257,8 +258,8 @@ async fn an_accepted_job_offer_raises_the_score_of_a_passively_detected_lead(poo
     let report = run(&pool, &fetcher, &FixedClock(100)).await;
 
     assert_eq!(report.candidates, 2);
-    assert_eq!(report.accepted_by_rules, 1);
-    assert_eq!(report.rejected_by_rules, 1);
+    assert_eq!(report.accepted_by_rules, 2);
+    assert_eq!(report.rejected_by_rules, 2);
     let offers: Vec<_> = signals(&pool, profile, "keycloakco.fr")
         .await
         .into_iter()
@@ -266,6 +267,10 @@ async fn an_accepted_job_offer_raises_the_score_of_a_passively_detected_lead(poo
         .collect();
     assert_eq!(offers.len(), 1);
     assert_eq!(offers[0].source, SourceName::Ats);
+    assert_eq!(
+        offers[0].agent,
+        Some(lodestone_core::definition::AgentId::new("ats-fr"))
+    );
     assert_eq!(offers[0].raw["route"], "keywords");
     assert_eq!(offers[0].raw["details"]["ats"], "lever");
     assert_eq!(offers[0].raw["details"]["board"], "keycloakco");

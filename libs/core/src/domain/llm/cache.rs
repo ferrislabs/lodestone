@@ -3,7 +3,7 @@ use common::CoreError;
 
 use crate::domain::{
     NormalizedDomain,
-    profile::{ProfileId, RevisionNumber},
+    profile::{ProfileId, RevisionNumber, definition::AgentId},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -12,6 +12,7 @@ pub struct CacheScope {
     pub revision: RevisionNumber,
     pub prompt: String,
     pub domain: NormalizedDomain,
+    pub agent: Option<AgentId>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

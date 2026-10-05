@@ -1,0 +1,32 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO signals (id, lead_id, kind, value, source, raw, provenance, strength, observed_at, fingerprint, agent_id)\n            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)\n            ON CONFLICT (lead_id, fingerprint) DO UPDATE SET\n                raw = CASE WHEN EXCLUDED.observed_at >= signals.observed_at\n                           THEN EXCLUDED.raw ELSE signals.raw END,\n                strength = GREATEST(signals.strength, EXCLUDED.strength),\n                observed_at = GREATEST(signals.observed_at, EXCLUDED.observed_at)\n            RETURNING (xmax = 0) AS \"inserted!\"\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "inserted!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Jsonb",
+        "Text",
+        "Float8",
+        "Timestamptz",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "3f6e2a717c1407e8343775a4e10920db0a7b3e19dd8f5cc41369ca8cdd6e66ab"
+}
