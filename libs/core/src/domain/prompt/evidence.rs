@@ -108,10 +108,11 @@ mod tests {
     }
 
     #[test]
-    fn whitespace_is_compared_exactly() {
-        let documents = docs(&["alpha  beta"]);
-        assert!(verified_evidence(&output(vec![(0, "alpha beta")]), &documents).is_err());
-        assert!(verified_evidence(&output(vec![(0, "alpha  beta")]), &documents).is_ok());
+    fn typography_is_normalised_but_words_stay_strict() {
+        let documents = docs(&["alpha  beta mise en oeuvre"]);
+        assert!(verified_evidence(&output(vec![(0, "alpha beta")]), &documents).is_ok());
+        assert!(verified_evidence(&output(vec![(0, "en œuvre")]), &documents).is_ok());
+        assert!(verified_evidence(&output(vec![(0, "alpha gamma")]), &documents).is_err());
     }
 
     proptest! {
