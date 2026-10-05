@@ -13,6 +13,7 @@ pub mod llm_provider;
 pub mod partner;
 pub mod postgres;
 pub mod profile;
+pub mod qualification;
 pub mod registry;
 pub mod run;
 pub mod signal;

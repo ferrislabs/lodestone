@@ -414,7 +414,12 @@ async fn newly_discovered_hosts_are_handled_without_waiting_for_an_interval(pool
     hosts.upsert(&fresh).await.unwrap();
 
     eventually(|| async { handled.load(Ordering::SeqCst) == 3 }).await;
-    assert_eq!(status(&pool, "dns_cname").await.unwrap().items_total, 3);
+    eventually(|| async {
+        status(&pool, "dns_cname")
+            .await
+            .is_some_and(|row| row.items_total == 3)
+    })
+    .await;
 
     shutdown.send_replace(true);
     handle.await.unwrap();

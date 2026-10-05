@@ -85,15 +85,40 @@ export namespace Schemas {
     };
     pagination?: (null | PaginationMetadata) | undefined;
   };
+  export type VerdictDto = "fiable" | "a_verifier" | "ecarte";
   export type LeadDto = {
+    confidence?: (number | null) | undefined;
     domain: string;
     first_seen_at: string;
     id: string;
     last_seen_at: string;
     profile: ProfileRefDto;
+    qualified_at?: (string | null) | undefined;
     score: number;
     status: LeadStatusDto;
     updated_at: string;
+    verdict?: (null | VerdictDto) | undefined;
+  };
+  export type ProbabilityDto = { label: string; probability: number; value: string };
+  export type QualificationAnswerDto = {
+    choice: string;
+    choice_label: string;
+    confidence: number;
+    probabilities: Array<ProbabilityDto>;
+    question_id: string;
+    wording: string;
+  };
+  export type QualificationResultDto = {
+    agent_id: string;
+    agent_name: string;
+    agent_score?: (number | null) | undefined;
+    answers: Array<QualificationAnswerDto>;
+    created_at: string;
+    error?: (string | null) | undefined;
+    model: string;
+    provider_id?: (string | null) | undefined;
+    provider_name?: (string | null) | undefined;
+    status: string;
   };
   export type ScoreContributionDto = {
     contribution: number;
@@ -118,6 +143,7 @@ export namespace Schemas {
       assessments: Array<AssessmentDto>;
       contacts: Array<ContactDto>;
       lead: LeadDto;
+      qualification_results: Array<QualificationResultDto>;
       score_breakdown: Array<ScoreContributionDto>;
       signals: Array<SignalDto>;
     };
@@ -125,14 +151,17 @@ export namespace Schemas {
   };
   export type DataEnvelope_LeadDto = {
     data: {
+      confidence?: (number | null) | undefined;
       domain: string;
       first_seen_at: string;
       id: string;
       last_seen_at: string;
       profile: ProfileRefDto;
+      qualified_at?: (string | null) | undefined;
       score: number;
       status: LeadStatusDto;
       updated_at: string;
+      verdict?: (null | VerdictDto) | undefined;
     };
     pagination?: (null | PaginationMetadata) | undefined;
   };
@@ -243,14 +272,17 @@ export namespace Schemas {
   };
   export type DataEnvelope_Vec_LeadDto = {
     data: Array<{
+      confidence?: (number | null) | undefined;
       domain: string;
       first_seen_at: string;
       id: string;
       last_seen_at: string;
       profile: ProfileRefDto;
+      qualified_at?: (string | null) | undefined;
       score: number;
       status: LeadStatusDto;
       updated_at: string;
+      verdict?: (null | VerdictDto) | undefined;
     }>;
     pagination?: (null | PaginationMetadata) | undefined;
   };
@@ -331,6 +363,7 @@ export namespace Schemas {
     assessments: Array<AssessmentDto>;
     contacts: Array<ContactDto>;
     lead: LeadDto;
+    qualification_results: Array<QualificationResultDto>;
     score_breakdown: Array<ScoreContributionDto>;
     signals: Array<SignalDto>;
   };

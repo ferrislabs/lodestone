@@ -17,7 +17,7 @@ use crate::{
     },
 };
 
-const LEAD_COLUMNS: &str = "id, profile_id, domain, status, score, score_breakdown, first_seen_at, last_seen_at, updated_at";
+const LEAD_COLUMNS: &str = "id, profile_id, domain, status, score, score_breakdown, confidence, verdict, qualified_at, first_seen_at, last_seen_at, updated_at";
 
 const LATEST_ASSESSMENT: &str = " AND assessments.id = (SELECT latest.id FROM assessments latest WHERE latest.lead_id = leads.id ORDER BY latest.created_at DESC, latest.id DESC LIMIT 1)";
 

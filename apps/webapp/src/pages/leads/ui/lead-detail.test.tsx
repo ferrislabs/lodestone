@@ -16,7 +16,49 @@ const detail: LeadDetailData = {
 		first_seen_at: '2026-01-01T00:00:00Z',
 		last_seen_at: '2026-02-01T00:00:00Z',
 		updated_at: '2026-02-01T00:00:00Z',
+		confidence: 72.5,
+		verdict: 'fiable',
+		qualified_at: '2026-02-01T00:00:00Z',
 	},
+	qualification_results: [
+		{
+			agent_id: 'pertinence',
+			agent_name: 'Pertinence',
+			provider_id: 'prov-1',
+			provider_name: 'Laya',
+			model: 'gemma_laya',
+			status: 'valid',
+			agent_score: 0.625,
+			answers: [
+				{
+					question_id: 'pertinence',
+					wording: "Ce lead est-il pertinent pour l'offre ?",
+					choice: 'moyenne',
+					choice_label: 'Moyenne',
+					confidence: 0.8,
+					probabilities: [
+						{ value: 'forte', label: 'Forte', probability: 0.25 },
+						{ value: 'moyenne', label: 'Moyenne', probability: 0.5 },
+						{ value: 'faible', label: 'Faible', probability: 0.25 },
+					],
+				},
+			],
+			error: null,
+			created_at: '2026-02-01T00:00:00Z',
+		},
+		{
+			agent_id: 'maturite',
+			agent_name: 'Maturité',
+			provider_id: null,
+			provider_name: null,
+			model: '',
+			status: 'invalid',
+			agent_score: null,
+			answers: [],
+			error: 'fournisseur indisponible',
+			created_at: '2026-02-01T00:00:00Z',
+		},
+	],
 	score_breakdown: [
 		{
 			signal: 'hiring_page',
@@ -100,6 +142,62 @@ describe('LeadDetail', () => {
 		expect(screen.getByText('Révision du profil : 3')).toBeTruthy()
 		expect(screen.getByText('Hello')).toBeTruthy()
 		expect(screen.getByText('En attente')).toBeTruthy()
+	})
+
+	it('shows the verdict and the confidence of the lead', () => {
+		const { container } = renderDetail()
+		const badge = container.querySelector('[data-verdict]')
+		expect(badge?.getAttribute('data-verdict')).toBe('fiable')
+		expect(badge?.textContent).toBe('Fiable')
+		expect(screen.getByText('Confiance')).toBeTruthy()
+		expect(screen.getByText(/^72,5\s%$/)).toBeTruthy()
+	})
+
+	it('renders one qualification card per agent with answers and bars', () => {
+		const { container } = renderDetail()
+		expect(screen.getByText('Qualification (2)')).toBeTruthy()
+		const cards = container.querySelectorAll('article[data-agent]')
+		expect(cards).toHaveLength(2)
+		const valid = container.querySelector('article[data-agent="pertinence"]')
+		expect(valid?.getAttribute('data-status')).toBe('valid')
+		expect(valid?.textContent).toContain('Pertinence')
+		expect(valid?.textContent).toContain('Laya (gemma_laya)')
+		expect(valid?.textContent).toContain(
+			"Ce lead est-il pertinent pour l'offre ?",
+		)
+		expect(valid?.textContent).toContain('Réponse : Moyenne')
+		expect(valid?.textContent).toMatch(/confiance 80\s%/)
+		expect(valid?.textContent).toMatch(/Score de l'agent : 62,5\s%/)
+		const bars = valid?.querySelectorAll('[data-probability]') ?? []
+		expect(Array.from(bars).map((bar) => bar.getAttribute('style'))).toEqual([
+			'width: 25%;',
+			'width: 50%;',
+			'width: 25%;',
+		])
+	})
+
+	it('shows the error of an invalid agent result without a score', () => {
+		const { container } = renderDetail()
+		const invalid = container.querySelector('article[data-agent="maturite"]')
+		expect(invalid?.getAttribute('data-status')).toBe('invalid')
+		expect(invalid?.textContent).toContain('Invalide')
+		expect(invalid?.textContent).toContain('fournisseur indisponible')
+		expect(invalid?.textContent).not.toContain("Score de l'agent")
+		expect(invalid?.querySelectorAll('[data-probability]')).toHaveLength(0)
+	})
+
+	it('says so when no agent has answered yet', () => {
+		renderDetail({
+			detail: {
+				...detail,
+				lead: { ...detail.lead, verdict: null, confidence: null },
+				qualification_results: [],
+			},
+		})
+		expect(
+			screen.getByText('Aucune qualification pour le moment.'),
+		).toBeTruthy()
+		expect(screen.getByText('Qualification (0)')).toBeTruthy()
 	})
 
 	it('renders evidence as a blockquote with an external provenance link', () => {

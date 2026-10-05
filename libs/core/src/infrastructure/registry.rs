@@ -16,6 +16,7 @@ pub mod domain {
     pub struct LlmProvider;
     pub struct Partner;
     pub struct Profile;
+    pub struct Qualification;
     pub struct Run;
     pub struct Signal;
     pub struct Suppression;

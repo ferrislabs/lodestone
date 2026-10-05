@@ -12,6 +12,7 @@ use crate::{
             query::{LeadDetail, LeadListing, LeadQuery, ProfileSummary},
         },
         profile::{ProfileId, ports::ProfileRepository},
+        qualification::ports::QualificationRepository,
         suppression::ports::SuppressionRepository,
     },
     infrastructure::job::postgres::PgJobOutbox,
@@ -34,7 +35,7 @@ impl LodestoneUseCase {
         Ok(LeadListing { profile, page })
     }
 
-    #[transactional(lead, profile, suppression, signal, contact, assessment)]
+    #[transactional(lead, profile, suppression, signal, contact, assessment, qualification)]
     pub async fn lead_detail(&self, lead_id: LeadId) -> Result<LeadDetail, CoreError> {
         let mut leads = lead_repository;
         let mut profiles = profile_repository;
@@ -42,6 +43,7 @@ impl LodestoneUseCase {
         let mut signals = signal_repository;
         let mut contacts = contact_repository;
         let mut assessments = assessment_repository;
+        let mut qualification = qualification_repository;
 
         let lead = leads.find(lead_id).await?.ok_or(CoreError::NotFound)?;
         if suppression.is_domain_suppressed(&lead.domain).await? {
@@ -51,7 +53,26 @@ impl LodestoneUseCase {
             .find(lead.profile_id)
             .await?
             .ok_or(CoreError::NotFound)?;
+        let qualification_results = qualification.current_results(lead_id).await?;
+        let qualification_agents = match qualification_results.first() {
+            Some(first) => profiles
+                .list_revisions(lead.profile_id)
+                .await?
+                .into_iter()
+                .find(|revision| revision.number == first.profile_revision)
+                .map(|revision| {
+                    revision
+                        .definition
+                        .definition()
+                        .qualification_agents
+                        .clone()
+                })
+                .unwrap_or_default(),
+            None => Vec::new(),
+        };
         Ok(LeadDetail {
+            qualification_results,
+            qualification_agents,
             signals: signals.list_for_lead(lead_id).await?,
             contacts: contacts.list_for_lead(lead_id).await?,
             assessments: assessments.list_for_lead(lead_id).await?,

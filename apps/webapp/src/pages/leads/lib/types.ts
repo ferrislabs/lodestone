@@ -10,3 +10,6 @@ export type ScoreContribution = Schemas.ScoreContributionDto
 export type ProfileSummary =
 	Schemas.DataEnvelope_Vec_ProfileSummaryDto['data'][number]
 export type PaginationMeta = Schemas.PaginationMetadata
+export type Verdict = Schemas.VerdictDto
+export type QualificationResult = Schemas.QualificationResultDto
+export type QualificationAnswer = Schemas.QualificationAnswerDto

@@ -1,16 +1,13 @@
-use std::{num::NonZeroU32, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 
 use chrono::{DateTime, TimeZone, Utc};
 use lodestone_core::{
     Clock, CreateProfileCommand, FetchError, FetchRequest, FetchResponse, Fetcher, LeadRepository,
-    LlmError, LlmProvider, LlmRequest, LlmResponse, LodestoneUseCase, NormalizedDomain, Partner,
-    PartnerRepository, ProfileId, ProfileName, TokenPricing, ValidatedProfile,
+    LodestoneUseCase, NormalizedDomain, Partner, PartnerRepository, ProfileId, ProfileName,
+    ValidatedProfile,
     infrastructure::{
-        lead::postgres::PgLeadRepository, llm_cache::postgres::PgLlmCache,
-        partner::postgres::PgPartnerRepository, postgres::with_tx,
+        lead::postgres::PgLeadRepository, partner::postgres::PgPartnerRepository, postgres::with_tx,
     },
-    llm::gateway::CallSettings,
-    triage::TriageSettings,
 };
 use serde_json::json;
 use sources::decp::{DecpSettings, DecpSource, partner_awards};
@@ -70,14 +67,6 @@ impl Fetcher for FixtureFetcher {
     }
 }
 
-struct NoProvider;
-
-impl LlmProvider for NoProvider {
-    async fn complete(&self, _request: &LlmRequest<'_>) -> Result<LlmResponse, LlmError> {
-        Err(LlmError::Refused)
-    }
-}
-
 fn settings() -> DecpSettings {
     DecpSettings {
         dataset_api_url: Url::parse(sources::decp::DATASET_API_URL).unwrap(),
@@ -87,21 +76,6 @@ fn settings() -> DecpSettings {
         notified_within_days: 31,
         max_body_bytes: 1024 * 1024,
         max_rate_limit_wait: Duration::from_secs(1),
-    }
-}
-
-fn triage_settings() -> TriageSettings {
-    TriageSettings {
-        call: CallSettings {
-            max_retries: 0,
-            pricing: TokenPricing {
-                input_cents_per_mtok: 0,
-                output_cents_per_mtok: 0,
-            },
-            base_delay: Duration::ZERO,
-        },
-        max_tokens: 512,
-        budget_cents: NonZeroU32::new(10).unwrap(),
     }
 }
 
@@ -140,16 +114,7 @@ async fn activate(pool: &PgPool, name: &str, decp: bool) -> ProfileId {
 
 async fn run_job(pool: &PgPool, source: &DecpSource<FixtureFetcher>) {
     let usecase = LodestoneUseCase::new(pool.clone());
-    usecase
-        .run_triage(
-            source,
-            None::<&NoProvider>,
-            &PgLlmCache::new(pool.clone()),
-            triage_settings(),
-            &FixedClock,
-        )
-        .await
-        .unwrap();
+    usecase.run_triage(source, &FixedClock).await.unwrap();
     let contracts = source.take_awards();
     for active in usecase.list_active_profiles().await.unwrap() {
         let Some(rules) = active
@@ -199,7 +164,7 @@ async fn buyers_become_leads_and_holders_become_partners(pool: PgPool) {
 
     assert!(has_lead(&pool, profile, "ille-et-vilaine.fr").await);
     assert!(has_lead(&pool, profile, "lorient-agglo.bzh").await);
-    assert!(!has_lead(&pool, profile, "lorient.bzh").await);
+    assert!(has_lead(&pool, profile, "lorient.bzh").await);
     assert!(!has_lead(&pool, profile, "megalis.bretagne.bzh").await);
     assert!(!has_lead(&pool, other, "ille-et-vilaine.fr").await);
 
@@ -237,5 +202,5 @@ async fn a_second_daily_run_changes_nothing(pool: PgPool) {
         .fetch_one(&pool)
         .await
         .unwrap();
-    assert_eq!(signals, 2);
+    assert_eq!(signals, 3);
 }

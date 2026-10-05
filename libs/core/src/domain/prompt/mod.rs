@@ -36,7 +36,7 @@ pub const QUALIFICATION_V1: PromptTemplate = PromptTemplate {
     instruction: include_str!("../../../prompts/qualification.v1.instruction.md"),
 };
 
-fn neutralize(text: &str) -> String {
+pub(crate) fn neutralize(text: &str) -> String {
     text.replace(&format!("</{CONTEXT_TAG}"), &format!("<\\/{CONTEXT_TAG}"))
         .replace(&format!("<{CONTEXT_TAG}"), &format!("<\\{CONTEXT_TAG}"))
         .replace(CONTEXT_PLACEHOLDER, "{ {market_context} }")

@@ -34,7 +34,7 @@ export const QUALIFICATION_TEMPLATES: readonly QualificationTemplate[] = [
 		description: "Le lead correspond-il à l'offre et au client cible ?",
 		name: 'Pertinence',
 		prompt:
-			'You judge whether a company is a relevant prospect for the offer described in the market context. Base your answers only on what the documents and signals state. Do not assume facts that are not written. Answer with the closest option.',
+			"Tu évalues si une entreprise est un prospect pertinent pour l'offre décrite dans le contexte de marché. Base tes réponses uniquement sur ce que disent les documents et les signaux. Ne suppose aucun fait qui n'est pas écrit. Réponds avec l'option la plus proche.",
 		questionId: 'pertinence',
 		wording: "Ce lead est-il pertinent pour l'offre ?",
 		options: [
@@ -50,7 +50,7 @@ export const QUALIFICATION_TEMPLATES: readonly QualificationTemplate[] = [
 			"Où en est l'organisation sur le sujet de l'offre : dette, SaaS ou inconnu ?",
 		name: 'Maturité technique',
 		prompt:
-			'You assess how mature the organization is on the topic of the offer from the signals and documents. Ageing self-hosted software means high technical debt and a strong opportunity. A recent SaaS product means a weaker one. Answer unknown when nothing shows it.',
+			"Tu évalues la maturité de l'organisation sur le sujet de l'offre à partir des signaux et des documents. Un logiciel auto-hébergé vieillissant signifie une dette technique élevée et une forte opportunité. Un produit SaaS récent signifie une opportunité plus faible. Réponds « inconnu » quand rien ne permet de trancher.",
 		questionId: 'maturite',
 		wording:
 			"Quelle est la maturité technique de l'organisation sur le sujet de l'offre ?",
@@ -66,7 +66,7 @@ export const QUALIFICATION_TEMPLATES: readonly QualificationTemplate[] = [
 		description: "Public, grande entreprise ou PME : qui est l'acheteur ?",
 		name: "Type d'organisation",
 		prompt:
-			'You classify the organization by type from the documents. Public bodies buy through tenders, large companies run their own IT teams, small and medium businesses rarely do. Answer unknown when nothing shows it.',
+			"Tu classes l'organisation par type à partir des documents. Les organismes publics achètent par appels d'offres, les grandes entreprises ont leurs propres équipes informatiques, les PME rarement. Réponds « inconnu » quand rien ne permet de trancher.",
 		questionId: 'type',
 		wording: "De quel type d'organisation s'agit-il ?",
 		options: [
@@ -80,7 +80,7 @@ export const QUALIFICATION_TEMPLATES: readonly QualificationTemplate[] = [
 ]
 
 export const DEFAULT_AGGREGATOR_PROMPT =
-	'You write the summary of a lead for a B2B lead detection tool. You receive the lead, its signals, and the answers and scores of every qualification agent. Write a short synthesis, the verdict narrative, an approach angle and a message draft for the operator to review. Quote evidence verbatim from the documents. Never change the computed confidence or the verdict. Base your text only on what is provided and do not invent facts.'
+	"Tu rédiges le résumé d'un lead pour un outil de détection de leads B2B. Tu reçois le lead, ses signaux, ainsi que les réponses et les scores de chaque agent de qualification. Rédige une courte synthèse, le récit du verdict, un angle d'approche et un brouillon de message que l'opérateur relira. Cite les preuves mot pour mot depuis les documents. Ne modifie jamais la confiance ni le verdict calculés. Base ton texte uniquement sur ce qui est fourni et n'invente aucun fait."
 
 export function findTemplate(id: string): QualificationTemplate {
 	return (

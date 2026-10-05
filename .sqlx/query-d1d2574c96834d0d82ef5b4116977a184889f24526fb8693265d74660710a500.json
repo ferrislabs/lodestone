@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT id, profile_id, domain, status, score, score_breakdown, first_seen_at, last_seen_at, updated_at\n            FROM leads\n            WHERE profile_id = $1 AND domain = $2\n            ",
+  "query": "\n            SELECT id, profile_id, domain, status, score, score_breakdown, confidence, verdict, qualified_at, first_seen_at, last_seen_at, updated_at\n            FROM leads\n            WHERE domain = $1\n            ORDER BY profile_id\n            ",
   "describe": {
     "columns": [
       {
@@ -35,23 +35,37 @@
       },
       {
         "ordinal": 6,
+        "name": "confidence",
+        "type_info": "Float8"
+      },
+      {
+        "ordinal": 7,
+        "name": "verdict",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "qualified_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 9,
         "name": "first_seen_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 7,
+        "ordinal": 10,
         "name": "last_seen_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 8,
+        "ordinal": 11,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
-        "Uuid",
         "Text"
       ]
     },
@@ -62,10 +76,13 @@
       false,
       false,
       false,
+      true,
+      true,
+      true,
       false,
       false,
       false
     ]
   },
-  "hash": "6b82bbefed7d0c779afca0713c8c2d9532a53bc84e9beb683a3e5f0e18953bb1"
+  "hash": "d1d2574c96834d0d82ef5b4116977a184889f24526fb8693265d74660710a500"
 }

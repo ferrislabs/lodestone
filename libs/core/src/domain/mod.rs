@@ -11,6 +11,7 @@ pub(crate) mod output;
 pub(crate) mod partner;
 pub(crate) mod profile;
 pub(crate) mod prompt;
+pub(crate) mod qualification;
 pub(crate) mod run;
 pub(crate) mod scoring;
 pub(crate) mod source;

@@ -1,15 +1,17 @@
-use std::time::Duration;
+use std::{num::NonZeroU32, time::Duration};
 
 use chrono::{DateTime, Utc};
 use common::CoreError;
 use dns::HickoryResolver;
 use fetch::PoliteFetcher;
+use llm::any::AnyProvider;
 use lodestone_core::{
-    ContactFinder, LodestoneUseCase, Source, SourceName, StepOutcome,
+    ContactFinder, LlmError, LodestoneUseCase, ProviderDefinition, Source, SourceName, StepOutcome,
     contacts::ContactRunSettings,
+    evaluation::{EvaluationSettings, ProviderBuilder, QUALIFICATION_LISTENER},
     infrastructure::{
         candidate_host::postgres::PgCandidateHosts, contact_target::postgres::PgContactTargets,
-        ct_cursor::postgres::PgCtCursors,
+        crypto::AesGcmCipher, ct_cursor::postgres::PgCtCursors, llm_cache::postgres::PgLlmCache,
     },
     jobs::SystemClock,
     listeners::ListenerStep,
@@ -138,3 +140,57 @@ pub type SecurityTxtStep = ContactStep<SecurityTxtFinder<PoliteFetcher>>;
 pub type RoleGuessStep = ContactStep<RoleGuessFinder<HickoryResolver>>;
 pub type DnsCnameStep = HostStep<DnsCname>;
 pub type HttpProbeStep = HostStep<HttpProbe>;
+
+const QUALIFICATION_MAX_TOKENS: u32 = 2048;
+const QUALIFICATION_BATCH_SIZE: u32 = 10;
+const QUALIFICATION_BASE_DELAY: Duration = Duration::from_secs(2);
+
+pub struct AnyProviderBuilder;
+
+impl ProviderBuilder for AnyProviderBuilder {
+    type Provider = AnyProvider;
+
+    fn build(&self, definition: &ProviderDefinition) -> Result<AnyProvider, LlmError> {
+        AnyProvider::from_definition(definition)
+    }
+}
+
+pub struct QualificationStep {
+    pub usecase: LodestoneUseCase,
+    pub cipher: AesGcmCipher,
+    pub cache: PgLlmCache,
+    pub budget_cents: NonZeroU32,
+}
+
+impl ListenerStep for QualificationStep {
+    fn name(&self) -> &str {
+        QUALIFICATION_LISTENER
+    }
+
+    async fn is_active(&self) -> Result<bool, CoreError> {
+        self.usecase.has_enabled_qualification_agent().await
+    }
+
+    async fn run_once(&self) -> Result<StepOutcome, SourceRunError> {
+        let report = self
+            .usecase
+            .qualify_due_leads(
+                &AnyProviderBuilder,
+                &self.cipher,
+                &self.cache,
+                EvaluationSettings {
+                    max_tokens: QUALIFICATION_MAX_TOKENS,
+                    budget_cents: self.budget_cents,
+                    batch_size: QUALIFICATION_BATCH_SIZE,
+                    base_delay: QUALIFICATION_BASE_DELAY,
+                },
+                &SystemClock,
+            )
+            .await?;
+        Ok(StepOutcome {
+            processed: report.leads,
+            signals: report.valid,
+            backlog: Some(report.backlog),
+        })
+    }
+}

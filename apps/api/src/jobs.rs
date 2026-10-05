@@ -10,7 +10,7 @@ use fetch::PoliteFetcher;
 use llm::any::AnyProvider;
 use lodestone_core::{
     Clock, Job, JobKind, JobQueue, LodestoneUseCase, NewJob, PartnerAward, SourceName, Tier,
-    TierError, TokenPricing, WEBHOOK_JOB_KIND,
+    TierError, WEBHOOK_JOB_KIND,
     infrastructure::{
         contact_target::postgres::PgAtsTargets, crypto::AesGcmCipher, job::postgres::PgJobQueue,
         llm_cache::postgres::PgLlmCache,
@@ -20,7 +20,7 @@ use lodestone_core::{
     llm::gateway::CallSettings,
     qualification::QualificationSettings,
     sources::{SOURCE_JOB_KIND, SourceRunError, source_job, source_of_job},
-    triage::{CandidateSource, TriageReport, TriageSettings},
+    triage::{CandidateSource, TriageReport},
 };
 use sources::{
     ats::AtsSource,
@@ -48,8 +48,6 @@ const QUALIFICATION_MAX_ATTEMPTS: NonZeroU16 = NonZeroU16::new(3).unwrap();
 const QUALIFICATION_MAX_TOKENS: u32 = 4096;
 const QUALIFICATION_BATCH_SIZE: u32 = 20;
 const QUALIFICATION_BASE_DELAY: Duration = Duration::from_secs(2);
-const TRIAGE_MAX_TOKENS: u32 = 1024;
-const TRIAGE_BASE_DELAY: Duration = Duration::from_secs(2);
 
 pub type Boamp = BoampSource<PoliteFetcher>;
 pub type Decp = DecpSource<PoliteFetcher>;
@@ -185,91 +183,31 @@ impl JobRouter {
         source: &S,
         label: &str,
     ) -> Result<TriageReport, SourceRunError> {
-        let resolved = match self
-            .usecase
-            .resolve_llm_tier(Tier::Triage, &self.llm.cipher)
-            .await
-        {
-            Ok(resolved) => Some(resolved),
-            Err(error) => {
-                warn!(%error, source = label, "triage has no usable provider, ambiguous candidates are deferred");
-                None
-            }
-        };
-        let provider = resolved.as_ref().and_then(|resolved| {
-            match AnyProvider::from_definition(&resolved.definition) {
-                Ok(provider) => Some(provider),
-                Err(error) => {
-                    warn!(%error, source = label, "triage provider could not be built, ambiguous candidates are deferred");
-                    None
-                }
-            }
-        });
-        let (max_retries, pricing) = resolved.as_ref().map_or(
-            (
-                0,
-                TokenPricing {
-                    input_cents_per_mtok: 0,
-                    output_cents_per_mtok: 0,
-                },
-            ),
-            |resolved| (resolved.max_retries, resolved.pricing),
-        );
-        let settings = TriageSettings {
-            call: CallSettings {
-                max_retries,
-                pricing,
-                base_delay: TRIAGE_BASE_DELAY,
-            },
-            max_tokens: TRIAGE_MAX_TOKENS,
-            budget_cents: self.llm.budget_cents,
-        };
-        let report = self
-            .usecase
-            .run_triage(
-                source,
-                provider.as_ref(),
-                &self.llm.cache,
-                settings,
-                &SystemClock,
-            )
-            .await?;
+        let report = self.usecase.run_triage(source, &SystemClock).await?;
         info!(
             source = label,
             candidates = report.candidates,
             accepted_by_rules = report.accepted_by_rules,
+            accepted_ambiguous = report.accepted_ambiguous,
             rejected_by_rules = report.rejected_by_rules,
-            sent_to_llm = report.sent_to_llm,
-            accepted_by_llm = report.accepted_by_llm,
-            deferred = report.deferred,
-            budget_exhausted = report.budget_exhausted,
-            "triage finished"
+            "keyword sourcing finished"
         );
         Ok(report)
     }
 
     async fn run_boamp(&self) -> Result<(u64, u64), SourceRunError> {
         let report = self.triage_source(&self.sources.boamp, "boamp").await?;
-        Ok((
-            report.candidates,
-            report.accepted_by_rules + report.accepted_by_llm,
-        ))
+        Ok((report.candidates, report.accepted()))
     }
 
     async fn run_ted(&self) -> Result<(u64, u64), SourceRunError> {
         let report = self.triage_source(&self.sources.ted, "ted").await?;
-        Ok((
-            report.candidates,
-            report.accepted_by_rules + report.accepted_by_llm,
-        ))
+        Ok((report.candidates, report.accepted()))
     }
 
     async fn run_ats(&self) -> Result<(u64, u64), SourceRunError> {
         let report = self.triage_source(&self.sources.ats, "ats").await?;
-        Ok((
-            report.candidates,
-            report.accepted_by_rules + report.accepted_by_llm,
-        ))
+        Ok((report.candidates, report.accepted()))
     }
 
     async fn run_france_travail(&self) -> Result<(u64, u64), SourceRunError> {
@@ -278,10 +216,7 @@ impl JobRouter {
             return Ok((0, 0));
         };
         let report = self.triage_source(source, "france_travail").await?;
-        Ok((
-            report.candidates,
-            report.accepted_by_rules + report.accepted_by_llm,
-        ))
+        Ok((report.candidates, report.accepted()))
     }
 
     async fn run_decp(&self) -> Result<(u64, u64), SourceRunError> {
@@ -319,10 +254,7 @@ impl JobRouter {
             partner_awards = partners,
             "decp partner awards recorded"
         );
-        Ok((
-            report.candidates,
-            report.accepted_by_rules + report.accepted_by_llm,
-        ))
+        Ok((report.candidates, report.accepted()))
     }
 
     async fn run_source(&self, job: &Job) -> Result<JobOutcome, JobError> {

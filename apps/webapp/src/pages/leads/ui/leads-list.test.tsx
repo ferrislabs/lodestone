@@ -17,6 +17,8 @@ const leads: Lead[] = [
 		domain: 'acme.test',
 		status: 'qualified',
 		score: 42,
+		confidence: 72.5,
+		verdict: 'fiable',
 		first_seen_at: '2026-01-01T00:00:00Z',
 		last_seen_at: '2026-02-01T00:00:00Z',
 		updated_at: '2026-02-01T00:00:00Z',
@@ -83,6 +85,22 @@ describe('LeadsList', () => {
 		expect(screen.getByText('Qualifié')).toBeTruthy()
 		expect(screen.getByText('42')).toBeTruthy()
 		expect(screen.getByText('Page 1 sur 2 - 40 leads')).toBeTruthy()
+	})
+
+	it('shows the verdict badge and the confidence of each lead', () => {
+		const { container } = render(<Harness data={leads} state="ready" />)
+		const badges = Array.from(container.querySelectorAll('[data-verdict]'))
+		expect(badges.map((badge) => badge.textContent)).toEqual([
+			'Fiable',
+			'En attente',
+		])
+		expect(badges.map((badge) => badge.getAttribute('data-verdict'))).toEqual([
+			'fiable',
+			'en_attente',
+		])
+		expect(screen.getByText('Verdict')).toBeTruthy()
+		expect(screen.getByText(/^72,5\s%$/)).toBeTruthy()
+		expect(screen.getByText('—')).toBeTruthy()
 	})
 
 	it('opens a lead when its domain is clicked', () => {
