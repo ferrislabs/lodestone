@@ -162,8 +162,13 @@ impl AuthRepository for FerrisKeyRepository {
 
         let mut validation = Validation::new(Algorithm::RS256);
 
-        validation.validate_aud = false;
         validation.validate_exp = false;
+        validation.set_issuer(&[self.issuer.as_str()]);
+        validation.set_required_spec_claims(&["iss"]);
+        match &self.audience {
+            Some(audience) => validation.set_audience(&[audience.as_str()]),
+            None => validation.validate_aud = false,
+        }
 
         let data = decode::<Claims>(token, &decoding_key, &validation).map_err(|e| {
             warn!("failed to decode token: {}", e);
@@ -270,13 +275,13 @@ HUim3t4M1KMtX1QmMKKCg4i4
         format!(r#"{{"keys":[{{"kid":"{kid}","n":"{n}","e":"{e}"}}]}}"#)
     }
 
-    fn build_signed_token(exp: i64, client_id: Option<String>) -> String {
+    fn build_signed_token(issuer: &str, exp: i64, client_id: Option<String>) -> String {
         let mut header = Header::new(Algorithm::RS256);
         header.kid = Some(TEST_KID.to_string());
 
         let claims = Claims {
             sub: Subject("user-123".to_string()),
-            iss: "https://auth.ferriscord.com".to_string(),
+            iss: issuer.to_string(),
             aud: Some(Audience::Single("ferriscord-api".to_string())),
             exp: Some(exp),
             email: Some("john.doe@example.com".to_string()),
@@ -413,8 +418,8 @@ HUim3t4M1KMtX1QmMKKCg4i4
     async fn test_validate_token_returns_expired_for_past_exp() {
         let issuer =
             start_server_with_response("200 OK", &build_jwks_json(TEST_KID, TEST_N, TEST_E));
-        let repo = FerrisKeyRepository::new(issuer, None);
-        let token = build_signed_token(Utc::now().timestamp() - 120, None);
+        let repo = FerrisKeyRepository::new(issuer.clone(), None);
+        let token = build_signed_token(&issuer, Utc::now().timestamp() - 120, None);
 
         let err = repo
             .validate_token(&token)
@@ -428,8 +433,8 @@ HUim3t4M1KMtX1QmMKKCg4i4
     async fn test_validate_token_returns_claims_for_valid_token() {
         let issuer =
             start_server_with_response("200 OK", &build_jwks_json(TEST_KID, TEST_N, TEST_E));
-        let repo = FerrisKeyRepository::new(issuer, None);
-        let token = build_signed_token(Utc::now().timestamp() + 120, None);
+        let repo = FerrisKeyRepository::new(issuer.clone(), None);
+        let token = build_signed_token(&issuer, Utc::now().timestamp() + 120, None);
 
         let claims = repo
             .validate_token(&token)
@@ -444,8 +449,9 @@ HUim3t4M1KMtX1QmMKKCg4i4
     async fn test_identity_returns_identity_from_valid_token() {
         let issuer =
             start_server_with_response("200 OK", &build_jwks_json(TEST_KID, TEST_N, TEST_E));
-        let repo = FerrisKeyRepository::new(issuer, None);
+        let repo = FerrisKeyRepository::new(issuer.clone(), None);
         let token = build_signed_token(
+            &issuer,
             Utc::now().timestamp() + 120,
             Some("ferriscord-bot".to_string()),
         );

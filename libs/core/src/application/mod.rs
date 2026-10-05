@@ -62,7 +62,7 @@ impl LodestoneService {
 }
 
 pub async fn create_service(config: Config) -> Result<LodestoneService, CoreError> {
-    let auth_repo = FerrisKeyRepository::new(config.auth.issuer, None);
+    let auth_repo = FerrisKeyRepository::new(config.auth.issuer, config.auth.audience);
     let auth = AuthService::new(auth_repo);
 
     let db_url = format!(

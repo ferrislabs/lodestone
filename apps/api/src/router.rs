@@ -97,6 +97,7 @@ pub fn router(state: AppState) -> Result<Router, ApiError> {
     }
 
     let router = router
+        .merge(handlers::api::router(state.clone()))
         // Outside authentication, so a flood of unauthenticated requests is
         // throttled before any token is validated - which costs a round trip
         // to the identity provider on a cache miss.
