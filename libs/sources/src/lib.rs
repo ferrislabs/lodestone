@@ -1,6 +1,8 @@
 pub mod boamp;
+pub(crate) mod buyer_domain;
 pub mod contact_pages;
 pub mod ct;
+pub mod decp;
 pub mod dns_cname;
 pub mod http_probe;
 pub mod role_guess;

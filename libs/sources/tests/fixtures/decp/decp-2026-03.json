@@ -1,0 +1,149 @@
+{
+ "marches": {
+  "marche": [
+   {
+    "id": "2026S09005",
+    "acheteur": {
+     "id": "20004217400090"
+    },
+    "nature": "Marché",
+    "objet": "Migration vers une solution de SSO et MFA pour les agents",
+    "codeCPV": "72200000",
+    "procedure": "Procédure adaptée",
+    "dureeMois": 24,
+    "dateNotification": "2026-03-27",
+    "datePublicationDonnees": "2026-03-27",
+    "titulaires": [
+     {
+      "titulaire": {
+       "typeIdentifiant": "SIRET",
+       "id": "81378068100025"
+      }
+     }
+    ],
+    "source": "fixture",
+    "montant": 45000.0
+   },
+   {
+    "id": "2026S09006",
+    "acheteur": {
+     "id": "22350001800013"
+    },
+    "nature": "Marché",
+    "objet": "Refonte de l'annuaire et du SSO",
+    "codeCPV": "72200000",
+    "procedure": "Procédure adaptée",
+    "dureeMois": 24,
+    "dateNotification": "2026-03-10",
+    "datePublicationDonnees": "2026-03-10",
+    "titulaires": [
+     {
+      "titulaire": {
+       "typeIdentifiant": "SIRET",
+       "id": "34927581800061"
+      }
+     }
+    ],
+    "source": "fixture",
+    "montant": 9000.0
+   },
+   {
+    "id": "2026S09001",
+    "acheteur": {
+     "id": "22350001800013"
+    },
+    "nature": "Marché",
+    "objet": "Mise en place d'un annuaire d'entreprise et d'une authentification unique SSO pour les agents",
+    "codeCPV": "72200000",
+    "procedure": "Procédure adaptée",
+    "dureeMois": 24,
+    "dateNotification": "2026-03-30",
+    "datePublicationDonnees": "2026-04-02",
+    "titulaires": [
+     {
+      "titulaire": {
+       "typeIdentifiant": "SIRET",
+       "id": "83177947500027"
+      }
+     },
+     {
+      "titulaire": {
+       "typeIdentifiant": "SIRET",
+       "id": "34927581800061"
+      }
+     },
+     {
+      "titulaire": {
+       "typeIdentifiant": "TVA",
+       "id": "FR12345678901"
+      }
+     }
+    ],
+    "source": "fixture",
+    "montant": 1.0
+   },
+   {
+    "id": "2026T03377",
+    "acheteur": {
+     "id": "21560121200016"
+    },
+    "nature": "Marché",
+    "objet": "PROJET DE RENOVATION DU QUARTIER BOIS-DU-CHATEAU - NPNRU - SECTEURS MAISON DES ASSOCIATIONS (EX COLLEGE) ET RUE LEO DELIBES - LOT 3 AMENAGEMENTS PAYSAGERS - REVETEMENTS - MOBILIER",
+    "codeCPV": "45112700",
+    "procedure": "Appel d'offres ouvert",
+    "marcheInnovant": false,
+    "ccag": "Travaux",
+    "offresRecues": 2,
+    "attributionAvance": true,
+    "typeGroupementOperateurs": "Pas de groupement",
+    "lieuExecution": {
+     "code": "56",
+     "typeCode": "Code département"
+    },
+    "dureeMois": 34,
+    "dateNotification": "2026-03-27",
+    "datePublicationDonnees": "2026-03-28",
+    "montant": 1129999.4,
+    "formePrix": "Forfaitaire",
+    "sousTraitanceDeclaree": false,
+    "titulaires": [
+     {
+      "titulaire": {
+       "typeIdentifiant": "SIRET",
+       "id": "37833478300032"
+      }
+     }
+    ],
+    "considerationsSociales": {
+     "considerationSociale": [
+      "Clause sociale"
+     ]
+    },
+    "considerationsEnvironnementales": {
+     "considerationEnvironnementale": [
+      "Pas de considération environnementale"
+     ]
+    },
+    "modalitesExecution": {
+     "modaliteExecution": [
+      "Sans objet"
+     ]
+    },
+    "techniques": {
+     "technique": [
+      "Sans objet"
+     ]
+    },
+    "typesPrix": {
+     "typePrix": [
+      "Définitif révisable"
+     ]
+    },
+    "source": "megalis",
+    "origineUE": 0.0,
+    "origineFrance": 0.0,
+    "tauxAvance": 0.05
+   }
+  ]
+ }
+}

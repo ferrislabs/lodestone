@@ -17,6 +17,10 @@ Only a source whose endpoint is a documented public API may use `FetchPurpose::A
 
 - BOAMP (OpenDataSoft Explore API on `boamp-datadila.opendatasoft.com`)
 - Certificate Transparency monitoring endpoints (static-ct-api, ADR 0003)
+- DECP (#46), three documented public interfaces:
+  - the data.gouv.fr dataset API and the monthly consolidated files it lists (`www.data.gouv.fr/api/1/datasets/...`, then `static.data.gouv.fr`), published by the Ministères économiques et financiers under the Licence Ouverte
+  - the Annuaire de l'administration OpenDataSoft API (`api-lannuaire.service-public.fr/api/explore/v2.1/...`), whose robots.txt disallows `/api/` like BOAMP, used to resolve a buyer SIRET to its public website
+  - the Recherche d'entreprises API (`recherche-entreprises.api.gouv.fr`, documented, 7 requests per second), used to resolve a SIRET to a company name
 
 Adding a source to this list requires amending this ADR.
 

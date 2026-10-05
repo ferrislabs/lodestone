@@ -3895,6 +3895,7 @@ dependencies = [
  "httpmock",
  "lodestone-core",
  "regex",
+ "serde",
  "serde_json",
  "sqlx",
  "tokio",

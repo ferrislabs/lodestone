@@ -1,0 +1,307 @@
+{
+ "marches": {
+  "marche": [
+   {
+    "id": "2026S04026",
+    "acheteur": {
+     "id": "25351449100047"
+    },
+    "nature": "Marché",
+    "objet": "INSTALLATION, PARAMETRAGE ET MAINTENANCE D'UNE SOLUTION D'AUTHENTIFICATION UNIQUE (SSO) POUR LES BESOIN DE MEGALIS BRETAGNE",
+    "codeCPV": "72267100",
+    "procedure": "Procédure adaptée",
+    "marcheInnovant": false,
+    "ccag": "Techniques de l'information et de la communication",
+    "offresRecues": 7,
+    "attributionAvance": false,
+    "typeGroupementOperateurs": "Pas de groupement",
+    "lieuExecution": {
+     "code": "35",
+     "typeCode": "Code département"
+    },
+    "dureeMois": 48,
+    "dateNotification": "2026-04-14",
+    "datePublicationDonnees": "2026-04-21",
+    "montant": 120000.0,
+    "formePrix": "Unitaire",
+    "sousTraitanceDeclaree": false,
+    "titulaires": [
+     {
+      "titulaire": {
+       "typeIdentifiant": "SIRET",
+       "id": "83177947500027"
+      }
+     }
+    ],
+    "considerationsSociales": {
+     "considerationSociale": [
+      "Pas de considération sociale"
+     ]
+    },
+    "considerationsEnvironnementales": {
+     "considerationEnvironnementale": [
+      "Clause environnementale"
+     ]
+    },
+    "modalitesExecution": {
+     "modaliteExecution": [
+      "Bons de commande"
+     ]
+    },
+    "techniques": {
+     "technique": [
+      "Accord-cadre"
+     ]
+    },
+    "typesPrix": {
+     "typePrix": [
+      "Définitif révisable"
+     ]
+    },
+    "source": "megalis",
+    "origineUE": 0.0,
+    "origineFrance": 0.0,
+    "tauxAvance": 0.0
+   },
+   {
+    "id": "2026S09001",
+    "acheteur": {
+     "id": "22350001800013"
+    },
+    "nature": "Marché",
+    "objet": "Mise en place d'un annuaire d'entreprise et d'une authentification unique SSO pour les agents",
+    "codeCPV": "72200000",
+    "procedure": "Procédure adaptée",
+    "dureeMois": 24,
+    "dateNotification": "2026-04-02",
+    "datePublicationDonnees": "2026-04-02",
+    "titulaires": [
+     {
+      "titulaire": {
+       "typeIdentifiant": "SIRET",
+       "id": "83177947500027"
+      }
+     },
+     {
+      "titulaire": {
+       "typeIdentifiant": "SIRET",
+       "id": "34927581800061"
+      }
+     },
+     {
+      "titulaire": {
+       "typeIdentifiant": "TVA",
+       "id": "FR12345678901"
+      }
+     }
+    ],
+    "source": "fixture",
+    "montant": 85000.0
+   },
+   {
+    "id": "2026S09002",
+    "acheteur": {
+     "id": "21560121200016"
+    },
+    "nature": "Marché",
+    "objet": "Annuaire téléphonique et authentification SSO du standard",
+    "codeCPV": "72200000",
+    "procedure": "Procédure adaptée",
+    "dureeMois": 24,
+    "dateNotification": "2026-04-10",
+    "datePublicationDonnees": "2026-04-10",
+    "titulaires": [
+     {
+      "titulaire": {
+       "typeIdentifiant": "SIRET",
+       "id": "83177947500027"
+      }
+     }
+    ],
+    "source": "fixture",
+    "montant": 12000.0
+   },
+   {
+    "id": "2026F03666",
+    "acheteur": {
+     "id": "20004217400090"
+    },
+    "nature": "Marché",
+    "objet": "FOURNITURE DE PETITS OUTILLAGES, CONSOMMABLES, EQUIPEMENTS D'ATELIER ET D'ACCESSOIRES DIVERS POUR LE GARAGE ET LE SERVICE MAINTENANCE DE LA DIRECTION PREVENTION ET VALORISATION DES DECHETS",
+    "codeCPV": "44500000",
+    "procedure": "Procédure adaptée",
+    "marcheInnovant": false,
+    "ccag": "Fournitures courantes et services",
+    "offresRecues": 2,
+    "attributionAvance": false,
+    "typeGroupementOperateurs": "Pas de groupement",
+    "lieuExecution": {
+     "code": "56",
+     "typeCode": "Code département"
+    },
+    "dureeMois": 36,
+    "dateNotification": "2026-04-07",
+    "datePublicationDonnees": "2026-04-08",
+    "montant": 88900.0,
+    "formePrix": "Unitaire",
+    "sousTraitanceDeclaree": false,
+    "titulaires": [
+     {
+      "titulaire": {
+       "typeIdentifiant": "SIRET",
+       "id": "66850296600041"
+      }
+     }
+    ],
+    "considerationsSociales": {
+     "considerationSociale": [
+      "Pas de considération sociale"
+     ]
+    },
+    "considerationsEnvironnementales": {
+     "considerationEnvironnementale": [
+      "Pas de considération environnementale"
+     ]
+    },
+    "modalitesExecution": {
+     "modaliteExecution": [
+      "Bons de commande"
+     ]
+    },
+    "techniques": {
+     "technique": [
+      "Accord-cadre"
+     ]
+    },
+    "typesPrix": {
+     "typePrix": [
+      "Définitif ferme"
+     ]
+    },
+    "source": "megalis",
+    "origineUE": 0.0,
+    "origineFrance": 0.0,
+    "tauxAvance": 0.0
+   },
+   {
+    "id": "2026S09003",
+    "acheteur": {
+     "id": "20004217400090"
+    },
+    "nature": "Marché",
+    "objet": "Déploiement d'une authentification SSO",
+    "codeCPV": "72200000",
+    "procedure": "Procédure adaptée",
+    "dureeMois": 24,
+    "dateNotification": "2026-04-27",
+    "datePublicationDonnees": "2026-04-27",
+    "titulaires": [
+     {
+      "titulaire": {
+       "typeIdentifiant": "SIRET",
+       "id": "83177947500027"
+      }
+     }
+    ],
+    "source": "fixture",
+    "montant": 1000.0
+   },
+   {
+    "id": "2026T04311",
+    "acheteur": {
+     "id": "21560121200016"
+    },
+    "nature": "Marché",
+    "objet": "MAISON DES ASSOCIATIONS LE COUTALLER - REMPLACEMENT DES ECLAIRAGES ET DE MENUISERIES EXTERIEURES ALUMINIUM - LOT 2 ELECTRICITE",
+    "codeCPV": "45315300",
+    "procedure": "Procédure adaptée",
+    "marcheInnovant": false,
+    "ccag": "Travaux",
+    "offresRecues": 5,
+    "attributionAvance": false,
+    "typeGroupementOperateurs": "Pas de groupement",
+    "lieuExecution": {
+     "code": "56",
+     "typeCode": "Code département"
+    },
+    "dureeMois": 5,
+    "dateNotification": "2026-04-27",
+    "datePublicationDonnees": "2026-04-28",
+    "montant": 44622.21,
+    "formePrix": "Forfaitaire",
+    "sousTraitanceDeclaree": false,
+    "titulaires": [
+     {
+      "titulaire": {
+       "typeIdentifiant": "SIRET",
+       "id": "40522248000049"
+      }
+     }
+    ],
+    "considerationsSociales": {
+     "considerationSociale": [
+      "Pas de considération sociale"
+     ]
+    },
+    "considerationsEnvironnementales": {
+     "considerationEnvironnementale": [
+      "Pas de considération environnementale"
+     ]
+    },
+    "modalitesExecution": {
+     "modaliteExecution": [
+      "Sans objet"
+     ]
+    },
+    "techniques": {
+     "technique": [
+      "Sans objet"
+     ]
+    },
+    "typesPrix": {
+     "typePrix": [
+      "Définitif actualisable"
+     ]
+    },
+    "source": "megalis",
+    "origineUE": 0.0,
+    "origineFrance": 0.0,
+    "tauxAvance": 0.0
+   },
+   {
+    "id": "2026S09004",
+    "acheteur": {
+     "id": "253514491"
+    },
+    "nature": "Marché",
+    "objet": "Fourniture d'un annuaire et d'un SSO",
+    "codeCPV": "72200000",
+    "procedure": "Procédure adaptée",
+    "dureeMois": 24,
+    "dateNotification": "2026-04-05",
+    "datePublicationDonnees": "2026-04-05",
+    "titulaires": [
+     {
+      "titulaire": {
+       "typeIdentifiant": "SIRET",
+       "id": "83177947500027"
+      }
+     }
+    ],
+    "source": "fixture"
+   }
+  ],
+  "contrat-concession": [
+   {
+    "id": "2026S05103",
+    "nature": "Concession de service public",
+    "objet": "Concession SSO annuaire authentification",
+    "procedure": "Procédure négociée ouverte",
+    "titulaires": null,
+    "autoriteConcedante": {
+     "id": "24200000000000"
+    }
+   }
+  ]
+ }
+}
