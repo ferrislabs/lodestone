@@ -1,0 +1,528 @@
+{
+ "total_count": 9,
+ "results": [
+  {
+   "idweb": "26-94122",
+   "id": "26_94122",
+   "contractfolderid": "3e5278b6-c2e5-4bf1-904d-b51c2626b98d",
+   "objet": "Achat et mise en oeuvre d'une solution IAM en mode SAAS",
+   "filename": "26-94122",
+   "famille": "JOUE",
+   "code_departement": [
+    "69"
+   ],
+   "code_departement_prestation": null,
+   "famille_libelle": "Marchés européens",
+   "dateparution": "2026-10-01",
+   "datefindiffusion": "2026-10-15",
+   "datelimitereponse": "2026-10-15T15:00:00+00:00",
+   "nomacheteur": "GRANDLYON Métropole",
+   "titulaire": null,
+   "perimetre": "DIRECTIVE-24",
+   "type_procedure": "OUVERT",
+   "soustype_procedure": null,
+   "procedure_libelle": "Procédure Ouverte",
+   "procedure_categorise": "OUVERT/",
+   "nature": "APPEL_OFFRE",
+   "sousnature": "STANDARD",
+   "nature_libelle": "Avis de marché",
+   "sousnature_libelle": null,
+   "nature_categorise": "appeloffre/standard",
+   "nature_categorise_libelle": "Avis de marché/",
+   "criteres": [
+    "environnementaux"
+   ],
+   "marche_public_simplifie": null,
+   "marche_public_simplifie_label": null,
+   "etat": "RECTIFICATIF",
+   "descripteur_code": [
+    "163"
+   ],
+   "dc": [
+    "163"
+   ],
+   "descripteur_libelle": [
+    "Informatique (prestations de services)"
+   ],
+   "type_marche": [
+    "SERVICES"
+   ],
+   "type_marche_facette": [
+    "Services"
+   ],
+   "type_avis": [
+    "5",
+    "1"
+   ],
+   "annonce_lie": [
+    "26-80363"
+   ],
+   "annonces_anterieures": null,
+   "source_schema": "3.2.5",
+   "donnees": "{\"EFORMS\": {\"ContractNotice\": {\"ext:UBLExtensions\": {\"ext:UBLExtension\": {\"ext:ExtensionContent\": {\"efext:EformsExtension\": {\"efac:Changes\": {\"efbc:ChangedNoticeIdentifier\": \"56364db0-40e5-4250-b457-066cbe4e0499-01\", \"efac:Change\": [{\"efbc:ChangeDescription\": {\"@languageID\": \"FRA\", \"#text\": \"Remise des offres:  Au lieu du 30/09/2026 à 17h00 au plus tard. Lire 15/10/2026 à 17h00 au plus tard.\"}, \"efac:ChangedSection\": {\"efbc:ChangedSectionIdentifier\": \"PROCEDURE\"}}, {\"efbc:ChangeDescription\": {\"@languageID\": \"FRA\", \"#text\": \"Date d'ouverture des offres:  Au lieu du 01/10/2026 à 08h00 au plus tard. Lire 16/10/2026 à 17h00 au plus tard.\"}, \"efac:ChangedSection\": {\"efbc:ChangedSectionIdentifier\": \"PROCEDURE\"}}]}, \"efac:NoticeSubType\": {\"cbc:SubTypeCode\": {\"@listName\": \"notice-subtype\", \"#text\": \"16\"}}, \"efac:Organizations\": {\"efac:Organization\": [{\"efac:Company\": {\"cac:PartyIdentification\": {\"cbc:ID\": {\"@schemeName\": \"organization\", \"#text\": \"ORG-0001\"}}, \"cac:PartyName\": {\"cbc:Name\": {\"@languageID\": \"FRA\", \"#text\": \"Avenue-Web Systèmes\"}}, \"cac:PostalAddress\": {\"cbc:CityName\": \"Seyssinet-Pariset\", \"cbc:PostalZone\": \"38170\", \"cbc:CountrySubentityCode\": {\"@listName\": \"nuts\", \"#text\": \"FRK24\"}, \"cac:Country\": {\"cbc:IdentificationCode\": {\"@listName\": \"country\", \"#text\": \"FRA\"}}}, \"cac:PartyLegalEntity\": {\"cbc:CompanyID\": {\"@schemeName\": \"eu\", \"#text\": \"6958BD6C-F3C0-A4AF-89241D7044EE010E\"}}, \"cac:Contact\": {\"cbc:Telephone\": \"+33480041260\", \"cbc:ElectronicMail\": \"publications-joue@aws-france.com\"}}}, {\"efac:Company\": {\"cbc:WebsiteURI\": \"http://www.grandlyon.com\", \"cac:PartyIdentification\": {\"cbc:ID\": {\"@schemeName\": \"organization\", \"#text\": \"ORG-0002\"}}, \"cac:PartyName\": {\"cbc:Name\": {\"@languageID\": \"FRA\", \"#text\": \"GRANDLYON Métropole\"}}, \"cac:PostalAddress\": {\"cbc:StreetName\": \"20 rue du Lac\", \"cbc:AdditionalStreetName\": \"Cs 33569\", \"cbc:CityName\": \"Lyon\", \"cbc:PostalZone\": \"69505\", \"cbc:CountrySubentityCode\": {\"@listName\": \"nuts\", \"#text\": \"FRK26\"}, \"cac:Country\": {\"cbc:IdentificationCode\": {\"@listName\": \"country\", \"#text\": \"FRA\"}}}, \"cac:PartyLegalEntity\": {\"cbc:CompanyID\": {\"@schemeName\": \"eu\", \"#text\": \"54465\"}}, \"cac:Contact\": {\"cbc:Name\": \"La Présidente\", \"cbc:Telephone\": \"0478634040\", \"cbc:ElectronicMail\": \"scp-assistance@grandlyon.com\"}}}, {\"efac:Company\": {\"cbc:WebsiteURI\": \"https://www.telerecours.fr\", \"cac:PartyIdentification\": {\"cbc:ID\": {\"@schemeName\": \"organization\", \"#text\": \"ORG-0003\"}}, \"cac:PartyName\": {\"cbc:Name\": {\"@languageID\": \"FRA\", \"#text\": \"Tribunal administratif de Lyon\"}}, \"cac:PostalAddress\": {\"cbc:StreetName\": \"184 rue Duguesclin\", \"cbc:CityName\": \"Lyon\", \"cbc:PostalZone\": \"69433\", \"cbc:CountrySubentityCode\": {\"@listName\": \"nuts\", \"#text\": \"FRK26\"}, \"cac:Country\": {\"cbc:IdentificationCode\": {\"@listName\": \"country\", \"#text\": \"FRA\"}}}, \"cac:PartyLegalEntity\": {\"cbc:CompanyID\": {\"@schemeName\": \"eu\", \"#text\": \"6958BD8A-0091-ADFE-98231B258E88AD57\"}}, \"cac:Contact\": {\"cbc:Telephone\": \"0487635000\", \"cbc:Telefax\": \"0487635250\", \"cbc:ElectronicMail\": \"greffe.ta-lyon@juradm.fr\"}}}, {\"efac:Company\": {\"cac:PartyIdentification\": {\"cbc:ID\": {\"@schemeName\": \"organization\", \"#text\": \"ORG-0004\"}}, \"cac:PartyName\": {\"cbc:Name\": {\"@languageID\": \"FRA\", \"#text\": \"Tribunal administratif de Lyon\"}}, \"cac:PostalAddress\": {\"cbc:StreetName\": \"184, rue Duguesclin\", \"cbc:CityName\": \"Lyon\", \"cbc:PostalZone\": \"69433\", \"cbc:CountrySubentityCode\": {\"@listName\": \"nuts\", \"#text\": \"FRK26\"}, \"cac:Country\": {\"cbc:IdentificationCode\": {\"@listName\": \"country\", \"#text\": \"FRA\"}}}, \"cac:PartyLegalEntity\": {\"cbc:CompanyID\": {\"@schemeName\": \"eu\", \"#text\": \"6958BD9D-B3BD-CE9E-08608C976ADFCCFD\"}}, \"cac:Contact\": {\"cbc:Telephone\": \"0478141010\", \"cbc:Telefax\": \"0478141065\", \"cbc:ElectronicMail\": \"greffe.ta-lyon@juradm.fr\"}}}]}}}}}, \"cbc:UBLVersionID\": \"2.3\", \"cbc:CustomizationID\": \"eforms-sdk-1.12\", \"cbc:ID\": {\"@schemeName\": \"notice-id\", \"#text\": \"1d2f3f68-c86f-457d-8062-ba6a859d8cdb\"}, \"cbc:ContractFolderID\": \"3e5278b6-c2e5-4bf1-904d-b51c2626b98d\", \"cbc:IssueDate\": \"2026-09-30+02:00\", \"cbc:IssueTime\": \"08:10:08+02:00\", \"cbc:VersionID\": \"01\", \"cbc:RegulatoryDomain\": \"32014L0024\", \"cbc:NoticeTypeCode\": {\"@listName\": \"competition\", \"#text\": \"cn-standard\"}, \"cbc:NoticeLanguageCode\": \"FRA\", \"cac:ContractingParty\": {\"cbc:BuyerProfileURI\": \"http://www.marchespublics.grandlyon.com\", \"cac:ContractingPartyType\": {\"cbc:PartyTypeCode\": {\"@listName\": \"buyer-legal-type\", \"#text\": \"la\"}}, \"cac:ContractingActivity\": {\"cbc:ActivityTypeCode\": {\"@listName\": \"authority-activity\", \"#text\": \"gen-pub\"}}, \"cac:Party\": {\"cac:PartyIdentification\": {\"cbc:ID\": {\"@schemeName\": \"organization\", \"#text\": \"ORG-0002\"}}, \"cac:ServiceProviderParty\": {\"cbc:ServiceTypeCode\": {\"@listName\": \"organisation-role\", \"#text\": \"ted-esen\"}, \"cac:Party\": {\"cac:PartyIdentification\": {\"cbc:ID\": {\"@schemeName\": \"organization\", \"#text\": \"ORG-0001\"}}}}}}, \"cac:TenderingTerms\": {\"cac:TendererQualificationRequest\": {\"cac:SpecificTendererRequirement\": {\"cbc:TendererRequirementTypeCode\": {\"@listName\": \"exclusion-grounds-source\", \"#text\": \"epo-procurement-document\"}}}}, \"cac:TenderingProcess\": {\"cbc:ProcedureCode\": {\"@languageID\": \"FRA\", \"@listName\": \"procurement-procedure-type\", \"#text\": \"open\"}, \"cac:ProcessJustification\": {\"cbc:ProcessReasonCode\": {\"@listName\": \"accelerated-procedure\", \"#text\": \"false\"}}}, \"cac:ProcurementProject\": {\"cbc:ID\": \"25DINSI42\", \"cbc:Name\": {\"@languageID\": \"FRA\", \"#text\": \"Achat et mise en oeuvre d'une solution IAM en mode SAAS\"}, \"cbc:Description\": {\"@languageID\": \"FRA\", \"#text\": \"Achat et mise en oeuvre d'une solution IAM en mode SAAS\"}, \"cbc:ProcurementTypeCode\": {\"@listName\": \"contract-nature\", \"#text\": \"services\"}, \"cac:MainCommodityClassification\": {\"cbc:ItemClassificationCode\": {\"@listName\": \"cpv\", \"#text\": \"72268000\"}}, \"cac:AdditionalCommodityClassification\": {\"cbc:ItemClassificationCode\": {\"@listName\": \"cpv\", \"#text\": \"72268000\"}}, \"cac:RealizedLocation\": {\"cac:Address\": {\"cbc:CountrySubentityCode\": {\"@listName\": \"nuts\", \"#text\": \"FRK26\"}, \"cac:Country\": {\"cbc:IdentificationCode\": {\"@listName\": \"country\", \"#text\": \"FRA\"}}}}}, \"cac:ProcurementProjectLot\": {\"cbc:ID\": {\"@schemeName\": \"Lot\", \"#text\": \"LOT-0000\"}, \"cac:TenderingTerms\": {\"cbc:VariantConstraintCode\": {\"@listName\": \"permission\", \"#text\": \"not-allowed\"}, \"cbc:FundingProgramCode\": {\"@listName\": \"eu-funded\", \"#text\": \"no-eu-funds\"}, \"cac:CallForTendersDocumentReference\": {\"cbc:ID\": \"1861531\", \"cbc:DocumentType\": \"non-restricted-document\", \"cbc:LanguageID\": \"FRA\", \"cbc:DocumentStatusCode\": {\"@listName\": \"linguistic-status\", \"#text\": \"official\"}, \"cac:Attachment\": {\"cac:ExternalReference\": {\"cbc:URI\": \"https://www.marches-publics.info/mpiaws/index.cfm?fuseaction=dematEnt.login&amp;type=DCE&amp;IDM=1861531\"}}}, \"cac:TendererQualificationRequest\": [{\"cac:SpecificTendererRequirement\": {\"cbc:TendererRequirementTypeCode\": {\"@listName\": \"selection-criteria-source\", \"#text\": \"epo-procurement-document\"}}}, {\"cac:SpecificTendererRequirement\": {\"cbc:TendererRequirementTypeCode\": {\"@listName\": \"reserved-procurement\", \"#text\": \"none\"}}}], \"cac:ContractExecutionRequirement\": [{\"cbc:ExecutionRequirementCode\": {\"@listName\": \"einvoicing\", \"#text\": \"required\"}}, {\"cbc:ExecutionRequirementCode\": {\"@listName\": \"ecatalog-submission\", \"#text\": \"not-allowed\"}}, {\"cbc:ExecutionRequirementCode\": {\"@listName\": \"esignature-submission\", \"#text\": \"false\"}}, {\"cbc:ExecutionRequirementCode\": {\"@listName\": \"reserved-execution\", \"#text\": \"no\"}}, {\"cbc:ExecutionRequirementCode\": {\"@listName\": \"conditions\", \"#text\": \"performance\"}, \"cbc:Description\": {\"@languageID\": \"FRA\", \"#text\": \"Une clause d'insertion est prévue dans le marché\"}}], \"cac:TenderRecipientParty\": {\"cbc:EndpointID\": \"https://www.marches-publics.info/mpiaws/index.cfm?fuseaction=demat.termes&amp;IDM=1861531\"}, \"cac:TenderValidityPeriod\": {\"cbc:DurationMeasure\": {\"@unitCode\": \"MONTH\", \"#text\": \"7\"}}, \"cac:AppealTerms\": {\"cac:AppealInformationParty\": {\"cac:PartyIdentification\": {\"cbc:ID\": {\"@schemeName\": \"organization\", \"#text\": \"ORG-0004\"}}}, \"cac:AppealReceiverParty\": {\"cac:PartyIdentification\": {\"cbc:ID\": {\"@schemeName\": \"organization\", \"#text\": \"ORG-0003\"}}}}, \"cac:Language\": {\"cbc:ID\": \"FRA\"}, \"cac:PostAwardProcess\": {\"cbc:ElectronicOrderUsageIndicator\": \"false\", \"cbc:ElectronicPaymentUsageIndicator\": \"false\"}}, \"cac:TenderingProcess\": {\"ext:UBLExtensions\": {\"ext:UBLExtension\": {\"ext:ExtensionContent\": {\"efext:EformsExtension\": {\"efbc:AccessToolName\": \"AW Solutions\"}}}}, \"cbc:SubmissionMethodCode\": {\"@listName\": \"esubmission\", \"#text\": \"required\"}, \"cbc:GovernmentAgreementConstraintIndicator\": \"true\", \"cac:TenderSubmissionDeadlinePeriod\": {\"cbc:EndDate\": \"2026-10-15+02:00\", \"cbc:EndTime\": \"17:00:00+02:00\"}, \"cac:OpenTenderEvent\": {\"cbc:OccurrenceDate\": \"2026-10-16+02:00\", \"cbc:OccurrenceTime\": \"17:00:00+02:00\", \"cac:OccurenceLocation\": {\"cbc:Description\": {\"@languageID\": \"FRA\", \"#text\": \"Lyon\"}}}, \"cac:AuctionTerms\": {\"cbc:AuctionConstraintIndicator\": \"false\"}, \"cac:ContractingSystem\": [{\"cbc:ContractingSystemTypeCode\": {\"@listName\": \"framework-agreement\", \"#text\": \"none\"}}, {\"cbc:ContractingSystemTypeCode\": {\"@listName\": \"dps-usage\", \"#text\": \"none\"}}]}, \"cac:ProcurementProject\": {\"cbc:ID\": {\"@schemeName\": \"InternalID\", \"#text\": \"S-PF-1861531\"}, \"cbc:Name\": {\"@languageID\": \"FRA\", \"#text\": \"Achat et mise en oeuvre d'une solution IAM en mode SAAS\"}, \"cbc:Description\": {\"@languageID\": \"FRA\", \"#text\": \"Achat et mise en oeuvre d'une solution IAM en mode SAAS\"}, \"cbc:ProcurementTypeCode\": {\"@listName\": \"contract-nature\", \"#text\": \"services\"}, \"cac:ProcurementAdditionalType\": {\"cbc:ProcurementTypeCode\": {\"@listName\": \"environmental-impact\", \"#text\": \"other\"}}, \"cac:MainCommodityClassification\": {\"cbc:ItemClassificationCode\": {\"@listName\": \"cpv\", \"#text\": \"72268000\"}}, \"cac:AdditionalCommodityClassification\": {\"cbc:ItemClassificationCode\": {\"@listName\": \"cpv\", \"#text\": \"72268000\"}}, \"cac:RealizedLocation\": {\"cac:Address\": {\"cbc:StreetName\": \"208bis rue Garibaldi\", \"cbc:CityName\": \"Lyon\", \"cbc:PostalZone\": \"69003\", \"cbc:CountrySubentityCode\": {\"@listName\": \"nuts\", \"#text\": \"FRK26\"}, \"cac:Country\": {\"cbc:IdentificationCode\": {\"@listName\": \"country\", \"#text\": \"FRA\"}}}}, \"cac:PlannedPeriod\": {\"cbc:StartDate\": \"2027-01-01+01:00\", \"cbc:DurationMeasure\": {\"@unitCode\": \"MONTH\", \"#text\": \"48\"}}}}}}}",
+   "url_avis": "https://www.boamp.fr/pages/avis/?q=idweb:26-94122"
+  },
+  {
+   "idweb": "26-95330",
+   "id": "26_95330",
+   "contractfolderid": "5daf8102-aa1e-46f8-aa98-f6736245e256",
+   "objet": "Traitement des déchets issus des déchèteries de la CARO et de la déchèterie municipale de Rochefort",
+   "filename": "26-95330",
+   "famille": "JOUE",
+   "code_departement": [
+    "17"
+   ],
+   "code_departement_prestation": null,
+   "famille_libelle": "Marchés européens",
+   "dateparution": "2026-10-04",
+   "datefindiffusion": "2026-11-03",
+   "datelimitereponse": "2026-11-03T11:00:00+00:00",
+   "nomacheteur": "Communauté d'agglomération Rochefort Océan",
+   "titulaire": null,
+   "perimetre": "DIRECTIVE-24",
+   "type_procedure": "OUVERT",
+   "soustype_procedure": null,
+   "procedure_libelle": "Procédure Ouverte",
+   "procedure_categorise": "OUVERT/",
+   "nature": "APPEL_OFFRE",
+   "sousnature": "STANDARD",
+   "nature_libelle": "Avis de marché",
+   "sousnature_libelle": null,
+   "nature_categorise": "appeloffre/standard",
+   "nature_categorise_libelle": "Avis de marché/",
+   "criteres": null,
+   "marche_public_simplifie": null,
+   "marche_public_simplifie_label": null,
+   "etat": "INITIAL",
+   "descripteur_code": [
+    "404"
+   ],
+   "dc": [
+    "404"
+   ],
+   "descripteur_libelle": [
+    "Déchets non ménagers (prestations)"
+   ],
+   "type_marche": [
+    "SERVICES"
+   ],
+   "type_marche_facette": [
+    "Services"
+   ],
+   "type_avis": [
+    "5",
+    "1"
+   ],
+   "annonce_lie": null,
+   "annonces_anterieures": null,
+   "source_schema": "3.2.5",
+   "donnees": "{\"EFORMS\": {\"ContractNotice\": {\"ext:UBLExtensions\": {\"ext:UBLExtension\": {\"ext:ExtensionContent\": {\"efext:EformsExtension\": {\"efac:NoticeSubType\": {\"cbc:SubTypeCode\": {\"@listName\": \"notice-subtype\", \"#text\": \"16\"}}, \"efac:Organizations\": {\"efac:Organization\": [{\"efac:Company\": {\"cac:PartyIdentification\": {\"cbc:ID\": {\"@schemeName\": \"organization\", \"#text\": \"ORG-0001\"}}, \"cac:PartyName\": {\"cbc:Name\": {\"@languageID\": \"FRA\", \"#text\": \"Avenue-Web Systèmes\"}}, \"cac:PostalAddress\": {\"cbc:CityName\": \"Seyssinet-Pariset\", \"cbc:PostalZone\": \"38170\", \"cbc:CountrySubentityCode\": {\"@listName\": \"nuts\", \"#text\": \"FRK24\"}, \"cac:Country\": {\"cbc:IdentificationCode\": {\"@listName\": \"country\", \"#text\": \"FRA\"}}}, \"cac:PartyLegalEntity\": {\"cbc:CompanyID\": {\"@schemeName\": \"eu\", \"#text\": \"D8F199D3-E563-190B-797954011C536631\"}}, \"cac:Contact\": {\"cbc:Telephone\": \"+33480041260\", \"cbc:ElectronicMail\": \"publications-joue@aws-france.com\"}}}, {\"efbc:GroupLeadIndicator\": \"true\", \"efac:Company\": {\"cbc:WebsiteURI\": \"http://www.agglo-rochefortocean.fr\", \"cac:PartyIdentification\": {\"cbc:ID\": {\"@schemeName\": \"organization\", \"#text\": \"ORG-0002\"}}, \"cac:PartyName\": {\"cbc:Name\": {\"@languageID\": \"FRA\", \"#text\": \"Communauté d'agglomération Rochefort Océan\"}}, \"cac:PostalAddress\": {\"cbc:StreetName\": \"Parc des Fourriers\", \"cbc:AdditionalStreetName\": \"3 avenue Maurice Chupin, Cs 50224\", \"cbc:CityName\": \"Rochefort\", \"cbc:PostalZone\": \"17304\", \"cbc:CountrySubentityCode\": {\"@listName\": \"nuts\", \"#text\": \"FRI32\"}, \"cac:Country\": {\"cbc:IdentificationCode\": {\"@listName\": \"country\", \"#text\": \"FRA\"}}}, \"cac:PartyLegalEntity\": {\"cbc:CompanyID\": {\"@schemeName\": \"eu\", \"#text\": \"54924\"}}, \"cac:Contact\": {\"cbc:Name\": \"BLANCHÉ Hervé\", \"cbc:JobTitle\": \"Président\", \"cbc:Telephone\": \"0546821780\", \"cbc:Telefax\": \"0546997630\", \"cbc:ElectronicMail\": \"commandepublique@agglo-rochefortocean.fr\"}}}, {\"efac:Company\": {\"cac:PartyIdentification\": {\"cbc:ID\": {\"@schemeName\": \"organization\", \"#text\": \"ORG-0003\"}}, \"cac:PartyName\": {\"cbc:Name\": {\"@languageID\": \"FRA\", \"#text\": \"Communauté d'agglomération Rochefort Océan\"}}, \"cac:PostalAddress\": {\"cbc:Postbox\": \"50224\", \"cbc:StreetName\": \"Parc des Fourriers\", \"cbc:AdditionalStreetName\": \"3 avenue Maurice Chupin\", \"cbc:CityName\": \"Rochefort\", \"cbc:PostalZone\": \"17304\", \"cbc:CountrySubentityCode\": {\"@listName\": \"nuts\", \"#text\": \"FRI32\"}, \"cac:Country\": {\"cbc:IdentificationCode\": {\"@listName\": \"country\", \"#text\": \"FRA\"}}}, \"cac:PartyLegalEntity\": {\"cbc:CompanyID\": {\"@schemeName\": \"eu\", \"#text\": \"D8F19A01-9696-D0F6-80DDE2485FCEFABE\"}}, \"cac:Contact\": {\"cbc:Telephone\": \"0516843518\", \"cbc:ElectronicMail\": \"commandepublique@agglo-rochefortocean.fr\"}}}, {\"efac:Company\": {\"cac:PartyIdentification\": {\"cbc:ID\": {\"@schemeName\": \"organization\", \"#text\": \"ORG-0004\"}}, \"cac:PartyName\": {\"cbc:Name\": {\"@languageID\": \"FRA\", \"#text\": \"Tribunal administratif de Poitiers\"}}, \"cac:PostalAddress\": {\"cbc:Postbox\": \"541\", \"cbc:StreetName\": \"15, rue de Blossac\", \"cbc:AdditionalStreetName\": \"Hôtel Gilbert\", \"cbc:CityName\": \"Poitiers\", \"cbc:PostalZone\": \"86020\", \"cbc:CountrySubentityCode\": {\"@listName\": \"nuts\", \"#text\": \"FRI34\"}, \"cac:Country\": {\"cbc:IdentificationCode\": {\"@listName\": \"country\", \"#text\": \"FRA\"}}}, \"cac:PartyLegalEntity\": {\"cbc:CompanyID\": {\"@schemeName\": \"eu\", \"#text\": \"D8F19A14-ED4C-450A-91E55CB89B56D42C\"}}, \"cac:Contact\": {\"cbc:Telephone\": \"0549607919\", \"cbc:Telefax\": \"0549606809\", \"cbc:ElectronicMail\": \"greffe.ta-poitiers@juradm.fr\"}}}, {\"efac:Company\": {\"cac:PartyIdentification\": {\"cbc:ID\": {\"@schemeName\": \"organization\", \"#text\": \"ORG-0005\"}}, \"cac:PartyName\": {\"cbc:Name\": {\"@languageID\": \"FRA\", \"#text\": \"Tribunal administratif de Poitiers\"}}, \"cac:PostalAddress\": {\"cbc:Postbox\": \"541\", \"cbc:StreetName\": \"15, rue de Blossac\", \"cbc:AdditionalStreetName\": \"Hôtel Gilbert\", \"cbc:CityName\": \"Poitiers\", \"cbc:PostalZone\": \"86020\", \"cbc:CountrySubentityCode\": {\"@listName\": \"nuts\", \"#text\": \"FRI34\"}, \"cac:Country\": {\"cbc:IdentificationCode\": {\"@listName\": \"country\", \"#text\": \"FRA\"}}}, \"cac:PartyLegalEntity\": {\"cbc:CompanyID\": {\"@schemeName\": \"eu\", \"#text\": \"D8F19A34-D9A3-0870-0E36F07BA68165BA\"}}, \"cac:Contact\": {\"cbc:Telephone\": \"0549607919\", \"cbc:Telefax\": \"0549606809\", \"cbc:ElectronicMail\": \"greffe.ta-poitiers@juradm.fr\"}}}, {\"efbc:GroupLeadIndicator\": \"false\", \"efac:Company\": {\"cac:PartyIdentification\": {\"cbc:ID\": {\"@schemeName\": \"organization\", \"#text\": \"ORG-0006\"}}, \"cac:PartyName\": {\"cbc:Name\": {\"@languageID\": \"FRA\", \"#text\": \"Ville de Rochefort\"}}, \"cac:PostalAddress\": {\"cbc:Postbox\": \"60030\", \"cbc:StreetName\": \"119 rue Pierre Loti\", \"cbc:CityName\": \"Rochefort\", \"cbc:PostalZone\": \"17301\", \"cbc:CountrySubentityCode\": {\"@listName\": \"nuts\", \"#text\": \"FRI32\"}, \"cac:Country\": {\"cbc:IdentificationCode\": {\"@listName\": \"country\", \"#text\": \"FRA\"}}}, \"cac:PartyLegalEntity\": {\"cbc:CompanyID\": {\"@schemeName\": \"eu\", \"#text\": \"D8F19A55-9F14-1454-0499D1761597693E\"}}, \"cac:Contact\": {\"cbc:Name\": \"DCAJCP - Marchés Publics\", \"cbc:Telephone\": \"0516843518\", \"cbc:ElectronicMail\": \"marches.publics@ville-rochefort.fr\"}}}]}}}}}, \"cbc:UBLVersionID\": \"2.3\", \"cbc:CustomizationID\": \"eforms-sdk-1.12\", \"cbc:ID\": {\"@schemeName\": \"notice-id\", \"#text\": \"b5bac0a6-5cc8-45b5-bd34-69bdfdd24c3f\"}, \"cbc:ContractFolderID\": \"5daf8102-aa1e-46f8-aa98-f6736245e256\", \"cbc:IssueDate\": \"2026-10-02+02:00\", \"cbc:IssueTime\": \"12:10:36+02:00\", \"cbc:VersionID\": \"01\", \"cbc:RegulatoryDomain\": \"32014L0024\", \"cbc:NoticeTypeCode\": {\"@listName\": \"competition\", \"#text\": \"cn-standard\"}, \"cbc:NoticeLanguageCode\": \"FRA\", \"cac:ContractingParty\": [{\"cbc:BuyerProfileURI\": \"https://www.agglo-rochefortocean.fr/marches-publics\", \"cac:ContractingPartyType\": {\"cbc:PartyTypeCode\": {\"@listName\": \"buyer-legal-type\", \"#text\": \"la\"}}, \"cac:ContractingActivity\": {\"cbc:ActivityTypeCode\": {\"@listName\": \"authority-activity\", \"#text\": \"gen-pub\"}}, \"cac:Party\": {\"cac:PartyIdentification\": {\"cbc:ID\": {\"@schemeName\": \"organization\", \"#text\": \"ORG-0002\"}}, \"cac:ServiceProviderParty\": {\"cbc:ServiceTypeCode\": {\"@listName\": \"organisation-role\", \"#text\": \"ted-esen\"}, \"cac:Party\": {\"cac:PartyIdentification\": {\"cbc:ID\": {\"@schemeName\": \"organization\", \"#text\": \"ORG-0001\"}}}}}}, {\"cbc:BuyerProfileURI\": \"https://www.agglo-rochefortocean.fr/marches-publics\", \"cac:ContractingPartyType\": {\"cbc:PartyTypeCode\": {\"@listName\": \"buyer-legal-type\", \"#text\": \"la\"}}, \"cac:ContractingActivity\": {\"cbc:ActivityTypeCode\": {\"@listName\": \"authority-activity\", \"#text\": \"gen-pub\"}}, \"cac:Party\": {\"cac:PartyIdentification\": {\"cbc:ID\": {\"@schemeName\": \"organization\", \"#text\": \"ORG-0006\"}}}}], \"cac:TenderingTerms\": {\"cac:TendererQualificationRequest\": {\"cac:SpecificTendererRequirement\": {\"cbc:TendererRequirementTypeCode\": {\"@listName\": \"exclusion-grounds-source\", \"#text\": \"epo-procurement-document\"}}}, \"cac:LotDistribution\": {\"cbc:MaximumLotsAwardedNumeric\": \"3\", \"cbc:MaximumLotsSubmittedNumeric\": \"3\"}}, \"cac:TenderingProcess\": {\"cbc:ProcedureCode\": {\"@languageID\": \"FRA\", \"@listName\": \"procurement-procedure-type\", \"#text\": \"open\"}, \"cac:ProcessJustification\": {\"cbc:ProcessReasonCode\": {\"@listName\": \"accelerated-procedure\", \"#text\": \"false\"}}}, \"cac:ProcurementProject\": {\"cbc:ID\": \"2026-0029\", \"cbc:Name\": {\"@languageID\": \"FRA\", \"#text\": \"Traitement des déchets issus des déchèteries de la CARO et de la déchèterie municipale de Rochefort\"}, \"cbc:Description\": {\"@languageID\": \"FRA\", \"#text\": \"Traitement des déchets des 8 déchèteries de la Communauté d'agglomération Rochefort Océan et de la déchèterie municipale de la Ville de Rochefort\"}, \"cbc:ProcurementTypeCode\": {\"@listName\": \"contract-nature\", \"#text\": \"services\"}, \"cbc:Note\": {\"@languageID\": \"FRA\", \"#text\": \"Les marchés sont passés dans le cadre d'un \\\"groupement de commandes  pour les prestations liées aux déchets\\\" constitué de la Caro (mandataire du groupement) et de la Ville de Rochefort\"}, \"cac:MainCommodityClassification\": {\"cbc:ItemClassificationCode\": {\"@listName\": \"cpv\", \"#text\": \"90513000\"}}, \"cac:AdditionalCommodityClassification\": {\"cbc:ItemClassificationCode\": {\"@listName\": \"cpv\", \"#text\": \"90500000\"}}, \"cac:RealizedLocation\": {\"cac:Address\": {\"cbc:CountrySubentityCode\": {\"@listName\": \"nuts\", \"#text\": \"FRI32\"}, \"cac:Country\": {\"cbc:IdentificationCode\": {\"@listName\": \"country\", \"#text\": \"FRA\"}}}}}, \"cac:ProcurementProjectLot\": [{\"cbc:ID\": {\"@schemeName\": \"Lot\", \"#text\": \"LOT-0001\"}, \"cac:TenderingTerms\": {\"cbc:VariantConstraintCode\": {\"@listName\": \"permission\", \"#text\": \"not-allowed\"}, \"cbc:FundingProgramCode\": {\"@listName\": \"eu-funded\", \"#text\": \"no-eu-funds\"}, \"cbc:RecurringProcurementIndicator\": \"true\", \"cbc:MultipleTendersCode\": {\"@listName\": \"permission\", \"#text\": \"not-allowed\"}, \"cac:CallForTendersDocumentReference\": {\"cbc:ID\": \"1883219\", \"cbc:DocumentType\": \"non-restricted-document\", \"cbc:LanguageID\": \"FRA\", \"cbc:DocumentStatusCode\": {\"@listName\": \"linguistic-status\", \"#text\": \"official\"}, \"cac:Attachment\": {\"cac:ExternalReference\": {\"cbc:URI\": \"https://www.marches-publics.info/mpiaws/index.cfm?fuseaction=dematEnt.login&amp;type=DCE&amp;IDM=1883219\"}}}, \"cac:TendererQualificationRequest\": [{\"cac:SpecificTendererRequirement\": {\"cbc:TendererRequirementTypeCode\": {\"@listName\": \"selection-criteria-source\", \"#text\": \"epo-procurement-document\"}}}, {\"cac:SpecificTendererRequirement\": {\"cbc:TendererRequirementTypeCode\": {\"@listName\": \"reserved-procurement\", \"#text\": \"none\"}}}], \"cac:ContractExecutionRequirement\": [{\"cbc:ExecutionRequirementCode\": {\"@listName\": \"einvoicing\", \"#text\": \"required\"}}, {\"cbc:ExecutionRequirementCode\": {\"@listName\": \"ecatalog-submission\", \"#text\": \"not-allowed\"}}, {\"cbc:ExecutionRequirementCode\": {\"@listName\": \"esignature-submission\", \"#text\": \"false\"}}, {\"cbc:ExecutionRequirementCode\": {\"@listName\": \"reserved-execution\", \"#text\": \"no\"}}], \"cac:AdditionalInformationParty\": {\"cac:PartyIdentification\": {\"cbc:ID\": {\"@schemeName\": \"touchpoint\", \"#text\": \"ORG-0003\"}}}, \"cac:TenderRecipientParty\": {\"cbc:EndpointID\": \"https://www.marches-publics.info/mpiaws/index.cfm?fuseaction=demat.termes&amp;IDM=1883219\"}, \"cac:TenderValidityPeriod\": {\"cbc:DurationMeasure\": {\"@unitCode\": \"MONTH\", \"#text\": \"4\"}}, \"cac:AppealTerms\": {\"cac:AppealInformationParty\": {\"cac:PartyIdentification\": {\"cbc:ID\": {\"@schemeName\": \"organization\", \"#text\": \"ORG-0005\"}}}, \"cac:AppealReceiverParty\": {\"cac:PartyIdentification\": {\"cbc:ID\": {\"@schemeName\": \"organization\", \"#text\": \"ORG-0004\"}}}}, \"cac:Language\": {\"cbc:ID\": \"FRA\"}, \"cac:PostAwardProcess\": {\"cbc:ElectronicOrderUsageIndicator\": \"false\", \"cbc:ElectronicPaymentUsageIndicator\": \"false\"}}, \"cac:TenderingProcess\": {\"ext:UBLExtensions\": {\"ext:UBLExtension\": {\"ext:ExtensionContent\": {\"efext:EformsExtension\": {\"efbc:AccessToolName\": \"AW Solutions\"}}}}, \"cbc:SubmissionMethodCode\": {\"@listName\": \"esubmission\", \"#text\": \"required\"}, \"cbc:GovernmentAgreementConstraintIndicator\": \"true\", \"cac:TenderSubmissionDeadlinePeriod\": {\"cbc:EndDate\": \"2026-11-03+01:00\", \"cbc:EndTime\": \"12:00:00+01:00\"}, \"cac:OpenTenderEvent\": {\"cbc:OccurrenceDate\": \"2026-11-03+01:00\", \"cbc:OccurrenceTime\": \"14:00:00+01:00\", \"cac:OccurenceLocation\": {\"cbc:Description\": {\"@languageID\": \"FRA\", \"#text\": \"Rochefort\"}}}, \"cac:AuctionTerms\": {\"cbc:AuctionConstraintIndicator\": \"false\"}, \"cac:ContractingSystem\": [{\"cbc:ContractingSystemTypeCode\": {\"@listName\": \"framework-agreement\", \"#text\": \"none\"}}, {\"cbc:ContractingSystemTypeCode\": {\"@listName\": \"dps-usage\", \"#text\": \"none\"}}]}, \"cac:ProcurementProject\": {\"cbc:ID\": {\"@schemeName\": \"InternalID\", \"#text\": \"1\"}, \"cbc:Name\": {\"@languageID\": \"FRA\", \"#text\": \"Lot n°1 - Enfouissement des déchets tout-venant\"}, \"cbc:Description\": {\"@languageID\": \"FRA\", \"#text\": \"Ce marché a pour objet la réception, le transfert, le transport et le traitement des déchets dits «Tout-venant», assimilables aux DIB, des déchetteries de la Communauté d'Agglomération Rochefort Océan et de la déchetterie municipale de Rochefort\"}, \"cbc:ProcurementTypeCode\": {\"@listName\": \"contract-nature\", \"#text\": \"services\"}, \"cac:MainCommodityClassification\": {\"cbc:ItemClassificationCode\": {\"@listName\": \"cpv\", \"#text\": \"90513000\"}}, \"cac:AdditionalCommodityClassification\": [{\"cbc:ItemClassificationCode\": {\"@listName\": \"cpv\", \"#text\": \"90500000\"}}, {\"cbc:ItemClassificationCode\": {\"@listName\": \"cpv\", \"#text\": \"90500000\"}}], \"cac:RealizedLocation\": {\"cac:Address\": {\"cbc:StreetName\": \"territoire de l'agglomération Rochefort Océan\", \"cbc:CityName\": \"Rochefort\", \"cbc:PostalZone\": \"17300\", \"cbc:CountrySubentityCode\": {\"@listName\": \"nuts\", \"#text\": \"FRI32\"}, \"cac:Country\": {\"cbc:IdentificationCode\": {\"@listName\": \"country\", \"#text\": \"FRA\"}}}}, \"cac:PlannedPeriod\": {\"cbc:StartDate\": \"2027-01-01+01:00\", \"cbc:DurationMeasure\": {\"@unitCode\": \"MONTH\", \"#text\": \"48\"}}}}, {\"cbc:ID\": {\"@schemeName\": \"Lot\", \"#text\": \"LOT-0002\"}, \"cac:TenderingTerms\": {\"cbc:VariantConstraintCode\": {\"@listName\": \"permission\", \"#text\": \"not-allowed\"}, \"cbc:FundingProgramCode\": {\"@listName\": \"eu-funded\", \"#text\": \"no-eu-funds\"}, \"cbc:RecurringProcurementIndicator\": \"true\", \"cbc:MultipleTendersCode\": {\"@listName\": \"permission\", \"#text\": \"not-allowed\"}, \"cac:CallForTendersDocumentReference\": {\"cbc:ID\": \"1883219\", \"cbc:DocumentType\": \"non-restricted-document\", \"cbc:LanguageID\": \"FRA\", \"cbc:DocumentStatusCode\": {\"@listName\": \"linguistic-status\", \"#text\": \"official\"}, \"cac:Attachment\": {\"cac:ExternalReference\": {\"cbc:URI\": \"https://www.marches-publics.info/mpiaws/index.cfm?fuseaction=dematEnt.login&amp;type=DCE&amp;IDM=1883219\"}}}, \"cac:TendererQualificationRequest\": [{\"cac:SpecificTendererRequirement\": {\"cbc:TendererRequirementTypeCode\": {\"@listName\": \"selection-criteria-source\", \"#text\": \"epo-procurement-document\"}}}, {\"cac:SpecificTendererRequirement\": {\"cbc:TendererRequirementTypeCode\": {\"@listName\": \"reserved-procurement\", \"#text\": \"none\"}}}], \"cac:ContractExecutionRequirement\": [{\"cbc:ExecutionRequirementCode\": {\"@listName\": \"einvoicing\", \"#text\": \"required\"}}, {\"cbc:ExecutionRequirementCode\": {\"@listName\": \"ecatalog-submission\", \"#text\": \"not-allowed\"}}, {\"cbc:ExecutionRequirementCode\": {\"@listName\": \"esignature-submission\", \"#text\": \"false\"}}, {\"cbc:ExecutionRequirementCode\": {\"@listName\": \"reserved-execution\", \"#text\": \"no\"}}], \"cac:AdditionalInformationParty\": {\"cac:PartyIdentification\": {\"cbc:ID\": {\"@schemeName\": \"touchpoint\", \"#text\": \"ORG-0003\"}}}, \"cac:TenderRecipientParty\": {\"cbc:EndpointID\": \"https://www.marches-publics.info/mpiaws/index.cfm?fuseaction=demat.termes&amp;IDM=1883219\"}, \"cac:TenderValidityPeriod\": {\"cbc:DurationMeasure\": {\"@unitCode\": \"MONTH\", \"#text\": \"4\"}}, \"cac:AppealTerms\": {\"cac:AppealInformationParty\": {\"cac:PartyIdentification\": {\"cbc:ID\": {\"@schemeName\": \"organization\", \"#text\": \"ORG-0005\"}}}, \"cac:AppealReceiverParty\": {\"cac:PartyIdentification\": {\"cbc:ID\": {\"@schemeName\": \"organization\", \"#text\": \"ORG-0004\"}}}}, \"cac:Language\": {\"cbc:ID\": \"FRA\"}, \"cac:PostAwardProcess\": {\"cbc:ElectronicOrderUsageIndicator\": \"false\", \"cbc:ElectronicPaymentUsageIndicator\": \"false\"}}, \"cac:TenderingProcess\": {\"ext:UBLExtensions\": {\"ext:UBLExtension\": {\"ext:ExtensionContent\": {\"efext:EformsExtension\": {\"efbc:AccessToolName\": \"AW Solutions\"}}}}, \"cbc:SubmissionMethodCode\": {\"@listName\": \"esubmission\", \"#text\": \"required\"}, \"cbc:GovernmentAgreementConstraintIndicator\": \"true\", \"cac:TenderSubmissionDeadlinePeriod\": {\"cbc:EndDate\": \"2026-11-03+01:00\", \"cbc:EndTime\": \"12:00:00+01:00\"}, \"cac:OpenTenderEvent\": {\"cbc:OccurrenceDate\": \"2026-11-03+01:00\", \"cbc:OccurrenceTime\": \"14:00:00+01:00\", \"cac:OccurenceLocation\": {\"cbc:Description\": {\"@languageID\": \"FRA\", \"#text\": \"Rochefort\"}}}, \"cac:AuctionTerms\": {\"cbc:AuctionConstraintIndicator\": \"false\"}, \"cac:ContractingSystem\": [{\"cbc:ContractingSystemTypeCode\": {\"@listName\": \"framework-agreement\", \"#text\": \"none\"}}, {\"cbc:ContractingSystemTypeCode\": {\"@listName\": \"dps-usage\", \"#text\": \"none\"}}]}, \"cac:ProcurementProject\": {\"cbc:ID\": {\"@schemeName\": \"InternalID\", \"#text\": \"2\"}, \"cbc:Name\": {\"@languageID\": \"FRA\", \"#text\": \"Lot n°2 - Traitement des déchets bois\"}, \"cbc:Description\": {\"@languageID\": \"FRA\", \"#text\": \"Ce marché a pour objet le traitement et la valorisation des déchets de bois issus des déchetteries de la Communauté d'agglomération Rochefort Océan et de la déchetterie municipale de la ville de Rochefort\"}, \"cbc:ProcurementTypeCode\": {\"@listName\": \"contract-nature\", \"#text\": \"services\"}, \"cac:MainCommodityClassification\": {\"cbc:ItemClassificationCode\": {\"@listName\": \"cpv\", \"#text\": \"90513000\"}}, \"cac:AdditionalCommodityClassification\": [{\"cbc:ItemClassificationCode\": {\"@listName\": \"cpv\", \"#text\": \"90500000\"}}, {\"cbc:ItemClassificationCode\": {\"@listName\": \"cpv\", \"#text\": \"90500000\"}}], \"cac:RealizedLocation\": {\"cac:Address\": {\"cbc:StreetName\": \"territoire de l'agglomération Rochefort Océan\", \"cbc:CityName\": \"Rochefort\", \"cbc:PostalZone\": \"17300\", \"cbc:CountrySubentityCode\": {\"@listName\": \"nuts\", \"#text\": \"FRI32\"}, \"cac:Country\": {\"cbc:IdentificationCode\": {\"@listName\": \"country\", \"#text\": \"FRA\"}}}}, \"cac:PlannedPeriod\": {\"cbc:StartDate\": \"2027-01-01+01:00\", \"cbc:DurationMeasure\": {\"@unitCode\": \"MONTH\", \"#text\": \"48\"}}}}, {\"cbc:ID\": {\"@schemeName\": \"Lot\", \"#text\": \"LOT-0003\"}, \"cac:TenderingTerms\": {\"cbc:VariantConstraintCode\": {\"@listName\": \"permission\", \"#text\": \"not-allowed\"}, \"cbc:FundingProgramCode\": {\"@listName\": \"eu-funded\", \"#text\": \"no-eu-funds\"}, \"cbc:RecurringProcurementIndicator\": \"true\", \"cbc:MultipleTendersCode\": {\"@listName\": \"permission\", \"#text\": \"not-allowed\"}, \"cac:CallForTendersDocumentReference\": {\"cbc:ID\": \"1883219\", \"cbc:DocumentType\": \"non-restricted-document\", \"cbc:LanguageID\": \"FRA\", \"cbc:DocumentStatusCode\": {\"@listName\": \"linguistic-status\", \"#text\": \"official\"}, \"cac:Attachment\": {\"cac:ExternalReference\": {\"cbc:URI\": \"https://www.marches-publics.info/mpiaws/index.cfm?fuseaction=dematEnt.login&amp;type=DCE&amp;IDM=1883219\"}}}, \"cac:TendererQualificationRequest\": [{\"cac:SpecificTendererRequirement\": {\"cbc:TendererRequirementTypeCode\": {\"@listName\": \"selection-criteria-source\", \"#text\": \"epo-procurement-document\"}}}, {\"cac:SpecificTendererRequirement\": {\"cbc:TendererRequirementTypeCode\": {\"@listName\": \"reserved-procurement\", \"#text\": \"none\"}}}], \"cac:ContractExecutionRequirement\": [{\"cbc:ExecutionRequirementCode\": {\"@listName\": \"einvoicing\", \"#text\": \"required\"}}, {\"cbc:ExecutionRequirementCode\": {\"@listName\": \"ecatalog-submission\", \"#text\": \"not-allowed\"}}, {\"cbc:ExecutionRequirementCode\": {\"@listName\": \"esignature-submission\", \"#text\": \"false\"}}, {\"cbc:ExecutionRequirementCode\": {\"@listName\": \"reserved-execution\", \"#text\": \"no\"}}], \"cac:AdditionalInformationParty\": {\"cac:PartyIdentification\": {\"cbc:ID\": {\"@schemeName\": \"touchpoint\", \"#text\": \"ORG-0003\"}}}, \"cac:TenderRecipientParty\": {\"cbc:EndpointID\": \"https://www.marches-publics.info/mpiaws/index.cfm?fuseaction=demat.termes&amp;IDM=1883219\"}, \"cac:TenderValidityPeriod\": {\"cbc:DurationMeasure\": {\"@unitCode\": \"MONTH\", \"#text\": \"4\"}}, \"cac:AppealTerms\": {\"cac:AppealInformationParty\": {\"cac:PartyIdentification\": {\"cbc:ID\": {\"@schemeName\": \"organization\", \"#text\": \"ORG-0005\"}}}, \"cac:AppealReceiverParty\": {\"cac:PartyIdentification\": {\"cbc:ID\": {\"@schemeName\": \"organization\", \"#text\": \"ORG-0004\"}}}}, \"cac:Language\": {\"cbc:ID\": \"FRA\"}, \"cac:PostAwardProcess\": {\"cbc:ElectronicOrderUsageIndicator\": \"false\", \"cbc:ElectronicPaymentUsageIndicator\": \"false\"}}, \"cac:TenderingProcess\": {\"ext:UBLExtensions\": {\"ext:UBLExtension\": {\"ext:ExtensionContent\": {\"efext:EformsExtension\": {\"efbc:AccessToolName\": \"AW Solutions\"}}}}, \"cbc:SubmissionMethodCode\": {\"@listName\": \"esubmission\", \"#text\": \"required\"}, \"cbc:GovernmentAgreementConstraintIndicator\": \"true\", \"cac:TenderSubmissionDeadlinePeriod\": {\"cbc:EndDate\": \"2026-11-03+01:00\", \"cbc:EndTime\": \"12:00:00+01:00\"}, \"cac:OpenTenderEvent\": {\"cbc:OccurrenceDate\": \"2026-11-03+01:00\", \"cbc:OccurrenceTime\": \"14:00:00+01:00\", \"cac:OccurenceLocation\": {\"cbc:Description\": {\"@languageID\": \"FRA\", \"#text\": \"Rochefort\"}}}, \"cac:AuctionTerms\": {\"cbc:AuctionConstraintIndicator\": \"false\"}, \"cac:ContractingSystem\": [{\"cbc:ContractingSystemTypeCode\": {\"@listName\": \"framework-agreement\", \"#text\": \"none\"}}, {\"cbc:ContractingSystemTypeCode\": {\"@listName\": \"dps-usage\", \"#text\": \"none\"}}]}, \"cac:ProcurementProject\": {\"cbc:ID\": {\"@schemeName\": \"InternalID\", \"#text\": \"3\"}, \"cbc:Name\": {\"@languageID\": \"FRA\", \"#text\": \"Lot n°3 - Traitement et transport des déchets d'amiante liée\"}, \"cbc:Description\": {\"@languageID\": \"FRA\", \"#text\": \"Ne concerne que la Communauté d'agglomération Rochefort Ocean.\\nLa prestation comprend :\\n- la mise à disposition d'un « dépôt bag » (ou body-benne) en benne de 15 m3\\n- la collecte et le transport jusqu'aux centre de traitement,\\n- le traitement des déchets amiantés\"}, \"cbc:ProcurementTypeCode\": {\"@listName\": \"contract-nature\", \"#text\": \"services\"}, \"cac:MainCommodityClassification\": {\"cbc:ItemClassificationCode\": {\"@listName\": \"cpv\", \"#text\": \"90513000\"}}, \"cac:AdditionalCommodityClassification\": [{\"cbc:ItemClassificationCode\": {\"@listName\": \"cpv\", \"#text\": \"90500000\"}}, {\"cbc:ItemClassificationCode\": {\"@listName\": \"cpv\", \"#text\": \"90500000\"}}], \"cac:RealizedLocation\": {\"cac:Address\": {\"cbc:StreetName\": \"territoire de l'agglomération Rochefort Océan\", \"cbc:CityName\": \"Rochefort\", \"cbc:PostalZone\": \"17300\", \"cbc:CountrySubentityCode\": {\"@listName\": \"nuts\", \"#text\": \"FRI32\"}, \"cac:Country\": {\"cbc:IdentificationCode\": {\"@listName\": \"country\", \"#text\": \"FRA\"}}}}, \"cac:PlannedPeriod\": {\"cbc:StartDate\": \"2027-01-01+01:00\", \"cbc:DurationMeasure\": {\"@unitCode\": \"MONTH\", \"#text\": \"48\"}}}}]}}}",
+   "url_avis": "https://www.boamp.fr/pages/avis/?q=idweb:26-95330"
+  },
+  {
+   "idweb": "26-95410",
+   "id": "26_95410",
+   "contractfolderid": "c0d6160c-94f6-4b4c-982b-9e6069e30050",
+   "objet": "Diagnostics de raccordement au réseau public d'assainissement des installations situées sur le domaine privé",
+   "filename": "26-95410",
+   "famille": "JOUE",
+   "code_departement": [
+    "29"
+   ],
+   "code_departement_prestation": null,
+   "famille_libelle": "Marchés européens",
+   "dateparution": "2026-10-04",
+   "datefindiffusion": "2026-11-03",
+   "datelimitereponse": "2026-11-03T11:00:00+00:00",
+   "nomacheteur": "SERVICE PUBLIC DE L EAU AN DOUR",
+   "titulaire": null,
+   "perimetre": "DIRECTIVE-24",
+   "type_procedure": "OUVERT",
+   "soustype_procedure": null,
+   "procedure_libelle": "Procédure Ouverte",
+   "procedure_categorise": "OUVERT/",
+   "nature": "APPEL_OFFRE",
+   "sousnature": "STANDARD",
+   "nature_libelle": "Avis de marché",
+   "sousnature_libelle": null,
+   "nature_categorise": "appeloffre/standard",
+   "nature_categorise_libelle": "Avis de marché/",
+   "criteres": null,
+   "marche_public_simplifie": null,
+   "marche_public_simplifie_label": null,
+   "etat": "INITIAL",
+   "descripteur_code": [
+    "18",
+    "72"
+   ],
+   "dc": [
+    "18",
+    "72"
+   ],
+   "descripteur_libelle": [
+    "Assainissement",
+    "Contrôle technique"
+   ],
+   "type_marche": [
+    "SERVICES"
+   ],
+   "type_marche_facette": [
+    "Services"
+   ],
+   "type_avis": [
+    "5",
+    "1"
+   ],
+   "annonce_lie": null,
+   "annonces_anterieures": null,
+   "source_schema": "3.2.5",
+   "donnees": "{\"EFORMS\": {\"ContractNotice\": {\"ext:UBLExtensions\": {\"ext:UBLExtension\": {\"ext:ExtensionContent\": {\"efext:EformsExtension\": {\"efac:NoticeSubType\": {\"cbc:SubTypeCode\": {\"@listName\": \"notice-subtype\", \"#text\": \"16\"}}, \"efac:Organizations\": {\"efac:Organization\": [{\"efac:Company\": {\"cac:PartyIdentification\": {\"cbc:ID\": {\"@schemeName\": \"organization\", \"#text\": \"ORG-0001\"}}, \"cac:PartyName\": {\"cbc:Name\": {\"@languageID\": \"FRA\", \"#text\": \"Service public de l'eau AN DOUR\"}}, \"cac:PostalAddress\": {\"cbc:StreetName\": \"3 rue Yves Guyader\", \"cbc:CityName\": \"MORLAIX\", \"cbc:PostalZone\": \"29600\", \"cbc:CountrySubentityCode\": {\"@listName\": \"nuts\", \"#text\": \"FRH02\"}, \"cac:Country\": {\"cbc:IdentificationCode\": {\"@listName\": \"country\", \"#text\": \"FRA\"}}}, \"cac:PartyLegalEntity\": {\"cbc:CompanyID\": \"97787458500010\"}, \"cac:Contact\": {\"cbc:Telephone\": \"0683136282\", \"cbc:ElectronicMail\": \"commande.publique@andour.bzh\"}}}, {\"efac:Company\": {\"cac:PartyIdentification\": {\"cbc:ID\": {\"@schemeName\": \"organization\", \"#text\": \"ORG-0002\"}}, \"cac:PartyName\": {\"cbc:Name\": {\"@languageID\": \"FRA\", \"#text\": \"Tribunnal administratif Rennes\"}}, \"cac:PostalAddress\": {\"cbc:CityName\": \"RENNES\", \"cbc:PostalZone\": \"35000\", \"cbc:CountrySubentityCode\": {\"@listName\": \"nuts\", \"#text\": \"FRH03\"}, \"cac:Country\": {\"cbc:IdentificationCode\": {\"@listName\": \"country\", \"#text\": \"FRA\"}}}, \"cac:PartyLegalEntity\": {\"cbc:CompanyID\": \"173500059\"}, \"cac:Contact\": {\"cbc:Telephone\": \"0223212828\", \"cbc:ElectronicMail\": \"greffe.ta-rennes@juradm.fr\"}}}]}}}}}, \"cbc:UBLVersionID\": \"2.3\", \"cbc:CustomizationID\": \"eforms-sdk-1.13\", \"cbc:ID\": {\"@schemeName\": \"notice-id\", \"#text\": \"f4ee6008-9fbf-4425-86f9-d3a7e24538b7\"}, \"cbc:ContractFolderID\": \"c0d6160c-94f6-4b4c-982b-9e6069e30050\", \"cbc:IssueDate\": \"2026-10-02+02:00\", \"cbc:IssueTime\": \"14:56:04.844+02:00\", \"cbc:VersionID\": \"01\", \"cbc:RegulatoryDomain\": \"32014L0024\", \"cbc:NoticeTypeCode\": {\"@listName\": \"competition\", \"#text\": \"cn-standard\"}, \"cbc:NoticeLanguageCode\": \"FRA\", \"cac:ContractingParty\": {\"cbc:BuyerProfileURI\": \"https://www.megalis.bretagne.bzh/\", \"cac:ContractingPartyType\": {\"cbc:PartyTypeCode\": {\"@listName\": \"buyer-legal-type\", \"#text\": \"la\"}}, \"cac:ContractingActivity\": {\"cbc:ActivityTypeCode\": {\"@listName\": \"authority-activity\", \"#text\": \"econ-aff\"}}, \"cac:Party\": {\"cac:PartyIdentification\": {\"cbc:ID\": {\"@schemeName\": \"organization\", \"#text\": \"ORG-0001\"}}}}, \"cac:TenderingTerms\": {\"cac:TendererQualificationRequest\": {\"cac:SpecificTendererRequirement\": {\"cbc:TendererRequirementTypeCode\": {\"@listName\": \"exclusion-grounds-source\", \"#text\": \"epo-procurement-document\"}}}}, \"cac:TenderingProcess\": {\"cbc:ProcedureCode\": {\"@listName\": \"procurement-procedure-type\", \"#text\": \"open\"}, \"cac:ProcessJustification\": {\"cbc:ProcessReasonCode\": {\"@listName\": \"accelerated-procedure\", \"#text\": \"false\"}}}, \"cac:ProcurementProject\": {\"cbc:ID\": {\"@schemeName\": \"InternalID\", \"#text\": \"2026042\"}, \"cbc:Name\": {\"@languageID\": \"FRA\", \"#text\": \"CONTROLE BRANCHEMENTS AEP\"}, \"cbc:Description\": {\"@languageID\": \"FRA\", \"#text\": \"Diagnostics de raccordement au réseau public d'assainissement des installations situées sur le domaine privé\"}, \"cbc:ProcurementTypeCode\": {\"@listName\": \"contract-nature\", \"#text\": \"services\"}, \"cac:MainCommodityClassification\": {\"cbc:ItemClassificationCode\": {\"@listName\": \"cpv\", \"#text\": \"71630000\"}}, \"cac:RealizedLocation\": {\"cac:Address\": {\"cbc:CountrySubentityCode\": {\"@listName\": \"nuts\", \"#text\": \"FRH02\"}, \"cac:Country\": {\"cbc:IdentificationCode\": {\"@listName\": \"country\", \"#text\": \"FRA\"}}}}}, \"cac:ProcurementProjectLot\": {\"cbc:ID\": {\"@schemeName\": \"Lot\", \"#text\": \"LOT-0001\"}, \"cac:TenderingTerms\": {\"cbc:FundingProgramCode\": {\"@listName\": \"eu-funded\", \"#text\": \"no-eu-funds\"}, \"cac:CallForTendersDocumentReference\": {\"cbc:ID\": \"2026042\", \"cbc:DocumentType\": \"non-restricted-document\", \"cac:Attachment\": {\"cac:ExternalReference\": {\"cbc:URI\": \"https://www.megalis.bretagne.bzh/\"}}}, \"cac:TendererQualificationRequest\": [{\"cac:SpecificTendererRequirement\": {\"cbc:TendererRequirementTypeCode\": {\"@listName\": \"selection-criteria-source\", \"#text\": \"epo-procurement-document\"}}}, {\"cac:SpecificTendererRequirement\": {\"cbc:TendererRequirementTypeCode\": {\"@listName\": \"reserved-procurement\", \"#text\": \"none\"}}}], \"cac:ContractExecutionRequirement\": [{\"cbc:ExecutionRequirementCode\": {\"@listName\": \"reserved-execution\", \"#text\": \"no\"}}, {\"cbc:ExecutionRequirementCode\": {\"@listName\": \"conditions\", \"#text\": \"performance\"}}, {\"cbc:ExecutionRequirementCode\": {\"@listName\": \"einvoicing\", \"#text\": \"required\"}}, {\"cbc:ExecutionRequirementCode\": {\"@listName\": \"ecatalog-submission\", \"#text\": \"not-allowed\"}}], \"cac:TenderRecipientParty\": {\"cbc:EndpointID\": \"https://www.megalis.bretagne.bzh/\"}, \"cac:TenderValidityPeriod\": {\"cbc:DurationMeasure\": {\"@unitCode\": \"MONTH\", \"#text\": \"4\"}}, \"cac:AppealTerms\": {\"cac:PresentationPeriod\": {\"cbc:Description\": {\"@languageID\": \"FRA\", \"#text\": \"voir RC\"}}, \"cac:AppealReceiverParty\": {\"cac:PartyIdentification\": {\"cbc:ID\": {\"@schemeName\": \"organization\", \"#text\": \"ORG-0002\"}}}}, \"cac:Language\": {\"cbc:ID\": \"FRA\"}, \"cac:PostAwardProcess\": {\"cbc:ElectronicOrderUsageIndicator\": \"true\", \"cbc:ElectronicPaymentUsageIndicator\": \"true\"}}, \"cac:TenderingProcess\": {\"cbc:SubmissionMethodCode\": {\"@listName\": \"esubmission\", \"#text\": \"required\"}, \"cbc:GovernmentAgreementConstraintIndicator\": \"true\", \"cac:TenderSubmissionDeadlinePeriod\": {\"cbc:EndDate\": \"2026-11-03+01:00\", \"cbc:EndTime\": \"12:00:00+01:00\"}, \"cac:AuctionTerms\": {\"cbc:AuctionConstraintIndicator\": \"false\"}, \"cac:FrameworkAgreement\": {\"cbc:MaximumOperatorQuantity\": \"0\", \"cac:SubsequentProcessTenderRequirement\": {\"cbc:Name\": \"buyer-categories\"}}, \"cac:ContractingSystem\": [{\"cbc:ContractingSystemTypeCode\": {\"@listName\": \"framework-agreement\", \"#text\": \"fa-wo-rc\"}}, {\"cbc:ContractingSystemTypeCode\": {\"@listName\": \"dps-usage\", \"#text\": \"none\"}}]}, \"cac:ProcurementProject\": {\"cbc:Name\": {\"@languageID\": \"FRA\", \"#text\": \"Diagnostics de raccordement au réseau public d'assainissement des installations situées sur le domaine privé\"}, \"cbc:Description\": {\"@languageID\": \"FRA\", \"#text\": \"Diagnostics de raccordement au réseau public d'assainissement des installations situées sur le domaine privé\"}, \"cbc:ProcurementTypeCode\": {\"@listName\": \"contract-nature\", \"#text\": \"services\"}, \"cbc:SMESuitableIndicator\": \"true\", \"cac:MainCommodityClassification\": {\"cbc:ItemClassificationCode\": {\"@listName\": \"cpv\", \"#text\": \"71630000\"}}, \"cac:RealizedLocation\": {\"cac:Address\": {\"cbc:CountrySubentityCode\": {\"@listName\": \"nuts\", \"#text\": \"FRH02\"}, \"cac:Country\": {\"cbc:IdentificationCode\": {\"@listName\": \"country\", \"#text\": \"FRA\"}}}}, \"cac:PlannedPeriod\": {\"cbc:DurationMeasure\": {\"@unitCode\": \"MONTH\", \"#text\": \"12\"}}}}}}}",
+   "url_avis": "https://www.boamp.fr/pages/avis/?q=idweb:26-95410"
+  },
+  {
+   "idweb": "26-95224",
+   "id": "26_95224",
+   "contractfolderid": "233f1784-d034-41ba-b65b-87a5664abc29",
+   "objet": "Agence de marketing pour mener les campagnes de promotion digitale du CNOSF",
+   "filename": "26-95224",
+   "famille": "JOUE",
+   "code_departement": [
+    "75"
+   ],
+   "code_departement_prestation": null,
+   "famille_libelle": "Marchés européens",
+   "dateparution": "2026-10-04",
+   "datefindiffusion": "2026-11-02",
+   "datelimitereponse": "2026-11-02T11:00:00+00:00",
+   "nomacheteur": "CNOSF",
+   "titulaire": null,
+   "perimetre": "DIRECTIVE-24",
+   "type_procedure": "OUVERT",
+   "soustype_procedure": null,
+   "procedure_libelle": "Procédure Ouverte",
+   "procedure_categorise": "OUVERT/",
+   "nature": "APPEL_OFFRE",
+   "sousnature": "STANDARD",
+   "nature_libelle": "Avis de marché",
+   "sousnature_libelle": null,
+   "nature_categorise": "appeloffre/standard",
+   "nature_categorise_libelle": "Avis de marché/",
+   "criteres": null,
+   "marche_public_simplifie": null,
+   "marche_public_simplifie_label": null,
+   "etat": "INITIAL",
+   "descripteur_code": [
+    "285"
+   ],
+   "dc": [
+    "285"
+   ],
+   "descripteur_libelle": [
+    "Publicité, Communication"
+   ],
+   "type_marche": [
+    "SERVICES"
+   ],
+   "type_marche_facette": [
+    "Services"
+   ],
+   "type_avis": [
+    "5",
+    "1"
+   ],
+   "annonce_lie": null,
+   "annonces_anterieures": null,
+   "source_schema": "3.2.5",
+   "donnees": "{\"EFORMS\": {\"ContractNotice\": {\"ext:UBLExtensions\": {\"ext:UBLExtension\": {\"ext:ExtensionContent\": {\"efext:EformsExtension\": {\"efac:NoticeSubType\": {\"cbc:SubTypeCode\": {\"@listName\": \"notice-subtype\", \"#text\": \"16\"}}, \"efac:Organizations\": {\"efac:Organization\": [{\"efac:Company\": {\"cac:PartyIdentification\": {\"cbc:ID\": {\"@schemeName\": \"organization\", \"#text\": \"ORG-0001\"}}, \"cac:PartyName\": {\"cbc:Name\": {\"@languageID\": \"FRA\", \"#text\": \"CNOSF\"}}, \"cac:PostalAddress\": {\"cbc:StreetName\": \"1 avenue pierre de coubertin\", \"cbc:CityName\": \"Paris\", \"cbc:PostalZone\": \"75013\", \"cbc:CountrySubentityCode\": {\"@listName\": \"nuts\", \"#text\": \"FR101\"}, \"cac:Country\": {\"cbc:IdentificationCode\": {\"@listName\": \"country\", \"#text\": \"FRA\"}}}, \"cac:PartyLegalEntity\": {\"cbc:CompanyID\": \"78435427600023\"}, \"cac:Contact\": {\"cbc:Telephone\": \"+33 140782905\", \"cbc:ElectronicMail\": \"achats@cnosf.org\"}}}, {\"efac:Company\": {\"cac:PartyIdentification\": {\"cbc:ID\": {\"@schemeName\": \"organization\", \"#text\": \"ORG-0002\"}}, \"cac:PartyName\": {\"cbc:Name\": {\"@languageID\": \"FRA\", \"#text\": \"Tribunal judiciaire de Paris\"}}, \"cac:PostalAddress\": {\"cbc:CityName\": \"Paris\", \"cbc:PostalZone\": \"75017\", \"cbc:CountrySubentityCode\": {\"@listName\": \"nuts\", \"#text\": \"FR101\"}, \"cac:Country\": {\"cbc:IdentificationCode\": {\"@listName\": \"country\", \"#text\": \"FRA\"}}}, \"cac:PartyLegalEntity\": {\"cbc:CompanyID\": \"177 501 111 01763\"}}}, {\"efac:Company\": {\"cbc:WebsiteURI\": \"www.dematis.com\", \"cac:PartyIdentification\": {\"cbc:ID\": {\"@schemeName\": \"organization\", \"#text\": \"ORG-0000\"}}, \"cac:PartyName\": {\"cbc:Name\": {\"@languageID\": \"FRA\", \"#text\": \"DEMATIS\"}}, \"cac:PostalAddress\": {\"cbc:CityName\": \"Paris\", \"cbc:PostalZone\": \"75015\", \"cbc:CountrySubentityCode\": {\"@listName\": \"nuts\", \"#text\": \"FR101\"}, \"cac:Country\": {\"cbc:IdentificationCode\": {\"@listName\": \"country\", \"#text\": \"FRA\"}}}, \"cac:PartyLegalEntity\": {\"cbc:CompanyID\": \"45072478600030\"}, \"cac:Contact\": {\"cbc:Telephone\": \"+33 172365548\", \"cbc:ElectronicMail\": \"contact@dematis.com\"}}}]}}}}}, \"cbc:UBLVersionID\": \"2.3\", \"cbc:CustomizationID\": \"eforms-sdk-1.13\", \"cbc:ID\": {\"@schemeName\": \"notice-id\", \"#text\": \"594bb255-2114-4195-88e1-66c6c63c64d7\"}, \"cbc:ContractFolderID\": \"233f1784-d034-41ba-b65b-87a5664abc29\", \"cbc:IssueDate\": \"2026-10-02+02:00\", \"cbc:IssueTime\": \"11:00:05+02:00\", \"cbc:VersionID\": \"01\", \"cbc:RegulatoryDomain\": \"32014L0024\", \"cbc:NoticeTypeCode\": {\"@listName\": \"competition\", \"#text\": \"cn-standard\"}, \"cbc:NoticeLanguageCode\": {\"@listName\": \"language\", \"#text\": \"FRA\"}, \"cac:ContractingParty\": {\"cbc:BuyerProfileURI\": \"https://cnosf.e-marchespublics.com\", \"cac:ContractingPartyType\": {\"cbc:PartyTypeCode\": {\"@listName\": \"buyer-legal-type\", \"#text\": \"pub-undert\"}}, \"cac:ContractingActivity\": {\"cbc:ActivityTypeCode\": {\"@listName\": \"authority-activity\", \"#text\": \"rcr\"}}, \"cac:Party\": {\"cac:PartyIdentification\": {\"cbc:ID\": \"ORG-0001\"}, \"cac:ServiceProviderParty\": {\"cbc:ServiceTypeCode\": {\"@listName\": \"organisation-role\", \"#text\": \"ted-esen\"}, \"cac:Party\": {\"cac:PartyIdentification\": {\"cbc:ID\": \"ORG-0000\"}}}}}, \"cac:TenderingTerms\": {\"cac:TendererQualificationRequest\": {\"cac:SpecificTendererRequirement\": {\"cbc:TendererRequirementTypeCode\": {\"@listName\": \"exclusion-grounds-source\", \"#text\": \"epo-procurement-document\"}}}}, \"cac:TenderingProcess\": {\"cbc:ProcedureCode\": {\"@listName\": \"procurement-procedure-type\", \"#text\": \"open\"}, \"cac:ProcessJustification\": {\"cbc:ProcessReasonCode\": {\"@listName\": \"accelerated-procedure\", \"#text\": \"false\"}}}, \"cac:ProcurementProject\": {\"cbc:Name\": {\"@languageID\": \"FRA\", \"#text\": \"Agence de marketing pour mener les campagnes de promotion digitale du CNOSF\"}, \"cbc:Description\": {\"@languageID\": \"FRA\", \"#text\": \"Agence de marketing pour mener les campagnes de promotion digitale du CNOSF\\r\\nVoir DCE\"}, \"cbc:ProcurementTypeCode\": {\"@listName\": \"contract-nature\", \"#text\": \"services\"}, \"cac:MainCommodityClassification\": {\"cbc:ItemClassificationCode\": {\"@listName\": \"cpv\", \"#text\": \"79341000\"}}, \"cac:RealizedLocation\": {\"cac:Address\": {\"cbc:CountrySubentityCode\": {\"@listName\": \"nuts\", \"#text\": \"FR101\"}, \"cac:Country\": {\"cbc:IdentificationCode\": {\"@listName\": \"country\", \"#text\": \"FRA\"}}}}}, \"cac:ProcurementProjectLot\": {\"cbc:ID\": {\"@schemeName\": \"Lot\", \"#text\": \"LOT-0001\"}, \"cac:TenderingTerms\": {\"cbc:FundingProgramCode\": {\"@listName\": \"eu-funded\", \"#text\": \"no-eu-funds\"}, \"cac:CallForTendersDocumentReference\": {\"cbc:ID\": \"DOC-1\", \"cbc:DocumentType\": \"non-restricted-document\", \"cac:Attachment\": {\"cac:ExternalReference\": {\"cbc:URI\": \"https://cnosf.e-marchespublics.com/pack/annonce_marche_public_25357_1185276.html\"}}}, \"cac:TendererQualificationRequest\": [{\"cac:SpecificTendererRequirement\": {\"cbc:TendererRequirementTypeCode\": {\"@listName\": \"reserved-procurement\", \"#text\": \"none\"}}}, {\"cac:SpecificTendererRequirement\": {\"cbc:TendererRequirementTypeCode\": {\"@listName\": \"selection-criteria-source\", \"#text\": \"epo-procurement-document\"}}}], \"cac:ContractExecutionRequirement\": [{\"cbc:ExecutionRequirementCode\": {\"@listName\": \"conditions\", \"#text\": \"performance\"}}, {\"cbc:ExecutionRequirementCode\": {\"@listName\": \"ecatalog-submission\", \"#text\": \"not-allowed\"}}, {\"cbc:ExecutionRequirementCode\": {\"@listName\": \"reserved-execution\", \"#text\": \"no\"}}, {\"cbc:ExecutionRequirementCode\": {\"@listName\": \"einvoicing\", \"#text\": \"allowed\"}}], \"cac:TenderRecipientParty\": {\"cbc:EndpointID\": \"https://cnosf.e-marchespublics.com/pack/recherche_d_appels_d_offres_marches_publics_1_aapc_________1.html\"}, \"cac:TenderValidityPeriod\": {\"cbc:DurationMeasure\": {\"@unitCode\": \"DAY\", \"#text\": \"120\"}}, \"cac:AppealTerms\": {\"cac:AppealInformationParty\": {\"cac:PartyIdentification\": {\"cbc:ID\": \"ORG-0002\"}}, \"cac:AppealReceiverParty\": {\"cac:PartyIdentification\": {\"cbc:ID\": \"ORG-0002\"}}}, \"cac:Language\": {\"cbc:ID\": \"FRA\"}, \"cac:PostAwardProcess\": {\"cbc:ElectronicOrderUsageIndicator\": \"false\", \"cbc:ElectronicPaymentUsageIndicator\": \"false\"}}, \"cac:TenderingProcess\": {\"cbc:SubmissionMethodCode\": {\"@listName\": \"esubmission\", \"#text\": \"required\"}, \"cbc:GovernmentAgreementConstraintIndicator\": \"false\", \"cac:TenderSubmissionDeadlinePeriod\": {\"cbc:EndDate\": \"2026-11-02+01:00\", \"cbc:EndTime\": \"12:00:00+01:00\"}, \"cac:AuctionTerms\": {\"cbc:AuctionConstraintIndicator\": \"false\"}, \"cac:FrameworkAgreement\": {\"cbc:MaximumOperatorQuantity\": \"1\", \"cbc:Justification\": {\"@languageID\": \"FRA\", \"#text\": \"Fourchette de date estimative sur la période maximum du marché (voir DCE)\"}}, \"cac:ContractingSystem\": [{\"cbc:ContractingSystemTypeCode\": {\"@listName\": \"framework-agreement\", \"#text\": \"fa-wo-rc\"}}, {\"cbc:ContractingSystemTypeCode\": {\"@listName\": \"dps-usage\", \"#text\": \"none\"}}]}, \"cac:ProcurementProject\": {\"cbc:Name\": {\"@languageID\": \"FRA\", \"#text\": \"Agence de marketing pour mener les campagnes de promotion digitale du CNOSF\"}, \"cbc:Description\": {\"@languageID\": \"FRA\", \"#text\": \"Agence de marketing pour mener les campagnes de promotion digitale du CNOSF\"}, \"cbc:ProcurementTypeCode\": {\"@listName\": \"contract-nature\", \"#text\": \"services\"}, \"cac:MainCommodityClassification\": {\"cbc:ItemClassificationCode\": {\"@listName\": \"cpv\", \"#text\": \"79341000\"}}, \"cac:RealizedLocation\": {\"cac:Address\": {\"cbc:CountrySubentityCode\": {\"@listName\": \"nuts\", \"#text\": \"FR101\"}, \"cac:Country\": {\"cbc:IdentificationCode\": {\"@listName\": \"country\", \"#text\": \"FRA\"}}}}, \"cac:PlannedPeriod\": {\"cbc:StartDate\": \"2026-12-18+01:00\", \"cbc:EndDate\": \"2030-12-31+01:00\"}}}}}}",
+   "url_avis": "https://www.boamp.fr/pages/avis/?q=idweb:26-95224"
+  },
+  {
+   "idweb": "26-95504",
+   "id": "26_95504",
+   "contractfolderid": "55f322a9-519a-4ea2-b7ac-a64289d4606f",
+   "objet": "Travaux de restructuration du Centre Hospitalier de Saint-Pierre d'Albigny - Lots 12 et 13",
+   "filename": "26-95504",
+   "famille": "JOUE",
+   "code_departement": [
+    "73"
+   ],
+   "code_departement_prestation": null,
+   "famille_libelle": "Marchés européens",
+   "dateparution": "2026-10-04",
+   "datefindiffusion": "2026-11-02",
+   "datelimitereponse": "2026-11-02T11:00:00+00:00",
+   "nomacheteur": "Centre Hospitalier de Saint-Pierre d'Albigny",
+   "titulaire": null,
+   "perimetre": "DIRECTIVE-24",
+   "type_procedure": "NEGOCIE",
+   "soustype_procedure": null,
+   "procedure_libelle": "Procédure Négociée",
+   "procedure_categorise": "NEGOCIE/",
+   "nature": "APPEL_OFFRE",
+   "sousnature": "STANDARD",
+   "nature_libelle": "Avis de marché",
+   "sousnature_libelle": null,
+   "nature_categorise": "appeloffre/standard",
+   "nature_categorise_libelle": "Avis de marché/",
+   "criteres": null,
+   "marche_public_simplifie": null,
+   "marche_public_simplifie_label": null,
+   "etat": "INITIAL",
+   "descripteur_code": [
+    "144"
+   ],
+   "dc": [
+    "144"
+   ],
+   "descripteur_libelle": [
+    "Gros oeuvre"
+   ],
+   "type_marche": [
+    "TRAVAUX"
+   ],
+   "type_marche_facette": [
+    "Travaux"
+   ],
+   "type_avis": [
+    "5",
+    "1"
+   ],
+   "annonce_lie": null,
+   "annonces_anterieures": null,
+   "source_schema": "3.2.5",
+   "donnees": "{\"EFORMS\": {\"ContractNotice\": {\"ext:UBLExtensions\": {\"ext:UBLExtension\": {\"ext:ExtensionContent\": {\"efext:EformsExtension\": {\"efac:NoticeSubType\": {\"cbc:SubTypeCode\": {\"@listName\": \"notice-subtype\", \"#text\": \"16\"}}, \"efac:Organizations\": {\"efac:Organization\": [{\"efac:Company\": {\"cac:PartyIdentification\": {\"cbc:ID\": {\"@schemeName\": \"organization\", \"#text\": \"ORG-0001\"}}, \"cac:PartyName\": {\"cbc:Name\": {\"@languageID\": \"FRA\", \"#text\": \"Avenue-Web Systèmes\"}}, \"cac:PostalAddress\": {\"cbc:CityName\": \"Seyssinet-Pariset\", \"cbc:PostalZone\": \"38170\", \"cbc:CountrySubentityCode\": {\"@listName\": \"nuts\", \"#text\": \"FRK24\"}, \"cac:Country\": {\"cbc:IdentificationCode\": {\"@listName\": \"country\", \"#text\": \"FRA\"}}}, \"cac:PartyLegalEntity\": {\"cbc:CompanyID\": {\"@schemeName\": \"eu\", \"#text\": \"E18C728B-F128-6F25-DBA9ADC50E673537\"}}, \"cac:Contact\": {\"cbc:Telephone\": \"+33480041260\", \"cbc:ElectronicMail\": \"publications-joue@aws-france.com\"}}}, {\"efac:Company\": {\"cac:PartyIdentification\": {\"cbc:ID\": {\"@schemeName\": \"organization\", \"#text\": \"ORG-0002\"}}, \"cac:PartyName\": {\"cbc:Name\": {\"@languageID\": \"FRA\", \"#text\": \"Centre Hospitalier de Saint-Pierre d'Albigny\"}}, \"cac:PostalAddress\": {\"cbc:StreetName\": \"Rue Jacques Marret\", \"cbc:CityName\": \"Saint-Pierre-d'Albigny\", \"cbc:PostalZone\": \"73250\", \"cbc:CountrySubentityCode\": {\"@listName\": \"nuts\", \"#text\": \"FRK27\"}, \"cac:Country\": {\"cbc:IdentificationCode\": {\"@listName\": \"country\", \"#text\": \"FRA\"}}}, \"cac:PartyLegalEntity\": {\"cbc:CompanyID\": {\"@schemeName\": \"eu\", \"#text\": \"62506\"}}, \"cac:Contact\": {\"cbc:Name\": \"Chambaz Florent\", \"cbc:JobTitle\": \"Directeur Général\", \"cbc:Telephone\": \"0479094784\", \"cbc:ElectronicMail\": \"correspondre@aws-france.com\"}}}, {\"efac:Company\": {\"cac:PartyIdentification\": {\"cbc:ID\": {\"@schemeName\": \"organization\", \"#text\": \"ORG-0003\"}}, \"cac:PartyName\": {\"cbc:Name\": {\"@languageID\": \"FRA\", \"#text\": \"Tribunal administratif de Grenoble\"}}, \"cac:PostalAddress\": {\"cbc:Postbox\": \"1135\", \"cbc:StreetName\": \"2 Place de Verdun\", \"cbc:CityName\": \"Grenoble\", \"cbc:PostalZone\": \"38022\", \"cbc:CountrySubentityCode\": {\"@listName\": \"nuts\", \"#text\": \"FRK24\"}, \"cac:Country\": {\"cbc:IdentificationCode\": {\"@listName\": \"country\", \"#text\": \"FRA\"}}}, \"cac:PartyLegalEntity\": {\"cbc:CompanyID\": {\"@schemeName\": \"eu\", \"#text\": \"E18C72D1-C2EA-760C-4F50902105904DB2\"}}, \"cac:Contact\": {\"cbc:Telephone\": \"0476429000\", \"cbc:Telefax\": \"0476422269\", \"cbc:ElectronicMail\": \"greffe.ta-grenoble@juradm.fr\"}}}, {\"efac:Company\": {\"cac:PartyIdentification\": {\"cbc:ID\": {\"@schemeName\": \"organization\", \"#text\": \"ORG-0004\"}}, \"cac:PartyName\": {\"cbc:Name\": {\"@languageID\": \"FRA\", \"#text\": \"Tribunal administratif de Grenoble\"}}, \"cac:PostalAddress\": {\"cbc:Postbox\": \"1135\", \"cbc:StreetName\": \"2 Place de Verdun\", \"cbc:CityName\": \"Grenoble\", \"cbc:PostalZone\": \"38022\", \"cbc:CountrySubentityCode\": {\"@listName\": \"nuts\", \"#text\": \"FRK24\"}, \"cac:Country\": {\"cbc:IdentificationCode\": {\"@listName\": \"country\", \"#text\": \"FRA\"}}}, \"cac:PartyLegalEntity\": {\"cbc:CompanyID\": {\"@schemeName\": \"eu\", \"#text\": \"E18C72FB-02FF-0319-1D76D76C71DB5FF8\"}}, \"cac:Contact\": {\"cbc:Telephone\": \"0476429000\", \"cbc:Telefax\": \"0476422269\", \"cbc:ElectronicMail\": \"greffe.ta-grenoble@juradm.fr\"}}}]}}}}}, \"cbc:UBLVersionID\": \"2.3\", \"cbc:CustomizationID\": \"eforms-sdk-1.12\", \"cbc:ID\": {\"@schemeName\": \"notice-id\", \"#text\": \"b0081b6d-709a-4850-903b-f1789b792e06\"}, \"cbc:ContractFolderID\": \"55f322a9-519a-4ea2-b7ac-a64289d4606f\", \"cbc:IssueDate\": \"2026-10-02+02:00\", \"cbc:IssueTime\": \"16:11:13+02:00\", \"cbc:VersionID\": \"01\", \"cbc:RegulatoryDomain\": \"32014L0024\", \"cbc:NoticeTypeCode\": {\"@listName\": \"competition\", \"#text\": \"cn-standard\"}, \"cbc:NoticeLanguageCode\": \"FRA\", \"cac:ContractingParty\": {\"cbc:BuyerProfileURI\": \"https://agysoft.marches-publics.info/\", \"cac:ContractingPartyType\": {\"cbc:PartyTypeCode\": {\"@listName\": \"buyer-legal-type\", \"#text\": \"body-pl\"}}, \"cac:ContractingActivity\": {\"cbc:ActivityTypeCode\": {\"@listName\": \"authority-activity\", \"#text\": \"health\"}}, \"cac:Party\": {\"cac:PartyIdentification\": {\"cbc:ID\": {\"@schemeName\": \"organization\", \"#text\": \"ORG-0002\"}}, \"cac:ServiceProviderParty\": {\"cbc:ServiceTypeCode\": {\"@listName\": \"organisation-role\", \"#text\": \"ted-esen\"}, \"cac:Party\": {\"cac:PartyIdentification\": {\"cbc:ID\": {\"@schemeName\": \"organization\", \"#text\": \"ORG-0001\"}}}}}}, \"cac:TenderingTerms\": {\"cac:TendererQualificationRequest\": {\"cac:SpecificTendererRequirement\": {\"cbc:TendererRequirementTypeCode\": {\"@listName\": \"exclusion-grounds-source\", \"#text\": \"epo-procurement-document\"}}}, \"cac:LotDistribution\": {\"cbc:MaximumLotsAwardedNumeric\": \"2\", \"cbc:MaximumLotsSubmittedNumeric\": \"2\"}}, \"cac:TenderingProcess\": {\"cbc:ProcedureCode\": {\"@languageID\": \"FRA\", \"@listName\": \"procurement-procedure-type\", \"#text\": \"neg-w-call\"}, \"cac:ProcessJustification\": {\"cbc:ProcessReasonCode\": {\"@listName\": \"accelerated-procedure\", \"#text\": \"false\"}}}, \"cac:ProcurementProject\": {\"cbc:Name\": {\"@languageID\": \"FRA\", \"#text\": \"Travaux de restructuration du Centre Hospitalier de Saint-Pierre d'Albigny - Lots 12 et 13\"}, \"cbc:Description\": {\"@languageID\": \"FRA\", \"#text\": \"Travaux de restructuration du Centre Hospitalier de Saint-Pierre d'Albigny - Lots 12 et 13\"}, \"cbc:ProcurementTypeCode\": {\"@listName\": \"contract-nature\", \"#text\": \"works\"}, \"cac:MainCommodityClassification\": {\"cbc:ItemClassificationCode\": {\"@listName\": \"cpv\", \"#text\": \"45454000\"}}, \"cac:AdditionalCommodityClassification\": {\"cbc:ItemClassificationCode\": {\"@listName\": \"cpv\", \"#text\": \"45454000\"}}, \"cac:RealizedLocation\": {\"cac:Address\": {\"cbc:CountrySubentityCode\": {\"@listName\": \"nuts\", \"#text\": \"FRK27\"}, \"cac:Country\": {\"cbc:IdentificationCode\": {\"@listName\": \"country\", \"#text\": \"FRA\"}}}}}, \"cac:ProcurementProjectLot\": [{\"cbc:ID\": {\"@schemeName\": \"Lot\", \"#text\": \"LOT-0001\"}, \"cac:TenderingTerms\": {\"cbc:VariantConstraintCode\": {\"@listName\": \"permission\", \"#text\": \"allowed\"}, \"cbc:FundingProgramCode\": {\"@listName\": \"eu-funded\", \"#text\": \"no-eu-funds\"}, \"cbc:MultipleTendersCode\": {\"@listName\": \"permission\", \"#text\": \"not-allowed\"}, \"cac:CallForTendersDocumentReference\": {\"cbc:ID\": \"1883583\", \"cbc:DocumentType\": \"non-restricted-document\", \"cbc:LanguageID\": \"FRA\", \"cbc:DocumentStatusCode\": {\"@listName\": \"linguistic-status\", \"#text\": \"official\"}, \"cac:Attachment\": {\"cac:ExternalReference\": {\"cbc:URI\": \"https://www.marches-publics.info/mpiaws/index.cfm?fuseaction=dematEnt.login&amp;type=DCE&amp;IDM=1883583\"}}}, \"cac:TendererQualificationRequest\": [{\"cac:SpecificTendererRequirement\": {\"cbc:TendererRequirementTypeCode\": {\"@listName\": \"selection-criteria-source\", \"#text\": \"epo-procurement-document\"}}}, {\"cac:SpecificTendererRequirement\": {\"cbc:TendererRequirementTypeCode\": {\"@listName\": \"reserved-procurement\", \"#text\": \"none\"}}}], \"cac:ContractExecutionRequirement\": [{\"cbc:ExecutionRequirementCode\": {\"@listName\": \"einvoicing\", \"#text\": \"required\"}}, {\"cbc:ExecutionRequirementCode\": {\"@listName\": \"ecatalog-submission\", \"#text\": \"not-allowed\"}}, {\"cbc:ExecutionRequirementCode\": {\"@listName\": \"esignature-submission\", \"#text\": \"false\"}}, {\"cbc:ExecutionRequirementCode\": {\"@listName\": \"reserved-execution\", \"#text\": \"no\"}}], \"cac:TenderRecipientParty\": {\"cbc:EndpointID\": \"https://www.marches-publics.info/mpiaws/index.cfm?fuseaction=demat.termes&amp;IDM=1883583\"}, \"cac:AppealTerms\": {\"cac:AppealInformationParty\": {\"cac:PartyIdentification\": {\"cbc:ID\": {\"@schemeName\": \"organization\", \"#text\": \"ORG-0004\"}}}, \"cac:AppealReceiverParty\": {\"cac:PartyIdentification\": {\"cbc:ID\": {\"@schemeName\": \"organization\", \"#text\": \"ORG-0003\"}}}}, \"cac:Language\": {\"cbc:ID\": \"FRA\"}, \"cac:PostAwardProcess\": {\"cbc:ElectronicOrderUsageIndicator\": \"false\", \"cbc:ElectronicPaymentUsageIndicator\": \"false\"}}, \"cac:TenderingProcess\": {\"ext:UBLExtensions\": {\"ext:UBLExtension\": {\"ext:ExtensionContent\": {\"efext:EformsExtension\": {\"efbc:AccessToolName\": \"AW Solutions\"}}}}, \"cbc:SubmissionMethodCode\": {\"@listName\": \"esubmission\", \"#text\": \"required\"}, \"cbc:CandidateReductionConstraintIndicator\": \"true\", \"cbc:GovernmentAgreementConstraintIndicator\": \"true\", \"cac:TenderSubmissionDeadlinePeriod\": {\"cbc:EndDate\": \"2026-11-02+01:00\", \"cbc:EndTime\": \"12:00:00+01:00\"}, \"cac:AuctionTerms\": {\"cbc:AuctionConstraintIndicator\": \"false\"}, \"cac:ContractingSystem\": [{\"cbc:ContractingSystemTypeCode\": {\"@listName\": \"framework-agreement\", \"#text\": \"none\"}}, {\"cbc:ContractingSystemTypeCode\": {\"@listName\": \"dps-usage\", \"#text\": \"none\"}}]}, \"cac:ProcurementProject\": {\"cbc:ID\": {\"@schemeName\": \"InternalID\", \"#text\": \"12\"}, \"cbc:Name\": {\"@languageID\": \"FRA\", \"#text\": \"CVC PB\"}, \"cbc:Description\": {\"@languageID\": \"FRA\", \"#text\": \"CVC PB\"}, \"cbc:ProcurementTypeCode\": {\"@listName\": \"contract-nature\", \"#text\": \"works\"}, \"cac:MainCommodityClassification\": {\"cbc:ItemClassificationCode\": {\"@listName\": \"cpv\", \"#text\": \"45454000\"}}, \"cac:AdditionalCommodityClassification\": {\"cbc:ItemClassificationCode\": {\"@listName\": \"cpv\", \"#text\": \"45315000\"}}, \"cac:RealizedLocation\": {\"cac:Address\": {\"cbc:StreetName\": \"Hôpital Michel Dubettier Rue Jacques Marret\", \"cbc:CityName\": \"Saint-Pierre d'Albigny\", \"cbc:PostalZone\": \"73250\", \"cbc:CountrySubentityCode\": {\"@listName\": \"nuts\", \"#text\": \"FRK27\"}, \"cac:Country\": {\"cbc:IdentificationCode\": {\"@listName\": \"country\", \"#text\": \"FRA\"}}}}, \"cac:PlannedPeriod\": {\"cbc:StartDate\": \"2027-02-01+01:00\", \"cbc:DurationMeasure\": {\"@unitCode\": \"MONTH\", \"#text\": \"26\"}}}}, {\"cbc:ID\": {\"@schemeName\": \"Lot\", \"#text\": \"LOT-0002\"}, \"cac:TenderingTerms\": {\"cbc:VariantConstraintCode\": {\"@listName\": \"permission\", \"#text\": \"allowed\"}, \"cbc:FundingProgramCode\": {\"@listName\": \"eu-funded\", \"#text\": \"no-eu-funds\"}, \"cbc:MultipleTendersCode\": {\"@listName\": \"permission\", \"#text\": \"not-allowed\"}, \"cac:CallForTendersDocumentReference\": {\"cbc:ID\": \"1883583\", \"cbc:DocumentType\": \"non-restricted-document\", \"cbc:LanguageID\": \"FRA\", \"cbc:DocumentStatusCode\": {\"@listName\": \"linguistic-status\", \"#text\": \"official\"}, \"cac:Attachment\": {\"cac:ExternalReference\": {\"cbc:URI\": \"https://www.marches-publics.info/mpiaws/index.cfm?fuseaction=dematEnt.login&amp;type=DCE&amp;IDM=1883583\"}}}, \"cac:TendererQualificationRequest\": [{\"cac:SpecificTendererRequirement\": {\"cbc:TendererRequirementTypeCode\": {\"@listName\": \"selection-criteria-source\", \"#text\": \"epo-procurement-document\"}}}, {\"cac:SpecificTendererRequirement\": {\"cbc:TendererRequirementTypeCode\": {\"@listName\": \"reserved-procurement\", \"#text\": \"none\"}}}], \"cac:ContractExecutionRequirement\": [{\"cbc:ExecutionRequirementCode\": {\"@listName\": \"einvoicing\", \"#text\": \"required\"}}, {\"cbc:ExecutionRequirementCode\": {\"@listName\": \"ecatalog-submission\", \"#text\": \"not-allowed\"}}, {\"cbc:ExecutionRequirementCode\": {\"@listName\": \"esignature-submission\", \"#text\": \"false\"}}, {\"cbc:ExecutionRequirementCode\": {\"@listName\": \"reserved-execution\", \"#text\": \"no\"}}], \"cac:TenderRecipientParty\": {\"cbc:EndpointID\": \"https://www.marches-publics.info/mpiaws/index.cfm?fuseaction=demat.termes&amp;IDM=1883583\"}, \"cac:AppealTerms\": {\"cac:AppealInformationParty\": {\"cac:PartyIdentification\": {\"cbc:ID\": {\"@schemeName\": \"organization\", \"#text\": \"ORG-0004\"}}}, \"cac:AppealReceiverParty\": {\"cac:PartyIdentification\": {\"cbc:ID\": {\"@schemeName\": \"organization\", \"#text\": \"ORG-0003\"}}}}, \"cac:Language\": {\"cbc:ID\": \"FRA\"}, \"cac:PostAwardProcess\": {\"cbc:ElectronicOrderUsageIndicator\": \"false\", \"cbc:ElectronicPaymentUsageIndicator\": \"false\"}}, \"cac:TenderingProcess\": {\"ext:UBLExtensions\": {\"ext:UBLExtension\": {\"ext:ExtensionContent\": {\"efext:EformsExtension\": {\"efbc:AccessToolName\": \"AW Solutions\"}}}}, \"cbc:SubmissionMethodCode\": {\"@listName\": \"esubmission\", \"#text\": \"required\"}, \"cbc:CandidateReductionConstraintIndicator\": \"true\", \"cbc:GovernmentAgreementConstraintIndicator\": \"true\", \"cac:TenderSubmissionDeadlinePeriod\": {\"cbc:EndDate\": \"2026-11-02+01:00\", \"cbc:EndTime\": \"12:00:00+01:00\"}, \"cac:AuctionTerms\": {\"cbc:AuctionConstraintIndicator\": \"false\"}, \"cac:ContractingSystem\": [{\"cbc:ContractingSystemTypeCode\": {\"@listName\": \"framework-agreement\", \"#text\": \"none\"}}, {\"cbc:ContractingSystemTypeCode\": {\"@listName\": \"dps-usage\", \"#text\": \"none\"}}]}, \"cac:ProcurementProject\": {\"cbc:ID\": {\"@schemeName\": \"InternalID\", \"#text\": \"13\"}, \"cbc:Name\": {\"@languageID\": \"FRA\", \"#text\": \"Fluides médicaux\"}, \"cbc:Description\": {\"@languageID\": \"FRA\", \"#text\": \"Fluides médicaux\"}, \"cbc:ProcurementTypeCode\": {\"@listName\": \"contract-nature\", \"#text\": \"works\"}, \"cac:MainCommodityClassification\": {\"cbc:ItemClassificationCode\": {\"@listName\": \"cpv\", \"#text\": \"45454000\"}}, \"cac:AdditionalCommodityClassification\": {\"cbc:ItemClassificationCode\": {\"@listName\": \"cpv\", \"#text\": \"24111500\"}}, \"cac:RealizedLocation\": {\"cac:Address\": {\"cbc:StreetName\": \"Hôpital Michel Dubettier Rue Jacques Marret\", \"cbc:CityName\": \"Saint-Pierre d'Albigny\", \"cbc:PostalZone\": \"73250\", \"cbc:CountrySubentityCode\": {\"@listName\": \"nuts\", \"#text\": \"FRK27\"}, \"cac:Country\": {\"cbc:IdentificationCode\": {\"@listName\": \"country\", \"#text\": \"FRA\"}}}}, \"cac:PlannedPeriod\": {\"cbc:StartDate\": \"2027-02-01+01:00\", \"cbc:DurationMeasure\": {\"@unitCode\": \"MONTH\", \"#text\": \"26\"}}}}]}}}",
+   "url_avis": "https://www.boamp.fr/pages/avis/?q=idweb:26-95504"
+  },
+  {
+   "idweb": "26-95027",
+   "id": "26_95027",
+   "contractfolderid": null,
+   "objet": "Assistance à maîtrise d'ouvrage relative à la restructuration de l'EHPAD Simon Hême à Mer (41)",
+   "filename": "26-95027",
+   "famille": "FNS",
+   "code_departement": [
+    "41"
+   ],
+   "code_departement_prestation": null,
+   "famille_libelle": "Marchés entre 90 k€ et seuils européens",
+   "dateparution": "2026-10-01",
+   "datefindiffusion": "2026-11-02",
+   "datelimitereponse": "2026-11-02T17:00:00+00:00",
+   "nomacheteur": "EHPAD Simon Hême",
+   "titulaire": null,
+   "perimetre": "FNSimple",
+   "type_procedure": "OUVERT",
+   "soustype_procedure": null,
+   "procedure_libelle": "Procédure Ouverte",
+   "procedure_categorise": "OUVERT/",
+   "nature": "APPEL_OFFRE",
+   "sousnature": null,
+   "nature_libelle": "Avis de marché",
+   "sousnature_libelle": null,
+   "nature_categorise": "appeloffre/standard",
+   "nature_categorise_libelle": "Avis de marché/",
+   "criteres": null,
+   "marche_public_simplifie": null,
+   "marche_public_simplifie_label": null,
+   "etat": "INITIAL",
+   "descripteur_code": [
+    "433"
+   ],
+   "dc": [
+    "433"
+   ],
+   "descripteur_libelle": [
+    "Assistance à maîtrise d'ouvrage"
+   ],
+   "type_marche": [
+    "SERVICES"
+   ],
+   "type_marche_facette": [
+    "Services"
+   ],
+   "type_avis": [
+    "5",
+    "1"
+   ],
+   "annonce_lie": null,
+   "annonces_anterieures": null,
+   "source_schema": "3.2.5",
+   "donnees": "{\"FNSimple\": {\"organisme\": {\"nomOfficiel\": \"EHPAD Simon Hême\", \"typeIdentificationNational\": {\"siret\": \"\"}, \"codeIdentificationNational\": \"26410009000010\", \"ville\": \"MER\", \"cp\": \"41500\", \"grpCommandes\": {\"non\": \"\"}}, \"initial\": {\"communication\": {\"urlProfilAch\": \"https://www.e-marchespublics.com/appel-offre/1185187\", \"docSecurite\": {\"oui\": \"\"}, \"urlSecurite\": {\"non\": \"\"}, \"nomContact\": \"WALLET Valérie\", \"adresseMailContact\": \"comptabilite@ehpad-mer.fr\", \"telContact\": \"+33 254810354\"}, \"procedure\": {\"procedureAdapteeO\": \"\", \"capaciteExercice\": \"Voir DCE\", \"capaciteEcoFin\": \"Voir DCE\", \"capaciteTech\": \"Voir DCE\", \"techAchat\": {\"autres\": \"\"}, \"dateReceptionOffres\": \"2026-11-02T17:00:00Z\", \"presOffres\": {\"interdite\": \"\"}, \"nbCandidatReduit\": {\"non\": \"\"}, \"attributionSansNegociation\": {\"non\": \"\"}, \"variantes\": {\"non\": \"\"}}, \"natureMarche\": {\"intitule\": \"Assistance à maîtrise d'ouvrage relative à la restructuration de l'EHPAD Simon Hême à Mer (41)\", \"codeCPV\": {\"objetPrincipal\": {\"classPrincipale\": \"71310000\"}}, \"natureMarche\": {\"services\": \"\"}, \"lieuExecution\": \"EHPAD Simon Hême MER\", \"dureeMois\": \"58\", \"tranches\": {\"non\": \"\"}, \"reservationMarche\": {\"non\": \"\"}, \"lotsMarche\": {\"non\": \"\"}}, \"informComplementaire\": {\"non\": \"\"}}}}",
+   "url_avis": "https://www.boamp.fr/pages/avis/?q=idweb:26-95027"
+  },
+  {
+   "idweb": "26-95288",
+   "id": "26_95288",
+   "contractfolderid": null,
+   "objet": "Transport scolaire communal-.",
+   "filename": "26-95288",
+   "famille": "FNS",
+   "code_departement": [
+    "54"
+   ],
+   "code_departement_prestation": null,
+   "famille_libelle": "Marchés entre 90 k€ et seuils européens",
+   "dateparution": "2026-10-02",
+   "datefindiffusion": "2026-10-26",
+   "datelimitereponse": "2026-10-26T12:00:00+00:00",
+   "nomacheteur": "Commune de PIENNES",
+   "titulaire": null,
+   "perimetre": "FNSimple",
+   "type_procedure": "OUVERT",
+   "soustype_procedure": null,
+   "procedure_libelle": "Procédure Ouverte",
+   "procedure_categorise": "OUVERT/",
+   "nature": "APPEL_OFFRE",
+   "sousnature": null,
+   "nature_libelle": "Avis de marché",
+   "sousnature_libelle": null,
+   "nature_categorise": "appeloffre/standard",
+   "nature_categorise_libelle": "Avis de marché/",
+   "criteres": [
+    "environnementaux"
+   ],
+   "marche_public_simplifie": null,
+   "marche_public_simplifie_label": null,
+   "etat": "INITIAL",
+   "descripteur_code": [
+    "347"
+   ],
+   "dc": [
+    "347"
+   ],
+   "descripteur_libelle": [
+    "Transport"
+   ],
+   "type_marche": [
+    "SERVICES"
+   ],
+   "type_marche_facette": [
+    "Services"
+   ],
+   "type_avis": [
+    "5",
+    "1"
+   ],
+   "annonce_lie": null,
+   "annonces_anterieures": null,
+   "source_schema": "3.2.5",
+   "donnees": "{\"FNSimple\": {\"organisme\": {\"nomOfficiel\": \"Commune de PIENNES\", \"typeIdentificationNational\": {\"siret\": \"\"}, \"codeIdentificationNational\": \"21540425200011\", \"ville\": \"PIENNES\", \"cp\": \"54490\", \"grpCommandes\": {\"non\": \"\"}}, \"initial\": {\"communication\": {\"urlProfilAch\": \"https://www.xmarches.fr/entreprise/detailConsultation.php?key=41687\", \"identifiantInterne\": \"2026-03\", \"docSecurite\": {\"oui\": \"\"}, \"urlSecurite\": {\"non\": \"\"}, \"nomContact\": \"MATTHIEU CALVO\"}, \"procedure\": {\"procedureAdapteeO\": \"\", \"capaciteExercice\": \"cf. RC\", \"capaciteEcoFin\": \"cf. RC\", \"capaciteTech\": \"cf. RC\", \"techAchat\": {\"autres\": \"\"}, \"dateReceptionOffres\": \"2026-10-26T12:00:00\", \"presOffres\": {\"interdite\": \"\"}, \"nbCandidatReduit\": {\"non\": \"\"}, \"attributionSansNegociation\": {\"oui\": \"\"}, \"variantes\": {\"non\": \"\"}}, \"natureMarche\": {\"intitule\": \"Transport scolaire communal-.\", \"natureMarche\": {\"services\": \"\"}, \"description\": \"Le contrat porte sur les prestations suivantes : Transport scolaire au sein de la commune de Piennes\\n\\nPassage d’un bus scolaire (lundi, mardi, jeudi et vendredi : le matin, le midi : A/R et le soir).-.\", \"lieuExecution\": \"Piennes\", \"tranches\": {\"non\": \"\"}, \"reservationMarche\": {\"non\": \"\"}, \"lotsMarche\": {\"non\": \"\"}}, \"informComplementaire\": {\"non\": \"\"}}}}",
+   "url_avis": "https://www.boamp.fr/pages/avis/?q=idweb:26-95288"
+  },
+  {
+   "idweb": "26-95272",
+   "id": "26_95272",
+   "contractfolderid": null,
+   "objet": "services d'assurances pour la commune de Saint-André-de-l'Eure",
+   "filename": "26-95272",
+   "famille": "MAPA",
+   "code_departement": [
+    "27"
+   ],
+   "code_departement_prestation": null,
+   "famille_libelle": "Marchés <90 k€ (MAPA)",
+   "dateparution": "2026-10-02",
+   "datefindiffusion": "2026-12-30",
+   "datelimitereponse": "2026-10-28T12:00:00+00:00",
+   "nomacheteur": "COMMUNE DE SAINT ANDRE DE L&#039;EURE",
+   "titulaire": null,
+   "perimetre": "MAPA",
+   "type_procedure": "PROCEDURE_ADAPTE",
+   "soustype_procedure": null,
+   "procedure_libelle": "Procédure Adaptée",
+   "procedure_categorise": "PROCEDURE_ADAPTE/",
+   "nature": "APPEL_OFFRE",
+   "sousnature": null,
+   "nature_libelle": "Avis de marché",
+   "sousnature_libelle": null,
+   "nature_categorise": "appeloffre/standard",
+   "nature_categorise_libelle": "Avis de marché/",
+   "criteres": null,
+   "marche_public_simplifie": null,
+   "marche_public_simplifie_label": null,
+   "etat": "INITIAL",
+   "descripteur_code": [
+    "20"
+   ],
+   "dc": [
+    "20"
+   ],
+   "descripteur_libelle": [
+    "Assurance"
+   ],
+   "type_marche": [
+    "SERVICES"
+   ],
+   "type_marche_facette": [
+    "Services"
+   ],
+   "type_avis": [
+    "5",
+    "1"
+   ],
+   "annonce_lie": null,
+   "annonces_anterieures": null,
+   "source_schema": "3.2.5",
+   "donnees": "{\"MAPA\": {\"organisme\": {\"correspondantPRM\": {\"nom\": \"LE MAIRE\"}, \"acheteurPublic\": \"COMMUNE DE SAINT ANDRE DE L&#039;EURE\", \"adr\": {\"voie\": {\"nomvoie\": \"Place Gambetta\"}, \"cp\": \"27220\", \"ville\": \"SAINT-ANDRE-DE-L-EURE\"}, \"coord\": {\"tel\": \"+33 232328704\", \"mel\": \"sg@ville-st-andre-eure.fr\", \"url\": \"https://ville-st-andre-eure.fr\"}, \"urlProfilAcheteur\": \"https://marchespublics.eure.fr/index.php?page=Entreprise.EntrepriseDetailsConsultation&id=511897&orgAcronyme=a8t\"}, \"initial\": {\"natureMarche\": {\"services\": \"\"}, \"description\": {\"objet\": \"services d'assurances pour la commune de Saint-André-de-l'Eure\", \"lieuExecutionLivraison\": {\"voie\": {\"nomvoie\": \"Place Gambetta\"}, \"cp\": \"27220\", \"ville\": \"SAINT-ANDRE-DE-L-EURE\"}}, \"caracteristiques\": {\"variantes\": {\"non\": {\"@xsi:type\": \"xs:string\"}}, \"principales\": \"Souscription d'un contrat d'assurance \\\"Dommages aux biens\\\"\"}, \"duree\": {\"nbMois\": \"48\"}, \"procedure\": {\"procedureAdaptee\": \"\"}, \"delais\": {\"receptionOffres\": \"2026-10-28T12:00:00.000+01:00\", \"validite\": {\"nbJours\": \"180\"}}, \"renseignements\": {\"idMarche\": \"2026-02-DAB\"}, \"marcheUnique\": \"\"}}}",
+   "url_avis": "https://www.boamp.fr/pages/avis/?q=idweb:26-95272"
+  },
+  {
+   "idweb": "26-95269",
+   "id": "26_95269",
+   "contractfolderid": null,
+   "objet": "MARCHÉ DE PRESTATIONS DE SERVICE - PRODUCTION ET FOURNITURE DE REPAS ET DE GOUTERS",
+   "filename": "26-95269",
+   "famille": "MAPA",
+   "code_departement": [
+    "77",
+    "91"
+   ],
+   "code_departement_prestation": null,
+   "famille_libelle": "Marchés <90 k€ (MAPA)",
+   "dateparution": "2026-10-02",
+   "datefindiffusion": "2026-10-29",
+   "datelimitereponse": "2026-10-30T18:30:00+00:00",
+   "nomacheteur": "SISVM",
+   "titulaire": null,
+   "perimetre": "MAPA",
+   "type_procedure": "PROCEDURE_ADAPTE",
+   "soustype_procedure": null,
+   "procedure_libelle": "Procédure Adaptée",
+   "procedure_categorise": "PROCEDURE_ADAPTE/",
+   "nature": "APPEL_OFFRE",
+   "sousnature": null,
+   "nature_libelle": "Avis de marché",
+   "sousnature_libelle": null,
+   "nature_categorise": "appeloffre/standard",
+   "nature_categorise_libelle": "Avis de marché/",
+   "criteres": null,
+   "marche_public_simplifie": null,
+   "marche_public_simplifie_label": null,
+   "etat": "INITIAL",
+   "descripteur_code": [
+    "66"
+   ],
+   "dc": [
+    "66"
+   ],
+   "descripteur_libelle": [
+    "Restauration collective"
+   ],
+   "type_marche": [
+    "SERVICES"
+   ],
+   "type_marche_facette": [
+    "Services"
+   ],
+   "type_avis": [
+    "5",
+    "1"
+   ],
+   "annonce_lie": null,
+   "annonces_anterieures": null,
+   "source_schema": "3.2.5",
+   "donnees": "{\"MAPA\": {\"organisme\": {\"correspondantPRM\": {\"civilite\": \"MME\", \"nom\": \"DE PAIX DE COEUR\", \"pren\": \"MARION\", \"fonc\": \"PRESIDENTE\"}, \"acheteurPublic\": \"Syndicat Intercommunal Scolaire Voisenon / Montereau-sur-le-Jard\", \"adr\": {\"voie\": {\"num\": \"8\", \"typevoie\": \"rue\", \"nomvoie\": \"DES ECOLES\"}, \"cp\": \"77950\", \"ville\": \"Voisenon\"}, \"coord\": {\"tel\": \"0619080233\", \"mel\": \"syndicat.intercommunal-voisenon@orange.fr\"}, \"urlProfilAcheteur\": \"http://www.klekoon.com\"}, \"initial\": {\"natureMarche\": {\"services\": \"\"}, \"description\": {\"objet\": \"\\nLa présente consultation concerne la production et la fourniture de repas et goûter pour le restaurant scolaire des établissements scolaires constituant le syndicat.\\n\", \"lieuExecutionLivraison\": {\"voie\": {\"nomvoie\": \"PLACE DE L'EGLISE - AUBIGNY\"}, \"cp\": \"77950\", \"ville\": \"MONTEREAU-SUR-LE-JARD\"}}, \"caracteristiques\": {\"variantes\": {\"non\": {\"@d7p1:type\": \"q1:string\"}}, \"principales\": \"La présente consultation concerne la production et la fourniture de repas et goûter pour le restaurant scolaire des établissements scolaires constituant le syndicat.\\n\\n\"}, \"duree\": {\"nbMois\": \"12\", \"dateDebutPrestation\": \"2026-12-01\"}, \"conditions\": {\"langue\": {\"langEC\": \"fr\"}}, \"justifications\": {\"redressementJudiciaire\": \"\", \"article2141\": \"\", \"articlesL5212\": \"\", \"articlesL1221-L3243\": \"\", \"effectifs\": \"\", \"listeFournituresServices\": \"\", \"qualificationsProfessionnelles\": {\"precisions\": \"•\\tL’agrément attestant de la conformité au regard du Paquet Hygiène (règlement CE 178/2002, complété par les règlements 852 et 853 de 2004) de l’unité centrale de préparation de repas et de l’ensemble des prestations qu’il mobilisera dans le cadre de l’exécution du présent marché, à produire au plus tard à la notification du marché \"}, \"DC1\": \"\", \"DC2\": \"\"}, \"criteres\": {\"criterePondere\": [{\"criterePCT\": \"40\", \"critere\": \"PRIX\"}, {\"criterePCT\": \"60\", \"critere\": \"VALEUR TECHNIQUE ET DEVELOPPEMENT DURABLE\"}]}, \"procedure\": {\"procedureAdaptee\": \"\"}, \"delais\": {\"receptionOffres\": \"2026-10-30T18:30:00\", \"validite\": {\"nbJours\": \"120\"}}, \"renseignements\": {\"idMarche\": \"2026-RESTAURATION SCOLAIRE\"}, \"adressesComplt\": {\"admEtTech\": {\"PersonnePhysique\": {\"civilite\": \"MME\", \"nom\": \"DE PAIX DE COEUR\", \"pren\": \"MARION\", \"fonc\": \"PRESIDENTE\"}, \"adr\": {\"voie\": {\"num\": \"8\", \"typevoie\": \"rue\", \"nomvoie\": \"DES ECOLES\"}, \"cp\": \"77950\", \"ville\": \"VOISENON\"}, \"coord\": {\"mel\": \"syndicat@sisvm.fr\"}}}}}}",
+   "url_avis": "https://www.boamp.fr/pages/avis/?q=idweb:26-95269"
+  }
+ ]
+}

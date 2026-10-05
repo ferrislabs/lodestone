@@ -3891,6 +3891,7 @@ dependencies = [
  "common",
  "ct",
  "fetch",
+ "flate2",
  "httpmock",
  "lodestone-core",
  "regex",

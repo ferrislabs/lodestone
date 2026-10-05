@@ -15,6 +15,7 @@ pub struct Candidate {
     pub text: String,
     pub provenance: Provenance,
     pub observed_at: DateTime<Utc>,
+    pub details: serde_json::Value,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

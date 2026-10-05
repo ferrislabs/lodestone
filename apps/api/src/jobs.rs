@@ -11,6 +11,7 @@ use fetch::PoliteFetcher;
 use llm::any::AnyProvider;
 use lodestone_core::{
     Clock, Job, JobKind, JobQueue, LodestoneUseCase, NewJob, SourceName, Tier, TierError,
+    TokenPricing,
     contacts::ContactRunSettings,
     infrastructure::{
         candidate_host::postgres::PgCandidateHosts, contact_target::postgres::PgContactTargets,
@@ -20,21 +21,23 @@ use lodestone_core::{
     jobs::{JobError, JobHandler, JobOutcome, SystemClock},
     llm::gateway::CallSettings,
     qualification::QualificationSettings,
-    sources::{SOURCE_JOB_KIND, source_job, source_of_job},
+    sources::{SOURCE_JOB_KIND, SourceRunError, source_job, source_of_job},
+    triage::TriageSettings,
 };
 use sources::{
-    contact_pages::PublicPageFinder, ct::CtSource, dns_cname::DnsCnameSource,
+    boamp::BoampSource, contact_pages::PublicPageFinder, ct::CtSource, dns_cname::DnsCnameSource,
     http_probe::HttpProbeSource, role_guess::RoleGuessFinder, security_txt::SecurityTxtFinder,
 };
 use tracing::{info, warn};
 
-pub const WIRED_SOURCES: [SourceName; 6] = [
+pub const WIRED_SOURCES: [SourceName; 7] = [
     SourceName::CertificateTransparency,
     SourceName::DnsCname,
     SourceName::HttpProbe,
     SourceName::PublicPage,
     SourceName::SecurityTxt,
     SourceName::RoleGuess,
+    SourceName::Boamp,
 ];
 
 pub const QUALIFICATION_JOB_KIND: &str = "llm.qualify";
@@ -43,9 +46,12 @@ const QUALIFICATION_MAX_ATTEMPTS: NonZeroU16 = NonZeroU16::new(3).unwrap();
 const QUALIFICATION_MAX_TOKENS: u32 = 4096;
 const QUALIFICATION_BATCH_SIZE: u32 = 20;
 const QUALIFICATION_BASE_DELAY: Duration = Duration::from_secs(2);
+const TRIAGE_MAX_TOKENS: u32 = 1024;
+const TRIAGE_BASE_DELAY: Duration = Duration::from_secs(2);
 
 pub type DnsCname = DnsCnameSource<HickoryResolver, PgCandidateHosts>;
 pub type HttpProbe = HttpProbeSource<PoliteFetcher, PgCandidateHosts, LodestoneUseCase>;
+pub type Boamp = BoampSource<PoliteFetcher>;
 pub type CertificateTransparency = CtSource<PoliteFetcher, PgCandidateHosts, PgCtCursors>;
 
 pub struct ContactFinders {
@@ -60,6 +66,7 @@ pub struct WiredSources {
     pub certificate_transparency: CertificateTransparency,
     pub dns_cname: DnsCname,
     pub http_probe: HttpProbe,
+    pub boamp: Boamp,
     pub contacts: ContactFinders,
 }
 
@@ -171,6 +178,72 @@ impl JobRouter {
         }
     }
 
+    async fn run_boamp(&self) -> Result<(u64, u64), SourceRunError> {
+        let resolved = match self
+            .usecase
+            .resolve_llm_tier(Tier::Triage, &self.llm.cipher)
+            .await
+        {
+            Ok(resolved) => Some(resolved),
+            Err(error) => {
+                warn!(%error, "boamp triage has no usable provider, ambiguous notices are deferred");
+                None
+            }
+        };
+        let provider = resolved.as_ref().and_then(|resolved| {
+            match AnyProvider::from_definition(&resolved.definition) {
+                Ok(provider) => Some(provider),
+                Err(error) => {
+                    warn!(%error, "boamp triage provider could not be built, ambiguous notices are deferred");
+                    None
+                }
+            }
+        });
+        let (max_retries, pricing) = resolved.as_ref().map_or(
+            (
+                0,
+                TokenPricing {
+                    input_cents_per_mtok: 0,
+                    output_cents_per_mtok: 0,
+                },
+            ),
+            |resolved| (resolved.max_retries, resolved.pricing),
+        );
+        let settings = TriageSettings {
+            call: CallSettings {
+                max_retries,
+                pricing,
+                base_delay: TRIAGE_BASE_DELAY,
+            },
+            max_tokens: TRIAGE_MAX_TOKENS,
+            budget_cents: self.llm.budget_cents,
+        };
+        let report = self
+            .usecase
+            .run_triage(
+                &self.sources.boamp,
+                provider.as_ref(),
+                &self.llm.cache,
+                settings,
+                &SystemClock,
+            )
+            .await?;
+        info!(
+            candidates = report.candidates,
+            accepted_by_rules = report.accepted_by_rules,
+            rejected_by_rules = report.rejected_by_rules,
+            sent_to_llm = report.sent_to_llm,
+            accepted_by_llm = report.accepted_by_llm,
+            deferred = report.deferred,
+            budget_exhausted = report.budget_exhausted,
+            "boamp triage finished"
+        );
+        Ok((
+            report.candidates,
+            report.accepted_by_rules + report.accepted_by_llm,
+        ))
+    }
+
     async fn run_source(&self, job: &Job) -> Result<JobOutcome, JobError> {
         let source = source_of_job(job)?;
         let result = match source {
@@ -225,6 +298,7 @@ impl JobRouter {
                     .await
                     .map(|report| (report.domains, report.contacts))
             }
+            SourceName::Boamp => self.run_boamp().await,
             other => {
                 return Err(JobError::Permanent(format!(
                     "source `{other}` is not wired"
@@ -294,5 +368,13 @@ mod tests {
         assert_eq!(QUALIFICATION_JOB_KIND, "llm.qualify");
         assert_eq!(job.kind.as_str(), "llm.qualify");
         assert_eq!(job.dedup_key.as_deref(), Some("llm:qualify"));
+    }
+
+    #[test]
+    fn the_boamp_source_job_is_wired_and_deduplicated() {
+        assert!(WIRED_SOURCES.contains(&SourceName::Boamp));
+        let job = source_job(SourceName::Boamp, Utc::now()).unwrap();
+        assert_eq!(job.dedup_key.as_deref(), Some("source:boamp"));
+        assert_eq!(job.payload["source"], "boamp");
     }
 }

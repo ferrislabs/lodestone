@@ -4,7 +4,7 @@ pub mod logger;
 pub mod openapi;
 pub mod router;
 
-use std::{error::Error, net::SocketAddr, sync::Arc, time::Duration};
+use std::{error::Error, net::SocketAddr, num::NonZeroU32, sync::Arc, time::Duration};
 
 use args::Args;
 use axum::Router;
@@ -27,6 +27,7 @@ use lodestone_core::{
 };
 use server::{get_addr, run_server, shutdown_signal};
 use sources::{
+    boamp::{BoampSettings, BoampSource},
     contact_pages::{ContactPageSettings, PublicPageFinder},
     ct::{CtSettings, CtSource},
     dns_cname::{DnsCnameSettings, DnsCnameSource},
@@ -50,6 +51,8 @@ const DNS_BATCH_SIZE: u32 = 500;
 const DNS_CONCURRENCY: usize = 16;
 const PROBE_BATCH_SIZE: u32 = 200;
 const PROBE_CONCURRENCY: usize = 8;
+const BOAMP_MAX_BODY_BYTES: usize = 16 * 1024 * 1024;
+const BOAMP_REQUESTS_PER_MINUTE: u32 = 30;
 const CT_LOG_LIST_TTL: Duration = Duration::from_secs(6 * 3600);
 
 #[tokio::main]
@@ -82,6 +85,19 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let fetcher = Arc::new(PoliteFetcher::new(FetchSettings::from_outbound(
         &outbound_config,
     ))?);
+    let mut boamp_fetch = FetchSettings::from_outbound(&outbound_config);
+    boamp_fetch.max_body_bytes = BOAMP_MAX_BODY_BYTES;
+    boamp_fetch.requests_per_host_per_minute = boamp_fetch
+        .requests_per_host_per_minute
+        .max(NonZeroU32::new(BOAMP_REQUESTS_PER_MINUTE).unwrap_or(NonZeroU32::MIN));
+    let boamp = BoampSource::new(
+        Arc::new(PoliteFetcher::new(boamp_fetch)?),
+        BoampSettings {
+            base_url: args.boamp.base_url.clone(),
+            lookback_days: args.boamp.lookback_days.get(),
+            max_pages: args.boamp.max_pages.get(),
+        },
+    );
     let certificate_transparency = CtSource::new(
         Arc::clone(&fetcher),
         Arc::new(PgCandidateHosts::new(pool.clone())),
@@ -133,6 +149,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             certificate_transparency,
             dns_cname,
             http_probe,
+            boamp,
             contacts,
         },
         Intervals {

@@ -526,3 +526,34 @@ async fn body_cap_applies_after_decompression() {
     assert!(response.truncated);
     assert_eq!(response.body.len(), cap);
 }
+
+#[tokio::test]
+async fn documented_api_requests_skip_robots_while_crawl_is_refused() {
+    let server = MockServer::start_async().await;
+    let robots = server
+        .mock_async(|when, then| {
+            when.method(GET).path("/robots.txt");
+            then.status(200).body("User-agent: *\nDisallow: /api/\n");
+        })
+        .await;
+    let api = server
+        .mock_async(|when, then| {
+            when.method(GET).path("/api/records");
+            then.status(200).body("{}");
+        })
+        .await;
+    let fetcher = fetcher(settings());
+    let refused = fetcher
+        .fetch(&request(&server, "/api/records", FetchPurpose::Crawl))
+        .await
+        .unwrap_err();
+    assert_eq!(refused, FetchError::DisallowedByRobots);
+    api.assert_hits_async(0).await;
+    let response = fetcher
+        .fetch(&request(&server, "/api/records", FetchPurpose::Api))
+        .await
+        .unwrap();
+    assert_eq!(response.status, 200);
+    api.assert_hits_async(1).await;
+    robots.assert_hits_async(1).await;
+}

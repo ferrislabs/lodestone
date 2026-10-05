@@ -64,6 +64,7 @@ pub struct TriageReport {
     pub rejected_by_rules: u64,
     pub sent_to_llm: u64,
     pub accepted_by_llm: u64,
+    pub deferred: u64,
     pub budget_exhausted: bool,
 }
 
@@ -90,7 +91,7 @@ fn candidate_text(candidate: &Candidate) -> String {
 }
 
 struct TriageLlm<'a, P, C> {
-    provider: &'a P,
+    provider: Option<&'a P>,
     cache: &'a C,
     settings: TriageSettings,
 }
@@ -99,7 +100,7 @@ impl LodestoneUseCase {
     pub async fn run_triage<S, P, C, K>(
         &self,
         source: &S,
-        provider: &P,
+        provider: Option<&P>,
         cache: &C,
         settings: TriageSettings,
         clock: &K,
@@ -273,6 +274,7 @@ impl LodestoneUseCase {
                             "title": candidate.title,
                             "matched": matched,
                             "route": "keywords",
+                            "details": candidate.details,
                         }),
                         provenance: candidate.provenance.clone(),
                         strength: strength(RULES_STRENGTH)?,
@@ -285,6 +287,10 @@ impl LodestoneUseCase {
                     {
                         continue;
                     }
+                    let Some(provider) = llm.provider else {
+                        report.deferred += 1;
+                        continue;
+                    };
                     let documents = [UntrustedDocument {
                         source: candidate.provenance.as_str(),
                         content: &content,
@@ -303,7 +309,7 @@ impl LodestoneUseCase {
                     };
                     report.sent_to_llm += 1;
                     let verdict = match call_structured_cached::<TriageVerdict, _, _>(
-                        llm.provider,
+                        provider,
                         llm.cache,
                         &scope,
                         prompt,
@@ -349,6 +355,7 @@ impl LodestoneUseCase {
                             "model": verdict.model,
                             "prompt": tag,
                             "from_cache": verdict.from_cache,
+                            "details": candidate.details,
                         }),
                         provenance: candidate.provenance.clone(),
                         strength: strength(LLM_STRENGTH)?,
