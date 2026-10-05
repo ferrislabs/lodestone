@@ -102,7 +102,7 @@ describe('definition tabs', () => {
 		expect(screen.getByLabelText(/Qualification threshold/)).toBeTruthy()
 		expect(screen.queryByLabelText(/Offer/)).toBeNull()
 		fireEvent.click(screen.getByRole('tab', { name: TAB_LABELS.scoring }))
-		expect(screen.getByLabelText('Add Factors')).toBeTruthy()
+		expect(screen.getByRole('button', { name: 'Add factor' })).toBeTruthy()
 		expect(screen.queryByLabelText(/Qualification threshold/)).toBeNull()
 		fireEvent.click(screen.getByRole('tab', { name: TAB_LABELS.agents }))
 		expect(screen.getByRole('button', { name: 'Add agent' })).toBeTruthy()
