@@ -72,6 +72,7 @@ export interface UiHints {
 	messages: UiMessages
 	layout?: Readonly<Record<string, ObjectLayout>>
 	choices?: Readonly<Record<string, NumberRange>>
+	optionLabels?: Readonly<Record<string, Readonly<Record<string, string>>>>
 }
 
 export const DEFAULT_MESSAGES: UiMessages = {

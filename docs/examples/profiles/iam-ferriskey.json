@@ -172,6 +172,7 @@
   },
   "llm": {
     "qualification_threshold": 40,
-    "relevance_criteria": "The organization operates its own identity infrastructure, such as a self-hosted Keycloak, or pays for a SaaS IAM, and shows signs of migration, staffing or procurement around it. Physical access control and unrelated directories are not relevant."
+    "relevance_criteria": "The organization operates its own identity infrastructure, such as a self-hosted Keycloak, or pays for a SaaS IAM, and shows signs of migration, staffing or procurement around it. Physical access control and unrelated directories are not relevant.",
+    "language": "fr"
   }
 }

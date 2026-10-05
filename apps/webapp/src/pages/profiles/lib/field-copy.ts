@@ -222,7 +222,7 @@ export const FIELD_COPY: Readonly<Record<string, FieldCopy>> = {
 	llm: {
 		label: 'LLM',
 		description:
-			'Seuil de qualification et critères de pertinence donnés au modèle.',
+			'Seuil de qualification, critères de pertinence et langue des réponses donnés au modèle.',
 	},
 	'llm.qualification_threshold': {
 		label: 'Seuil de qualification',
@@ -232,6 +232,11 @@ export const FIELD_COPY: Readonly<Record<string, FieldCopy>> = {
 	'llm.relevance_criteria': {
 		label: 'Critères de pertinence',
 		description: "Critères donnés au LLM pour juger la pertinence d'un lead.",
+	},
+	'llm.language': {
+		label: 'Langue des réponses du LLM',
+		description:
+			"Langue du bilan, de l'angle d'approche, du brouillon et des raisons de tri. Les citations restent dans la langue de la source.",
 	},
 }
 

@@ -65,6 +65,7 @@
   },
   "llm": {
     "qualification_threshold": 50,
-    "relevance_criteria": "The organization runs an online shop on Magento, preferably an outdated version, or is hiring or tendering for a rebuild of its merchant site."
+    "relevance_criteria": "The organization runs an online shop on Magento, preferably an outdated version, or is hiring or tendering for a rebuild of its merchant site.",
+    "language": "fr"
   }
 }

@@ -469,6 +469,19 @@ describe('definition tabs', () => {
 		expect(field).toHaveProperty('value', '')
 	})
 
+	it('offers the LLM answer language as a french select', () => {
+		render(<Harness startTab="settings" />)
+		const select = screen.getByLabelText('Langue des réponses du LLM')
+		expect(select).toHaveProperty('value', 'fr')
+		expect(
+			within(select)
+				.getAllByRole('option')
+				.map((option) => option.textContent),
+		).toEqual(['Français', 'English'])
+		fireEvent.change(select, { target: { value: 'en' } })
+		expect(select).toHaveProperty('value', 'en')
+	})
+
 	it('never renders a JSON editor', () => {
 		const tabs: EditorTab[] = ['identity', 'agents', 'scoring', 'settings']
 		render(

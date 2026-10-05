@@ -564,11 +564,24 @@
         "target_customer"
       ]
     },
+    "Language": {
+      "type": "string",
+      "enum": [
+        "fr",
+        "en"
+      ]
+    },
     "LlmSettings": {
       "title": "LLM settings",
-      "description": "Qualification threshold and relevance criteria given to the model.",
+      "description": "Qualification threshold, relevance criteria and answer language given to the model.",
       "type": "object",
       "properties": {
+        "language": {
+          "title": "Answer language",
+          "description": "Language of every free-text field the LLM writes: triage reason, qualification summary, approach angle and draft. Evidence quotes stay in the source language.",
+          "$ref": "#/$defs/Language",
+          "default": "fr"
+        },
         "qualification_threshold": {
           "description": "Percentage of the maximum possible score from which a lead is qualified.",
           "type": "integer",
