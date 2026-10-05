@@ -33,10 +33,11 @@ use sources::{
     http_probe::HttpProbeSource,
     role_guess::RoleGuessFinder,
     security_txt::SecurityTxtFinder,
+    ted::TedSource,
 };
 use tracing::{info, warn};
 
-pub const WIRED_SOURCES: [SourceName; 8] = [
+pub const WIRED_SOURCES: [SourceName; 9] = [
     SourceName::CertificateTransparency,
     SourceName::DnsCname,
     SourceName::HttpProbe,
@@ -45,6 +46,7 @@ pub const WIRED_SOURCES: [SourceName; 8] = [
     SourceName::RoleGuess,
     SourceName::Boamp,
     SourceName::Decp,
+    SourceName::Ted,
 ];
 
 pub const QUALIFICATION_JOB_KIND: &str = "llm.qualify";
@@ -60,6 +62,7 @@ pub type DnsCname = DnsCnameSource<HickoryResolver, PgCandidateHosts>;
 pub type HttpProbe = HttpProbeSource<PoliteFetcher, PgCandidateHosts, LodestoneUseCase>;
 pub type Boamp = BoampSource<PoliteFetcher>;
 pub type Decp = DecpSource<PoliteFetcher>;
+pub type Ted = TedSource<PoliteFetcher>;
 pub type CertificateTransparency = CtSource<PoliteFetcher, PgCandidateHosts, PgCtCursors>;
 
 pub struct ContactFinders {
@@ -76,6 +79,7 @@ pub struct WiredSources {
     pub http_probe: HttpProbe,
     pub boamp: Boamp,
     pub decp: Decp,
+    pub ted: Ted,
     pub contacts: ContactFinders,
 }
 
@@ -264,6 +268,14 @@ impl JobRouter {
         ))
     }
 
+    async fn run_ted(&self) -> Result<(u64, u64), SourceRunError> {
+        let report = self.triage_source(&self.sources.ted, "ted").await?;
+        Ok((
+            report.candidates,
+            report.accepted_by_rules + report.accepted_by_llm,
+        ))
+    }
+
     async fn run_decp(&self) -> Result<(u64, u64), SourceRunError> {
         let report = self.triage_source(&self.sources.decp, "decp").await?;
         let contracts = self.sources.decp.take_awards();
@@ -354,6 +366,7 @@ impl JobRouter {
             }
             SourceName::Boamp => self.run_boamp().await,
             SourceName::Decp => self.run_decp().await,
+            SourceName::Ted => self.run_ted().await,
             other => {
                 return Err(JobError::Permanent(format!(
                     "source `{other}` is not wired"
@@ -440,5 +453,13 @@ mod tests {
         let job = source_job(SourceName::Decp, Utc::now()).unwrap();
         assert_eq!(job.dedup_key.as_deref(), Some("source:decp"));
         assert_eq!(job.payload["source"], "decp");
+    }
+
+    #[test]
+    fn the_ted_source_job_is_wired_and_deduplicated() {
+        assert!(WIRED_SOURCES.contains(&SourceName::Ted));
+        let job = source_job(SourceName::Ted, Utc::now()).unwrap();
+        assert_eq!(job.dedup_key.as_deref(), Some("source:ted"));
+        assert_eq!(job.payload["source"], "ted");
     }
 }

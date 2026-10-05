@@ -4,7 +4,11 @@ use lodestone_core::{
     FetchError, FetchPurpose, FetchRequest, FetchResponse, Fetcher, NormalizedDomain, SourceName,
 };
 use rate_limit::{InMemoryRateLimiter, Quota, RateLimitKey, RateLimiter};
-use reqwest::{Client, Response, StatusCode, header::LOCATION, redirect::Policy};
+use reqwest::{
+    Client, Response, StatusCode,
+    header::{CONTENT_TYPE, LOCATION},
+    redirect::Policy,
+};
 use thiserror::Error;
 use tracing::{Instrument, info_span};
 use url::{Host, Url};
@@ -17,6 +21,20 @@ use crate::{
 
 const ROBOTS_MAX_REDIRECTS: u8 = 5;
 const DEFAULT_RETRY_AFTER: Duration = Duration::from_secs(60);
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PostRequest {
+    pub url: Url,
+    pub body: Vec<u8>,
+    pub source: SourceName,
+}
+
+pub trait PostFetcher: Send + Sync {
+    fn post(
+        &self,
+        request: &PostRequest,
+    ) -> impl Future<Output = Result<FetchResponse, FetchError>> + Send;
+}
 
 #[derive(Debug, Error)]
 pub enum FetchBuildError {
@@ -110,13 +128,17 @@ impl<L: RateLimiter> PoliteFetcher<L> {
         }
     }
 
-    async fn send(&self, url: &Url) -> Result<Response, FetchError> {
-        self.inner
-            .client
-            .get(url.clone())
-            .send()
-            .await
-            .map_err(map_error)
+    async fn send(&self, url: &Url, body: Option<&[u8]>) -> Result<Response, FetchError> {
+        let builder = match body {
+            Some(body) => self
+                .inner
+                .client
+                .post(url.clone())
+                .header(CONTENT_TYPE, "application/json")
+                .body(body.to_vec()),
+            None => self.inner.client.get(url.clone()),
+        };
+        builder.send().await.map_err(map_error)
     }
 
     async fn read_body(&self, mut response: Response) -> Result<(Vec<u8>, bool), FetchError> {
@@ -159,7 +181,7 @@ impl<L: RateLimiter> PoliteFetcher<L> {
                     Err(error) => return Err(error),
                 }
             }
-            let Ok(response) = self.send(&current).await else {
+            let Ok(response) = self.send(&current, None).await else {
                 break failure();
             };
             let status = response.status();
@@ -189,7 +211,11 @@ impl<L: RateLimiter> PoliteFetcher<L> {
         Ok(rule)
     }
 
-    async fn run(&self, request: &FetchRequest) -> Result<FetchResponse, FetchError> {
+    async fn run(
+        &self,
+        request: &FetchRequest,
+        body: Option<&[u8]>,
+    ) -> Result<FetchResponse, FetchError> {
         let settings = &self.inner.settings;
         let mut current = request.url.clone();
         let mut hops: u8 = 0;
@@ -205,9 +231,9 @@ impl<L: RateLimiter> PoliteFetcher<L> {
                 }
             }
             self.throttle(&current, request.source).await?;
-            let response = self.send(&current).await?;
+            let response = self.send(&current, body).await?;
             if let Some(next) = redirect_target(&response, &current)? {
-                if hops >= settings.max_redirects {
+                if body.is_some() || hops >= settings.max_redirects {
                     return Err(FetchError::Redirect);
                 }
                 hops += 1;
@@ -245,7 +271,24 @@ impl<L: RateLimiter + 'static> Fetcher for PoliteFetcher<L> {
             purpose = ?request.purpose,
             source = %request.source,
         );
-        self.run(request).instrument(span).await
+        self.run(request, None).instrument(span).await
+    }
+}
+
+impl<L: RateLimiter + 'static> PostFetcher for PoliteFetcher<L> {
+    async fn post(&self, request: &PostRequest) -> Result<FetchResponse, FetchError> {
+        let span = info_span!(
+            "fetch",
+            host = request.url.host_str().unwrap_or(""),
+            purpose = ?FetchPurpose::Api,
+            source = %request.source,
+        );
+        let fetch = FetchRequest {
+            url: request.url.clone(),
+            purpose: FetchPurpose::Api,
+            source: request.source,
+        };
+        self.run(&fetch, Some(&request.body)).instrument(span).await
     }
 }
 

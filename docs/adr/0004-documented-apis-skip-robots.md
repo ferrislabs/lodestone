@@ -16,6 +16,7 @@ Requests made with `FetchPurpose::Api` do not consult robots.txt. `FetchPurpose:
 Only a source whose endpoint is a documented public API may use `FetchPurpose::Api`. Sources allowed to:
 
 - BOAMP (OpenDataSoft Explore API on `boamp-datadila.opendatasoft.com`)
+- TED (Tenders Electronic Daily Search API, `api.ted.europa.eu/v3/notices/search`, POST with a JSON query, no key; published by the Publications Office of the EU, its robots.txt answers 404)
 - Certificate Transparency monitoring endpoints (static-ct-api, ADR 0003)
 - DECP (#46), three documented public interfaces:
   - the data.gouv.fr dataset API and the monthly consolidated files it lists (`www.data.gouv.fr/api/1/datasets/...`, then `static.data.gouv.fr`), published by the Ministères économiques et financiers under the Licence Ouverte

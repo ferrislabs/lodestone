@@ -4,7 +4,7 @@ use common::{Config, SettingsError};
 use crate::{
     auth::AuthArgs, boamp::BoampArgs, contacts::ContactArgs, ct::CtArgs, database::DatabaseArgs,
     decp::DecpArgs, jobs::JobsArgs, llm::LlmArgs, log::LogArgs, observability::ObservabilityArgs,
-    outbound::OutboundArgs, rate_limit::RateLimitArgs, server::ServerArgs,
+    outbound::OutboundArgs, rate_limit::RateLimitArgs, server::ServerArgs, ted::TedArgs,
 };
 
 pub mod auth;
@@ -20,6 +20,7 @@ pub mod observability;
 pub mod outbound;
 pub mod rate_limit;
 pub mod server;
+pub mod ted;
 
 #[derive(Debug, Clone, Parser)]
 pub struct Args {
@@ -61,6 +62,9 @@ pub struct Args {
 
     #[command(flatten)]
     pub decp: DecpArgs,
+
+    #[command(flatten)]
+    pub ted: TedArgs,
 }
 
 impl TryFrom<Args> for Config {
