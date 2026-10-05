@@ -2,9 +2,12 @@ use chrono::{DateTime, Utc};
 use common::CoreError;
 use uuid::Uuid;
 
-use crate::{Lead, LeadId, LeadStatus, NormalizedDomain, ProfileId, Score};
+use crate::{
+    Lead, LeadId, LeadStatus, NormalizedDomain, ProfileId, ProfileName, ProfileSummary,
+    RevisionNumber, Score,
+};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, sqlx::FromRow)]
 pub struct LeadRow {
     pub id: Uuid,
     pub profile_id: Uuid,
@@ -43,6 +46,40 @@ impl TryFrom<LeadRow> for Lead {
             first_seen_at: row.first_seen_at,
             last_seen_at: row.last_seen_at,
             updated_at: row.updated_at,
+        })
+    }
+}
+
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct ProfileSummaryRow {
+    pub id: Uuid,
+    pub name: String,
+    pub active: bool,
+    pub revision: Option<i32>,
+    pub lead_count: i64,
+}
+
+impl TryFrom<ProfileSummaryRow> for ProfileSummary {
+    type Error = CoreError;
+
+    fn try_from(row: ProfileSummaryRow) -> Result<Self, Self::Error> {
+        let name = ProfileName::parse(&row.name)
+            .map_err(|_| CoreError::Internal("stored profile name is invalid".to_owned()))?;
+        let revision = row
+            .revision
+            .map(|number| {
+                u32::try_from(number)
+                    .ok()
+                    .and_then(RevisionNumber::new)
+                    .ok_or_else(|| CoreError::Internal("stored revision is invalid".to_owned()))
+            })
+            .transpose()?;
+        Ok(Self {
+            id: ProfileId(row.id),
+            name,
+            active: row.active,
+            revision,
+            lead_count: u64::try_from(row.lead_count).unwrap_or_default(),
         })
     }
 }

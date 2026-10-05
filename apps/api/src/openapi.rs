@@ -23,7 +23,13 @@ impl Modify for SecurityAddon {
 #[derive(OpenApi)]
 #[openapi(
     info(title = "Lodestone API", description = "Lead detection API", version = "0.1.0"),
-    paths(handlers::api::me),
+    paths(
+        handlers::api::me,
+        handlers::profiles::list_profiles,
+        handlers::leads::list_leads,
+        handlers::leads::lead_detail,
+        handlers::leads::change_lead_status,
+    ),
     modifiers(&SecurityAddon),
 )]
 pub struct ApiDoc;

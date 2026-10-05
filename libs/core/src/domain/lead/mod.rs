@@ -11,6 +11,7 @@ use crate::domain::{
 };
 
 pub mod ports;
+pub mod query;
 
 macro_rules! uuid_id {
     ($name:ident) => {

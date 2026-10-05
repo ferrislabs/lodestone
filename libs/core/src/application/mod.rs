@@ -8,6 +8,7 @@ use crate::infrastructure::postgres::error::map_sqlx_error;
 
 pub mod contacts;
 pub mod jobs;
+pub mod leads;
 pub mod llm;
 pub mod partners;
 pub mod policy;

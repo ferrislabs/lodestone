@@ -31,6 +31,7 @@ pub use domain::{
         InvalidScore, InvalidTransition, Lead, LeadId, LeadStatus, Score, Signal, SignalId,
         UnknownLeadStatus,
         ports::{AssessmentRepository, ContactRepository, LeadRepository, SignalRepository},
+        query::{LeadDetail, LeadListing, LeadPage, LeadQuery, LeadSort, ProfileSummary},
     },
     llm::{
         LlmError, LlmProvider, LlmRequest, LlmResponse, ProviderDefinition, ProviderKind,

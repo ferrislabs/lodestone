@@ -3,7 +3,10 @@ use common::CoreError;
 
 use crate::domain::{
     NormalizedDomain,
-    lead::{Assessment, ContactEmail, Lead, LeadId, LeadStatus, Signal},
+    lead::{
+        Assessment, ContactEmail, Lead, LeadId, LeadStatus, Signal,
+        query::{LeadPage, LeadQuery, ProfileSummary},
+    },
     profile::{ProfileId, RevisionNumber},
     scoring::ScoreBreakdown,
 };
@@ -49,6 +52,16 @@ pub trait LeadRepository: Send {
         &mut self,
         profile_id: ProfileId,
     ) -> impl Future<Output = Result<Vec<Lead>, CoreError>> + Send;
+
+    fn list_page(
+        &mut self,
+        profile_id: ProfileId,
+        query: &LeadQuery,
+    ) -> impl Future<Output = Result<LeadPage, CoreError>> + Send;
+
+    fn profile_summaries(
+        &mut self,
+    ) -> impl Future<Output = Result<Vec<ProfileSummary>, CoreError>> + Send;
 
     fn list_to_qualify(
         &mut self,
