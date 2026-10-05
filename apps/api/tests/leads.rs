@@ -86,8 +86,8 @@ impl Seed {
 
     async fn assessment(&self, lead: &str) {
         sqlx::query(
-            "INSERT INTO assessments (id, lead_id, profile_revision, summary, approach_angle, evidence, model, prompt_version, created_at, draft_subject, draft_body)
-             VALUES ($1, $2::uuid, 2, 'Runs Keycloak', 'Offer managed IAM', $3, 'model-x', 'qualification-v1', now(), 'Hello', 'Body text')",
+            "INSERT INTO assessments (id, lead_id, profile_revision, summary, approach_angle, evidence, model, prompt_version, created_at, draft_subject, draft_body, draft_status)
+             VALUES ($1, $2::uuid, 2, 'Runs Keycloak', 'Offer managed IAM', $3, 'model-x', 'qualification-v1', now(), 'Hello', 'Body text', 'pending')",
         )
         .bind(common::generate_uuid_v7())
         .bind(lead)

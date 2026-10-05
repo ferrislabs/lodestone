@@ -7,6 +7,7 @@ use sqlx::postgres::PgPoolOptions;
 use crate::infrastructure::postgres::error::map_sqlx_error;
 
 pub mod contacts;
+pub mod drafts;
 pub mod jobs;
 pub mod leads;
 pub mod llm;

@@ -18,6 +18,7 @@ use crate::{
         job::ports::Clock,
         lead::{
             Assessment, AssessmentId, Evidence, Lead, LeadId, LeadStatus, Signal,
+            draft::DraftReview,
             ports::{AssessmentRepository, LeadRepository, SignalRepository},
         },
         llm::{
@@ -313,6 +314,7 @@ impl LodestoneUseCase {
                 model: structured.model,
                 prompt_version: tag.clone(),
                 draft: Some(output.draft_message),
+                draft_review: Some(DraftReview::pending()),
                 created_at: now,
             };
             if self.store_assessment(&assessment, now).await? {

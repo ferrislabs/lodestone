@@ -26,7 +26,7 @@ impl<'tx> PgLeadRepository<'tx> {
     }
 }
 
-const NOT_SUPPRESSED: &str = " AND NOT EXISTS (SELECT 1 FROM suppression_list sup WHERE sup.kind = 'domain' AND (sup.value = leads.domain OR right(leads.domain, length(sup.value) + 1) = '.' || sup.value))";
+pub(crate) const NOT_SUPPRESSED: &str = " AND NOT EXISTS (SELECT 1 FROM suppression_list sup WHERE sup.kind = 'domain' AND (sup.value = leads.domain OR right(leads.domain, length(sup.value) + 1) = '.' || sup.value))";
 
 fn escape_like(raw: &str) -> String {
     let mut escaped = String::with_capacity(raw.len());

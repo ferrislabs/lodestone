@@ -4,7 +4,8 @@ use common::CoreError;
 use crate::domain::{
     NormalizedDomain,
     lead::{
-        Assessment, ContactEmail, Lead, LeadId, LeadStatus, Signal,
+        Assessment, AssessmentId, ContactEmail, Lead, LeadId, LeadStatus, Signal,
+        draft::{DraftEdit, DraftPage, DraftRecord, DraftReview},
         query::{LeadPage, LeadQuery, ProfileSummary},
     },
     profile::{ProfileId, RevisionNumber},
@@ -107,4 +108,29 @@ pub trait AssessmentRepository: Send {
         &mut self,
         lead_id: LeadId,
     ) -> impl Future<Output = Result<Vec<Assessment>, CoreError>> + Send;
+
+    fn find_draft(
+        &mut self,
+        id: AssessmentId,
+    ) -> impl Future<Output = Result<Option<DraftRecord>, CoreError>> + Send;
+
+    fn list_pending_drafts(
+        &mut self,
+        profile_id: Option<ProfileId>,
+        limit: u32,
+        offset: u64,
+    ) -> impl Future<Output = Result<DraftPage, CoreError>> + Send;
+
+    fn edit_draft(
+        &mut self,
+        id: AssessmentId,
+        edit: &DraftEdit,
+        at: DateTime<Utc>,
+    ) -> impl Future<Output = Result<bool, CoreError>> + Send;
+
+    fn decide_draft(
+        &mut self,
+        id: AssessmentId,
+        review: &DraftReview,
+    ) -> impl Future<Output = Result<bool, CoreError>> + Send;
 }

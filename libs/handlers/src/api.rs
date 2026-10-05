@@ -10,6 +10,7 @@ use utoipa::ToSchema;
 
 use crate::{
     auth::{AuthenticatedUser, auth_middleware},
+    drafts,
     errors::ApiError,
     leads, llm, profiles,
     response::{DataEnvelope, Response},
@@ -78,6 +79,16 @@ pub fn router(state: AppState) -> Router<AppState> {
             "/llm/tiers/{tier}",
             axum::routing::put(llm::assign_tier).delete(llm::unassign_tier),
         )
+        .route("/drafts", get(drafts::list_drafts))
+        .route(
+            "/drafts/{assessment_id}",
+            get(drafts::get_draft).patch(drafts::edit_draft),
+        )
+        .route(
+            "/drafts/{assessment_id}/approve",
+            post(drafts::approve_draft),
+        )
+        .route("/drafts/{assessment_id}/reject", post(drafts::reject_draft))
         .route("/leads/{lead_id}", get(leads::lead_detail))
         .route("/leads/{lead_id}/status", patch(leads::change_lead_status));
 

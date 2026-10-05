@@ -25,5 +25,6 @@
 | assessment | LLM output for a lead: summary, approach angle, quoted evidence, draft, model, prompt version, profile revision. | analysis, review |
 | evidence | A verbatim excerpt of stored source content that an assessment cites. | proof |
 | draft | A message proposed by qualification, waiting for human approval. Never sent by Lodestone. | email, message |
+| draft status | One of pending, approved, rejected. Only pending drafts can be edited or decided. Approving marks the draft ready and validates its lead; it never sends anything. | sent, published |
 | LLM provider | A named endpoint with kind, base URL, model and encrypted API key, stored in Postgres. | model, backend |
 | output | An adapter that pushes leads out: JSON, CSV, webhook, later a CRM. | export target, sink |
