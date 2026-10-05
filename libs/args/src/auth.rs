@@ -21,6 +21,14 @@ pub struct AuthArgs {
     pub client_id: String,
 
     #[arg(
+        long = "auth-audience",
+        env = "AUTH_AUDIENCE",
+        name = "AUTH_AUDIENCE",
+        long_help = "Expected audience of access tokens. When set, tokens without it are rejected."
+    )]
+    pub audience: Option<String>,
+
+    #[arg(
         long = "auth-client-secret",
         env = "AUTH_CLIENT_SECRET",
         name = "AUTH_CLIENT_SECRET",
@@ -35,6 +43,7 @@ impl From<AuthArgs> for AuthConfig {
     fn from(value: AuthArgs) -> Self {
         Self {
             issuer: value.issuer,
+            audience: value.audience,
         }
     }
 }

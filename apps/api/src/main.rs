@@ -1,11 +1,13 @@
-pub mod internal_router;
-pub mod jobs;
-pub mod logger;
-pub mod openapi;
-pub mod router;
-
 use std::{error::Error, net::SocketAddr, num::NonZeroU32, sync::Arc, time::Duration};
 
+use api::{
+    internal_router::internal_router,
+    jobs::{
+        ContactFinders, Intervals, JobRouter, LlmRuntime, WiredSources, schedule_wired_sources,
+    },
+    logger::init_tracing_and_logging,
+    router::router,
+};
 use args::Args;
 use axum::Router;
 use axum_server::Handle;
@@ -44,15 +46,6 @@ use sources::{
 };
 use tokio::sync::watch;
 use tracing::{error, info};
-
-use crate::{
-    internal_router::internal_router,
-    jobs::{
-        ContactFinders, Intervals, JobRouter, LlmRuntime, WiredSources, schedule_wired_sources,
-    },
-    logger::init_tracing_and_logging,
-    router::router,
-};
 
 const DNS_BATCH_SIZE: u32 = 500;
 const DNS_CONCURRENCY: usize = 16;

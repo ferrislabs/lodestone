@@ -38,6 +38,7 @@ pub struct DatabaseConfig {
 #[derive(Clone, Debug)]
 pub struct AuthConfig {
     pub issuer: String,
+    pub audience: Option<String>,
 }
 
 #[derive(Debug, Error)]
