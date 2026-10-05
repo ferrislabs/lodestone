@@ -212,7 +212,7 @@ impl LodestoneUseCase {
         let leads = self
             .leads_to_qualify(
                 active,
-                definition.llm.qualification_threshold,
+                definition.qualification_points(),
                 &tag,
                 settings.batch_size,
             )

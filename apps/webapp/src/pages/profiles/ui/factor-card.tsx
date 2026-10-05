@@ -7,11 +7,14 @@ import {
 	DISTINCT_SIGNALS,
 	type Factor,
 	factorTitle,
+	isValidWeight,
 	SIGNAL_GROUPS,
 	SIGNAL_KINDS,
 	signalMeta,
+	WEIGHT_ERROR,
 } from '#/pages/profiles/lib/scoring'
 import type { Problem } from '#/pages/profiles/lib/types'
+import { WeightPicker } from '#/pages/profiles/ui/weight-picker'
 
 interface FactorCardProps {
 	index: number
@@ -20,7 +23,7 @@ interface FactorCardProps {
 	available: boolean
 	problems: readonly Problem[]
 	onSignal: (signal: string) => void
-	onWeight: (weight: number | null) => void
+	onWeight: (weight: number) => void
 	onValue: (value: string) => void
 	onRemove: () => void
 }
@@ -61,7 +64,14 @@ export function FactorCard({
 	const meta = signalMeta(factor.signal)
 	const title = factorTitle(factor)
 	const signalProblems = pathProblems(problems, `${base}.signal`)
-	const weightProblems = pathProblems(problems, `${base}.weight`)
+	const serverWeightProblems = pathProblems(problems, `${base}.weight`)
+	const weightProblems =
+		isValidWeight(factor.weight) || serverWeightProblems.length > 0
+			? serverWeightProblems
+			: [
+					...serverWeightProblems,
+					{ path: `${base}.weight`, message: WEIGHT_ERROR },
+				]
 	const valueProblems = pathProblems(problems, `${base}.value`)
 	const failing =
 		signalProblems.length + weightProblems.length + valueProblems.length > 0
@@ -69,10 +79,11 @@ export function FactorCard({
 	const signalId = `factor-signal-${index}`
 	const valueId = `factor-value-${index}`
 	const listId = `factor-values-${index}`
-	const helper =
-		factor.signal === DISTINCT_SIGNALS
-			? 'points per distinct signal kind'
-			: 'points per unit of strength'
+	const helper = !isValidWeight(factor.weight)
+		? null
+		: factor.signal === DISTINCT_SIGNALS
+			? `${factor.weight} points per distinct signal kind`
+			: `Adds up to ${factor.weight} points`
 
 	return (
 		<li
@@ -94,20 +105,17 @@ export function FactorCard({
 				</Button>
 			</div>
 			<div className="flex flex-col gap-1">
-				<Label htmlFor={weightId}>Weight</Label>
-				<Input
-					id={weightId}
-					type="number"
-					step={1}
-					className="h-14 text-center text-3xl font-semibold"
-					value={factor.weight ?? ''}
-					aria-invalid={weightProblems.length > 0}
-					onChange={(event) => {
-						const parsed = event.currentTarget.valueAsNumber
-						onWeight(Number.isNaN(parsed) ? null : parsed)
-					}}
+				<Label id={weightId}>Weight</Label>
+				<WeightPicker
+					labelledBy={weightId}
+					value={factor.weight}
+					invalid={weightProblems.length > 0}
+					describedBy={`${weightId}-errors`}
+					onChange={onWeight}
 				/>
-				<p className="text-xs text-muted-foreground">{helper}</p>
+				{helper !== null && (
+					<p className="text-xs text-muted-foreground">{helper}</p>
+				)}
 				<Errors id={`${weightId}-errors`} items={weightProblems} />
 			</div>
 			<div className="flex flex-col gap-1">

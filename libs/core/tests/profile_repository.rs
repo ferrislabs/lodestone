@@ -32,6 +32,7 @@ const MINIMAL_PROFILE: &str = r#"{
 
 fn definition(threshold: f64) -> ValidatedProfile {
     let mut value: serde_json::Value = serde_json::from_str(MINIMAL_PROFILE).unwrap();
+    value["scoring"]["factors"][0]["weight"] = serde_json::json!(100.0);
     value["llm"]["qualification_threshold"] = serde_json::json!(threshold);
     ValidatedProfile::parse(value).unwrap()
 }

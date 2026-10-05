@@ -21,7 +21,7 @@
       "$ref": "#/$defs/LlmSettings"
     },
     "schema_version": {
-      "description": "Profile format version. Must be 2.",
+      "description": "Profile format version. Must be 3.",
       "type": "integer",
       "format": "uint32",
       "minimum": 0
@@ -570,9 +570,11 @@
       "type": "object",
       "properties": {
         "qualification_threshold": {
-          "description": "Score from which a lead is qualified.",
-          "type": "number",
-          "format": "double"
+          "description": "Percentage of the maximum possible score from which a lead is qualified.",
+          "type": "integer",
+          "format": "uint8",
+          "maximum": 100,
+          "minimum": 0
         },
         "relevance_criteria": {
           "description": "Criteria given to the LLM to judge a lead relevance.",
@@ -691,9 +693,11 @@
           ]
         },
         "weight": {
-          "description": "Weight applied to the measure of the signal.",
-          "type": "number",
-          "format": "double"
+          "description": "Integer weight from 1 to 10 applied to the measure of the signal.",
+          "type": "integer",
+          "format": "uint8",
+          "maximum": 10,
+          "minimum": 1
         }
       },
       "additionalProperties": false,

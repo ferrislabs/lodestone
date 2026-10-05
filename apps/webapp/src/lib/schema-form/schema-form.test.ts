@@ -111,7 +111,11 @@ describe('classify', () => {
 		}
 		const weight = def('ScoringFactor').properties?.weight ?? {}
 		const weightNode = classify(root, weight)
-		if (weightNode.kind === 'number') expect(weightNode.integer).toBe(false)
+		if (weightNode.kind === 'number') {
+			expect(weightNode.integer).toBe(true)
+			expect(weightNode.schema.minimum).toBe(1)
+			expect(weightNode.schema.maximum).toBe(10)
+		}
 	})
 
 	it('orders required properties first', () => {
@@ -130,7 +134,7 @@ describe('defaultValue', () => {
 	it('builds a new profile with every required key', () => {
 		const value = defaultValue(root, root, PROFILE_HINTS)
 		expect(value).toEqual({
-			schema_version: 2,
+			schema_version: 3,
 			identity: { offer: '', target_customer: '' },
 			agents: [],
 			scoring: { factors: [] },
@@ -294,7 +298,7 @@ describe('validateValue', () => {
 	})
 
 	it('reports a missing required key', () => {
-		const problems = validateValue(root, root, { schema_version: 2 })
+		const problems = validateValue(root, root, { schema_version: 3 })
 		expect(problems.map((p) => p.path)).toContain('identity')
 	})
 })

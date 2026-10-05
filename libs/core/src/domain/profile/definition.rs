@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::domain::values::SourceName;
 
-pub const PROFILE_SCHEMA_VERSION: u32 = 2;
+pub const PROFILE_SCHEMA_VERSION: u32 = 3;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -12,7 +12,7 @@ pub const PROFILE_SCHEMA_VERSION: u32 = 2;
     description = "Describes one market: what is sold, which agents scan which sources, how leads are scored, which contacts to prefer and how the LLM qualifies a lead."
 )]
 pub struct ProfileDefinition {
-    #[schemars(description = "Profile format version. Must be 2.")]
+    #[schemars(description = "Profile format version. Must be 3.")]
     pub schema_version: u32,
     pub identity: Identity,
     #[schemars(description = "Detection agents. At least one is required.")]
@@ -379,8 +379,11 @@ pub struct ScoringFactor {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(description = "Signal value to match. Any value when absent.")]
     pub value: Option<String>,
-    #[schemars(description = "Weight applied to the measure of the signal.")]
-    pub weight: f64,
+    #[schemars(
+        range(min = 1, max = 10),
+        description = "Integer weight from 1 to 10 applied to the measure of the signal."
+    )]
+    pub weight: u8,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -404,13 +407,24 @@ pub struct ContactRanking {
     description = "Qualification threshold and relevance criteria given to the model."
 )]
 pub struct LlmSettings {
-    #[schemars(description = "Score from which a lead is qualified.")]
-    pub qualification_threshold: f64,
+    #[schemars(
+        range(min = 0, max = 100),
+        description = "Percentage of the maximum possible score from which a lead is qualified."
+    )]
+    pub qualification_threshold: u8,
     #[schemars(description = "Criteria given to the LLM to judge a lead relevance.")]
     pub relevance_criteria: String,
 }
 
 impl ProfileDefinition {
+    pub fn max_score(&self) -> f64 {
+        crate::domain::scoring::max_score(&self.scoring)
+    }
+
+    pub fn qualification_points(&self) -> f64 {
+        f64::from(self.llm.qualification_threshold) * self.max_score() / 100.0
+    }
+
     pub fn enabled_agents(&self, source: SourceName) -> impl Iterator<Item = &Agent> {
         self.agents
             .iter()

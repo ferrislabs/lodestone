@@ -84,7 +84,7 @@ describe('SchemaForm', () => {
 		expect(screen.getByText('Scoring factor 1')).toBeTruthy()
 		const last = seen.mock.calls.at(-1)?.[0]
 		expect(last).toMatchObject({
-			scoring: { factors: [{ signal: '', weight: 0 }] },
+			scoring: { factors: [{ signal: '', weight: 5 }] },
 		})
 	})
 
