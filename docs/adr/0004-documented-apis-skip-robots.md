@@ -23,6 +23,10 @@ Only a source whose endpoint is a documented public API may use `FetchPurpose::A
   - the Annuaire de l'administration OpenDataSoft API (`api-lannuaire.service-public.fr/api/explore/v2.1/...`), whose robots.txt disallows `/api/` like BOAMP, used to resolve a buyer SIRET to its public website
   - the Recherche d'entreprises API (`recherche-entreprises.api.gouv.fr`, documented, 7 requests per second), used to resolve a SIRET to a company name
 - France Travail (#48), the Offres d'emploi v2 API (`api.francetravail.io/partenaire/offresdemploi/v2/offres/search`, GET with a bearer token obtained by the OAuth2 client credentials grant on `entreprise.francetravail.fr/connexion/oauth2/access_token`). It is a partner API that requires credentials registered by the operator; only fields returned by the API are used and the `urlOrigine` of an offer (often a job board) is never fetched
+- ATS job boards (#49), three documented public job board APIs, read for a lead only after its own careers page linked to the board (a slug is never guessed from the domain, and the careers pages themselves stay `Crawl`):
+  - Greenhouse Job Board API (`boards-api.greenhouse.io/v1/boards/<token>/jobs?content=true`, GET, no key; its robots.txt only disallows `/embed/`)
+  - Lever Postings API (`api.lever.co/v0/postings/<site>?mode=json`, and `api.eu.lever.co` for EU tenants, GET, no key; its robots.txt allows `/` with a crawl delay of 1 second, covered by the per-host rate limit)
+  - Ashby public job posting API (`api.ashbyhq.com/posting-api/job-board/<name>?includeCompensation=false`, GET, no key; its robots.txt answers 401)
 
 Adding a source to this list requires amending this ADR.
 

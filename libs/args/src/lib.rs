@@ -2,12 +2,13 @@ use clap::Parser;
 use common::{Config, SettingsError};
 
 use crate::{
-    auth::AuthArgs, boamp::BoampArgs, contacts::ContactArgs, ct::CtArgs, database::DatabaseArgs,
-    decp::DecpArgs, france_travail::FranceTravailArgs, jobs::JobsArgs, llm::LlmArgs, log::LogArgs,
-    observability::ObservabilityArgs, outbound::OutboundArgs, rate_limit::RateLimitArgs,
-    server::ServerArgs, ted::TedArgs,
+    ats::AtsArgs, auth::AuthArgs, boamp::BoampArgs, contacts::ContactArgs, ct::CtArgs,
+    database::DatabaseArgs, decp::DecpArgs, france_travail::FranceTravailArgs, jobs::JobsArgs,
+    llm::LlmArgs, log::LogArgs, observability::ObservabilityArgs, outbound::OutboundArgs,
+    rate_limit::RateLimitArgs, server::ServerArgs, ted::TedArgs,
 };
 
+pub mod ats;
 pub mod auth;
 pub mod boamp;
 pub mod contacts;
@@ -70,6 +71,9 @@ pub struct Args {
 
     #[command(flatten)]
     pub france_travail: FranceTravailArgs,
+
+    #[command(flatten)]
+    pub ats: AtsArgs,
 }
 
 impl TryFrom<Args> for Config {

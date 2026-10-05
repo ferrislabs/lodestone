@@ -14,8 +14,11 @@ use lodestone_core::{
     TokenPricing,
     contacts::ContactRunSettings,
     infrastructure::{
-        candidate_host::postgres::PgCandidateHosts, contact_target::postgres::PgContactTargets,
-        crypto::AesGcmCipher, ct_cursor::postgres::PgCtCursors, job::postgres::PgJobQueue,
+        candidate_host::postgres::PgCandidateHosts,
+        contact_target::postgres::{PgAtsTargets, PgContactTargets},
+        crypto::AesGcmCipher,
+        ct_cursor::postgres::PgCtCursors,
+        job::postgres::PgJobQueue,
         llm_cache::postgres::PgLlmCache,
     },
     jobs::{JobError, JobHandler, JobOutcome, SystemClock},
@@ -25,6 +28,7 @@ use lodestone_core::{
     triage::{CandidateSource, TriageReport, TriageSettings},
 };
 use sources::{
+    ats::AtsSource,
     boamp::BoampSource,
     contact_pages::PublicPageFinder,
     ct::CtSource,
@@ -38,7 +42,7 @@ use sources::{
 };
 use tracing::{info, warn};
 
-pub const WIRED_SOURCES: [SourceName; 9] = [
+pub const WIRED_SOURCES: [SourceName; 10] = [
     SourceName::CertificateTransparency,
     SourceName::DnsCname,
     SourceName::HttpProbe,
@@ -48,6 +52,7 @@ pub const WIRED_SOURCES: [SourceName; 9] = [
     SourceName::Boamp,
     SourceName::Decp,
     SourceName::Ted,
+    SourceName::Ats,
 ];
 
 pub const FRANCE_TRAVAIL_SOURCE: SourceName = SourceName::FranceTravail;
@@ -67,6 +72,7 @@ pub type Boamp = BoampSource<PoliteFetcher>;
 pub type Decp = DecpSource<PoliteFetcher>;
 pub type Ted = TedSource<PoliteFetcher>;
 pub type FranceTravail = FranceTravailSource<PoliteFetcher>;
+pub type Ats = AtsSource<PoliteFetcher, PgAtsTargets>;
 pub type CertificateTransparency = CtSource<PoliteFetcher, PgCandidateHosts, PgCtCursors>;
 
 pub struct ContactFinders {
@@ -85,6 +91,7 @@ pub struct WiredSources {
     pub decp: Decp,
     pub ted: Ted,
     pub france_travail: Option<FranceTravail>,
+    pub ats: Ats,
     pub contacts: ContactFinders,
 }
 
@@ -281,6 +288,14 @@ impl JobRouter {
         ))
     }
 
+    async fn run_ats(&self) -> Result<(u64, u64), SourceRunError> {
+        let report = self.triage_source(&self.sources.ats, "ats").await?;
+        Ok((
+            report.candidates,
+            report.accepted_by_rules + report.accepted_by_llm,
+        ))
+    }
+
     async fn run_france_travail(&self) -> Result<(u64, u64), SourceRunError> {
         let Some(source) = &self.sources.france_travail else {
             info!("france travail source is disabled, the stale job completes without work");
@@ -385,6 +400,7 @@ impl JobRouter {
             SourceName::Decp => self.run_decp().await,
             SourceName::Ted => self.run_ted().await,
             SourceName::FranceTravail => self.run_france_travail().await,
+            SourceName::Ats => self.run_ats().await,
             other => {
                 return Err(JobError::Permanent(format!(
                     "source `{other}` is not wired"
@@ -495,6 +511,15 @@ mod tests {
         let job = source_job(SourceName::Ted, Utc::now()).unwrap();
         assert_eq!(job.dedup_key.as_deref(), Some("source:ted"));
         assert_eq!(job.payload["source"], "ted");
+    }
+
+    #[test]
+    fn the_ats_source_job_is_wired_and_deduplicated() {
+        assert!(WIRED_SOURCES.contains(&SourceName::Ats));
+        assert!(scheduled_sources(false).contains(&SourceName::Ats));
+        let job = source_job(SourceName::Ats, Utc::now()).unwrap();
+        assert_eq!(job.dedup_key.as_deref(), Some("source:ats"));
+        assert_eq!(job.payload["source"], "ats");
     }
 
     #[test]

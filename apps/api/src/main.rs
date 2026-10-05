@@ -19,14 +19,18 @@ use lodestone_core::{
     RetryPolicy,
     contacts::ContactRunSettings,
     infrastructure::{
-        candidate_host::postgres::PgCandidateHosts, contact_target::postgres::PgContactTargets,
-        crypto::AesGcmCipher, ct_cursor::postgres::PgCtCursors, job::postgres::PgJobQueue,
+        candidate_host::postgres::PgCandidateHosts,
+        contact_target::postgres::{PgAtsTargets, PgContactTargets},
+        crypto::AesGcmCipher,
+        ct_cursor::postgres::PgCtCursors,
+        job::postgres::PgJobQueue,
         llm_cache::postgres::PgLlmCache,
     },
     jobs::{SystemClock, WorkerPool, WorkerSettings},
 };
 use server::{get_addr, run_server, shutdown_signal};
 use sources::{
+    ats::{AtsSettings, AtsSource},
     boamp::{BoampSettings, BoampSource},
     contact_pages::{ContactPageSettings, PublicPageFinder},
     ct::{CtSettings, CtSource},
@@ -60,6 +64,8 @@ const TED_MAX_BODY_BYTES: usize = 16 * 1024 * 1024;
 const TED_REQUESTS_PER_MINUTE: u32 = 30;
 const FRANCE_TRAVAIL_MAX_BODY_BYTES: usize = 16 * 1024 * 1024;
 const FRANCE_TRAVAIL_REQUESTS_PER_MINUTE: u32 = 180;
+const ATS_MAX_BODY_BYTES: usize = 16 * 1024 * 1024;
+const ATS_MAX_RATE_LIMIT_WAIT: Duration = Duration::from_secs(75);
 const DECP_REQUESTS_PER_MINUTE: u32 = 120;
 const DECP_REQUEST_TIMEOUT: Duration = Duration::from_secs(900);
 const DECP_MAX_RATE_LIMIT_WAIT: Duration = Duration::from_secs(75);
@@ -142,6 +148,18 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
         None => None,
     };
+    let mut ats_fetch = FetchSettings::from_outbound(&outbound_config);
+    ats_fetch.max_body_bytes = ATS_MAX_BODY_BYTES;
+    let ats = AtsSource::new(
+        Arc::new(PoliteFetcher::new(ats_fetch)?),
+        PgAtsTargets::new(pool.clone()),
+        AtsSettings {
+            batch_size: args.ats.batch_size.get(),
+            revisit_interval: args.ats.revisit_interval(),
+            max_career_paths: args.ats.max_career_paths.get(),
+            max_rate_limit_wait: ATS_MAX_RATE_LIMIT_WAIT,
+        },
+    );
     let mut decp_fetch = FetchSettings::from_outbound(&outbound_config);
     decp_fetch.max_body_bytes = args.decp.max_body_bytes();
     decp_fetch.request_timeout = decp_fetch.request_timeout.max(DECP_REQUEST_TIMEOUT);
@@ -215,6 +233,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             decp,
             ted,
             france_travail,
+            ats,
             contacts,
         },
         Intervals {
