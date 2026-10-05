@@ -162,6 +162,12 @@ impl<S: ListenerStep> Listener<S> {
             .await;
             return Some(self.settings.idle);
         }
+        if let Err(error) = statuses
+            .record_started(name, &self.instance, Utc::now())
+            .await
+        {
+            warn!(listener = name, %error, "listener start status not recorded");
+        }
         let step = self.step.run_once();
         tokio::pin!(step);
         let abandon = async {

@@ -1,6 +1,7 @@
 use std::{error::Error, net::SocketAddr, num::NonZeroU32, sync::Arc, time::Duration};
 
 use api::{
+    fetchers::ct_fetch_settings,
     internal_router::internal_router,
     jobs::{Intervals, JobRouter, LlmRuntime, WiredSources, schedule_wired_sources},
     listeners::{ContactStep, CtStep, HostStep},
@@ -49,9 +50,7 @@ use tokio::sync::watch;
 use tracing::{error, info};
 
 const DNS_BATCH_SIZE: u32 = 500;
-const DNS_CONCURRENCY: usize = 16;
 const PROBE_BATCH_SIZE: u32 = 200;
-const PROBE_CONCURRENCY: usize = 8;
 const BOAMP_MAX_BODY_BYTES: usize = 16 * 1024 * 1024;
 const BOAMP_REQUESTS_PER_MINUTE: u32 = 30;
 const TED_MAX_BODY_BYTES: usize = 16 * 1024 * 1024;
@@ -88,7 +87,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         Arc::new(PgCandidateHosts::new(pool.clone())),
         DnsCnameSettings {
             batch_size: DNS_BATCH_SIZE,
-            concurrency: DNS_CONCURRENCY,
+            concurrency: args.listeners.dns_concurrency.get(),
             revisit_interval: outbound_config.revisit_interval,
         },
     );
@@ -172,8 +171,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
             max_rate_limit_wait: DECP_MAX_RATE_LIMIT_WAIT,
         },
     );
+    let ct_fetcher = Arc::new(PoliteFetcher::new(ct_fetch_settings(
+        &outbound_config,
+        args.ct.requests_per_host_per_minute,
+    ))?);
     let certificate_transparency = CtSource::new(
-        Arc::clone(&fetcher),
+        ct_fetcher,
         Arc::new(PgCandidateHosts::new(pool.clone())),
         Arc::new(PgCtCursors::new(pool.clone())),
         CtSettings {
@@ -205,7 +208,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         Arc::new(app_state.usecase.clone()),
         HttpProbeSettings {
             batch_size: PROBE_BATCH_SIZE,
-            concurrency: PROBE_CONCURRENCY,
+            concurrency: args.listeners.probe_concurrency.get(),
             revisit_interval: outbound_config.revisit_interval,
             scheme: ProbeScheme::Https,
             port: None,
