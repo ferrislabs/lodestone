@@ -29,26 +29,23 @@ describe('ProfileProblems', () => {
 })
 
 describe('ProfileEditor', () => {
-	it('shows problems above the editor and keeps the text', () => {
+	it('shows problems above the form and the notice', () => {
 		render(
 			<ProfileEditor
-				text='{"a":1}'
+				form={<p>the form</p>}
 				problems={[{ path: 'llm', message: 'is required' }]}
 				notice="Revision 2 created"
 				dirty
 				saving={false}
 				saveLabel="Save as new revision"
-				onTextChange={vi.fn()}
 				onSave={vi.fn()}
 			/>,
 		)
 		const alert = screen.getByRole('alert')
-		const textarea = screen.getByLabelText('Definition (JSON)')
+		const form = screen.getByText('the form')
 		expect(
-			alert.compareDocumentPosition(textarea) &
-				Node.DOCUMENT_POSITION_FOLLOWING,
+			alert.compareDocumentPosition(form) & Node.DOCUMENT_POSITION_FOLLOWING,
 		).toBeTruthy()
-		expect((textarea as HTMLTextAreaElement).value).toBe('{"a":1}')
 		expect(screen.getByRole('status').textContent).toBe('Revision 2 created')
 	})
 })
