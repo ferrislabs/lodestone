@@ -6,6 +6,7 @@ use schemars::schema_for;
 const IAM: &str = include_str!("../../../docs/examples/profiles/iam-ferriskey.json");
 const ECOMMERCE: &str =
     include_str!("../../../docs/examples/profiles/ecommerce-replatforming.json");
+const PAYROLL: &str = include_str!("../../../docs/examples/profiles/payroll-saas.json");
 
 fn parse(raw: &str) -> ValidatedProfile {
     let value: serde_json::Value = serde_json::from_str(raw).expect("example is valid JSON");
@@ -46,6 +47,16 @@ fn ecommerce_example_is_valid_without_iam_fields() {
     let sources = &profile.definition().sources;
     assert!(sources.certificate_transparency.is_none());
     assert!(sources.dns_cname.is_none());
+}
+
+#[test]
+fn payroll_example_is_valid_with_keyword_sources_only() {
+    let profile = parse(PAYROLL);
+    let sources = &profile.definition().sources;
+    assert!(sources.boamp.is_some());
+    assert!(sources.france_travail.is_some());
+    assert!(sources.certificate_transparency.is_none());
+    assert!(sources.http_probe.is_none());
 }
 
 #[test]

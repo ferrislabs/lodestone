@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "identity": {
+    "offer": "Cloud payroll software for French organizations: payslips, social declarations and employee self-service",
+    "target_customer": "French companies and public bodies that run payroll in-house with spreadsheets or aging desktop software"
+  },
+  "sources": {
+    "boamp": {
+      "keywords": ["logiciel de paie", "paie", "SIRH", "dématérialisation des bulletins de paie", "gestion des ressources humaines"],
+      "exclusions": ["externalisation de la paie", "prestation de paie"]
+    },
+    "france_travail": {
+      "keywords": ["gestionnaire de paie", "responsable paie", "logiciel de paie", "SIRH"],
+      "exclusions": ["cabinet comptable"],
+      "accept_min_keywords": 1
+    }
+  },
+  "scoring": {
+    "factors": [
+      { "signal": "job_offer", "weight": 30 },
+      { "signal": "public_tender", "weight": 25 },
+      { "signal": "role_contact_found", "weight": 5 },
+      { "signal": "distinct_signals", "weight": 10 }
+    ]
+  },
+  "contact_ranking": {
+    "preferred_local_parts": ["rh", "paie", "drh", "contact", "info"],
+    "guess_local_parts": ["rh", "contact"]
+  },
+  "llm": {
+    "qualification_threshold": 40,
+    "relevance_criteria": "The organization employs people in France and shows that payroll is handled in-house: it hires payroll staff, or it tenders for payroll or HR information system software. Outsourcing payroll to a provider, and payment or billing topics unrelated to employees, are not relevant."
+  }
+}

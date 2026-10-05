@@ -20,6 +20,7 @@ Without `UPDATE_SCHEMA=1` the same test fails if the committed file is stale. Th
 
 - `docs/examples/profiles/iam-ferriskey.json`: sells FerrisKey and Autharie to organizations running Keycloak or a SaaS IAM. Uses certificate transparency, HTTP probes, CNAME patterns, public tenders and job boards.
 - `docs/examples/profiles/ecommerce-replatforming.json`: sells Magento migrations. Uses one HTTP probe with a version extractor, BOAMP and France Travail. It has no IAM-specific field.
+- `docs/examples/profiles/payroll-saas.json`: sells cloud payroll software to French organizations. Uses BOAMP and France Travail keywords only, with exclusions. It is the worked example for a second market in `docs/profile-authoring.md`.
 
 ## Sections
 
