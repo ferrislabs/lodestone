@@ -1,6 +1,8 @@
 pub mod api;
 pub mod auth;
 pub mod errors;
+pub mod leads;
+pub mod profiles;
 pub mod rate_limit;
 pub mod response;
 pub mod state;

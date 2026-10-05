@@ -1,5 +1,9 @@
 use auth::Identity;
-use axum::{Extension, Router, middleware::from_fn_with_state, routing::get};
+use axum::{
+    Extension, Router,
+    middleware::from_fn_with_state,
+    routing::{get, patch},
+};
 use lodestone_core::UserId;
 use serde::Serialize;
 use utoipa::ToSchema;
@@ -7,6 +11,7 @@ use utoipa::ToSchema;
 use crate::{
     auth::{AuthenticatedUser, auth_middleware},
     errors::ApiError,
+    leads, profiles,
     response::{DataEnvelope, Response},
     state::AppState,
 };
@@ -14,7 +19,12 @@ use crate::{
 pub const API_PREFIX: &str = "/api/v1";
 
 pub fn router(state: AppState) -> Router<AppState> {
-    let routes = Router::new().route("/me", get(me));
+    let routes = Router::new()
+        .route("/me", get(me))
+        .route("/profiles", get(profiles::list_profiles))
+        .route("/profiles/{profile_id}/leads", get(leads::list_leads))
+        .route("/leads/{lead_id}", get(leads::lead_detail))
+        .route("/leads/{lead_id}/status", patch(leads::change_lead_status));
 
     Router::new()
         .nest(API_PREFIX, routes)
