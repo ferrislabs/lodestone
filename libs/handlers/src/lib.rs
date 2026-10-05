@@ -8,6 +8,7 @@ pub mod llm;
 pub mod profiles;
 pub mod rate_limit;
 pub mod response;
+pub mod sources;
 pub mod state;
 
 pub use auth::AuthenticatedUser;

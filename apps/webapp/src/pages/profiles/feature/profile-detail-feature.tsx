@@ -29,6 +29,7 @@ import { ProfileActivation } from '#/pages/profiles/ui/profile-activation'
 import { ProfileDetail } from '#/pages/profiles/ui/profile-detail'
 import { ProfileEditor } from '#/pages/profiles/ui/profile-editor'
 import { RevisionHistory } from '#/pages/profiles/ui/revision-history'
+import { useSourceTrigger } from '#/pages/sources/feature/use-source-trigger'
 
 const NO_REVISIONS: RevisionSummary[] = []
 
@@ -37,6 +38,7 @@ export function ProfileDetailFeature() {
 	const navigate = useNavigate()
 	const queryClient = useQueryClient()
 	const activation = useProfileActivation()
+	const sourceTrigger = useSourceTrigger()
 	const search = useSearch({ from: '/_app/profiles/$profileId' })
 	const tab = search.tab ?? 'identity'
 	const setTab = (next: ProfileTab) =>
@@ -126,6 +128,7 @@ export function ProfileDetailFeature() {
 						value={editor.value}
 						problems={problems}
 						onNavigate={setTab}
+						sourceTrigger={sourceTrigger}
 						onChange={(next) => {
 							if (update.isError) update.reset()
 							setLocalProblems([])

@@ -1,4 +1,4 @@
-import { Trash2Icon } from 'lucide-react'
+import { PlayIcon, Trash2Icon } from 'lucide-react'
 
 import { Badge } from '#/components/ui/badge'
 import { Button } from '#/components/ui/button'
@@ -14,6 +14,8 @@ import {
 } from '#/pages/profiles/lib/agents'
 import { belongsToPath } from '#/pages/profiles/lib/tabs'
 import { DependencyNoteText } from '#/pages/profiles/ui/agent-form'
+import { triggerResultLabel } from '#/pages/sources/lib/state'
+import type { TriggerResult } from '#/pages/sources/lib/types'
 
 interface AgentCardProps {
 	agent: JsonValue
@@ -22,6 +24,9 @@ interface AgentCardProps {
 	note: DependencyNote | null
 	editing: boolean
 	confirmingRemove: boolean
+	runPending?: boolean
+	runResult?: TriggerResult | null
+	onRunSource?: () => void
 	onEdit: () => void
 	onEnabled: (enabled: boolean) => void
 	onRequestRemove: () => void
@@ -36,6 +41,9 @@ export function AgentCard({
 	note,
 	editing,
 	confirmingRemove,
+	runPending = false,
+	runResult = null,
+	onRunSource,
 	onEdit,
 	onEnabled,
 	onRequestRemove,
@@ -120,6 +128,29 @@ export function AgentCard({
 					</>
 				)}
 			</div>
+			{onRunSource && kind ? (
+				<div className="flex items-center gap-2">
+					<Button
+						type="button"
+						variant="secondary"
+						size="sm"
+						disabled={runPending}
+						aria-label={`Lancer la source de ${name || 'agent'}`}
+						title="Lance la source maintenant pour tous les profils, avec la dernière version enregistrée"
+						onClick={onRunSource}
+					>
+						<PlayIcon />
+						Lancer la source
+					</Button>
+					{runResult ? (
+						<output
+							className={`text-xs ${runResult.kind === 'error' ? 'text-destructive' : 'text-muted-foreground'}`}
+						>
+							{triggerResultLabel(runResult)}
+						</output>
+					) : null}
+				</div>
+			) : null}
 		</li>
 	)
 }

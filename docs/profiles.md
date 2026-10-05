@@ -78,6 +78,15 @@ Validation paths include the agent index, for example `agents[1].source.keywords
 - `http_probe` probes hosts found by certificate transparency. Without a `certificate_transparency` agent, it only probes hosts imported by an operator.
 - `ats` only visits companies already detected by `certificate_transparency`, `http_probe` or `dns_cname` signals.
 
+## Run a source now
+
+Each source runs on a recurring job, so an edited agent otherwise waits for the next interval. The Sources screen (Configuration > Sources) lists every source with its state, next run and latest run; "Lancer maintenant" moves the pending job to the present. Each agent card has a "Lancer la source" action for the same effect.
+
+- `GET /api/v1/sources` lists every known source with its job state and its latest runs. A source without a job, for example `france_travail` without credentials, has `status: "unavailable"`.
+- `POST /api/v1/sources/{source}/run` answers 202 with the updated job. It answers 409 when the source is already running, 404 for an unknown source or one without a job, and 403 for service accounts. `llm_qualification` is the qualification job.
+
+The worker picks the job up on its next poll. The run covers every active profile with an enabled agent of that kind, using the saved revisions only.
+
 ## Older versions
 
 Stored revisions are never rewritten. Versions 1 and 2 are accepted and upgraded when read; new revisions are written in version 3. Errors on an older document keep that document's paths.

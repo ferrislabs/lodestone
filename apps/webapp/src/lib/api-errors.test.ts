@@ -155,3 +155,29 @@ describe('translateApiMessage', () => {
 		)
 	})
 })
+
+describe('source run errors', () => {
+	it('translates the run-now messages', () => {
+		expect(translateApiMessage('Conflict: source is already running')).toBe(
+			'La source est déjà en cours',
+		)
+		expect(translateApiMessage('source has no scheduled job')).toBe(
+			"La source n'a pas de tâche planifiée",
+		)
+		expect(translateApiMessage('Source with id `nope` not found')).toBe(
+			'Source introuvable (id `nope`)',
+		)
+	})
+
+	it('keeps the conflict status for a running source', () => {
+		const parsed = parseApiError(
+			apiError(409, {
+				code: 'E_CONFLICT',
+				message: 'Conflict: source is already running',
+				status: 409,
+			}),
+		)
+		expect(parsed.status).toBe(409)
+		expect(parsed.message).toBe('La source est déjà en cours')
+	})
+})

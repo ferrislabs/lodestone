@@ -7,6 +7,7 @@ use uuid::Uuid;
 use crate::domain::lead::{str_enum, uuid_id};
 
 pub mod ports;
+pub mod schedule;
 
 uuid_id!(JobId);
 uuid_id!(LeaseToken);
