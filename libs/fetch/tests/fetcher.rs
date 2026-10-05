@@ -4,7 +4,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-use fetch::{FetchSettings, PoliteFetcher, PostFetcher, PostRequest};
+use common::Secret;
+use fetch::{ApiFetcher, ApiRequest, FetchSettings, PoliteFetcher, PostFetcher, PostRequest};
 use httpmock::{
     Method::{GET, POST},
     MockServer,
@@ -629,4 +630,85 @@ async fn json_post_keeps_the_safeguards() {
         .post(&post_request(&server, "/big", "{}"))
         .await;
     assert_eq!(refused.unwrap_err(), FetchError::NonPublicTarget);
+}
+
+fn api_request(server: &MockServer, path: &str) -> ApiRequest {
+    ApiRequest {
+        url: Url::parse(&server.url(path)).unwrap(),
+        source: SourceName::FranceTravail,
+        bearer: None,
+        form: None,
+    }
+}
+
+#[tokio::test]
+async fn api_get_sends_the_bearer_and_skips_robots() {
+    let server = MockServer::start_async().await;
+    let robots = server
+        .mock_async(|when, then| {
+            when.method(GET).path("/robots.txt");
+            then.status(200).body("User-agent: *\nDisallow: /");
+        })
+        .await;
+    let search = server
+        .mock_async(|when, then| {
+            when.method(GET)
+                .path("/offres")
+                .query_param("range", "0-149")
+                .header("authorization", "Bearer tok-123")
+                .matches(has_expected_user_agent);
+            then.status(206)
+                .header("content-range", "offres 0-149/300")
+                .body("{}");
+        })
+        .await;
+    let mut request = api_request(&server, "/offres?range=0-149");
+    request.bearer = Some(Secret::new("tok-123"));
+    let response = fetcher(settings()).call(&request).await.unwrap();
+    assert_eq!(response.status, 206);
+    assert_eq!(response.header("content-range"), Some("offres 0-149/300"));
+    search.assert_async().await;
+    robots.assert_hits_async(0).await;
+}
+
+#[tokio::test]
+async fn api_form_is_posted_urlencoded() {
+    let server = MockServer::start_async().await;
+    let token = server
+        .mock_async(|when, then| {
+            when.method(POST)
+                .path("/token")
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body("grant_type=client_credentials&client_id=a+b&scope=x+y");
+            then.status(200).body("{}");
+        })
+        .await;
+    let mut request = api_request(&server, "/token");
+    request.form = Some(vec![
+        ("grant_type".to_owned(), Secret::new("client_credentials")),
+        ("client_id".to_owned(), Secret::new("a b")),
+        ("scope".to_owned(), Secret::new("x y")),
+    ]);
+    let response = fetcher(settings()).call(&request).await.unwrap();
+    assert_eq!(response.status, 200);
+    token.assert_async().await;
+}
+
+#[tokio::test]
+async fn api_form_is_not_redirected_and_debug_hides_secrets() {
+    let server = MockServer::start_async().await;
+    server
+        .mock_async(|when, then| {
+            when.method(POST).path("/token");
+            then.status(302).header("location", "/elsewhere");
+        })
+        .await;
+    let mut request = api_request(&server, "/token");
+    request.bearer = Some(Secret::new("tok-123"));
+    request.form = Some(vec![("client_secret".to_owned(), Secret::new("s3cret"))]);
+    let printed = format!("{request:?}");
+    assert!(!printed.contains("tok-123"));
+    assert!(!printed.contains("s3cret"));
+    let error = fetcher(settings()).call(&request).await.unwrap_err();
+    assert_eq!(error, FetchError::Redirect);
 }

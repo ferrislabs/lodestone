@@ -4,6 +4,7 @@ pub mod contact_pages;
 pub mod ct;
 pub mod decp;
 pub mod dns_cname;
+pub mod france_travail;
 pub mod http_probe;
 pub mod role_guess;
 pub mod security_txt;

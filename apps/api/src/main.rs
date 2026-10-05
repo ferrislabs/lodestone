@@ -32,6 +32,7 @@ use sources::{
     ct::{CtSettings, CtSource},
     decp::{DecpSettings, DecpSource},
     dns_cname::{DnsCnameSettings, DnsCnameSource},
+    france_travail::{FranceTravailSettings, FranceTravailSource},
     http_probe::{HttpProbeSettings, HttpProbeSource, ProbeScheme},
     role_guess::RoleGuessFinder,
     security_txt::SecurityTxtFinder,
@@ -57,6 +58,8 @@ const BOAMP_MAX_BODY_BYTES: usize = 16 * 1024 * 1024;
 const BOAMP_REQUESTS_PER_MINUTE: u32 = 30;
 const TED_MAX_BODY_BYTES: usize = 16 * 1024 * 1024;
 const TED_REQUESTS_PER_MINUTE: u32 = 30;
+const FRANCE_TRAVAIL_MAX_BODY_BYTES: usize = 16 * 1024 * 1024;
+const FRANCE_TRAVAIL_REQUESTS_PER_MINUTE: u32 = 180;
 const DECP_REQUESTS_PER_MINUTE: u32 = 120;
 const DECP_REQUEST_TIMEOUT: Duration = Duration::from_secs(900);
 const DECP_MAX_RATE_LIMIT_WAIT: Duration = Duration::from_secs(75);
@@ -119,6 +122,26 @@ async fn main() -> Result<(), Box<dyn Error>> {
             buyer_countries: args.ted.buyer_countries.clone(),
         },
     );
+    let france_travail = match args.france_travail.credentials() {
+        Some((client_id, client_secret)) => {
+            let mut france_travail_fetch = FetchSettings::from_outbound(&outbound_config);
+            france_travail_fetch.max_body_bytes = FRANCE_TRAVAIL_MAX_BODY_BYTES;
+            france_travail_fetch.requests_per_host_per_minute =
+                NonZeroU32::new(FRANCE_TRAVAIL_REQUESTS_PER_MINUTE).unwrap_or(NonZeroU32::MIN);
+            Some(FranceTravailSource::new(
+                Arc::new(PoliteFetcher::new(france_travail_fetch)?),
+                FranceTravailSettings {
+                    token_url: args.france_travail.token_url.clone(),
+                    api_base_url: args.france_travail.api_base_url.clone(),
+                    client_id: client_id.clone(),
+                    client_secret: client_secret.clone(),
+                    published_since_days: args.france_travail.published_since_days.get(),
+                    max_pages: args.france_travail.max_pages.get(),
+                },
+            ))
+        }
+        None => None,
+    };
     let mut decp_fetch = FetchSettings::from_outbound(&outbound_config);
     decp_fetch.max_body_bytes = args.decp.max_body_bytes();
     decp_fetch.request_timeout = decp_fetch.request_timeout.max(DECP_REQUEST_TIMEOUT);
@@ -191,6 +214,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             boamp,
             decp,
             ted,
+            france_travail,
             contacts,
         },
         Intervals {
@@ -200,7 +224,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         },
         llm_runtime,
     );
-    schedule_wired_sources(&queue).await?;
+    schedule_wired_sources(&queue, args.france_travail.credentials().is_some()).await?;
 
     let router = router(app_state)?;
     let internal_router = internal_router()?;

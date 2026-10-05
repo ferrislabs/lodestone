@@ -1,0 +1,89 @@
+{
+  "filtresPossibles": [],
+  "resultats": [
+    {
+      "id": "184TKRB",
+      "intitule": "Ingénieur IAM Keycloak H/F",
+      "description": "Au sein de l'équipe sécurité, vous pilotez la migration de notre annuaire vers Keycloak et déployez le SSO sur l'ensemble des applications métier.\nCompétences : OIDC, SAML, gestion des identités.",
+      "dateCreation": "2026-10-02T08:12:33.000Z",
+      "dateActualisation": "2026-10-03T06:00:12.000Z",
+      "lieuTravail": {"libelle": "69 - LYON 03", "latitude": 45.76, "longitude": 4.85, "codePostal": "69003", "commune": "69383"},
+      "romeCode": "M1805",
+      "romeLibelle": "Études et développement informatique",
+      "appellationlibelle": "Ingénieur / Ingénieure sécurité informatique",
+      "entreprise": {
+        "nom": "ACME IDENTITY",
+        "description": "Éditeur de solutions de paiement en ligne, 250 salariés.",
+        "url": "https://www.acme-identity.fr/carrieres",
+        "logo": "https://entreprise.francetravail.fr/logo/acme.png",
+        "entrepriseAdaptee": false
+      },
+      "typeContrat": "CDI",
+      "typeContratLibelle": "Contrat à durée indéterminée",
+      "natureContrat": "Contrat travail",
+      "experienceExige": "E",
+      "experienceLibelle": "3 ans",
+      "origineOffre": {"origine": "1", "urlOrigine": "https://candidat.francetravail.fr/offres/recherche/detail/184TKRB"},
+      "contact": {"nom": "Service recrutement", "urlPostulation": "https://www.acme-identity.fr/jobs/184"},
+      "secteurActiviteLibelle": "Programmation, conseil et autres activités informatiques"
+    },
+    {
+      "id": "184TKRC",
+      "intitule": "Administrateur Okta / Auth0 (H/F)",
+      "description": "Nous recherchons un administrateur pour piloter la migration Okta vers une solution ouverte.",
+      "dateCreation": "2026-10-01T14:40:00.000Z",
+      "dateActualisation": "2026-10-01T14:40:00.000Z",
+      "lieuTravail": {"libelle": "75 - PARIS 09", "codePostal": "75009"},
+      "romeCode": "M1801",
+      "romeLibelle": "Administration de systèmes d'information",
+      "entreprise": {"entrepriseAdaptee": false},
+      "typeContrat": "CDD",
+      "natureContrat": "Contrat travail",
+      "origineOffre": {"origine": "2", "urlOrigine": "https://www.welcometothejungle.com/fr/companies/x/jobs/y", "partenaires": [{"nom": "WELCOME TO THE JUNGLE", "url": "https://www.welcometothejungle.com"}]},
+      "contact": {"nom": "RH", "courriel": "recrutement@nordsecure.fr"}
+    },
+    {
+      "id": "184TKRD",
+      "intitule": "Consultant IAM junior",
+      "description": "Mission en clientèle pour un grand compte du secteur bancaire.",
+      "dateCreation": "2026-10-03T09:00:00.000Z",
+      "lieuTravail": {"libelle": "92 - NANTERRE", "codePostal": "92000"},
+      "romeCode": "M1805",
+      "romeLibelle": "Études et développement informatique",
+      "entreprise": {"nom": "RANDSTAD DIGITAL", "url": "https://www.randstad.fr/candidats"},
+      "typeContrat": "MIS",
+      "origineOffre": {"origine": "2", "urlOrigine": "https://www.indeed.com/viewjob?jk=zzz"},
+      "contact": {"nom": "Randstad", "courriel": "contact@randstad.fr"}
+    },
+    {
+      "id": "184TKRE",
+      "intitule": "Technicien support SSO",
+      "description": "Poste en TPE, candidature par mail.",
+      "dateCreation": "2026-09-30T07:30:00.000Z",
+      "lieuTravail": {"libelle": "33 - BORDEAUX", "codePostal": "33000"},
+      "romeCode": "M1810",
+      "entreprise": {"nom": "Cabinet Dupont"},
+      "typeContrat": "CDI",
+      "origineOffre": {"origine": "1"},
+      "contact": {"nom": "M. Dupont", "courriel": "dupont.cabinet@gmail.com"}
+    },
+    {
+      "id": "184TKRF",
+      "intitule": "Architecte identités et accès",
+      "description": "Architecte IAM pour un groupe industriel.",
+      "dateCreation": "2026-10-04T10:15:00.000Z",
+      "lieuTravail": {"libelle": "31 - TOULOUSE", "codePostal": "31000"},
+      "romeCode": "M1806",
+      "romeLibelle": "Conseil et maîtrise d'ouvrage en systèmes d'information",
+      "entreprise": {"nom": "Aero Systems", "url": "https://aero-systems.fr"},
+      "typeContrat": "CDI",
+      "origineOffre": {"origine": "1"},
+      "contact": {"courriel": "jobs@hellowork.com"}
+    },
+    {
+      "intitule": "Offre sans identifiant",
+      "dateCreation": "2026-10-04T10:15:00.000Z",
+      "entreprise": {"url": "https://orphan.fr"}
+    }
+  ]
+}
