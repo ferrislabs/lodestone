@@ -1,5 +1,5 @@
 import { Link } from '@tanstack/react-router'
-import { Hammer, Users } from 'lucide-react'
+import { Cpu, FileText, Hammer, Layers, Users } from 'lucide-react'
 import type * as React from 'react'
 
 import { type NavItem, NavMain } from '#/components/nav-main'
@@ -13,10 +13,18 @@ import {
 	SidebarMenuItem,
 	SidebarRail,
 } from '#/components/ui/sidebar'
-
-const coreItems: NavItem[] = [{ title: 'Leads', to: '/leads', icon: Users }]
+import { usePendingDraftsCount } from '#/pages/drafts/feature/pending-drafts-count'
 
 export function AppSidebar(props: React.ComponentProps<typeof Sidebar>) {
+	const pending = usePendingDraftsCount()
+	const coreItems: NavItem[] = [
+		{ title: 'Leads', to: '/leads', icon: Users },
+		{ title: 'Drafts', to: '/drafts', icon: FileText, badge: pending },
+	]
+	const configItems: NavItem[] = [
+		{ title: 'Profiles', to: '/profiles', icon: Layers },
+		{ title: 'LLM providers', to: '/llm', icon: Cpu },
+	]
 	return (
 		<Sidebar collapsible="icon" {...props}>
 			<SidebarHeader className="border-b">
@@ -42,6 +50,7 @@ export function AppSidebar(props: React.ComponentProps<typeof Sidebar>) {
 			</SidebarHeader>
 			<SidebarContent>
 				<NavMain items={coreItems} />
+				<NavMain label="Configuration" items={configItems} />
 			</SidebarContent>
 			<SidebarFooter>
 				<div className="flex items-center justify-start px-2 pb-1 text-[10px] font-medium group-data-[collapsible=icon]:hidden">
