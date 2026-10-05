@@ -266,7 +266,7 @@ function focusRow(row: string) {
 	requestAnimationFrame(() => {
 		document
 			.querySelector<HTMLElement>(
-				`[data-row="${CSS.escape(row)}"] :is(input, textarea, select)`,
+				`[data-row="${row}"] :is(input, textarea, select)`,
 			)
 			?.focus()
 	})
