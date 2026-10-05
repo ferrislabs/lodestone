@@ -92,6 +92,24 @@ pub struct Profile {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub enum Revised {
+    Created(ProfileRevision),
+    Unchanged(ProfileRevision),
+}
+
+impl Revised {
+    pub fn revision(&self) -> &ProfileRevision {
+        match self {
+            Self::Created(revision) | Self::Unchanged(revision) => revision,
+        }
+    }
+
+    pub fn is_created(&self) -> bool {
+        matches!(self, Self::Created(_))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct ProfileRevision {
     pub profile_id: ProfileId,
     pub number: RevisionNumber,

@@ -4,7 +4,7 @@ use lodestone_macros::transactional;
 use crate::{
     application::LodestoneUseCase,
     domain::profile::{
-        ActiveProfile, Profile, ProfileId, ProfileRevision,
+        ActiveProfile, Profile, ProfileId, ProfileRevision, Revised,
         commands::{CreateProfileCommand, ReviseProfileCommand},
         service::ProfileService,
     },
@@ -24,7 +24,7 @@ impl LodestoneUseCase {
     pub async fn revise_profile(
         &self,
         command: ReviseProfileCommand,
-    ) -> Result<ProfileRevision, CoreError> {
+    ) -> Result<Revised, CoreError> {
         let mut service = ProfileService::new(profile_repository);
         service.revise_profile(command).await
     }
@@ -37,6 +37,12 @@ impl LodestoneUseCase {
     ) -> Result<Profile, CoreError> {
         let mut service = ProfileService::new(profile_repository);
         service.set_active(id, active).await
+    }
+
+    #[transactional(profile)]
+    pub async fn find_profile(&self, id: ProfileId) -> Result<Profile, CoreError> {
+        let mut service = ProfileService::new(profile_repository);
+        service.get(id).await
     }
 
     #[transactional(profile)]

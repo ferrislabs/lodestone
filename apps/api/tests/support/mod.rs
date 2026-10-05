@@ -132,6 +132,14 @@ impl Harness {
         router(self.state.clone()).expect("public router")
     }
 
+    pub fn valid_client_token(&self) -> String {
+        sign(
+            &self.key,
+            KID,
+            &client_claims(&self.server.base_url(), now() + 300),
+        )
+    }
+
     pub fn valid_user_token(&self) -> String {
         sign(
             &self.key,
@@ -184,4 +192,40 @@ pub async fn send(
     let raw = String::from_utf8_lossy(&bytes).into_owned();
     let json = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
     (status, json, raw)
+}
+
+pub async fn send_raw(
+    app: Router,
+    method: Method,
+    uri: &str,
+    authorization: Option<&str>,
+    body: Option<String>,
+) -> (StatusCode, http::HeaderMap, String) {
+    let mut builder = Request::builder().method(method).uri(uri);
+    if let Some(value) = authorization {
+        builder = builder.header(AUTHORIZATION, value);
+    }
+    let payload = match body {
+        Some(text) => {
+            builder = builder.header(CONTENT_TYPE, "application/json");
+            Body::from(text)
+        }
+        None => Body::empty(),
+    };
+    let mut request = builder.body(payload).expect("request");
+    request
+        .extensions_mut()
+        .insert(ConnectInfo(SocketAddr::from(([127, 0, 0, 1], 40000))));
+
+    let response = app.oneshot(request).await.expect("response");
+    let status = response.status();
+    let headers = response.headers().clone();
+    let bytes = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("body");
+    (
+        status,
+        headers,
+        String::from_utf8_lossy(&bytes).into_owned(),
+    )
 }

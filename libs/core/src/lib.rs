@@ -46,7 +46,7 @@ pub use domain::{
     partner::{InvalidSiret, Partner, PartnerAward, PartnerId, Siret, ports::PartnerRepository},
     profile::{
         ActiveProfile, Profile, ProfileId, ProfileName, ProfileNameError, ProfileProblem,
-        ProfileRevision, ProfileValidationError, RevisionNumber, ValidatedProfile,
+        ProfileRevision, ProfileValidationError, Revised, RevisionNumber, ValidatedProfile,
         commands::{CreateProfileCommand, ReviseProfileCommand},
         definition,
         ports::ProfileRepository,
