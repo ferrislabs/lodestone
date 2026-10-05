@@ -6,6 +6,7 @@ use common::CoreError;
 use http::StatusCode;
 use serde::Serialize;
 use thiserror::Error;
+use utoipa::ToSchema;
 
 #[derive(Debug, Error)]
 pub enum MiddlewareError {
@@ -104,6 +105,9 @@ pub enum ApiError {
     #[error("Unprocessable entity: {0}")]
     UnprocessableEntity(String),
 
+    #[error("Request payload rejected")]
+    Rejected(Vec<ErrorDetail>),
+
     // 429
     #[error("Too many requests")]
     TooManyRequests,
@@ -119,13 +123,20 @@ pub enum ApiError {
     ExternalService(String),
 }
 
-#[derive(Serialize)]
-struct ErrorBody {
-    code: &'static str,
-    message: String,
-    status: u16,
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, ToSchema)]
+pub struct ErrorDetail {
+    /// Location of the faulty field in the submitted document, `$` for the root.
+    pub path: String,
+    pub message: String,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct ErrorBody {
+    pub code: &'static str,
+    pub message: String,
+    pub status: u16,
     #[serde(skip_serializing_if = "Option::is_none")]
-    details: Option<serde_json::Value>,
+    pub details: Option<Vec<ErrorDetail>>,
 }
 
 impl ApiError {
@@ -138,7 +149,7 @@ impl ApiError {
             Self::Forbidden | Self::InsufficientScope(_) => StatusCode::FORBIDDEN,
             Self::NotFound | Self::ResourceNotFound(_, _) => StatusCode::NOT_FOUND,
             Self::Conflict(_) => StatusCode::CONFLICT,
-            Self::UnprocessableEntity(_) => StatusCode::UNPROCESSABLE_ENTITY,
+            Self::UnprocessableEntity(_) | Self::Rejected(_) => StatusCode::UNPROCESSABLE_ENTITY,
             Self::TooManyRequests => StatusCode::TOO_MANY_REQUESTS,
             Self::Internal | Self::Database | Self::ExternalService(_) => {
                 StatusCode::INTERNAL_SERVER_ERROR
@@ -159,7 +170,7 @@ impl ApiError {
             Self::NotFound => "E_NOT_FOUND",
             Self::ResourceNotFound(_, _) => "E_RESOURCE_NOT_FOUND",
             Self::Conflict(_) => "E_CONFLICT",
-            Self::UnprocessableEntity(_) => "E_UNPROCESSABLE_ENTITY",
+            Self::UnprocessableEntity(_) | Self::Rejected(_) => "E_UNPROCESSABLE_ENTITY",
             Self::TooManyRequests => "E_TOO_MANY_REQUESTS",
             Self::Internal => "E_INTERNAL",
             Self::Database => "E_DATABASE",
@@ -189,11 +200,17 @@ impl From<CoreError> for ApiError {
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let status = self.status();
+        let code = self.code();
+        let message = self.to_string();
+        let details = match self {
+            Self::Rejected(details) if !details.is_empty() => Some(details),
+            _ => None,
+        };
         let body = ErrorBody {
-            code: self.code(),
-            message: self.to_string(),
+            code,
+            message,
             status: status.as_u16(),
-            details: None,
+            details,
         };
         (status, Json(body)).into_response()
     }
@@ -401,6 +418,26 @@ mod tests {
     #[tokio::test]
     async fn test_response_has_no_details_by_default() {
         let (_, json) = parse_response(ApiError::Internal).await;
+        assert!(json.get("details").is_none());
+    }
+
+    #[tokio::test]
+    async fn rejected_lists_every_problem_with_its_path() {
+        let (status, json) = parse_response(ApiError::Rejected(vec![ErrorDetail {
+            path: "scoring.factors[2].weight".to_owned(),
+            message: "must be a finite number".to_owned(),
+        }]))
+        .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(json["code"], "E_UNPROCESSABLE_ENTITY");
+        assert_eq!(json["details"][0]["path"], "scoring.factors[2].weight");
+        assert_eq!(json["details"][0]["message"], "must be a finite number");
+    }
+
+    #[tokio::test]
+    async fn rejected_without_problems_omits_details() {
+        let (status, json) = parse_response(ApiError::Rejected(Vec::new())).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
         assert!(json.get("details").is_none());
     }
 }

@@ -2,7 +2,7 @@ use chrono::Utc;
 use common::{CoreError, generate_uuid_v7};
 
 use crate::domain::profile::{
-    ActiveProfile, Profile, ProfileId, ProfileRevision, RevisionNumber,
+    ActiveProfile, Profile, ProfileId, ProfileRevision, Revised, RevisionNumber,
     commands::{CreateProfileCommand, ReviseProfileCommand},
     ports::ProfileRepository,
 };
@@ -51,12 +51,23 @@ where
     pub async fn revise_profile(
         &mut self,
         command: ReviseProfileCommand,
-    ) -> Result<ProfileRevision, CoreError> {
+    ) -> Result<Revised, CoreError> {
         let latest = self
             .repo
             .lock_latest_revision_number(command.profile_id)
             .await?
             .ok_or(CoreError::NotFound)?;
+        let current = self
+            .repo
+            .list_revisions(command.profile_id)
+            .await?
+            .into_iter()
+            .find(|revision| revision.number == latest);
+        if let Some(current) = current
+            && current.definition == command.definition
+        {
+            return Ok(Revised::Unchanged(current));
+        }
         let number = latest
             .next()
             .ok_or_else(|| CoreError::Conflict("revision number overflow".to_owned()))?;
@@ -68,7 +79,7 @@ where
             created_at: Utc::now(),
         };
         self.repo.insert_revision(&revision).await?;
-        Ok(revision)
+        Ok(Revised::Created(revision))
     }
 
     #[tracing::instrument(skip(self), err)]
@@ -77,6 +88,10 @@ where
             .set_active(id, active, Utc::now())
             .await?
             .ok_or(CoreError::NotFound)
+    }
+
+    pub async fn get(&mut self, id: ProfileId) -> Result<Profile, CoreError> {
+        self.repo.find(id).await?.ok_or(CoreError::NotFound)
     }
 
     pub async fn list(&mut self) -> Result<Vec<Profile>, CoreError> {
@@ -139,12 +154,14 @@ mod tests {
         let mut repo = MockProfileRepository::new();
         repo.expect_lock_latest_revision_number()
             .returning(|_| Box::pin(async { Ok(RevisionNumber::new(3)) }));
+        repo.expect_list_revisions()
+            .returning(|_| Box::pin(async { Ok(Vec::new()) }));
         repo.expect_insert_revision()
             .withf(|revision| revision.number.get() == 4)
             .times(1)
             .returning(|_| Box::pin(async { Ok(()) }));
 
-        let revision = ProfileService::new(repo)
+        let revised = ProfileService::new(repo)
             .revise_profile(ReviseProfileCommand {
                 profile_id: ProfileId(uuid::Uuid::nil()),
                 definition: definition(),
@@ -153,7 +170,39 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(revision.number.get(), 4);
+        assert!(revised.is_created());
+        assert_eq!(revised.revision().number.get(), 4);
+    }
+
+    #[tokio::test]
+    async fn an_identical_definition_keeps_the_current_revision() {
+        let mut repo = MockProfileRepository::new();
+        repo.expect_lock_latest_revision_number()
+            .returning(|_| Box::pin(async { Ok(RevisionNumber::new(3)) }));
+        repo.expect_list_revisions().returning(|_| {
+            Box::pin(async {
+                Ok(vec![ProfileRevision {
+                    profile_id: ProfileId(uuid::Uuid::nil()),
+                    number: RevisionNumber::new(3).unwrap(),
+                    definition: definition(),
+                    created_by: None,
+                    created_at: Utc::now(),
+                }])
+            })
+        });
+        repo.expect_insert_revision().never();
+
+        let revised = ProfileService::new(repo)
+            .revise_profile(ReviseProfileCommand {
+                profile_id: ProfileId(uuid::Uuid::nil()),
+                definition: definition(),
+                created_by: None,
+            })
+            .await
+            .unwrap();
+
+        assert!(!revised.is_created());
+        assert_eq!(revised.revision().number.get(), 3);
     }
 
     #[tokio::test]
@@ -169,6 +218,44 @@ mod tests {
                 definition: definition(),
                 created_by: None,
             })
+            .await;
+
+        assert!(matches!(result, Err(CoreError::NotFound)));
+    }
+
+    fn stored_profile() -> Profile {
+        let now = Utc::now();
+        Profile {
+            id: ProfileId(uuid::Uuid::nil()),
+            name: crate::domain::profile::ProfileName::parse("IAM").unwrap(),
+            active: false,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    #[tokio::test]
+    async fn get_returns_the_stored_profile() {
+        let mut repo = MockProfileRepository::new();
+        repo.expect_find()
+            .returning(|_| Box::pin(async { Ok(Some(stored_profile())) }));
+
+        let profile = ProfileService::new(repo)
+            .get(ProfileId(uuid::Uuid::nil()))
+            .await
+            .unwrap();
+
+        assert_eq!(profile.name.as_str(), "IAM");
+    }
+
+    #[tokio::test]
+    async fn get_of_an_unknown_profile_is_not_found() {
+        let mut repo = MockProfileRepository::new();
+        repo.expect_find()
+            .returning(|_| Box::pin(async { Ok(None) }));
+
+        let result = ProfileService::new(repo)
+            .get(ProfileId(uuid::Uuid::nil()))
             .await;
 
         assert!(matches!(result, Err(CoreError::NotFound)));
