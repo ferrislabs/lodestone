@@ -26,6 +26,40 @@ const PLATFORM_SUFFIXES: [&str; 22] = [
     "marches-publics-securises.fr",
 ];
 
+const JOB_BOARD_SUFFIXES: [&str; 31] = [
+    "indeed.com",
+    "indeed.fr",
+    "linkedin.com",
+    "welcometothejungle.com",
+    "hellowork.com",
+    "regionsjob.com",
+    "meteojob.com",
+    "monster.fr",
+    "monster.com",
+    "apec.fr",
+    "jobteaser.com",
+    "glassdoor.fr",
+    "glassdoor.com",
+    "cadremploi.fr",
+    "jobijoba.com",
+    "talent.com",
+    "jooble.org",
+    "adzuna.fr",
+    "pole-emploi.fr",
+    "francetravail.fr",
+    "francetravail.io",
+    "randstad.fr",
+    "adecco.fr",
+    "manpower.fr",
+    "synergie.fr",
+    "crit-job.com",
+    "proman-emploi.fr",
+    "page-personnel.fr",
+    "michaelpage.fr",
+    "hays.fr",
+    "walters-people.fr",
+];
+
 const WEBMAIL_DOMAINS: [&str; 14] = [
     "gmail.com",
     "orange.fr",
@@ -58,6 +92,12 @@ fn is_platform(host: &str) -> bool {
         .any(|suffix| matches_suffix(host, suffix))
 }
 
+fn is_job_board(host: &str) -> bool {
+    JOB_BOARD_SUFFIXES
+        .iter()
+        .any(|suffix| matches_suffix(host, suffix))
+}
+
 fn is_webmail(domain: &str) -> bool {
     WEBMAIL_DOMAINS.contains(&domain)
         || domain
@@ -68,11 +108,12 @@ fn is_webmail(domain: &str) -> bool {
 
 pub(crate) fn buyer_domain(host: &str) -> Option<NormalizedDomain> {
     let host = host.trim().to_lowercase();
-    if is_platform(&host) {
+    if is_platform(&host) || is_job_board(&host) {
         return None;
     }
     let domain = NormalizedDomain::from_host(&host).ok()?;
-    if is_platform(domain.as_str()) || is_webmail(domain.as_str()) {
+    if is_platform(domain.as_str()) || is_job_board(domain.as_str()) || is_webmail(domain.as_str())
+    {
         return None;
     }
     Some(domain)
@@ -90,4 +131,31 @@ pub(crate) fn domain_of_url(raw: &str) -> Option<NormalizedDomain> {
 pub(crate) fn domain_of_email(raw: &str) -> Option<NormalizedDomain> {
     let (_, host) = raw.trim().rsplit_once('@')?;
     buyer_domain(host)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn job_boards_and_staffing_agencies_are_never_a_buyer() {
+        for host in [
+            "indeed.com",
+            "fr.indeed.com",
+            "www.linkedin.com",
+            "welcometothejungle.com",
+            "randstad.fr",
+            "careers.adecco.fr",
+        ] {
+            assert!(buyer_domain(host).is_none(), "{host}");
+        }
+        assert!(domain_of_url("https://www.apec.fr/offre").is_none());
+        assert!(domain_of_email("rh@hellowork.com").is_none());
+    }
+
+    #[test]
+    fn lookalike_hosts_are_kept() {
+        assert!(buyer_domain("notindeed.com").is_some());
+        assert_eq!(buyer_domain("www.acme.fr").unwrap().as_str(), "acme.fr");
+    }
 }

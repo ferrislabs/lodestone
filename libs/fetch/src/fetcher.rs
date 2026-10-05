@@ -1,5 +1,6 @@
 use std::{sync::Arc, time::Duration};
 
+use common::Secret;
 use lodestone_core::{
     FetchError, FetchPurpose, FetchRequest, FetchResponse, Fetcher, NormalizedDomain, SourceName,
 };
@@ -11,7 +12,7 @@ use reqwest::{
 };
 use thiserror::Error;
 use tracing::{Instrument, info_span};
-use url::{Host, Url};
+use url::{Host, Url, form_urlencoded};
 
 use crate::{
     address::ensure_public,
@@ -34,6 +35,34 @@ pub trait PostFetcher: Send + Sync {
         &self,
         request: &PostRequest,
     ) -> impl Future<Output = Result<FetchResponse, FetchError>> + Send;
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ApiRequest {
+    pub url: Url,
+    pub source: SourceName,
+    pub bearer: Option<Secret>,
+    pub form: Option<Vec<(String, Secret)>>,
+}
+
+pub trait ApiFetcher: Send + Sync {
+    fn call(
+        &self,
+        request: &ApiRequest,
+    ) -> impl Future<Output = Result<FetchResponse, FetchError>> + Send;
+}
+
+#[derive(Clone, Copy)]
+enum Payload<'a> {
+    Empty,
+    Json(&'a [u8]),
+    Form(&'a [u8]),
+}
+
+impl Payload<'_> {
+    fn is_empty(&self) -> bool {
+        matches!(self, Payload::Empty)
+    }
 }
 
 #[derive(Debug, Error)]
@@ -128,15 +157,30 @@ impl<L: RateLimiter> PoliteFetcher<L> {
         }
     }
 
-    async fn send(&self, url: &Url, body: Option<&[u8]>) -> Result<Response, FetchError> {
-        let builder = match body {
-            Some(body) => self
+    async fn send(
+        &self,
+        url: &Url,
+        payload: Payload<'_>,
+        bearer: Option<&str>,
+    ) -> Result<Response, FetchError> {
+        let builder = match payload {
+            Payload::Json(body) => self
                 .inner
                 .client
                 .post(url.clone())
                 .header(CONTENT_TYPE, "application/json")
                 .body(body.to_vec()),
-            None => self.inner.client.get(url.clone()),
+            Payload::Form(body) => self
+                .inner
+                .client
+                .post(url.clone())
+                .header(CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .body(body.to_vec()),
+            Payload::Empty => self.inner.client.get(url.clone()),
+        };
+        let builder = match bearer {
+            Some(token) => builder.bearer_auth(token),
+            None => builder,
         };
         builder.send().await.map_err(map_error)
     }
@@ -181,7 +225,7 @@ impl<L: RateLimiter> PoliteFetcher<L> {
                     Err(error) => return Err(error),
                 }
             }
-            let Ok(response) = self.send(&current, None).await else {
+            let Ok(response) = self.send(&current, Payload::Empty, None).await else {
                 break failure();
             };
             let status = response.status();
@@ -214,7 +258,8 @@ impl<L: RateLimiter> PoliteFetcher<L> {
     async fn run(
         &self,
         request: &FetchRequest,
-        body: Option<&[u8]>,
+        payload: Payload<'_>,
+        bearer: Option<&str>,
     ) -> Result<FetchResponse, FetchError> {
         let settings = &self.inner.settings;
         let mut current = request.url.clone();
@@ -231,9 +276,9 @@ impl<L: RateLimiter> PoliteFetcher<L> {
                 }
             }
             self.throttle(&current, request.source).await?;
-            let response = self.send(&current, body).await?;
+            let response = self.send(&current, payload, bearer).await?;
             if let Some(next) = redirect_target(&response, &current)? {
-                if body.is_some() || hops >= settings.max_redirects {
+                if !payload.is_empty() || hops >= settings.max_redirects {
                     return Err(FetchError::Redirect);
                 }
                 hops += 1;
@@ -271,7 +316,9 @@ impl<L: RateLimiter + 'static> Fetcher for PoliteFetcher<L> {
             purpose = ?request.purpose,
             source = %request.source,
         );
-        self.run(request, None).instrument(span).await
+        self.run(request, Payload::Empty, None)
+            .instrument(span)
+            .await
     }
 }
 
@@ -288,7 +335,38 @@ impl<L: RateLimiter + 'static> PostFetcher for PoliteFetcher<L> {
             purpose: FetchPurpose::Api,
             source: request.source,
         };
-        self.run(&fetch, Some(&request.body)).instrument(span).await
+        self.run(&fetch, Payload::Json(&request.body), None)
+            .instrument(span)
+            .await
+    }
+}
+
+impl<L: RateLimiter + 'static> ApiFetcher for PoliteFetcher<L> {
+    async fn call(&self, request: &ApiRequest) -> Result<FetchResponse, FetchError> {
+        let span = info_span!(
+            "fetch",
+            host = request.url.host_str().unwrap_or(""),
+            purpose = ?FetchPurpose::Api,
+            source = %request.source,
+        );
+        let fetch = FetchRequest {
+            url: request.url.clone(),
+            purpose: FetchPurpose::Api,
+            source: request.source,
+        };
+        let encoded = request.form.as_ref().map(|fields| {
+            let mut serializer = form_urlencoded::Serializer::new(String::new());
+            for (name, value) in fields {
+                serializer.append_pair(name, value.expose());
+            }
+            serializer.finish().into_bytes()
+        });
+        let payload = match &encoded {
+            Some(body) => Payload::Form(body),
+            None => Payload::Empty,
+        };
+        let bearer = request.bearer.as_ref().map(Secret::expose);
+        self.run(&fetch, payload, bearer).instrument(span).await
     }
 }
 

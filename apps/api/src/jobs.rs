@@ -30,6 +30,7 @@ use sources::{
     ct::CtSource,
     decp::{DecpSource, partner_awards},
     dns_cname::DnsCnameSource,
+    france_travail::FranceTravailSource,
     http_probe::HttpProbeSource,
     role_guess::RoleGuessFinder,
     security_txt::SecurityTxtFinder,
@@ -49,6 +50,8 @@ pub const WIRED_SOURCES: [SourceName; 9] = [
     SourceName::Ted,
 ];
 
+pub const FRANCE_TRAVAIL_SOURCE: SourceName = SourceName::FranceTravail;
+
 pub const QUALIFICATION_JOB_KIND: &str = "llm.qualify";
 pub const QUALIFICATION_DEDUP_KEY: &str = "llm:qualify";
 const QUALIFICATION_MAX_ATTEMPTS: NonZeroU16 = NonZeroU16::new(3).unwrap();
@@ -63,6 +66,7 @@ pub type HttpProbe = HttpProbeSource<PoliteFetcher, PgCandidateHosts, LodestoneU
 pub type Boamp = BoampSource<PoliteFetcher>;
 pub type Decp = DecpSource<PoliteFetcher>;
 pub type Ted = TedSource<PoliteFetcher>;
+pub type FranceTravail = FranceTravailSource<PoliteFetcher>;
 pub type CertificateTransparency = CtSource<PoliteFetcher, PgCandidateHosts, PgCtCursors>;
 
 pub struct ContactFinders {
@@ -80,6 +84,7 @@ pub struct WiredSources {
     pub boamp: Boamp,
     pub decp: Decp,
     pub ted: Ted,
+    pub france_travail: Option<FranceTravail>,
     pub contacts: ContactFinders,
 }
 
@@ -276,6 +281,18 @@ impl JobRouter {
         ))
     }
 
+    async fn run_france_travail(&self) -> Result<(u64, u64), SourceRunError> {
+        let Some(source) = &self.sources.france_travail else {
+            info!("france travail source is disabled, the stale job completes without work");
+            return Ok((0, 0));
+        };
+        let report = self.triage_source(source, "france_travail").await?;
+        Ok((
+            report.candidates,
+            report.accepted_by_rules + report.accepted_by_llm,
+        ))
+    }
+
     async fn run_decp(&self) -> Result<(u64, u64), SourceRunError> {
         let report = self.triage_source(&self.sources.decp, "decp").await?;
         let contracts = self.sources.decp.take_awards();
@@ -367,6 +384,7 @@ impl JobRouter {
             SourceName::Boamp => self.run_boamp().await,
             SourceName::Decp => self.run_decp().await,
             SourceName::Ted => self.run_ted().await,
+            SourceName::FranceTravail => self.run_france_travail().await,
             other => {
                 return Err(JobError::Permanent(format!(
                     "source `{other}` is not wired"
@@ -406,9 +424,25 @@ impl JobHandler for JobRouter {
     }
 }
 
-pub async fn schedule_wired_sources(queue: &Arc<PgJobQueue>) -> Result<(), CoreError> {
+pub fn scheduled_sources(france_travail_enabled: bool) -> Vec<SourceName> {
+    let mut sources = WIRED_SOURCES.to_vec();
+    if france_travail_enabled {
+        sources.push(FRANCE_TRAVAIL_SOURCE);
+    }
+    sources
+}
+
+pub async fn schedule_wired_sources(
+    queue: &Arc<PgJobQueue>,
+    france_travail_enabled: bool,
+) -> Result<(), CoreError> {
     let now = Utc::now();
-    for source in WIRED_SOURCES {
+    if !france_travail_enabled {
+        info!(
+            "france travail source disabled, set FRANCE_TRAVAIL_CLIENT_ID and FRANCE_TRAVAIL_CLIENT_SECRET to enable it"
+        );
+    }
+    for source in scheduled_sources(france_travail_enabled) {
         if queue
             .enqueue(&source_job(source, now)?, now)
             .await?
@@ -461,5 +495,16 @@ mod tests {
         let job = source_job(SourceName::Ted, Utc::now()).unwrap();
         assert_eq!(job.dedup_key.as_deref(), Some("source:ted"));
         assert_eq!(job.payload["source"], "ted");
+    }
+
+    #[test]
+    fn the_france_travail_job_is_scheduled_only_with_credentials() {
+        assert!(!WIRED_SOURCES.contains(&SourceName::FranceTravail));
+        assert!(!scheduled_sources(false).contains(&SourceName::FranceTravail));
+        assert!(scheduled_sources(true).contains(&SourceName::FranceTravail));
+        assert_eq!(scheduled_sources(true).len(), WIRED_SOURCES.len() + 1);
+        let job = source_job(SourceName::FranceTravail, Utc::now()).unwrap();
+        assert_eq!(job.dedup_key.as_deref(), Some("source:france_travail"));
+        assert_eq!(job.payload["source"], "france_travail");
     }
 }

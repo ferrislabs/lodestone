@@ -1,0 +1,14 @@
+{
+  "resultats": [
+    {
+      "id": "184TKRG",
+      "intitule": "Responsable cybersécurité identités",
+      "description": "Pilotage de la stratégie IAM et de la gouvernance des accès.",
+      "dateCreation": "2026-10-04T11:00:00.000Z",
+      "lieuTravail": {"libelle": "44 - NANTES", "codePostal": "44000"},
+      "romeCode": "M1802",
+      "entreprise": {"nom": "Loire Software", "url": "loire-software.fr"},
+      "typeContrat": "CDI"
+    }
+  ]
+}
