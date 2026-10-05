@@ -90,7 +90,8 @@ async fn iam_profile_against_the_real_france_travail_api() {
         .revision
         .definition
         .definition()
-        .france_travail()
+        .enabled_keyword_rules(lodestone_core::SourceName::FranceTravail)
+        .next()
         .cloned()
         .unwrap();
     let (candidates, stats) = source

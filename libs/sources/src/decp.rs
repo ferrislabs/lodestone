@@ -8,9 +8,7 @@ use chrono::{DateTime, Datelike, Duration as ChronoDuration, NaiveDate, Utc};
 use lodestone_core::{
     ActiveProfile, Candidate, FetchError, FetchPurpose, FetchRequest, FetchResponse, Fetcher,
     NormalizedDomain, PartnerAward, Provenance, Route, SignalKind, Siret, SourceError, SourceName,
-    definition::{KeywordSource, ProfileDefinition},
-    route,
-    triage::CandidateSource,
+    definition::KeywordSource, route, triage::CandidateSource,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -253,7 +251,13 @@ fn months_newest_first(since: NaiveDate, today: NaiveDate) -> Vec<(i32, u32)> {
 fn rules_of(profiles: &[ActiveProfile]) -> Vec<&KeywordSource> {
     profiles
         .iter()
-        .filter_map(|active| active.revision.definition.definition().decp())
+        .flat_map(|active| {
+            active
+                .revision
+                .definition
+                .definition()
+                .enabled_keyword_rules(SourceName::Decp)
+        })
         .collect()
 }
 
@@ -682,10 +686,6 @@ impl<F: Fetcher> DecpSource<F> {
 impl<F: Fetcher> CandidateSource for DecpSource<F> {
     fn name(&self) -> SourceName {
         SourceName::Decp
-    }
-
-    fn rules<'a>(&self, profile: &'a ProfileDefinition) -> Option<&'a KeywordSource> {
-        profile.decp()
     }
 
     async fn collect(

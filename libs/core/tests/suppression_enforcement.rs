@@ -10,6 +10,7 @@ use lodestone_core::{
     LeadRepository, LodestoneUseCase, NormalizedDomain, Observation, ProfileId, Provenance,
     SignalKind, Source, SourceError, SourceName, SuppressionTarget, UnitInterval,
     contacts::ContactRunSettings,
+    definition::Agent,
     infrastructure::{
         candidate_host::postgres::PgCandidateHosts, contact::postgres::PgContactRepository,
         contact_target::postgres::PgContactTargets, lead::postgres::PgLeadRepository,
@@ -74,7 +75,12 @@ impl Source for HostsSource {
         Ok(vec!["sso.acme.com", "auth.optout.io"])
     }
 
-    fn evaluate(&self, item: &Self::Item, _profile: &ActiveProfile) -> Vec<Observation> {
+    fn evaluate(
+        &self,
+        item: &Self::Item,
+        _profile: &ActiveProfile,
+        _agent: &Agent,
+    ) -> Vec<Observation> {
         vec![Observation {
             domain: domain(item),
             kind: SignalKind::parse("product_detected").unwrap(),
@@ -83,6 +89,7 @@ impl Source for HostsSource {
             provenance: Provenance::parse(&format!("https://{item}/realms/master")).unwrap(),
             strength: UnitInterval::new(0.9).unwrap(),
             observed_at: at(50),
+            agent: None,
         }]
     }
 }

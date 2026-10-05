@@ -101,6 +101,7 @@ export namespace Schemas {
     weight: number;
   };
   export type SignalDto = {
+    agent?: (string | null) | undefined;
     id: string;
     kind: string;
     observed_at: string;

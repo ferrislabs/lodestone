@@ -9,9 +9,7 @@ use common::Secret;
 use fetch::{ApiFetcher, ApiRequest};
 use lodestone_core::{
     ActiveProfile, Candidate, FetchError, FetchResponse, Provenance, SignalKind, SourceError,
-    SourceName,
-    definition::{KeywordSource, ProfileDefinition},
-    triage::CandidateSource,
+    SourceName, triage::CandidateSource,
 };
 use serde_json::{Value, json};
 use tokio::time::sleep;
@@ -90,10 +88,13 @@ pub fn closest_published_since(days: u32) -> u32 {
 pub fn query_keywords(profiles: &[ActiveProfile]) -> Vec<String> {
     let mut seen: HashSet<String> = HashSet::new();
     let mut queries = Vec::new();
-    for rules in profiles
-        .iter()
-        .filter_map(|active| active.revision.definition.definition().france_travail())
-    {
+    for rules in profiles.iter().flat_map(|active| {
+        active
+            .revision
+            .definition
+            .definition()
+            .enabled_keyword_rules(SourceName::FranceTravail)
+    }) {
         for keyword in &rules.keywords {
             let keyword = keyword.trim();
             if !keyword.is_empty() && seen.insert(keyword.to_lowercase()) {
@@ -410,10 +411,6 @@ impl<F: ApiFetcher> FranceTravailSource<F> {
 impl<F: ApiFetcher> CandidateSource for FranceTravailSource<F> {
     fn name(&self) -> SourceName {
         SourceName::FranceTravail
-    }
-
-    fn rules<'a>(&self, profile: &'a ProfileDefinition) -> Option<&'a KeywordSource> {
-        profile.france_travail()
     }
 
     async fn collect(

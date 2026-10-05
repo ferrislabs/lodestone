@@ -7,6 +7,18 @@ use uuid::Uuid;
 
 use super::*;
 
+fn agent_of(profile: &ActiveProfile, kind: SourceName) -> Agent {
+    profile
+        .revision
+        .definition
+        .definition()
+        .agents
+        .iter()
+        .find(|agent| agent.source.source_name() == kind)
+        .cloned()
+        .unwrap()
+}
+
 fn at(seconds: i64) -> DateTime<Utc> {
     Utc.timestamp_opt(1_800_000_000 + seconds, 0).unwrap()
 }
@@ -288,6 +300,15 @@ fn source(
     )
 }
 
+fn observe(source: &TestSource, item: &ProbedHost, profile: &ActiveProfile) -> Vec<Observation> {
+    let agents = &profile.revision.definition.definition().agents;
+    let agent = agents
+        .iter()
+        .find(|agent| agent.source.source_name() == SourceName::HttpProbe)
+        .unwrap_or(&agents[0]);
+    source.evaluate(item, profile, agent)
+}
+
 fn evaluator() -> TestSource {
     source(
         FakeFetcher::default(),
@@ -453,7 +474,7 @@ async fn fetch_error_is_none_and_other_paths_still_evaluated() {
     assert_eq!(items[0].responses[0].path, "/realms/master");
     assert!(items[0].responses[0].response.is_none());
     assert_eq!(items[0].responses[1].response.as_ref().unwrap().status, 200);
-    let found = source.evaluate(&items[0], &profiles[1]);
+    let found = observe(&source, &items[0], &profiles[1]);
     assert_eq!(found.len(), 1);
     assert_eq!(found[0].value.as_deref(), Some("zitadel"));
 }
@@ -587,32 +608,51 @@ fn matchers_require_all_conditions() {
         "/realms/master",
         Some(response(200, &[], "{\"realm\":\"m\"}")),
     );
-    assert_eq!(evaluator.evaluate(&hit, &profile).len(), 1);
+    assert_eq!(
+        evaluator
+            .evaluate(&hit, &profile, &agent_of(&profile, SourceName::HttpProbe))
+            .len(),
+        1
+    );
     for answer in [
         Some(response(404, &[], "{\"realm\":\"m\"}")),
         Some(response(200, &[], "{}")),
         None,
     ] {
         let miss = probed_item("sso.acme.com", "/realms/master", answer);
-        assert!(evaluator.evaluate(&miss, &profile).is_empty());
+        assert!(
+            evaluator
+                .evaluate(&miss, &profile, &agent_of(&profile, SourceName::HttpProbe))
+                .is_empty()
+        );
     }
     let other_path = probed_item(
         "sso.acme.com",
         "/other",
         Some(response(200, &[], "{\"realm\":1}")),
     );
-    assert!(evaluator.evaluate(&other_path, &profile).is_empty());
+    assert!(
+        evaluator
+            .evaluate(
+                &other_path,
+                &profile,
+                &agent_of(&profile, SourceName::HttpProbe)
+            )
+            .is_empty()
+    );
 }
 
 #[test]
 fn observation_carries_evidence() {
-    let found = evaluator().evaluate(
+    let profile = keycloak_profile();
+    let found = observe(
+        &evaluator(),
         &probed_item(
             "sso.acme.com",
             "/realms/master",
             Some(response(200, &[], "{\"realm\":\"m\"}")),
         ),
-        &keycloak_profile(),
+        &profile,
     );
     assert_eq!(found.len(), 1);
     let observation = &found[0];
@@ -655,13 +695,22 @@ fn header_matching_ignores_name_case() {
         "/live",
         Some(response(200, &[("x-powered-by", "authentik")], "")),
     );
-    assert_eq!(evaluator.evaluate(&hit, &profile).len(), 1);
+    assert_eq!(
+        evaluator
+            .evaluate(&hit, &profile, &agent_of(&profile, SourceName::HttpProbe))
+            .len(),
+        1
+    );
     let miss = probed_item(
         "sso.acme.com",
         "/live",
         Some(response(200, &[("server", "authentik")], "")),
     );
-    assert!(evaluator.evaluate(&miss, &profile).is_empty());
+    assert!(
+        evaluator
+            .evaluate(&miss, &profile, &agent_of(&profile, SourceName::HttpProbe))
+            .is_empty()
+    );
 }
 
 #[test]
@@ -680,7 +729,8 @@ fn version_below_marks_old_versions_only() {
     let evaluator = evaluator();
     let profile = versioned_profile();
     let run = |version: &str| {
-        evaluator.evaluate(
+        observe(
+            &evaluator,
             &probed_item(
                 "sso.acme.com",
                 "/version",
@@ -717,14 +767,16 @@ fn unparsable_or_missing_version_yields_no_marker() {
     );
     let evaluator = evaluator();
     for body in ["version=1.2-beta", "nothing here"] {
-        let found = evaluator.evaluate(
+        let found = observe(
+            &evaluator,
             &probed_item("sso.acme.com", "/version", Some(response(200, &[], body))),
             &profile,
         );
         assert_eq!(found.len(), 1, "{body}");
         assert_eq!(found[0].kind.as_str(), "product_detected");
     }
-    let found = evaluator.evaluate(
+    let found = observe(
+        &evaluator,
         &probed_item(
             "sso.acme.com",
             "/version",
@@ -739,7 +791,8 @@ fn unparsable_or_missing_version_yields_no_marker() {
 fn matches_marker_uses_the_same_response() {
     let evaluator = evaluator();
     let profile = versioned_profile();
-    let found = evaluator.evaluate(
+    let found = observe(
+        &evaluator,
         &probed_item(
             "sso.acme.com",
             "/version",
@@ -770,7 +823,8 @@ fn excluded_product_suppresses_everything() {
             "excluded_products": ["ferriskey"]
         }),
     );
-    let found = evaluator().evaluate(
+    let found = observe(
+        &evaluator(),
         &probed_item(
             "sso.acme.com",
             "/realms/master",
@@ -783,7 +837,8 @@ fn excluded_product_suppresses_everything() {
 
 #[test]
 fn product_is_reported_once() {
-    let found = evaluator().evaluate(
+    let found = observe(
+        &evaluator(),
         &probed_item(
             "sso.acme.com",
             "/realms/master",
@@ -821,7 +876,8 @@ fn without_probe() -> ActiveProfile {
 #[test]
 fn profile_without_http_probe_yields_nothing() {
     let other = without_probe();
-    let found = evaluator().evaluate(
+    let found = observe(
+        &evaluator(),
         &probed_item(
             "sso.acme.com",
             "/realms/master",
@@ -842,14 +898,14 @@ fn regexes_are_compiled_once_per_profile_revision() {
     );
     let first = keycloak_profile();
     for _ in 0..3 {
-        evaluator.evaluate(&item, &first);
+        observe(&evaluator, &item, &first);
     }
     assert_eq!(evaluator.compilations(), 1);
     let revised = profile(1, 2, plain());
-    evaluator.evaluate(&item, &revised);
-    evaluator.evaluate(&item, &revised);
+    observe(&evaluator, &item, &revised);
+    observe(&evaluator, &item, &revised);
     assert_eq!(evaluator.compilations(), 2);
-    evaluator.evaluate(&item, &first);
+    observe(&evaluator, &item, &first);
     assert_eq!(evaluator.compilations(), 2);
 }
 
@@ -858,8 +914,118 @@ fn cache_is_bounded() {
     let evaluator = evaluator();
     let item = probed_item("sso.acme.com", "/realms/master", None);
     for id in 0..200u128 {
-        evaluator.evaluate(&item, &profile(1000 + id, 1, plain()));
+        observe(&evaluator, &item, &profile(1000 + id, 1, plain()));
     }
     assert!(evaluator.compiled.lock().unwrap().len() <= MAX_CACHED_PROFILES);
     assert_eq!(evaluator.compilations(), 200);
+}
+
+fn two_agent_profile(excluded_by_first: &[&str]) -> ActiveProfile {
+    let mut active = keycloak_profile();
+    let value = json!({
+        "schema_version": 2,
+        "identity": {"offer": "Managed IAM", "target_customer": "Companies"},
+        "agents": [
+            {"id": "probe-a", "name": "A", "source": {
+                "kind": "http_probe",
+                "excluded_products": excluded_by_first,
+                "fingerprints": [{
+                    "id": "keycloak-realm",
+                    "path": "/realms/master",
+                    "product": "keycloak",
+                    "matchers": [{"kind": "status", "equals": 200}]
+                }]
+            }},
+            {"id": "probe-b", "name": "B", "source": {
+                "kind": "http_probe",
+                "fingerprints": [
+                    {
+                        "id": "keycloak-realm-b",
+                        "path": "/realms/master",
+                        "product": "keycloak",
+                        "matchers": [{"kind": "status", "equals": 200}]
+                    },
+                    {
+                        "id": "zitadel",
+                        "path": "/ui/console",
+                        "product": "zitadel",
+                        "matchers": [{"kind": "status", "equals": 200}]
+                    }
+                ]
+            }}
+        ],
+        "scoring": {"factors": [{"signal": "product_detected", "weight": 10.0}]},
+        "contact_ranking": {"preferred_local_parts": ["security"]},
+        "llm": {"qualification_threshold": 50.0, "relevance_criteria": "Uses an IAM"}
+    });
+    active.revision.definition = ValidatedProfile::parse(value).unwrap();
+    active
+}
+
+fn both_paths_item() -> ProbedHost {
+    ProbedHost {
+        host: candidate("sso.acme.com"),
+        responses: vec![
+            ProbedPath {
+                path: "/realms/master".to_owned(),
+                response: Some(response(200, &[], "{}")),
+            },
+            ProbedPath {
+                path: "/ui/console".to_owned(),
+                response: Some(response(200, &[], "console")),
+            },
+        ],
+        probed_at: at(9),
+    }
+}
+
+fn agent_named(profile: &ActiveProfile, id: &str) -> Agent {
+    profile
+        .revision
+        .definition
+        .definition()
+        .agents
+        .iter()
+        .find(|agent| agent.id.as_str() == id)
+        .cloned()
+        .unwrap()
+}
+
+#[test]
+fn each_agent_applies_its_own_fingerprints() {
+    let profile = two_agent_profile(&[]);
+    let evaluator = evaluator();
+    let item = both_paths_item();
+    let first = evaluator.evaluate(&item, &profile, &agent_named(&profile, "probe-a"));
+    let second = evaluator.evaluate(&item, &profile, &agent_named(&profile, "probe-b"));
+    let products = |found: &[Observation]| -> Vec<String> {
+        found.iter().filter_map(|o| o.value.clone()).collect()
+    };
+    assert_eq!(products(&first), ["keycloak"]);
+    assert_eq!(products(&second), ["keycloak", "zitadel"]);
+    assert_eq!(evaluator.compilations(), 2);
+}
+
+#[test]
+fn excluded_products_apply_per_agent() {
+    let profile = two_agent_profile(&["keycloak"]);
+    let evaluator = evaluator();
+    let item = both_paths_item();
+    assert!(
+        evaluator
+            .evaluate(&item, &profile, &agent_named(&profile, "probe-a"))
+            .is_empty()
+    );
+    assert_eq!(
+        evaluator
+            .evaluate(&item, &profile, &agent_named(&profile, "probe-b"))
+            .len(),
+        2
+    );
+}
+
+#[test]
+fn probe_paths_cover_every_enabled_agent() {
+    let profile = two_agent_profile(&[]);
+    assert_eq!(probe_paths(&[profile]), ["/realms/master", "/ui/console"]);
 }

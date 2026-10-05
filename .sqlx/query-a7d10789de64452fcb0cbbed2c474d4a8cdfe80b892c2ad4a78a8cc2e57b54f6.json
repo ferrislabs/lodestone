@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT id, profile_id, source, status, started_at, finished_at, volume, signals, error\n            FROM runs\n            WHERE id = $1\n            ",
+  "query": "\n            SELECT id, lead_id, kind, value, source, raw, provenance, strength, observed_at, agent_id\n            FROM signals\n            WHERE lead_id = $1\n            ORDER BY observed_at ASC, id ASC\n            ",
   "describe": {
     "columns": [
       {
@@ -10,42 +10,47 @@
       },
       {
         "ordinal": 1,
-        "name": "profile_id",
+        "name": "lead_id",
         "type_info": "Uuid"
       },
       {
         "ordinal": 2,
-        "name": "source",
+        "name": "kind",
         "type_info": "Text"
       },
       {
         "ordinal": 3,
-        "name": "status",
+        "name": "value",
         "type_info": "Text"
       },
       {
         "ordinal": 4,
-        "name": "started_at",
-        "type_info": "Timestamptz"
+        "name": "source",
+        "type_info": "Text"
       },
       {
         "ordinal": 5,
-        "name": "finished_at",
-        "type_info": "Timestamptz"
+        "name": "raw",
+        "type_info": "Jsonb"
       },
       {
         "ordinal": 6,
-        "name": "volume",
-        "type_info": "Int8"
+        "name": "provenance",
+        "type_info": "Text"
       },
       {
         "ordinal": 7,
-        "name": "signals",
-        "type_info": "Int8"
+        "name": "strength",
+        "type_info": "Float8"
       },
       {
         "ordinal": 8,
-        "name": "error",
+        "name": "observed_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 9,
+        "name": "agent_id",
         "type_info": "Text"
       }
     ],
@@ -58,13 +63,14 @@
       false,
       false,
       false,
-      false,
-      false,
       true,
+      false,
+      false,
+      false,
       false,
       false,
       true
     ]
   },
-  "hash": "82cd7dc1cdaadd4719c70daa54165195e77c8d8cd1aeb55f5822d253f0293ba5"
+  "hash": "a7d10789de64452fcb0cbbed2c474d4a8cdfe80b892c2ad4a78a8cc2e57b54f6"
 }

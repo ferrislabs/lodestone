@@ -184,6 +184,10 @@ fn probe_paths(profile: &ActiveProfile) -> Vec<String> {
         .revision
         .definition
         .definition()
+        .enabled_agents(SourceName::HttpProbe)
+        .next()
+        .unwrap()
+        .source
         .http_probe()
         .unwrap()
         .fingerprints
@@ -242,7 +246,17 @@ fn observed(files: &[&str]) -> Vec<(String, String)> {
         },
     );
     let item = probed_host(files, &probe_paths(&profile));
-    let found: Vec<Observation> = source.evaluate(&item, &profile);
+    let found: Vec<Observation> = source.evaluate(
+        &item,
+        &profile,
+        profile
+            .revision
+            .definition
+            .definition()
+            .enabled_agents(SourceName::HttpProbe)
+            .next()
+            .unwrap(),
+    );
     found
         .into_iter()
         .map(|observation| {

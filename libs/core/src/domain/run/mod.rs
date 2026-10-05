@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 
 use crate::domain::{
     lead::{str_enum, uuid_id},
-    profile::ProfileId,
+    profile::{ProfileId, definition::AgentId},
     values::SourceName,
 };
 
@@ -56,14 +56,22 @@ pub struct Run {
     pub volume: u64,
     pub signals: u64,
     pub error: Option<String>,
+    pub agent: Option<AgentId>,
 }
 
 impl Run {
-    pub fn start(id: RunId, profile_id: ProfileId, source: SourceName, at: DateTime<Utc>) -> Self {
+    pub fn start(
+        id: RunId,
+        profile_id: ProfileId,
+        source: SourceName,
+        agent: Option<AgentId>,
+        at: DateTime<Utc>,
+    ) -> Self {
         Self {
             id,
             profile_id,
             source,
+            agent,
             status: RunStatus::Running,
             started_at: at,
             finished_at: None,

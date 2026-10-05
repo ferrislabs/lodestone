@@ -32,6 +32,7 @@ const detail: LeadDetailData = {
 			kind: 'hiring_page',
 			value: 'careers',
 			source: 'crawler',
+			agent: 'ats-fr',
 			provenance: 'https://acme.test/careers',
 			strength: 0.8,
 			observed_at: '2026-02-01T00:00:00Z',
@@ -91,6 +92,7 @@ describe('LeadDetail', () => {
 		expect(screen.getByText('Fintech')).toBeTruthy()
 		expect(screen.getByText('Score breakdown')).toBeTruthy()
 		expect(screen.getByText('Source: crawler')).toBeTruthy()
+		expect(screen.getByText('ats-fr')).toBeTruthy()
 		expect(screen.getByText('jane@acme.test')).toBeTruthy()
 		expect(screen.getByText('Growing team')).toBeTruthy()
 		expect(screen.getByText('Model: model-x')).toBeTruthy()

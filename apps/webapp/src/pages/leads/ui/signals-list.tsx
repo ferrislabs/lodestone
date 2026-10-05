@@ -1,3 +1,4 @@
+import { Badge } from '#/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '#/components/ui/card'
 import { formatDateTime, formatRatio } from '#/pages/leads/lib/format'
 import type { Signal } from '#/pages/leads/lib/types'
@@ -24,6 +25,9 @@ export function SignalsList({ signals }: SignalsListProps) {
 									<span className="font-medium">{signal.kind}</span>
 									{signal.value ? (
 										<span className="text-sm">{signal.value}</span>
+									) : null}
+									{signal.agent ? (
+										<Badge variant="secondary">{signal.agent}</Badge>
 									) : null}
 								</div>
 								<div className="flex flex-wrap gap-x-4 text-xs text-muted-foreground">

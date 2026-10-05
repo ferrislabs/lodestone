@@ -41,6 +41,7 @@ fn scope(profile: ProfileId, revision: u32) -> CacheScope {
         revision: RevisionNumber::new(revision).unwrap(),
         prompt: "triage@1".to_owned(),
         domain: NormalizedDomain::from_host("acme.com").unwrap(),
+        agent: None,
     }
 }
 

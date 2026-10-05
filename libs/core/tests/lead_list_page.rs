@@ -58,6 +58,7 @@ async fn add_signal(pool: &PgPool, profile: ProfileId, host: &str, kind: &str) {
                 provenance: Provenance::parse("https://example.com/x").unwrap(),
                 strength: UnitInterval::new(0.5).unwrap(),
                 observed_at: at(1),
+                agent: None,
             })
             .await?;
         Ok(())

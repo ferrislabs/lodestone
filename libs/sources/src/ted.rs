@@ -4,7 +4,6 @@ use chrono::{DateTime, Duration, NaiveDate, Utc};
 use fetch::{PostFetcher, PostRequest};
 use lodestone_core::{
     ActiveProfile, Candidate, NormalizedDomain, Provenance, SignalKind, SourceError, SourceName,
-    definition::{KeywordSource, ProfileDefinition},
     triage::CandidateSource,
 };
 use serde_json::{Value, json};
@@ -58,10 +57,13 @@ pub struct TedSource<F: PostFetcher> {
 pub fn keyword_union(profiles: &[ActiveProfile]) -> Vec<String> {
     let mut seen: HashSet<String> = HashSet::new();
     let mut union = Vec::new();
-    for rules in profiles
-        .iter()
-        .filter_map(|active| active.revision.definition.definition().ted())
-    {
+    for rules in profiles.iter().flat_map(|active| {
+        active
+            .revision
+            .definition
+            .definition()
+            .enabled_keyword_rules(SourceName::Ted)
+    }) {
         for keyword in &rules.keywords {
             let keyword = keyword.trim();
             if !keyword.is_empty() && seen.insert(keyword.to_lowercase()) {
@@ -386,10 +388,6 @@ impl<F: PostFetcher> TedSource<F> {
 impl<F: PostFetcher> CandidateSource for TedSource<F> {
     fn name(&self) -> SourceName {
         SourceName::Ted
-    }
-
-    fn rules<'a>(&self, profile: &'a ProfileDefinition) -> Option<&'a KeywordSource> {
-        profile.ted()
     }
 
     async fn collect(

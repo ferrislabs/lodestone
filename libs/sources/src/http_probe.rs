@@ -10,7 +10,7 @@ use lodestone_core::{
     ActiveProfile, CandidateHost, CandidateHosts, FetchError, FetchPurpose, FetchRequest,
     FetchResponse, Fetcher, Hostname, LodestoneUseCase, Observation, ProfileId, Provenance,
     RevisionNumber, SignalKind, Source, SourceError, SourceName, UnitInterval,
-    definition::{DebtRule, Fingerprint, Matcher, VersionExtractor},
+    definition::{Agent, AgentId, DebtRule, Fingerprint, Matcher, VersionExtractor},
 };
 use regex::Regex;
 use serde_json::json;
@@ -222,7 +222,7 @@ pub struct HttpProbeSource<F: Fetcher, H: CandidateHosts, G: ProbeGuard> {
     hosts: Arc<H>,
     guard: Arc<G>,
     settings: HttpProbeSettings,
-    compiled: Mutex<HashMap<(ProfileId, RevisionNumber), Arc<CompiledProfile>>>,
+    compiled: Mutex<HashMap<(ProfileId, RevisionNumber, AgentId), Arc<CompiledProfile>>>,
     compilations: AtomicUsize,
 }
 
@@ -242,9 +242,13 @@ impl<F: Fetcher, H: CandidateHosts, G: ProbeGuard> HttpProbeSource<F, H, G> {
         self.compilations.load(Ordering::SeqCst)
     }
 
-    fn compiled_for(&self, profile: &ActiveProfile) -> Option<Arc<CompiledProfile>> {
-        let config = profile.revision.definition.definition().http_probe()?;
-        let key = (profile.profile.id, profile.revision.number);
+    fn compiled_for(&self, profile: &ActiveProfile, agent: &Agent) -> Option<Arc<CompiledProfile>> {
+        let config = agent.source.http_probe()?;
+        let key = (
+            profile.profile.id,
+            profile.revision.number,
+            agent.id.clone(),
+        );
         let mut cache = self.compiled.lock().ok()?;
         if let Some(found) = cache.get(&key) {
             return Some(Arc::clone(found));
@@ -273,7 +277,14 @@ fn upstream(error: impl std::fmt::Display) -> SourceError {
 fn probe_paths(profiles: &[ActiveProfile]) -> Vec<String> {
     let mut paths: Vec<String> = profiles
         .iter()
-        .filter_map(|profile| profile.revision.definition.definition().http_probe())
+        .flat_map(|profile| {
+            profile
+                .revision
+                .definition
+                .definition()
+                .enabled_agents(SourceName::HttpProbe)
+        })
+        .filter_map(|agent| agent.source.http_probe())
         .flat_map(|config| config.fingerprints.iter().map(|item| item.path.clone()))
         .collect();
     paths.sort();
@@ -437,8 +448,13 @@ where
         Ok(items)
     }
 
-    fn evaluate(&self, item: &Self::Item, profile: &ActiveProfile) -> Vec<Observation> {
-        let Some(compiled) = self.compiled_for(profile) else {
+    fn evaluate(
+        &self,
+        item: &Self::Item,
+        profile: &ActiveProfile,
+        agent: &Agent,
+    ) -> Vec<Observation> {
+        let Some(compiled) = self.compiled_for(profile, agent) else {
             return Vec::new();
         };
         let (Ok(product_kind), Ok(debt_kind)) = (
@@ -510,6 +526,7 @@ where
                     provenance: provenance.clone(),
                     strength: product_strength,
                     observed_at: item.probed_at,
+                    agent: None,
                 });
             }
             let parsed = version.as_deref().and_then(parse_version);
@@ -533,6 +550,7 @@ where
                         provenance: provenance.clone(),
                         strength: debt_strength,
                         observed_at: item.probed_at,
+                        agent: None,
                     });
                 }
             }

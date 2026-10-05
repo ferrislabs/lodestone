@@ -89,6 +89,7 @@ mod tests {
             provenance: Provenance::parse("https://sso.acme.com/").unwrap(),
             strength: UnitInterval::new(strength).unwrap(),
             observed_at: Utc::now(),
+            agent: None,
         }
     }
 

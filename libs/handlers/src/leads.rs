@@ -98,6 +98,7 @@ pub struct SignalDto {
     pub observed_at: String,
     #[schema(value_type = Object)]
     pub raw: serde_json::Value,
+    pub agent: Option<String>,
 }
 
 impl From<&Signal> for SignalDto {
@@ -111,6 +112,7 @@ impl From<&Signal> for SignalDto {
             strength: signal.strength.get(),
             observed_at: signal.observed_at.to_rfc3339(),
             raw: signal.raw.clone(),
+            agent: signal.agent.as_ref().map(|agent| agent.as_str().to_owned()),
         }
     }
 }

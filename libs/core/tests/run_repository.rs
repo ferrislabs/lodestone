@@ -12,6 +12,7 @@ fn started(profile: lodestone_core::ProfileId, seconds: i64) -> Run {
         RunId(common::generate_uuid_v7()),
         profile,
         SourceName::HttpProbe,
+        None,
         at(seconds),
     )
 }
@@ -162,4 +163,33 @@ async fn list_recent_orders_and_limits(pool: PgPool) {
 
     assert_eq!(all, [newest.clone(), middle.clone(), oldest]);
     assert_eq!(limited, [newest, middle]);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_agent_round_trips_and_survives_finish(pool: PgPool) {
+    let profile = create_profile(&pool, "alpha").await;
+    let mut run = started(profile, 0);
+    run.agent = Some(lodestone_core::definition::AgentId::new("ats-en"));
+
+    let (found, finished) = with_tx(&pool, async |shared| {
+        let mut repo = PgRunRepository::new(&shared);
+        repo.insert(&run).await?;
+        let found = repo.find(run.id).await?;
+        let finished = repo
+            .finish(
+                run.id,
+                &RunOutcome::Succeeded {
+                    volume: 1,
+                    signals: 1,
+                },
+                at(5),
+            )
+            .await?;
+        Ok((found, finished))
+    })
+    .await
+    .unwrap();
+
+    assert_eq!(found.unwrap().agent, run.agent);
+    assert_eq!(finished.unwrap().agent, run.agent);
 }

@@ -6,7 +6,10 @@ use thiserror::Error;
 use crate::domain::{
     NormalizedDomain,
     fetch::FetchError,
-    profile::{ActiveProfile, definition::ProfileDefinition},
+    profile::{
+        ActiveProfile,
+        definition::{Agent, AgentId},
+    },
     values::{Provenance, SignalKind, SourceName, UnitInterval},
 };
 
@@ -19,6 +22,7 @@ pub struct Observation {
     pub provenance: Provenance,
     pub strength: UnitInterval,
     pub observed_at: DateTime<Utc>,
+    pub agent: Option<AgentId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -51,24 +55,14 @@ pub trait Source: Send + Sync {
         now: DateTime<Utc>,
     ) -> impl Future<Output = Result<Vec<Self::Item>, SourceError>> + Send;
 
-    fn evaluate(&self, item: &Self::Item, profile: &ActiveProfile) -> Vec<Observation>;
-}
-
-impl ProfileDefinition {
-    pub fn enables(&self, source: SourceName) -> bool {
-        match source {
-            SourceName::CertificateTransparency
-            | SourceName::HttpProbe
-            | SourceName::DnsCname
-            | SourceName::Boamp
-            | SourceName::Decp
-            | SourceName::Ted
-            | SourceName::FranceTravail
-            | SourceName::Ats => self.first_enabled(source).is_some(),
-            SourceName::PublicPage
-            | SourceName::SecurityTxt
-            | SourceName::RoleGuess
-            | SourceName::LlmQualification => true,
-        }
+    fn serves(&self, _item: &Self::Item, _agent: &Agent) -> bool {
+        true
     }
+
+    fn evaluate(
+        &self,
+        item: &Self::Item,
+        profile: &ActiveProfile,
+        agent: &Agent,
+    ) -> Vec<Observation>;
 }

@@ -158,6 +158,7 @@ impl LodestoneUseCase {
                 RunId(generate_uuid_v7()),
                 active.profile.id,
                 SourceName::LlmQualification,
+                None,
                 clock.now(),
             );
             self.insert_qualification_run(&run).await?;
@@ -238,6 +239,7 @@ impl LodestoneUseCase {
                 revision: active.revision.number,
                 prompt: tag.clone(),
                 domain: lead.domain.clone(),
+                agent: None,
             };
             let prompt = Prompt {
                 system: &system,
@@ -424,6 +426,7 @@ mod tests {
             provenance: Provenance::parse("https://example.com/realms/master").unwrap(),
             strength: UnitInterval::new(0.5).unwrap(),
             observed_at: Utc.timestamp_opt(1_800_000_000, 0).unwrap(),
+            agent: None,
         }
     }
 

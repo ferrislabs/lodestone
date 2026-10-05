@@ -24,6 +24,18 @@ fn at(seconds: i64) -> DateTime<Utc> {
     Utc.timestamp_opt(1_800_000_000 + seconds, 0).unwrap()
 }
 
+fn agent_of(profile: &ActiveProfile, kind: SourceName) -> Agent {
+    profile
+        .revision
+        .definition
+        .definition()
+        .agents
+        .iter()
+        .find(|agent| agent.source.source_name() == kind)
+        .cloned()
+        .unwrap()
+}
+
 fn labels(values: &[&str]) -> HashSet<String> {
     values.iter().map(|value| (*value).to_owned()).collect()
 }
@@ -347,5 +359,66 @@ async fn evaluate_never_creates_signals() {
         at(0),
     )
     .unwrap();
-    assert!(source.evaluate(&host, &profile(Some(&["sso"]))).is_empty());
+    let profile = profile(Some(&["sso"]));
+    let agent = agent_of(&profile, SourceName::CertificateTransparency);
+    assert!(source.evaluate(&host, &profile, &agent).is_empty());
+}
+
+fn ct_agents_profile(agents: &[(&str, &[&str])]) -> ActiveProfile {
+    let mut active = profile(None);
+    let value = json!({
+        "schema_version": 2,
+        "identity": {"offer": "Managed IAM", "target_customer": "Companies"},
+        "agents": agents
+            .iter()
+            .map(|(id, labels)| json!({
+                "id": id,
+                "name": id,
+                "source": {"kind": "certificate_transparency", "labels": labels}
+            }))
+            .collect::<Vec<_>>(),
+        "scoring": {"factors": [{"signal": "saas_provider", "weight": 10.0}]},
+        "contact_ranking": {"preferred_local_parts": ["security"]},
+        "llm": {"qualification_threshold": 50.0, "relevance_criteria": "Uses an IAM"}
+    });
+    active.revision.definition = ValidatedProfile::parse(value).unwrap();
+    active
+}
+
+#[test]
+fn label_filter_unions_the_labels_of_every_enabled_agent() {
+    let profile = ct_agents_profile(&[("ct-sso", &["sso"]), ("ct-auth", &["auth", "login"])]);
+    assert_eq!(label_filter(&[profile]), labels(&["sso", "auth", "login"]));
+}
+
+#[test]
+fn a_matched_host_is_attributed_to_the_agents_whose_labels_match() {
+    let source = source(256, None, 1, 1);
+    let profile = ct_agents_profile(&[("ct-sso", &["sso"]), ("ct-auth", &["auth"])]);
+    let agents = &profile.revision.definition.definition().agents;
+    let sso_host = CandidateHost::discovered(
+        Hostname::parse("sso.example.com").unwrap(),
+        HostOrigin::CertificateTransparency,
+        at(0),
+    )
+    .unwrap();
+    let auth_host = CandidateHost::discovered(
+        Hostname::parse("auth.example.com").unwrap(),
+        HostOrigin::CertificateTransparency,
+        at(0),
+    )
+    .unwrap();
+    assert!(source.serves(&sso_host, &agents[0]));
+    assert!(!source.serves(&sso_host, &agents[1]));
+    assert!(source.serves(&auth_host, &agents[1]));
+    assert!(!source.serves(&auth_host, &agents[0]));
+}
+
+#[test]
+fn a_disabled_ct_agent_adds_no_label() {
+    let mut profile = ct_agents_profile(&[("ct-sso", &["sso"]), ("ct-auth", &["auth"])]);
+    let mut value = serde_json::to_value(profile.revision.definition.definition()).unwrap();
+    value["agents"][1]["enabled"] = json!(false);
+    profile.revision.definition = ValidatedProfile::parse(value).unwrap();
+    assert_eq!(label_filter(&[profile]), labels(&["sso"]));
 }

@@ -414,7 +414,8 @@ async fn ambiguous_contracts_still_produce_partner_awards() {
         .revision
         .definition
         .definition()
-        .decp()
+        .enabled_keyword_rules(SourceName::Decp)
+        .next()
         .cloned()
         .unwrap();
     let awards = partner_awards(&rules, &contracts);
