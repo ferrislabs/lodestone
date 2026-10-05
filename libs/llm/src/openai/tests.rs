@@ -10,7 +10,8 @@ use std::{
 use common::Secret;
 use httpmock::prelude::*;
 use lodestone_core::{
-    LlmError, LlmProvider, LlmRequest, ProviderDefinition, ProviderKind, UntrustedDocument,
+    LlmError, LlmProvider, LlmRequest, ProviderDefinition, ProviderKind, ReasoningEffort,
+    UntrustedDocument,
 };
 use serde_json::json;
 use tracing::{
@@ -36,6 +37,7 @@ fn definition(
         model: "test-model".to_owned(),
         api_key: key.map(Secret::new),
         timeout,
+        reasoning_effort: None,
     }
 }
 
@@ -462,4 +464,127 @@ async fn tracing_records_model_and_usage_but_never_secrets() {
     assert!(!captured.contains(KEY));
     assert!(!captured.contains("hello"));
     assert!(!captured.contains("leaky-body"));
+}
+
+const OLLAMA_EXHAUSTED: &str = include_str!("fixtures/ollama_reasoning_exhausted.json");
+
+fn provider_with_effort(server: &MockServer, effort: ReasoningEffort) -> OpenAiCompatibleProvider {
+    let mut definition = definition(
+        ProviderKind::OpenAiCompatible,
+        &server.base_url(),
+        None,
+        Duration::from_secs(5),
+    );
+    definition.reasoning_effort = Some(effort);
+    OpenAiCompatibleProvider::new(&definition).unwrap()
+}
+
+#[tokio::test]
+async fn reasoning_effort_is_sent_when_set() {
+    for effort in [
+        ReasoningEffort::None,
+        ReasoningEffort::Low,
+        ReasoningEffort::Medium,
+        ReasoningEffort::High,
+    ] {
+        let server = MockServer::start();
+        let mut expected = expected_body();
+        expected["reasoning_effort"] = json!(effort.as_str());
+        let mock = server.mock(|when, then| {
+            when.method(POST).json_body(expected);
+            then.status(200).json_body(success_body());
+        });
+        run(&provider_with_effort(&server, effort)).await.unwrap();
+        mock.assert();
+    }
+}
+
+#[tokio::test]
+async fn reasoning_effort_is_absent_when_unset() {
+    let server = MockServer::start();
+    let mock = server.mock(|when, then| {
+        when.method(POST)
+            .matches(|request| {
+                request
+                    .body
+                    .as_ref()
+                    .is_some_and(|body| !String::from_utf8_lossy(body).contains("reasoning_effort"))
+            })
+            .json_body(expected_body());
+        then.status(200).json_body(success_body());
+    });
+    run(&provider(ProviderKind::OpenAiCompatible, &server, None))
+        .await
+        .unwrap();
+    mock.assert();
+}
+
+#[tokio::test]
+async fn empty_content_with_reasoning_and_length_is_reasoning_exhausted() {
+    let body: serde_json::Value = serde_json::from_str(OLLAMA_EXHAUSTED).unwrap();
+    assert_eq!(error_for(body).await, LlmError::ReasoningExhausted);
+}
+
+#[tokio::test]
+async fn reasoning_content_alias_is_understood() {
+    let error = error_for(choice_body(
+        json!({"content": null, "reasoning_content": "thinking"}),
+        "length",
+    ))
+    .await;
+    assert_eq!(error, LlmError::ReasoningExhausted);
+}
+
+#[tokio::test]
+async fn empty_content_without_reasoning_stays_truncated() {
+    let error = error_for(choice_body(json!({"content": ""}), "length")).await;
+    assert_eq!(error, LlmError::Truncated);
+}
+
+#[tokio::test]
+async fn reasoning_alongside_a_normal_answer_is_ignored() {
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST);
+        then.status(200).json_body(choice_body(
+            json!({"content": "{\"ok\": true}", "reasoning": "short thought"}),
+            "stop",
+        ));
+    });
+    let response = run(&provider(ProviderKind::OpenAiCompatible, &server, None))
+        .await
+        .unwrap();
+    assert_eq!(response.output, json!({"ok": true}));
+}
+
+fn fixture_reasoning() -> String {
+    let body: serde_json::Value = serde_json::from_str(OLLAMA_EXHAUSTED).unwrap();
+    body["choices"][0]["message"]["reasoning"]
+        .as_str()
+        .unwrap()
+        .to_owned()
+}
+
+#[tokio::test]
+async fn reasoning_text_never_reaches_the_response_or_the_error() {
+    let reasoning = fixture_reasoning();
+    assert!(!reasoning.is_empty());
+    let probe = &reasoning[..40];
+
+    let exhausted: serde_json::Value = serde_json::from_str(OLLAMA_EXHAUSTED).unwrap();
+    let error = error_for(exhausted).await;
+    assert!(!format!("{error} {error:?}").contains(probe));
+
+    let mut answered: serde_json::Value = serde_json::from_str(OLLAMA_EXHAUSTED).unwrap();
+    answered["choices"][0]["message"]["content"] = json!("{\"ok\": true}");
+    answered["choices"][0]["finish_reason"] = json!("stop");
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST);
+        then.status(200).json_body(answered);
+    });
+    let response = run(&provider(ProviderKind::OpenAiCompatible, &server, None))
+        .await
+        .unwrap();
+    assert!(!format!("{response:?}").contains(probe));
 }

@@ -157,6 +157,7 @@ function sameValues(a: ProviderFormValues, b: ProviderFormValues): boolean {
 		a.model === b.model &&
 		a.max_retries === b.max_retries &&
 		a.timeout_seconds === b.timeout_seconds &&
+		a.reasoning_effort === b.reasoning_effort &&
 		a.input_cents_per_mtok === b.input_cents_per_mtok &&
 		a.output_cents_per_mtok === b.output_cents_per_mtok
 	)

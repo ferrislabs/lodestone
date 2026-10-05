@@ -1,5 +1,17 @@
 import type { TierName } from '#/pages/llm/lib/types'
 
+const REASONING_LABELS: Readonly<Record<string, string>> = {
+	none: 'Désactivé',
+	low: 'Faible',
+	medium: 'Moyen',
+	high: 'Élevé',
+}
+
+const TEST_ERROR_HINTS: Readonly<Record<string, string>> = {
+	reasoning_exhausted:
+		'Réglez « Raisonnement » sur « Désactivé » dans la configuration du fournisseur.',
+}
+
 const TIER_LABELS: Readonly<Record<TierName, string>> = {
 	triage: 'Tri',
 	qualification: 'Qualification',
@@ -17,6 +29,7 @@ const TEST_ERROR_LABELS: Readonly<Record<string, string>> = {
 	authentication: 'Authentification refusée',
 	unreachable: 'Injoignable',
 	invalid_response: 'Réponse invalide',
+	reasoning_exhausted: 'Le modèle a consommé tous ses tokens à raisonner',
 	other: 'Erreur',
 }
 
@@ -30,4 +43,12 @@ export function providerKindLabel(kind: string): string {
 
 export function testErrorLabel(kind: string): string {
 	return TEST_ERROR_LABELS[kind] ?? kind
+}
+
+export function testErrorHint(kind: string): string | null {
+	return TEST_ERROR_HINTS[kind] ?? null
+}
+
+export function reasoningLabel(effort: string): string {
+	return REASONING_LABELS[effort] ?? effort
 }

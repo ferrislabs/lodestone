@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest'
 
-import { providerKindLabel, testErrorLabel, tierLabel } from './labels'
+import {
+	providerKindLabel,
+	reasoningLabel,
+	testErrorHint,
+	testErrorLabel,
+	tierLabel,
+} from './labels'
 
 describe('llm labels', () => {
 	it('labels the tiers in french', () => {
@@ -19,5 +25,18 @@ describe('llm labels', () => {
 		expect(testErrorLabel('timeout')).toBe('Délai dépassé')
 		expect(testErrorLabel('unreachable')).toBe('Injoignable')
 		expect(testErrorLabel('weird')).toBe('weird')
+	})
+
+	it('labels the reasoning exhaustion with a hint', () => {
+		expect(testErrorLabel('reasoning_exhausted')).toBe(
+			'Le modèle a consommé tous ses tokens à raisonner',
+		)
+		expect(testErrorHint('reasoning_exhausted')).toContain('Désactivé')
+		expect(testErrorHint('timeout')).toBeNull()
+	})
+
+	it('labels the reasoning levels', () => {
+		expect(reasoningLabel('none')).toBe('Désactivé')
+		expect(reasoningLabel('high')).toBe('Élevé')
 	})
 })

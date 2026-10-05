@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT id, name, kind, base_url, model, timeout_ms, max_retries,\n                   input_cents_per_mtok, output_cents_per_mtok,\n                   api_key_nonce, api_key_ciphertext, enabled, created_at, updated_at\n            FROM llm_providers\n            WHERE id = $1\n            ",
+  "query": "\n            SELECT id, name, kind, base_url, model, timeout_ms, max_retries,\n                   input_cents_per_mtok, output_cents_per_mtok,\n                   api_key_nonce, api_key_ciphertext, enabled, created_at, updated_at,\n                   reasoning_effort\n            FROM llm_providers\n            WHERE id = $1\n            ",
   "describe": {
     "columns": [
       {
@@ -72,6 +72,11 @@
         "ordinal": 13,
         "name": "updated_at",
         "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 14,
+        "name": "reasoning_effort",
+        "type_info": "Text"
       }
     ],
     "parameters": {
@@ -93,8 +98,9 @@
       true,
       false,
       false,
-      false
+      false,
+      true
     ]
   },
-  "hash": "fabf9cb78cc67c01602bef3fdce9af6859aabdaed4902348d7c34cbbb29e3510"
+  "hash": "927878aa7ee1a4f131ffc2504e07746ce2e7731bc375648c5d5b97ddabcc499f"
 }

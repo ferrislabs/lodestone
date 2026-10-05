@@ -99,7 +99,10 @@ fn is_retryable(error: &LlmError) -> bool {
         | LlmError::Network(_)
         | LlmError::InvalidOutput(_) => true,
         LlmError::Status { status } => *status >= 500,
-        LlmError::Refused | LlmError::Truncated | LlmError::Configuration(_) => false,
+        LlmError::Refused
+        | LlmError::Truncated
+        | LlmError::ReasoningExhausted
+        | LlmError::Configuration(_) => false,
     }
 }
 

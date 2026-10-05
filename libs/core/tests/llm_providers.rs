@@ -2,7 +2,8 @@ use std::time::Duration;
 
 use common::{CoreError, EncryptionKey, Secret};
 use lodestone_core::{
-    CipherError, LodestoneUseCase, ProviderId, ProviderKind, Tier, TierError, TokenPricing,
+    CipherError, LodestoneUseCase, ProviderId, ProviderKind, ReasoningEffort, Tier, TierError,
+    TokenPricing,
     infrastructure::crypto::AesGcmCipher,
     llm::{CreateLlmProvider, KeyChange, UpdateLlmProvider},
 };
@@ -31,6 +32,7 @@ fn create(name: &str, key: Option<&str>) -> CreateLlmProvider {
             output_cents_per_mtok: 300,
         },
         api_key: key.map(Secret::new),
+        reasoning_effort: None,
     }
 }
 
@@ -48,6 +50,7 @@ fn update(id: ProviderId, api_key: KeyChange) -> UpdateLlmProvider {
             output_cents_per_mtok: 2,
         },
         api_key,
+        reasoning_effort: None,
     }
 }
 
@@ -278,4 +281,70 @@ async fn tiers_are_listed_and_provider_is_fetched(pool: PgPool) {
         vec![(Tier::Qualification, a.id), (Tier::Triage, a.id)]
     );
     assert_eq!(uc.get_llm_provider(a.id).await.unwrap().name, "a");
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn reasoning_effort_round_trips_and_is_resolved(pool: PgPool) {
+    let uc = LodestoneUseCase::new(pool.clone());
+    let c = cipher(1);
+    let mut cmd = create("a", Some(CLEAR_KEY));
+    cmd.reasoning_effort = Some(ReasoningEffort::None);
+    let created = uc.create_llm_provider(cmd, &c).await.unwrap();
+    assert_eq!(created.reasoning_effort, Some(ReasoningEffort::None));
+    let stored: Option<String> =
+        sqlx::query_scalar("SELECT reasoning_effort FROM llm_providers WHERE id = $1")
+            .bind(created.id.0)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(stored.as_deref(), Some("none"));
+    assert_eq!(
+        uc.get_llm_provider(created.id)
+            .await
+            .unwrap()
+            .reasoning_effort,
+        Some(ReasoningEffort::None)
+    );
+    uc.assign_llm_tier(Tier::Triage, created.id).await.unwrap();
+    let resolved = uc.resolve_llm_tier(Tier::Triage, &c).await.unwrap();
+    assert_eq!(
+        resolved.definition.reasoning_effort,
+        Some(ReasoningEffort::None)
+    );
+
+    let mut set = update(created.id, KeyChange::Keep);
+    set.reasoning_effort = Some(ReasoningEffort::High);
+    let updated = uc.update_llm_provider(set, &c).await.unwrap();
+    assert_eq!(updated.reasoning_effort, Some(ReasoningEffort::High));
+    assert_eq!(
+        uc.list_llm_providers().await.unwrap()[0].reasoning_effort,
+        Some(ReasoningEffort::High)
+    );
+
+    let cleared = uc
+        .update_llm_provider(update(created.id, KeyChange::Keep), &c)
+        .await
+        .unwrap();
+    assert_eq!(cleared.reasoning_effort, None);
+    assert_eq!(
+        uc.get_llm_provider(created.id)
+            .await
+            .unwrap()
+            .reasoning_effort,
+        None
+    );
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn reasoning_effort_outside_the_set_is_rejected_by_the_database(pool: PgPool) {
+    let uc = LodestoneUseCase::new(pool.clone());
+    let created = uc
+        .create_llm_provider(create("a", Some(CLEAR_KEY)), &cipher(1))
+        .await
+        .unwrap();
+    let result = sqlx::query("UPDATE llm_providers SET reasoning_effort = 'max' WHERE id = $1")
+        .bind(created.id.0)
+        .execute(&pool)
+        .await;
+    assert!(result.is_err());
 }

@@ -47,6 +47,7 @@ mod tests {
             model: "test-model".to_owned(),
             api_key: key.map(Secret::new),
             timeout: Duration::from_secs(5),
+            reasoning_effort: None,
         }
     }
 

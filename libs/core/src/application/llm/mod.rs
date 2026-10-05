@@ -10,7 +10,7 @@ use url::Url;
 use crate::{
     application::LodestoneUseCase,
     domain::llm::{
-        ProviderDefinition, ProviderKind,
+        ProviderDefinition, ProviderKind, ReasoningEffort,
         provider::{
             LlmProviderRecord, LlmProviderRepository, ProviderId, ResolvedProvider, SecretCipher,
             Tier, TierError, TokenPricing,
@@ -28,6 +28,7 @@ pub struct CreateLlmProvider {
     pub max_retries: u8,
     pub pricing: TokenPricing,
     pub api_key: Option<Secret>,
+    pub reasoning_effort: Option<ReasoningEffort>,
 }
 
 #[derive(Debug, Clone)]
@@ -48,6 +49,7 @@ pub struct UpdateLlmProvider {
     pub max_retries: u8,
     pub pricing: TokenPricing,
     pub api_key: KeyChange,
+    pub reasoning_effort: Option<ReasoningEffort>,
 }
 
 fn requires_key(kind: ProviderKind) -> bool {
@@ -91,6 +93,7 @@ impl LodestoneUseCase {
             pricing: command.pricing,
             api_key,
             enabled: true,
+            reasoning_effort: command.reasoning_effort,
             created_at: now,
             updated_at: now,
         };
@@ -129,6 +132,7 @@ impl LodestoneUseCase {
             pricing: command.pricing,
             api_key,
             enabled: current.enabled,
+            reasoning_effort: command.reasoning_effort,
             created_at: current.created_at,
             updated_at: Utc::now(),
         };
@@ -246,6 +250,7 @@ impl LodestoneUseCase {
                 model: record.model,
                 api_key,
                 timeout: record.timeout,
+                reasoning_effort: record.reasoning_effort,
             },
             max_retries: record.max_retries,
             pricing: record.pricing,

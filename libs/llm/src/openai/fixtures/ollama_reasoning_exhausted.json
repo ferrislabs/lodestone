@@ -1,0 +1,26 @@
+{
+    "id": "chatcmpl-253",
+    "object": "chat.completion",
+    "created": 1791234330,
+    "model": "gemma4:e2b",
+    "system_fingerprint": "fp_ollama",
+    "choices": [
+        {
+            "index": 0,
+            "message": {
+                "role": "assistant",
+                "content": "",
+                "reasoning": "Thinking Process:\n\n1.  **Analyze the Request:** The user provided the input: \"Return {\\\"ok\\\": true}.\"\n2.  **Determine the Role:** The persona is a \"connectivity check\" and the instruction is to \"Answer with the requested JSON only.\"\n3.  "
+            },
+            "finish_reason": "length"
+        }
+    ],
+    "usage": {
+        "prompt_tokens": 35,
+        "prompt_tokens_details": {
+            "cached_tokens": 30
+        },
+        "completion_tokens": 64,
+        "total_tokens": 99
+    }
+}

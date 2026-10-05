@@ -43,6 +43,7 @@ fn definition_from_env() -> Option<ProviderDefinition> {
         model,
         api_key: std::env::var("LODESTONE_LLM_API_KEY").ok().map(Secret::new),
         timeout: Duration::from_secs(180),
+        reasoning_effort: None,
     })
 }
 

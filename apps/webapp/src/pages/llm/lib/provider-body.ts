@@ -1,9 +1,11 @@
 import { translateApiMessage } from '#/lib/api-errors'
-import type {
-	KeyMode,
-	Provider,
-	ProviderFieldName,
-	ProviderFormValues,
+import {
+	type KeyMode,
+	type Provider,
+	type ProviderFieldName,
+	type ProviderFormValues,
+	REASONING_EFFORTS,
+	type ReasoningEffort,
 } from '#/pages/llm/lib/types'
 
 export const EMPTY_PROVIDER_VALUES: ProviderFormValues = {
@@ -16,6 +18,7 @@ export const EMPTY_PROVIDER_VALUES: ProviderFormValues = {
 	input_cents_per_mtok: '',
 	output_cents_per_mtok: '',
 	api_key: '',
+	reasoning_effort: '',
 }
 
 export function valuesFromProvider(provider: Provider): ProviderFormValues {
@@ -29,6 +32,7 @@ export function valuesFromProvider(provider: Provider): ProviderFormValues {
 		input_cents_per_mtok: String(provider.pricing.input_cents_per_mtok),
 		output_cents_per_mtok: String(provider.pricing.output_cents_per_mtok),
 		api_key: '',
+		reasoning_effort: provider.reasoning_effort ?? '',
 	}
 }
 
@@ -49,6 +53,7 @@ const FIELD_PATHS: Record<ProviderFieldName, string> = {
 	input_cents_per_mtok: 'pricing.input_cents_per_mtok',
 	output_cents_per_mtok: 'pricing.output_cents_per_mtok',
 	api_key: 'api_key',
+	reasoning_effort: 'reasoning_effort',
 }
 
 export function fieldErrorsFromPaths(
@@ -114,10 +119,22 @@ function commonBody(values: ProviderFormValues): CommonBody {
 	return body
 }
 
+function reasoningOrNull(values: ProviderFormValues): ReasoningEffort | null {
+	return (
+		REASONING_EFFORTS.find((effort) => effort === values.reasoning_effort) ??
+		null
+	)
+}
+
 export function buildCreateBody(
 	values: ProviderFormValues,
-): CommonBody & { api_key?: string } {
-	const body: CommonBody & { api_key?: string } = commonBody(values)
+): CommonBody & { api_key?: string; reasoning_effort?: ReasoningEffort } {
+	const body: CommonBody & {
+		api_key?: string
+		reasoning_effort?: ReasoningEffort
+	} = commonBody(values)
+	const effort = reasoningOrNull(values)
+	if (effort !== null) body.reasoning_effort = effort
 	if (values.api_key !== '') body.api_key = values.api_key
 	return body
 }
@@ -125,8 +142,14 @@ export function buildCreateBody(
 export function buildUpdateBody(
 	values: ProviderFormValues,
 	keyMode: KeyMode,
-): CommonBody & { api_key?: string | null } {
-	const body: CommonBody & { api_key?: string | null } = commonBody(values)
+): CommonBody & {
+	api_key?: string | null
+	reasoning_effort: ReasoningEffort | null
+} {
+	const body: CommonBody & {
+		api_key?: string | null
+		reasoning_effort: ReasoningEffort | null
+	} = { ...commonBody(values), reasoning_effort: reasoningOrNull(values) }
 	if (keyMode === 'replace') body.api_key = values.api_key
 	if (keyMode === 'remove') body.api_key = null
 	return body

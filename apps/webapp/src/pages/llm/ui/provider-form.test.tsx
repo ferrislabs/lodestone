@@ -18,6 +18,7 @@ const provider: Provider = {
 	max_retries: 2,
 	timeout_seconds: 30,
 	pricing: { input_cents_per_mtok: 300, output_cents_per_mtok: 1500 },
+	reasoning_effort: null,
 	tiers: [],
 	created_at: '2026-01-01T00:00:00Z',
 	updated_at: '2026-01-01T00:00:00Z',
@@ -109,5 +110,32 @@ describe('ProviderForm', () => {
 		expect(
 			screen.getByLabelText('URL de base').getAttribute('aria-invalid'),
 		).toBe('true')
+	})
+
+	it('offers the reasoning options with the default first', () => {
+		renderForm()
+		const select = screen.getByLabelText('Raisonnement') as HTMLSelectElement
+		expect(Array.from(select.options).map((option) => option.text)).toEqual([
+			'Par défaut (non envoyé)',
+			'Désactivé',
+			'Faible',
+			'Moyen',
+			'Élevé',
+		])
+		expect(select.value).toBe('')
+		expect(screen.getByText(/« Désactivé » accélère les réponses/)).toBeTruthy()
+		expect(
+			screen.getByText(/La réflexion du modèle n'est jamais affichée/),
+		).toBeTruthy()
+	})
+
+	it('reports reasoning changes and shows the stored value', () => {
+		const props = renderForm({
+			values: { ...valuesFromProvider(provider), reasoning_effort: 'low' },
+		})
+		const select = screen.getByLabelText('Raisonnement') as HTMLSelectElement
+		expect(select.value).toBe('low')
+		fireEvent.change(select, { target: { value: 'none' } })
+		expect(props.onChange).toHaveBeenCalledWith('reasoning_effort', 'none')
 	})
 })

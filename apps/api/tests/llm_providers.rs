@@ -775,6 +775,135 @@ async fn test_endpoint_classifies_rate_limits_bad_bodies_and_other_statuses(pool
     }
 }
 
+#[sqlx::test(migrations = "../../migrations")]
+async fn test_endpoint_reports_reasoning_exhaustion_without_the_reasoning_text(pool: PgPool) {
+    let api = Api::new(pool).await;
+    let fixture: Value = serde_json::from_str(include_str!(
+        "../../../libs/llm/src/openai/fixtures/ollama_reasoning_exhausted.json"
+    ))
+    .expect("fixture");
+    let reasoning = fixture["choices"][0]["message"]["reasoning"]
+        .as_str()
+        .expect("reasoning")
+        .to_owned();
+    let upstream = MockServer::start_async().await;
+    upstream
+        .mock_async(|when, then| {
+            when.method(POST).path("/v1/chat/completions");
+            then.status(200).json_body(fixture.clone());
+        })
+        .await;
+    let id = api.create(provider("think", &upstream.base_url())).await;
+
+    let (status, body, raw) = api.test(&id).await;
+
+    assert_eq!(status, StatusCode::OK, "{raw}");
+    assert_eq!(body["data"]["ok"], false);
+    assert_eq!(body["data"]["error"]["kind"], "reasoning_exhausted");
+    assert!(!raw.contains(&reasoning[..40]), "{raw}");
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn test_endpoint_sends_the_configured_reasoning_effort(pool: PgPool) {
+    let api = Api::new(pool).await;
+    let upstream = MockServer::start_async().await;
+    let mock = upstream
+        .mock_async(|when, then| {
+            when.method(POST)
+                .path("/v1/chat/completions")
+                .json_body_partial(r#"{"reasoning_effort": "none"}"#);
+            then.status(200).json_body(json!({
+                "model": "m",
+                "choices": [{ "message": { "role": "assistant", "content": "{\"ok\": true}" }, "finish_reason": "stop" }],
+            }));
+        })
+        .await;
+    let mut body = provider("think", &upstream.base_url());
+    body["reasoning_effort"] = json!("none");
+    let id = api.create(body).await;
+
+    let (_, body, raw) = api.test(&id).await;
+
+    assert_eq!(body["data"]["ok"], true, "{raw}");
+    mock.assert_async().await;
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn reasoning_effort_is_created_read_patched_and_cleared(pool: PgPool) {
+    let api = Api::new(pool).await;
+    let (_, body) = api
+        .call(
+            Method::POST,
+            "/api/v1/llm/providers",
+            Some(provider("plain", "https://x.example")),
+        )
+        .await;
+    assert_eq!(body["data"]["reasoning_effort"], Value::Null);
+
+    let mut with = provider("with", "https://y.example");
+    with["reasoning_effort"] = json!("low");
+    let id = api.create(with).await;
+    let uri = format!("/api/v1/llm/providers/{id}");
+    let (_, body) = api.call(Method::GET, &uri, None).await;
+    assert_eq!(body["data"]["reasoning_effort"], "low");
+
+    let (status, body) = api
+        .call(Method::PATCH, &uri, Some(json!({ "name": "renamed" })))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["data"]["reasoning_effort"], "low");
+
+    let (_, body) = api
+        .call(
+            Method::PATCH,
+            &uri,
+            Some(json!({ "reasoning_effort": "high" })),
+        )
+        .await;
+    assert_eq!(body["data"]["reasoning_effort"], "high");
+
+    let (_, body) = api
+        .call(
+            Method::PATCH,
+            &uri,
+            Some(json!({ "reasoning_effort": null })),
+        )
+        .await;
+    assert_eq!(body["data"]["reasoning_effort"], Value::Null);
+    let (_, list) = api.call(Method::GET, "/api/v1/llm/providers", None).await;
+    assert!(
+        list["data"]
+            .as_array()
+            .expect("list")
+            .iter()
+            .any(|item| item["name"] == "renamed" && item["reasoning_effort"].is_null())
+    );
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn invalid_reasoning_effort_is_rejected_with_its_path(pool: PgPool) {
+    let api = Api::new(pool).await;
+    for value in [json!("max"), json!(3)] {
+        let mut body = provider("bad", "https://x.example");
+        body["reasoning_effort"] = value;
+        let (status, details) = api
+            .call(Method::POST, "/api/v1/llm/providers", Some(body))
+            .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{details}");
+        assert_eq!(paths(&details), vec!["reasoning_effort"]);
+    }
+    let id = api.create(provider("ok", "https://x.example")).await;
+    let (status, details) = api
+        .call(
+            Method::PATCH,
+            &format!("/api/v1/llm/providers/{id}"),
+            Some(json!({ "reasoning_effort": "max" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(paths(&details), vec!["reasoning_effort"]);
+}
+
 #[test]
 fn openapi_documents_every_llm_path_with_bearer_auth() {
     let spec = serde_json::to_value(api::openapi::ApiDoc::openapi()).expect("spec");

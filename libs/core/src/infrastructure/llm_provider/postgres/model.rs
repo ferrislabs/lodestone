@@ -6,7 +6,7 @@ use url::Url;
 use uuid::Uuid;
 
 use crate::domain::llm::{
-    ProviderKind,
+    ProviderKind, ReasoningEffort,
     provider::{LlmProviderRecord, ProviderId, SealedSecret, TokenPricing},
 };
 
@@ -24,6 +24,7 @@ pub struct LlmProviderRow {
     pub api_key_nonce: Option<Vec<u8>>,
     pub api_key_ciphertext: Option<Vec<u8>>,
     pub enabled: bool,
+    pub reasoning_effort: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -56,6 +57,17 @@ impl TryFrom<LlmProviderRow> for LlmProviderRecord {
                 ));
             }
         };
+        let reasoning_effort = row
+            .reasoning_effort
+            .as_deref()
+            .map(|raw| {
+                ReasoningEffort::parse(raw).ok_or_else(|| {
+                    CoreError::Internal(
+                        "stored llm provider reasoning effort is invalid".to_owned(),
+                    )
+                })
+            })
+            .transpose()?;
         Ok(Self {
             id: ProviderId(row.id),
             name: row.name,
@@ -70,6 +82,7 @@ impl TryFrom<LlmProviderRow> for LlmProviderRecord {
             },
             api_key,
             enabled: row.enabled,
+            reasoning_effort,
             created_at: row.created_at,
             updated_at: row.updated_at,
         })

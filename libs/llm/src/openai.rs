@@ -2,8 +2,8 @@ use std::time::Duration;
 
 use common::Secret;
 use lodestone_core::{
-    LlmError, LlmProvider, LlmRequest, LlmResponse, ProviderDefinition, ProviderKind, TokenUsage,
-    render_user_content,
+    LlmError, LlmProvider, LlmRequest, LlmResponse, ProviderDefinition, ProviderKind,
+    ReasoningEffort, TokenUsage, render_user_content,
 };
 use reqwest::{Client, StatusCode, header};
 use serde::{Deserialize, Serialize};
@@ -18,6 +18,7 @@ pub struct OpenAiCompatibleProvider {
     model: String,
     api_key: Option<Secret>,
     kind: ProviderKind,
+    reasoning_effort: Option<ReasoningEffort>,
 }
 
 #[derive(Serialize)]
@@ -26,6 +27,8 @@ struct ChatRequest<'a> {
     max_tokens: u32,
     messages: [Message<'a>; 2],
     response_format: ResponseFormat<'a>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reasoning_effort: Option<ReasoningEffort>,
 }
 
 #[derive(Serialize)]
@@ -72,6 +75,8 @@ struct ChoiceMessage {
     content: Option<String>,
     #[serde(default)]
     refusal: Option<String>,
+    #[serde(default, alias = "reasoning_content")]
+    reasoning: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -110,6 +115,7 @@ impl OpenAiCompatibleProvider {
             model: definition.model.clone(),
             api_key: definition.api_key.clone(),
             kind: definition.kind,
+            reasoning_effort: definition.reasoning_effort,
         })
     }
 
@@ -136,6 +142,7 @@ impl OpenAiCompatibleProvider {
                     strict: true,
                 },
             },
+            reasoning_effort: self.reasoning_effort,
         };
         let mut builder = self.client.post(&self.endpoint).json(&body);
         if let Some(key) = &self.api_key {
@@ -183,6 +190,16 @@ fn transport_error(error: reqwest::Error) -> LlmError {
     }
 }
 
+fn exhausted_by_reasoning(message: Option<&ChoiceMessage>) -> bool {
+    message.is_some_and(|message| {
+        message.content.as_deref().is_none_or(str::is_empty)
+            && message
+                .reasoning
+                .as_deref()
+                .is_some_and(|text| !text.is_empty())
+    })
+}
+
 fn interpret(response: ChatResponse) -> Result<LlmResponse, LlmError> {
     let choice = response
         .choices
@@ -190,7 +207,13 @@ fn interpret(response: ChatResponse) -> Result<LlmResponse, LlmError> {
         .next()
         .ok_or_else(|| LlmError::InvalidOutput("response has no choice".to_owned()))?;
     match choice.finish_reason.as_deref() {
-        Some("length") => return Err(LlmError::Truncated),
+        Some("length") => {
+            return Err(if exhausted_by_reasoning(choice.message.as_ref()) {
+                LlmError::ReasoningExhausted
+            } else {
+                LlmError::Truncated
+            });
+        }
         Some("content_filter") => return Err(LlmError::Refused),
         _ => {}
     }
