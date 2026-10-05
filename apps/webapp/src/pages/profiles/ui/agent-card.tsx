@@ -15,6 +15,7 @@ import {
 	agentEnabled,
 	agentField,
 	agentKind,
+	agentSummary,
 	type DependencyNote,
 	KIND_META,
 	sourceSchema,
@@ -72,10 +73,99 @@ export function AgentCard({
 	const criteriaProblems = messages(problems, `${base}.llm.relevance_criteria`)
 	const source = isJsonObject(agent) ? agent.source : undefined
 
+	if (collapsed) {
+		return (
+			<li
+				data-agent={index}
+				className="flex h-full flex-col gap-2 rounded-md border bg-muted/20 p-3"
+			>
+				<div className="flex items-start justify-between gap-2">
+					<p className="text-sm font-medium">{name || 'Agent sans nom'}</p>
+					<Switch
+						aria-label={`Agent ${name || index + 1} activé`}
+						checked={agentEnabled(agent)}
+						onCheckedChange={onEnabled}
+					/>
+				</div>
+				<div className="flex flex-wrap items-center gap-2">
+					{kind ? (
+						<Badge variant="secondary">{KIND_META[kind].label}</Badge>
+					) : null}
+					{own.length > 0 ? (
+						<Badge variant="destructive">
+							{own.length} {own.length > 1 ? 'problèmes' : 'problème'}
+						</Badge>
+					) : null}
+				</div>
+				<p className="text-xs text-muted-foreground">{agentSummary(agent)}</p>
+				{note ? (
+					<p
+						role={note.warn ? 'alert' : undefined}
+						className={
+							note.warn
+								? 'rounded-md border border-amber-500/50 bg-amber-500/10 p-2 text-xs text-amber-700 dark:text-amber-400'
+								: 'text-xs text-muted-foreground'
+						}
+					>
+						{note.text}
+						{note.warn
+							? " Aucun agent de ce type dans ce profil pour l'instant."
+							: ''}
+					</p>
+				) : null}
+				<div className="mt-auto flex items-center gap-1 pt-1">
+					{confirmingRemove ? (
+						<>
+							<Button
+								type="button"
+								variant="destructive"
+								size="sm"
+								onClick={onConfirmRemove}
+							>
+								Confirmer la suppression
+							</Button>
+							<Button
+								type="button"
+								variant="ghost"
+								size="sm"
+								onClick={onCancelRemove}
+							>
+								Conserver
+							</Button>
+						</>
+					) : (
+						<>
+							<Button
+								type="button"
+								variant="outline"
+								size="sm"
+								aria-label={`Modifier ${name || 'agent'}`}
+								aria-expanded={false}
+								onClick={onToggleCollapsed}
+							>
+								Modifier
+							</Button>
+							<Button
+								type="button"
+								variant="ghost"
+								size="sm"
+								aria-label={`Supprimer l'agent ${name || index + 1}`}
+								onClick={onRequestRemove}
+							>
+								<Trash2Icon />
+								Supprimer
+							</Button>
+						</>
+					)}
+				</div>
+			</li>
+		)
+	}
+
 	return (
 		<li
 			data-agent={index}
-			className="flex flex-col gap-3 rounded-md border bg-muted/20 p-3"
+			className="flex flex-col gap-3 rounded-md border bg-muted/20 p-3 sm:col-span-2 xl:col-span-3"
 		>
 			<div className="flex flex-wrap items-center gap-2">
 				<Button
