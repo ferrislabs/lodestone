@@ -60,7 +60,7 @@ pub fn keyword_union(profiles: &[ActiveProfile]) -> Vec<String> {
     let mut union = Vec::new();
     for rules in profiles
         .iter()
-        .filter_map(|active| active.revision.definition.definition().sources.ted.as_ref())
+        .filter_map(|active| active.revision.definition.definition().ted())
     {
         for keyword in &rules.keywords {
             let keyword = keyword.trim();
@@ -389,7 +389,7 @@ impl<F: PostFetcher> CandidateSource for TedSource<F> {
     }
 
     fn rules<'a>(&self, profile: &'a ProfileDefinition) -> Option<&'a KeywordSource> {
-        profile.sources.ted.as_ref()
+        profile.ted()
     }
 
     async fn collect(

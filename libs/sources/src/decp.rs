@@ -253,15 +253,7 @@ fn months_newest_first(since: NaiveDate, today: NaiveDate) -> Vec<(i32, u32)> {
 fn rules_of(profiles: &[ActiveProfile]) -> Vec<&KeywordSource> {
     profiles
         .iter()
-        .filter_map(|active| {
-            active
-                .revision
-                .definition
-                .definition()
-                .sources
-                .decp
-                .as_ref()
-        })
+        .filter_map(|active| active.revision.definition.definition().decp())
         .collect()
 }
 
@@ -693,7 +685,7 @@ impl<F: Fetcher> CandidateSource for DecpSource<F> {
     }
 
     fn rules<'a>(&self, profile: &'a ProfileDefinition) -> Option<&'a KeywordSource> {
-        profile.sources.decp.as_ref()
+        profile.decp()
     }
 
     async fn collect(

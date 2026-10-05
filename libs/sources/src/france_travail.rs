@@ -90,15 +90,10 @@ pub fn closest_published_since(days: u32) -> u32 {
 pub fn query_keywords(profiles: &[ActiveProfile]) -> Vec<String> {
     let mut seen: HashSet<String> = HashSet::new();
     let mut queries = Vec::new();
-    for rules in profiles.iter().filter_map(|active| {
-        active
-            .revision
-            .definition
-            .definition()
-            .sources
-            .france_travail
-            .as_ref()
-    }) {
+    for rules in profiles
+        .iter()
+        .filter_map(|active| active.revision.definition.definition().france_travail())
+    {
         for keyword in &rules.keywords {
             let keyword = keyword.trim();
             if !keyword.is_empty() && seen.insert(keyword.to_lowercase()) {
@@ -418,7 +413,7 @@ impl<F: ApiFetcher> CandidateSource for FranceTravailSource<F> {
     }
 
     fn rules<'a>(&self, profile: &'a ProfileDefinition) -> Option<&'a KeywordSource> {
-        profile.sources.france_travail.as_ref()
+        profile.france_travail()
     }
 
     async fn collect(

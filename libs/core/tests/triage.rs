@@ -46,7 +46,7 @@ impl CandidateSource for FakeSource {
     }
 
     fn rules<'a>(&self, profile: &'a ProfileDefinition) -> Option<&'a KeywordSource> {
-        profile.sources.boamp.as_ref()
+        profile.boamp()
     }
 
     async fn collect(
@@ -403,7 +403,13 @@ async fn exhausted_budget_stops_llm_calls_and_fails_the_run(pool: PgPool) {
 async fn profiles_route_the_same_candidate_with_their_own_rules(pool: PgPool) {
     let strict = iam_profile(&pool).await;
     let mut lenient_definition: Value = serde_json::from_str(IAM).unwrap();
-    lenient_definition["sources"]["boamp"] = json!({"keywords": ["SSO"], "accept_min_keywords": 1});
+    let boamp = lenient_definition["agents"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .find(|agent| agent["source"]["kind"] == "boamp")
+        .unwrap();
+    boamp["source"] = json!({"kind": "boamp", "keywords": ["SSO"], "accept_min_keywords": 1});
     let lenient = activate(&pool, "lenient", lenient_definition).await;
     let source = FakeSource {
         candidates: vec![candidate("ville.fr", "Projet SSO pour la ville")],

@@ -69,9 +69,8 @@ async fn iam_profile_against_the_real_ted_api() {
         .revision
         .definition
         .definition()
-        .sources
-        .ted
-        .clone()
+        .ted()
+        .cloned()
         .unwrap();
     let (candidates, stats) = source
         .collect_with_stats(std::slice::from_ref(&profile), Utc::now())

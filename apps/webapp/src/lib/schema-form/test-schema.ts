@@ -5,7 +5,7 @@ import { type Schema, toSchema } from '#/lib/schema-form/types'
 
 const SCHEMA_PATH = resolve(
 	process.cwd(),
-	'../../docs/schemas/profile.v1.schema.json',
+	'../../docs/schemas/profile.v2.schema.json',
 )
 
 export function loadProfileSchema(): Schema {

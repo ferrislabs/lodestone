@@ -51,9 +51,7 @@ pub fn label_filter(profiles: &[ActiveProfile]) -> HashSet<String> {
                 .revision
                 .definition
                 .definition()
-                .sources
-                .certificate_transparency
-                .as_ref()
+                .certificate_transparency()
         })
         .flat_map(|ct| ct.labels.iter().cloned())
         .collect()

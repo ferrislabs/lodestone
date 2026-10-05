@@ -1,19 +1,22 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-pub const PROFILE_SCHEMA_VERSION: u32 = 1;
+use crate::domain::values::SourceName;
+
+pub const PROFILE_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[schemars(
     title = "Detection profile",
-    description = "Describes one market: what is sold, which sources to scan, how leads are scored, which contacts to prefer and how the LLM qualifies a lead."
+    description = "Describes one market: what is sold, which agents scan which sources, how leads are scored, which contacts to prefer and how the LLM qualifies a lead."
 )]
 pub struct ProfileDefinition {
-    #[schemars(description = "Profile format version. Must be 1.")]
+    #[schemars(description = "Profile format version. Must be 2.")]
     pub schema_version: u32,
     pub identity: Identity,
-    pub sources: Sources,
+    #[schemars(description = "Detection agents. At least one is required.")]
+    pub agents: Vec<Agent>,
     pub scoring: Scoring,
     pub contact_ranking: ContactRanking,
     pub llm: LlmSettings,
@@ -32,37 +35,116 @@ pub struct Identity {
     pub target_customer: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(transparent)]
+#[schemars(
+    title = "Agent id",
+    description = "Slug identifying an agent in the profile."
+)]
+pub struct AgentId(
+    #[schemars(
+        length(min = 1, max = 63),
+        regex(pattern = "^[a-z0-9][a-z0-9-]{0,62}$")
+    )]
+    String,
+);
+
+impl AgentId {
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn is_slug(&self) -> bool {
+        let bytes = self.0.as_bytes();
+        (1..=63).contains(&bytes.len())
+            && (bytes[0].is_ascii_lowercase() || bytes[0].is_ascii_digit())
+            && bytes
+                .iter()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || *b == b'-')
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[schemars(
-    title = "Sources",
-    description = "The enabled sources. At least one is required."
+    title = "Agent",
+    description = "Searches one source with its own settings."
 )]
-pub struct Sources {
+pub struct Agent {
+    #[schemars(description = "Unique slug in the profile, for example ats-en.")]
+    pub id: AgentId,
+    #[schemars(description = "Display name.")]
+    pub name: String,
+    #[serde(default = "default_enabled")]
+    #[schemars(description = "A disabled agent is kept but not run.")]
+    pub enabled: bool,
+    #[schemars(description = "The source searched and its settings.")]
+    pub source: AgentSource,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(description = "Hostname labels to look for in certificate logs.")]
-    pub certificate_transparency: Option<CertificateTransparency>,
+    #[schemars(description = "LLM settings specific to this agent.")]
+    pub llm: Option<AgentLlm>,
+}
+
+fn default_enabled() -> bool {
+    true
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[schemars(
+    title = "Agent source",
+    description = "The source an agent searches, selected by kind."
+)]
+pub enum AgentSource {
+    #[schemars(title = "Certificate transparency")]
+    CertificateTransparency(CertificateTransparency),
+    #[schemars(title = "DNS CNAME")]
+    DnsCname(DnsCname),
+    #[schemars(title = "HTTP probe")]
+    HttpProbe(HttpProbe),
+    #[schemars(title = "BOAMP")]
+    Boamp(KeywordSource),
+    #[schemars(title = "DECP")]
+    Decp(KeywordSource),
+    #[schemars(title = "TED")]
+    Ted(KeywordSource),
+    #[schemars(title = "France Travail")]
+    FranceTravail(KeywordSource),
+    #[schemars(title = "ATS")]
+    Ats(KeywordSource),
+}
+
+impl AgentSource {
+    pub fn source_name(&self) -> SourceName {
+        match self {
+            Self::CertificateTransparency(_) => SourceName::CertificateTransparency,
+            Self::DnsCname(_) => SourceName::DnsCname,
+            Self::HttpProbe(_) => SourceName::HttpProbe,
+            Self::Boamp(_) => SourceName::Boamp,
+            Self::Decp(_) => SourceName::Decp,
+            Self::Ted(_) => SourceName::Ted,
+            Self::FranceTravail(_) => SourceName::FranceTravail,
+            Self::Ats(_) => SourceName::Ats,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(
+    title = "Agent LLM settings",
+    description = "LLM settings of one agent."
+)]
+pub struct AgentLlm {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(description = "Fingerprints probed over HTTP.")]
-    pub http_probe: Option<HttpProbe>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(description = "Providers identified by CNAME target suffix.")]
-    pub dns_cname: Option<DnsCname>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(description = "BOAMP public tenders.")]
-    pub boamp: Option<KeywordSource>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(description = "DECP public procurement data.")]
-    pub decp: Option<KeywordSource>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(description = "TED European tenders.")]
-    pub ted: Option<KeywordSource>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(description = "France Travail job offers.")]
-    pub france_travail: Option<KeywordSource>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(description = "Applicant tracking system job boards.")]
-    pub ats: Option<KeywordSource>,
+    #[schemars(
+        description = "Criteria given to the LLM to triage this agent's candidates. The profile criteria apply when absent."
+    )]
+    pub relevance_criteria: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -284,4 +366,68 @@ pub struct LlmSettings {
     pub qualification_threshold: f64,
     #[schemars(description = "Criteria given to the LLM to judge a lead relevance.")]
     pub relevance_criteria: String,
+}
+
+impl ProfileDefinition {
+    pub fn first_enabled(&self, source: SourceName) -> Option<&AgentSource> {
+        self.agents
+            .iter()
+            .filter(|agent| agent.enabled)
+            .map(|agent| &agent.source)
+            .find(|agent_source| agent_source.source_name() == source)
+    }
+
+    pub fn certificate_transparency(&self) -> Option<&CertificateTransparency> {
+        match self.first_enabled(SourceName::CertificateTransparency) {
+            Some(AgentSource::CertificateTransparency(rules)) => Some(rules),
+            _ => None,
+        }
+    }
+
+    pub fn dns_cname(&self) -> Option<&DnsCname> {
+        match self.first_enabled(SourceName::DnsCname) {
+            Some(AgentSource::DnsCname(rules)) => Some(rules),
+            _ => None,
+        }
+    }
+
+    pub fn http_probe(&self) -> Option<&HttpProbe> {
+        match self.first_enabled(SourceName::HttpProbe) {
+            Some(AgentSource::HttpProbe(rules)) => Some(rules),
+            _ => None,
+        }
+    }
+
+    pub fn keyword_rules(&self, source: SourceName) -> Option<&KeywordSource> {
+        match self.first_enabled(source) {
+            Some(
+                AgentSource::Boamp(rules)
+                | AgentSource::Decp(rules)
+                | AgentSource::Ted(rules)
+                | AgentSource::FranceTravail(rules)
+                | AgentSource::Ats(rules),
+            ) => Some(rules),
+            _ => None,
+        }
+    }
+
+    pub fn boamp(&self) -> Option<&KeywordSource> {
+        self.keyword_rules(SourceName::Boamp)
+    }
+
+    pub fn decp(&self) -> Option<&KeywordSource> {
+        self.keyword_rules(SourceName::Decp)
+    }
+
+    pub fn ted(&self) -> Option<&KeywordSource> {
+        self.keyword_rules(SourceName::Ted)
+    }
+
+    pub fn france_travail(&self) -> Option<&KeywordSource> {
+        self.keyword_rules(SourceName::FranceTravail)
+    }
+
+    pub fn ats(&self) -> Option<&KeywordSource> {
+        self.keyword_rules(SourceName::Ats)
+    }
 }

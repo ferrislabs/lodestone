@@ -1,97 +1,160 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "identity": {
     "offer": "FerrisKey (open source IAM/CIAM in Rust) and Autharie (managed IAM), both by Ferrislabs",
     "target_customer": "Organizations running self-hosted Keycloak or a similar IAM, or paying for a SaaS IAM"
   },
-  "sources": {
-    "certificate_transparency": {
-      "labels": ["auth", "sso", "login", "iam", "keycloak", "id", "accounts", "identity", "idp"]
+  "agents": [
+    {
+      "id": "certificate-transparency",
+      "name": "Certificate transparency",
+      "enabled": true,
+      "source": {
+        "kind": "certificate_transparency",
+        "labels": ["auth", "sso", "login", "iam", "keycloak", "id", "accounts", "identity", "idp"]
+      }
     },
-    "http_probe": {
-      "fingerprints": [
-        {
-          "id": "keycloak-realm",
-          "path": "/realms/master",
-          "product": "keycloak",
-          "matchers": [
-            { "kind": "status", "equals": 200 },
-            { "kind": "body", "pattern": "\"realm\"\\s*:\\s*\"master\"" }
-          ]
-        },
-        {
-          "id": "keycloak-legacy-realm",
-          "path": "/auth/realms/master",
-          "product": "keycloak",
-          "matchers": [
-            { "kind": "status", "equals": 200 },
-            { "kind": "body", "pattern": "\"realm\"\\s*:\\s*\"master\"" }
-          ],
-          "debt_markers": [
-            {
-              "id": "legacy_auth_path",
-              "rule": { "kind": "matches", "matcher": { "kind": "body", "pattern": "/auth/realms/master" } }
-            }
-          ]
-        },
-        {
-          "id": "authentik",
-          "path": "/-/health/live/",
-          "product": "authentik",
-          "matchers": [
-            { "kind": "status", "equals": 200 },
-            { "kind": "header", "name": "x-powered-by", "pattern": "^authentik$" }
-          ]
-        },
-        {
-          "id": "zitadel",
-          "path": "/ui/console",
-          "product": "zitadel",
-          "matchers": [
-            { "kind": "status", "equals": 200 },
-            { "kind": "body", "pattern": "<title>ZITADEL" }
-          ]
-        },
-        {
-          "id": "ferriskey",
-          "path": "/realms/master",
-          "product": "ferriskey",
-          "matchers": [
-            { "kind": "status", "equals": 401 },
-            { "kind": "body", "pattern": "\"code\"\\s*:\\s*\"E_UNAUTHORIZED\"" }
-          ]
-        }
-      ],
-      "excluded_products": ["ferriskey"]
+    {
+      "id": "http-probe",
+      "name": "HTTP probe",
+      "enabled": true,
+      "source": {
+        "kind": "http_probe",
+        "fingerprints": [
+          {
+            "id": "keycloak-realm",
+            "path": "/realms/master",
+            "product": "keycloak",
+            "matchers": [
+              { "kind": "status", "equals": 200 },
+              { "kind": "body", "pattern": "\"realm\"\\s*:\\s*\"master\"" }
+            ]
+          },
+          {
+            "id": "keycloak-legacy-realm",
+            "path": "/auth/realms/master",
+            "product": "keycloak",
+            "matchers": [
+              { "kind": "status", "equals": 200 },
+              { "kind": "body", "pattern": "\"realm\"\\s*:\\s*\"master\"" }
+            ],
+            "debt_markers": [
+              {
+                "id": "legacy_auth_path",
+                "rule": {
+                  "kind": "matches",
+                  "matcher": { "kind": "body", "pattern": "/auth/realms/master" }
+                }
+              }
+            ]
+          },
+          {
+            "id": "authentik",
+            "path": "/-/health/live/",
+            "product": "authentik",
+            "matchers": [
+              { "kind": "status", "equals": 200 },
+              { "kind": "header", "name": "x-powered-by", "pattern": "^authentik$" }
+            ]
+          },
+          {
+            "id": "zitadel",
+            "path": "/ui/console",
+            "product": "zitadel",
+            "matchers": [
+              { "kind": "status", "equals": 200 },
+              { "kind": "body", "pattern": "<title>ZITADEL" }
+            ]
+          },
+          {
+            "id": "ferriskey",
+            "path": "/realms/master",
+            "product": "ferriskey",
+            "matchers": [
+              { "kind": "status", "equals": 401 },
+              { "kind": "body", "pattern": "\"code\"\\s*:\\s*\"E_UNAUTHORIZED\"" }
+            ]
+          }
+        ],
+        "excluded_products": ["ferriskey"]
+      }
     },
-    "dns_cname": {
-      "patterns": [
-        { "provider": "auth0", "target_suffix": "auth0.com" },
-        { "provider": "okta", "target_suffix": "okta.com" },
-        { "provider": "okta", "target_suffix": "oktapreview.com" },
-        { "provider": "azure_ad_b2c", "target_suffix": "b2clogin.com" },
-        { "provider": "entra_external_id", "target_suffix": "ciamlogin.com" }
-      ]
+    {
+      "id": "dns-cname",
+      "name": "DNS CNAME",
+      "enabled": true,
+      "source": {
+        "kind": "dns_cname",
+        "patterns": [
+          { "provider": "auth0", "target_suffix": "auth0.com" },
+          { "provider": "okta", "target_suffix": "okta.com" },
+          { "provider": "okta", "target_suffix": "oktapreview.com" },
+          { "provider": "azure_ad_b2c", "target_suffix": "b2clogin.com" },
+          { "provider": "entra_external_id", "target_suffix": "ciamlogin.com" }
+        ]
+      }
     },
-    "boamp": {
-      "keywords": ["SSO", "IAM", "gestion des identités et des accès", "fédération d'identité", "annuaire", "MFA", "Keycloak", "authentification"],
-      "exclusions": ["badge", "contrôle d'accès physique", "annuaire téléphonique"]
+    {
+      "id": "boamp",
+      "name": "BOAMP",
+      "enabled": true,
+      "source": {
+        "kind": "boamp",
+        "keywords": ["SSO", "IAM", "gestion des identités et des accès", "fédération d'identité", "annuaire", "MFA", "Keycloak", "authentification"],
+        "exclusions": ["badge", "contrôle d'accès physique", "annuaire téléphonique"]
+      }
     },
-    "decp": {
-      "keywords": ["SSO", "IAM", "gestion des identités et des accès", "fédération d'identité", "annuaire", "MFA", "Keycloak", "authentification"],
-      "exclusions": ["badge", "contrôle d'accès physique", "annuaire téléphonique"]
+    {
+      "id": "decp",
+      "name": "DECP",
+      "enabled": true,
+      "source": {
+        "kind": "decp",
+        "keywords": ["SSO", "IAM", "gestion des identités et des accès", "fédération d'identité", "annuaire", "MFA", "Keycloak", "authentification"],
+        "exclusions": ["badge", "contrôle d'accès physique", "annuaire téléphonique"]
+      }
     },
-    "ted": {
-      "keywords": ["SSO", "IAM", "gestion des identités et des accès", "fédération d'identité", "annuaire", "MFA", "Keycloak", "authentification"],
-      "exclusions": ["badge", "contrôle d'accès physique", "annuaire téléphonique"]
+    {
+      "id": "ted",
+      "name": "TED",
+      "enabled": true,
+      "source": {
+        "kind": "ted",
+        "keywords": ["SSO", "IAM", "gestion des identités et des accès", "fédération d'identité", "annuaire", "MFA", "Keycloak", "authentification"],
+        "exclusions": ["badge", "contrôle d'accès physique", "annuaire téléphonique"]
+      }
     },
-    "france_travail": {
-      "keywords": ["Keycloak", "IAM", "ingénieur IAM", "migration Okta", "migration Auth0", "gestion des identités"]
+    {
+      "id": "france-travail",
+      "name": "France Travail",
+      "enabled": true,
+      "source": {
+        "kind": "france_travail",
+        "keywords": ["Keycloak", "IAM", "ingénieur IAM", "migration Okta", "migration Auth0", "gestion des identités"]
+      }
     },
-    "ats": {
-      "keywords": ["Keycloak", "IAM", "ingénieur IAM", "migration Okta", "migration Auth0", "gestion des identités"]
+    {
+      "id": "ats-fr",
+      "name": "Job offers (French)",
+      "enabled": true,
+      "source": {
+        "kind": "ats",
+        "keywords": ["Keycloak", "IAM", "ingénieur IAM", "migration Okta", "migration Auth0", "gestion des identités"]
+      }
+    },
+    {
+      "id": "ats-en",
+      "name": "Job offers (English)",
+      "enabled": true,
+      "source": {
+        "kind": "ats",
+        "keywords": ["identity and access management", "IAM", "SSO", "single sign-on", "Keycloak", "Okta migration"]
+      },
+      "llm": {
+        "relevance_criteria": "The job offer is for an engineer, architect or administrator who builds or runs the organization's own identity infrastructure, for example Keycloak, or who migrates it from a SaaS IAM. Offers that only require using SSO as an end user, or roles in physical access control, are not relevant."
+      }
     }
-  },
+  ],
   "scoring": {
     "factors": [
       { "signal": "product_detected", "value": "keycloak", "weight": 30 },

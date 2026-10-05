@@ -90,9 +90,8 @@ async fn iam_profile_against_the_real_france_travail_api() {
         .revision
         .definition
         .definition()
-        .sources
-        .france_travail
-        .clone()
+        .france_travail()
+        .cloned()
         .unwrap();
     let (candidates, stats) = source
         .collect_with_stats(std::slice::from_ref(&profile))

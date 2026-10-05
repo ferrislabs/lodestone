@@ -10,6 +10,7 @@ use crate::UserId;
 
 pub mod commands;
 pub mod definition;
+mod legacy;
 pub mod ports;
 pub mod service;
 pub mod validation;
@@ -127,10 +128,13 @@ pub struct ActiveProfile {
 #[cfg(test)]
 pub(crate) mod fixtures {
     pub const MINIMAL_PROFILE: &str = r#"{
-        "schema_version": 1,
+        "schema_version": 2,
         "identity": {"offer": "Managed IAM", "target_customer": "Companies running Keycloak"},
-        "sources": {
-            "http_probe": {
+        "agents": [{
+            "id": "http-probe",
+            "name": "HTTP probe",
+            "source": {
+                "kind": "http_probe",
                 "fingerprints": [{
                     "id": "keycloak-master-realm",
                     "path": "/realms/master",
@@ -144,7 +148,7 @@ pub(crate) mod fixtures {
                 }],
                 "excluded_products": ["ferriskey"]
             }
-        },
+        }],
         "scoring": {"factors": [{"signal": "product_detected", "value": "keycloak", "weight": 10.0}]},
         "contact_ranking": {"preferred_local_parts": ["security", "contact"]},
         "llm": {"qualification_threshold": 50.0, "relevance_criteria": "Self-hosts an IAM product"}

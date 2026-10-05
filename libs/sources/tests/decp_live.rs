@@ -85,9 +85,8 @@ async fn iam_profile_against_the_real_decp_dataset() {
         .revision
         .definition
         .definition()
-        .sources
-        .decp
-        .clone()
+        .decp()
+        .cloned()
         .unwrap();
     let (candidates, stats) = source
         .collect_with_stats(std::slice::from_ref(&profile), Utc::now())

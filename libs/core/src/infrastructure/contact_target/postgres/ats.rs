@@ -47,7 +47,14 @@ impl AtsTargets for PgAtsTargets {
                     WHERE profile_id = profiles.id
                     ORDER BY revision DESC
                     LIMIT 1
-                ) r ON jsonb_typeof(r.definition #> '{sources,ats}') = 'object'
+                ) r ON (
+                    jsonb_typeof(r.definition #> '{sources,ats}') = 'object'
+                    OR EXISTS (
+                        SELECT 1 FROM jsonb_array_elements(COALESCE(r.definition -> 'agents', '[]'::jsonb)) agent
+                        WHERE agent #>> '{source,kind}' = 'ats'
+                          AND COALESCE((agent ->> 'enabled')::boolean, true)
+                    )
+                )
                 WHERE EXISTS (
                     SELECT 1 FROM signals s
                     WHERE s.lead_id = leads.id AND s.source = ANY($3::text[])
