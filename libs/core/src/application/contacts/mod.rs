@@ -118,8 +118,10 @@ impl LodestoneUseCase {
                 volume: report.domains,
                 signals: contacts,
             };
-            self.finish_contact_run(run.id, &outcome, clock.now())
+            let finished_at = clock.now();
+            self.finish_contact_run(run.id, &outcome, finished_at)
                 .await?;
+            self.observe_run(run, &outcome, finished_at);
         }
         info!(source = %name, domains = report.domains, contacts = report.contacts, rate_limited = report.rate_limited, "contact run finished");
         Ok(report)

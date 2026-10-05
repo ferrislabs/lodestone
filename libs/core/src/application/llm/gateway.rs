@@ -10,13 +10,36 @@ use chrono::Utc;
 use serde::Serialize;
 
 use crate::domain::llm::{
-    LlmError, LlmProvider, LlmRequest, TokenUsage, UntrustedDocument,
+    LlmError, LlmProvider, LlmRequest, ProviderKind, TokenUsage, UntrustedDocument,
     cache::{CacheScope, CachedOutput, LlmCache},
     provider::TokenPricing,
 };
 
 const MICROCENTS_PER_CENT: u64 = 1_000_000;
 const MAX_BACKOFF: Duration = Duration::from_secs(60);
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LlmContext {
+    kind: ProviderKind,
+    model: Box<str>,
+}
+
+impl LlmContext {
+    pub fn new(kind: ProviderKind, model: &str) -> Self {
+        Self {
+            kind,
+            model: model.into(),
+        }
+    }
+
+    pub fn kind(&self) -> ProviderKind {
+        self.kind
+    }
+
+    pub fn model(&self) -> &str {
+        &self.model
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunBudget {
@@ -34,6 +57,10 @@ impl RunBudget {
 
     pub fn is_exhausted(&self) -> bool {
         self.spent_microcents >= self.limit_microcents
+    }
+
+    pub fn spent_microcents(&self) -> u64 {
+        self.spent_microcents
     }
 
     pub fn spent_cents(&self) -> f64 {

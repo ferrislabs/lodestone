@@ -3,14 +3,20 @@ use common::{Config, CoreError};
 use rate_limit::{InMemoryRateLimiter, Quota, RateLimitService};
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
+use telemetry::Metrics;
 
-use crate::{domain::output::WebhookPolicy, infrastructure::postgres::error::map_sqlx_error};
+use crate::{
+    application::llm::gateway::LlmContext,
+    domain::{llm::ProviderKind, output::WebhookPolicy},
+    infrastructure::postgres::error::map_sqlx_error,
+};
 
 pub mod contacts;
 pub mod drafts;
 pub mod jobs;
 pub mod leads;
 pub mod llm;
+pub(crate) mod observe;
 pub mod output;
 pub mod partners;
 pub mod policy;
@@ -29,6 +35,8 @@ pub type LodestoneRateLimitService = RateLimitService<InMemoryRateLimiter>;
 pub struct LodestoneUseCase {
     pub(crate) pool: PgPool,
     pub(crate) webhooks: Option<WebhookPolicy>,
+    pub(crate) metrics: Metrics,
+    pub(crate) llm: Option<LlmContext>,
 }
 
 impl LodestoneUseCase {
@@ -36,7 +44,23 @@ impl LodestoneUseCase {
         Self {
             pool,
             webhooks: None,
+            metrics: Metrics::default(),
+            llm: None,
         }
+    }
+
+    pub fn with_metrics(mut self, metrics: Metrics) -> Self {
+        self.metrics = metrics;
+        self
+    }
+
+    pub fn with_llm_provider(mut self, kind: ProviderKind, model: &str) -> Self {
+        self.llm = Some(LlmContext::new(kind, model));
+        self
+    }
+
+    pub fn metrics(&self) -> &Metrics {
+        &self.metrics
     }
 
     pub fn with_webhooks(mut self, policy: Option<WebhookPolicy>) -> Self {

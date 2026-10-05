@@ -19,7 +19,7 @@ use crate::{
         scoring::score,
         source::{Observation, Source, SourceError},
         suppression::ports::SuppressionRepository,
-        values::SourceName,
+        values::{SignalKind, SourceName},
     },
 };
 
@@ -120,7 +120,9 @@ impl LodestoneUseCase {
                     error: error.to_string(),
                 };
                 for run in &runs {
-                    self.finish_run(run.id, &outcome, clock.now()).await?;
+                    let finished_at = clock.now();
+                    self.finish_run(run.id, &outcome, finished_at).await?;
+                    self.observe_run(run, &outcome, finished_at);
                 }
                 return Err(error.into());
             }
@@ -143,7 +145,9 @@ impl LodestoneUseCase {
                     error: error.to_string(),
                 },
             };
-            self.finish_run(run.id, &outcome, clock.now()).await?;
+            let finished_at = clock.now();
+            self.finish_run(run.id, &outcome, finished_at).await?;
+            self.observe_run(run, &outcome, finished_at);
             recorded?;
             total_signals += signals;
         }
@@ -176,17 +180,31 @@ impl LodestoneUseCase {
         Ok(())
     }
 
-    #[transactional(lead, signal, suppression)]
     pub async fn record_observations(
         &self,
         active: &ActiveProfile,
         source: SourceName,
         observations: &[Observation],
     ) -> Result<(), CoreError> {
+        let recorded = self
+            .store_observations(active, source, observations)
+            .await?;
+        self.observe_signals(active.profile.id, source, &recorded);
+        Ok(())
+    }
+
+    #[transactional(lead, signal, suppression)]
+    async fn store_observations(
+        &self,
+        active: &ActiveProfile,
+        source: SourceName,
+        observations: &[Observation],
+    ) -> Result<Vec<SignalKind>, CoreError> {
         let mut leads = lead_repository;
         let mut signals = signal_repository;
         let mut suppressions = suppression_repository;
         let mut touched = Vec::new();
+        let mut recorded = Vec::new();
         let mut suppressed: Vec<(NormalizedDomain, bool)> = Vec::new();
         for observation in observations {
             let blocked = match suppressed
@@ -228,12 +246,13 @@ impl LodestoneUseCase {
                     observed_at: observation.observed_at,
                 })
                 .await?;
+            recorded.push(observation.kind.clone());
         }
         let scoring = &active.revision.definition.definition().scoring;
         for lead_id in touched {
             rescore(&mut leads, &mut signals, lead_id, scoring, Utc::now()).await?;
         }
-        Ok(())
+        Ok(recorded)
     }
 }
 

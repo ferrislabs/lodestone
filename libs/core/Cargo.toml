@@ -10,6 +10,7 @@ auth = { workspace = true }
 authz = { workspace = true }
 lodestone-macros = { workspace = true }
 rate-limit = { workspace = true }
+telemetry = { workspace = true }
 
 uuid = { workspace = true }
 serde = { workspace = true }
