@@ -32,7 +32,7 @@ export function UserMenu({ displayName, email, onSignOut }: UserMenuProps) {
 			<DropdownMenuTrigger asChild>
 				<button
 					type="button"
-					aria-label="User menu"
+					aria-label="Menu utilisateur"
 					className="flex size-9 items-center justify-center rounded-lg bg-orange-600 text-sm font-semibold text-white shadow-sm transition-opacity hover:opacity-90"
 				>
 					{getInitials(displayName)}
@@ -52,12 +52,12 @@ export function UserMenu({ displayName, email, onSignOut }: UserMenuProps) {
 				<DropdownMenuSeparator />
 				<DropdownMenuItem disabled>
 					<User />
-					Profile
+					Profil
 				</DropdownMenuItem>
 				<DropdownMenuSeparator />
 				<DropdownMenuItem variant="destructive" onClick={onSignOut}>
 					<LogOut />
-					Sign out
+					Se déconnecter
 				</DropdownMenuItem>
 			</DropdownMenuContent>
 		</DropdownMenu>

@@ -42,23 +42,21 @@ function renderPanel(overrides: Partial<Parameters<typeof TierPanel>[0]> = {}) {
 describe('TierPanel', () => {
 	it('shows the current selection per tier', () => {
 		renderPanel()
-		expect((screen.getByLabelText('triage') as HTMLSelectElement).value).toBe(
-			'a',
-		)
+		expect((screen.getByLabelText('Tri') as HTMLSelectElement).value).toBe('a')
 		expect(
-			(screen.getByLabelText('qualification') as HTMLSelectElement).value,
+			(screen.getByLabelText('Qualification') as HTMLSelectElement).value,
 		).toBe('')
 	})
 
 	it('offers none and marks disabled providers', () => {
 		renderPanel()
-		expect(screen.getAllByText('None').length).toBe(2)
-		expect(screen.getAllByText('Mistral (disabled)').length).toBe(2)
+		expect(screen.getAllByText('Aucun').length).toBe(2)
+		expect(screen.getAllByText('Mistral (désactivé)').length).toBe(2)
 	})
 
 	it('reports a selection change', () => {
 		const props = renderPanel()
-		fireEvent.change(screen.getByLabelText('qualification'), {
+		fireEvent.change(screen.getByLabelText('Qualification'), {
 			target: { value: 'a' },
 		})
 		expect(props.onSelect).toHaveBeenCalledWith('qualification', 'a')
@@ -66,12 +64,12 @@ describe('TierPanel', () => {
 
 	it('applies only when something changed', () => {
 		const props = renderPanel({ changed: true })
-		fireEvent.click(screen.getByText('Apply tiers'))
+		fireEvent.click(screen.getByText('Appliquer les niveaux'))
 		expect(props.onApply).toHaveBeenCalled()
 		cleanup()
 		renderPanel({ changed: false })
 		expect(
-			(screen.getByText('Apply tiers') as HTMLButtonElement).disabled,
+			(screen.getByText('Appliquer les niveaux') as HTMLButtonElement).disabled,
 		).toBe(true)
 	})
 })

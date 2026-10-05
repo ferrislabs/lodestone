@@ -4,5 +4,6 @@ import { tabSearchSchema } from '#/pages/profiles/lib/tabs'
 
 export const Route = createFileRoute('/_app/profiles/$profileId')({
 	validateSearch: tabSearchSchema,
+	head: () => ({ meta: [{ title: 'Profil · Lodestone' }] }),
 	component: ProfileDetailFeature,
 })

@@ -26,7 +26,7 @@ export function TabBar<T extends string>({
 					{item.problems > 0 ? (
 						<span
 							role="img"
-							aria-label={`${item.problems} problems`}
+							aria-label={`${item.problems} ${item.problems > 1 ? 'problèmes' : 'problème'}`}
 							className="inline-flex min-w-5 items-center justify-center rounded-full bg-destructive px-1.5 text-xs text-white"
 						>
 							{item.problems}

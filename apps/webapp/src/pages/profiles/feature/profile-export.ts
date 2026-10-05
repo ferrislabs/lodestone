@@ -1,4 +1,5 @@
 import { getApiUrl } from '#/api/lodestone'
+import { translateApiMessage } from '#/lib/api-errors'
 import { exportFilename } from '#/pages/profiles/lib/definition'
 import { authStore } from '#/store/auth.store'
 
@@ -10,9 +11,9 @@ function filenameFrom(header: string | null, fallback: string): string {
 async function failureMessage(response: Response): Promise<string> {
 	try {
 		const body: { message?: string } = await response.json()
-		return body.message ?? `HTTP ${response.status}`
+		return translateApiMessage(body.message ?? `HTTP ${response.status}`)
 	} catch {
-		return `HTTP ${response.status}`
+		return translateApiMessage(`HTTP ${response.status}`)
 	}
 }
 

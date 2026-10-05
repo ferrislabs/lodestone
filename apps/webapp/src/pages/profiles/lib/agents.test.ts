@@ -42,7 +42,7 @@ describe('agents', () => {
 
 	it('validates count, slug and uniqueness', () => {
 		expect(validateAgents({ agents: [] })).toEqual([
-			{ path: 'agents', message: 'must contain at least one agent' },
+			{ path: 'agents', message: 'Doit contenir au moins un agent' },
 		])
 		const a = { ...newAgent('ats', []), id: 'Bad Id' }
 		const b = newAgent('ats', [])

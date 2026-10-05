@@ -1,3 +1,5 @@
+import { useState } from 'react'
+
 import type { FormContext } from '#/components/schema-form/context'
 import { ObjectFields } from '#/components/schema-form/fields'
 import {
@@ -22,6 +24,7 @@ import {
 import type { EditorTab } from '#/pages/profiles/lib/tabs'
 import type { Problem } from '#/pages/profiles/lib/types'
 import { AgentsEditor } from '#/pages/profiles/ui/agents-editor'
+import { AgentsHelp } from '#/pages/profiles/ui/agents-help'
 import { ScoringExplainer } from '#/pages/profiles/ui/scoring-explainer'
 import { ScoringGrid } from '#/pages/profiles/ui/scoring-grid'
 import { ThresholdField } from '#/pages/profiles/ui/threshold-field'
@@ -64,6 +67,7 @@ export function DefinitionTabContent({
 }: DefinitionTabContentProps) {
 	const agents = useAgentsUi(value, onChange)
 	const scoring = useScoringUi(value, onChange)
+	const [helpCollapsed, setHelpCollapsed] = useState(false)
 	const context: FormContext = {
 		root: PROFILE_SCHEMA,
 		hints: DEFINITION_HINTS,
@@ -87,10 +91,13 @@ export function DefinitionTabContent({
 			return fields('identity')
 		case 'scoring':
 			return (
-				<div className="flex flex-col gap-4">
+				<div
+					data-testid="help-layout"
+					className="flex flex-col gap-4 lg:grid lg:grid-cols-4 lg:gap-6"
+				>
 					<ScoringExplainer
-						factorCount={scoring.factors.length}
-						maxScore={scoring.maxScore}
+						collapsed={helpCollapsed}
+						onToggle={() => setHelpCollapsed((current) => !current)}
 						thresholdSummary={thresholdSummary(
 							scoring.threshold,
 							isValidThreshold(scoring.threshold)
@@ -100,18 +107,20 @@ export function DefinitionTabContent({
 						example={workedExample(scoring.factors)}
 						onNavigate={() => onNavigate?.('settings')}
 					/>
-					<ScoringGrid
-						factors={scoring.factors}
-						problems={problems}
-						suggestions={scoring.suggestions}
-						available={scoring.available}
-						maxScore={scoring.maxScore}
-						onAdd={scoring.add}
-						onRemove={scoring.remove}
-						onSignal={scoring.setSignal}
-						onWeight={scoring.setWeight}
-						onValue={scoring.setValue}
-					/>
+					<div className="lg:order-1 lg:col-span-3">
+						<ScoringGrid
+							factors={scoring.factors}
+							problems={problems}
+							suggestions={scoring.suggestions}
+							available={scoring.available}
+							maxScore={scoring.maxScore}
+							onAdd={scoring.add}
+							onRemove={scoring.remove}
+							onSignal={scoring.setSignal}
+							onWeight={scoring.setWeight}
+							onValue={scoring.setValue}
+						/>
+					</div>
 				</div>
 			)
 		case 'settings':
@@ -135,25 +144,36 @@ export function DefinitionTabContent({
 			)
 		case 'agents':
 			return (
-				<AgentsEditor
-					context={context}
-					agents={agents.agents}
-					problems={problems}
-					collapsed={agents.collapsed}
-					confirmingRemove={agents.confirmingRemove}
-					picking={agents.picking}
-					onOpenPicker={agents.openPicker}
-					onClosePicker={agents.closePicker}
-					onAdd={agents.add}
-					onToggleCollapsed={agents.toggleCollapsed}
-					onEnabled={agents.setEnabled}
-					onName={agents.setName}
-					onId={agents.setId}
-					onCriteria={agents.setCriteria}
-					onRequestRemove={agents.requestRemove}
-					onConfirmRemove={agents.confirmRemove}
-					onCancelRemove={agents.cancelRemove}
-				/>
+				<div
+					data-testid="help-layout"
+					className="flex flex-col gap-4 lg:grid lg:grid-cols-4 lg:gap-6"
+				>
+					<AgentsHelp
+						collapsed={helpCollapsed}
+						onToggle={() => setHelpCollapsed((current) => !current)}
+					/>
+					<div className="lg:order-1 lg:col-span-3">
+						<AgentsEditor
+							context={context}
+							agents={agents.agents}
+							problems={problems}
+							collapsed={agents.collapsed}
+							confirmingRemove={agents.confirmingRemove}
+							picking={agents.picking}
+							onOpenPicker={agents.openPicker}
+							onClosePicker={agents.closePicker}
+							onAdd={agents.add}
+							onToggleCollapsed={agents.toggleCollapsed}
+							onEnabled={agents.setEnabled}
+							onName={agents.setName}
+							onId={agents.setId}
+							onCriteria={agents.setCriteria}
+							onRequestRemove={agents.requestRemove}
+							onConfirmRemove={agents.confirmRemove}
+							onCancelRemove={agents.cancelRemove}
+						/>
+					</div>
+				</div>
 			)
 	}
 }

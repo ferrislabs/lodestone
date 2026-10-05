@@ -63,19 +63,19 @@ export function ProfilesList({
 		<div className="flex flex-col gap-4 p-4 md:p-8">
 			<div className="flex flex-wrap items-start justify-between gap-3">
 				<div className="flex flex-col gap-1">
-					<h1 className="text-2xl font-bold tracking-tight">Profiles</h1>
+					<h1 className="text-2xl font-bold tracking-tight">Profils</h1>
 					<p className="text-sm text-muted-foreground">
-						Detection profiles describe a market. Each edit creates a new
-						revision.
+						Les profils de détection décrivent un marché. Chaque modification
+						crée une nouvelle révision.
 					</p>
 				</div>
-				<Button onClick={onCreate}>New profile</Button>
+				<Button onClick={onCreate}>Nouveau profil</Button>
 			</div>
 			<div className="flex flex-col gap-3 rounded-xl border bg-card p-4">
-				<h2 className="text-sm font-semibold">Import a profile</h2>
+				<h2 className="text-sm font-semibold">Importer un profil</h2>
 				<div className="flex flex-wrap items-end gap-3">
 					<div className="flex flex-col gap-1.5">
-						<Label htmlFor="import-file">JSON file</Label>
+						<Label htmlFor="import-file">Fichier JSON</Label>
 						<Input
 							id="import-file"
 							type="file"
@@ -89,11 +89,11 @@ export function ProfilesList({
 						/>
 					</div>
 					<div className="flex flex-col gap-1.5">
-						<Label htmlFor="import-name">Name (optional)</Label>
+						<Label htmlFor="import-name">Nom (facultatif)</Label>
 						<Input
 							id="import-name"
 							value={importName}
-							placeholder="Defaults to the offer"
+							placeholder="Par défaut, l'offre"
 							onChange={(event) => onImportNameChange(event.target.value)}
 						/>
 					</div>
@@ -105,7 +105,7 @@ export function ProfilesList({
 				) : null}
 				<ProfileProblems
 					problems={importProblems}
-					title="The file was rejected"
+					title="Le fichier a été rejeté"
 				/>
 			</div>
 			{actionError ? (
@@ -117,9 +117,9 @@ export function ProfilesList({
 				<Table>
 					<TableHeader>
 						<TableRow>
-							<TableHead>Name</TableHead>
-							<TableHead>Status</TableHead>
-							<TableHead>Revision</TableHead>
+							<TableHead>Nom</TableHead>
+							<TableHead>Statut</TableHead>
+							<TableHead>Révision</TableHead>
 							<TableHead>Leads</TableHead>
 							<TableHead className="text-right">Actions</TableHead>
 						</TableRow>
@@ -141,7 +141,7 @@ export function ProfilesList({
 									className="py-10 text-center text-destructive"
 									role="alert"
 								>
-									Could not load profiles: {errorMessage}
+									Impossible de charger les profils : {errorMessage}
 								</TableCell>
 							</TableRow>
 						) : null}
@@ -151,7 +151,7 @@ export function ProfilesList({
 									colSpan={COLUMNS}
 									className="py-10 text-center text-muted-foreground"
 								>
-									No profiles yet.
+									Aucun profil pour le moment.
 								</TableCell>
 							</TableRow>
 						) : null}
@@ -169,7 +169,7 @@ export function ProfilesList({
 										</TableCell>
 										<TableCell>
 											<Badge variant={profile.active ? 'default' : 'secondary'}>
-												{profile.active ? 'Active' : 'Inactive'}
+												{profile.active ? 'Actif' : 'Inactif'}
 											</Badge>
 										</TableCell>
 										<TableCell className="text-muted-foreground">

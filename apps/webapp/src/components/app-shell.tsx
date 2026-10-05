@@ -13,7 +13,10 @@ export function AppShell() {
 	const auth = useAuth()
 	const profile = auth.user?.profile
 	const displayName =
-		profile?.name || profile?.preferred_username || profile?.email || 'User'
+		profile?.name ||
+		profile?.preferred_username ||
+		profile?.email ||
+		'Utilisateur'
 
 	return (
 		<SidebarProvider>

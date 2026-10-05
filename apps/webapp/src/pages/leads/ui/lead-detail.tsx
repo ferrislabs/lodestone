@@ -35,7 +35,7 @@ export function LeadDetail({
 			<div>
 				<Button variant="ghost" size="sm" onClick={onBack}>
 					<ArrowLeft />
-					Back to leads
+					Retour aux leads
 				</Button>
 			</div>
 			{state === 'loading' ? (
@@ -47,7 +47,7 @@ export function LeadDetail({
 			) : null}
 			{state === 'error' ? (
 				<p role="alert" className="text-destructive">
-					Could not load this lead: {errorMessage}
+					Impossible de charger ce lead : {errorMessage}
 				</p>
 			) : null}
 			{state === 'ready' && detail ? (

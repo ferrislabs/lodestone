@@ -1,4 +1,5 @@
 import { getApiUrl } from '#/api/lodestone'
+import { translateApiMessage } from '#/lib/api-errors'
 import type { LeadsQuery } from '#/pages/leads/lib/search'
 import { authStore } from '#/store/auth.store'
 
@@ -26,11 +27,11 @@ function filenameFrom(header: string | null, fallback: string): string {
 async function failureMessage(response: Response): Promise<string> {
 	try {
 		const body: { message?: string } = await response.json()
-		if (body.message) return body.message
+		if (body.message) return translateApiMessage(body.message)
 	} catch {
-		return `HTTP ${response.status}`
+		return translateApiMessage(`HTTP ${response.status}`)
 	}
-	return `HTTP ${response.status}`
+	return translateApiMessage(`HTTP ${response.status}`)
 }
 
 export async function downloadLeadExport(

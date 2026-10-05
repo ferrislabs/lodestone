@@ -51,12 +51,12 @@ function Harness({ initial, problems = [], onValue }: HarnessProps) {
 describe('SchemaForm', () => {
 	it('marks required fields and hides the schema version', () => {
 		render(<Harness />)
-		const offer = screen.getByLabelText(/Offer/)
+		const offer = screen.getByLabelText(/Offre/)
 		expect(offer.tagName).toBe('TEXTAREA')
-		expect(screen.getByText('Offer').parentElement?.textContent).toContain('*')
-		expect(screen.getAllByTitle('Required').length).toBeGreaterThan(5)
-		expect(screen.queryByLabelText(/Schema version/)).toBeNull()
-		expect(screen.getByLabelText(/Qualification threshold/)).toHaveProperty(
+		expect(screen.getByText('Offre').parentElement?.textContent).toContain('*')
+		expect(screen.getAllByTitle('Obligatoire').length).toBeGreaterThan(5)
+		expect(screen.queryByLabelText(/Version du schéma/)).toBeNull()
+		expect(screen.getByLabelText(/Seuil de qualification/)).toHaveProperty(
 			'value',
 			'50',
 		)
@@ -64,24 +64,30 @@ describe('SchemaForm', () => {
 
 	it('adds and removes a row of a list', () => {
 		render(<Harness />)
-		fireEvent.click(screen.getByLabelText('Add Preferred local parts'))
-		const input = screen.getByLabelText('Preferred local parts 1')
+		fireEvent.click(
+			screen.getByLabelText('Ajouter : Parties locales préférées'),
+		)
+		const input = screen.getByLabelText('Parties locales préférées 1')
 		fireEvent.change(input, { target: { value: 'contact' } })
-		expect(screen.getByLabelText('Preferred local parts 1')).toHaveProperty(
+		expect(screen.getByLabelText('Parties locales préférées 1')).toHaveProperty(
 			'value',
 			'contact',
 		)
-		fireEvent.click(screen.getByLabelText('Add Preferred local parts'))
-		expect(screen.getByLabelText('Preferred local parts 2')).toBeTruthy()
-		fireEvent.click(screen.getByLabelText('Remove Preferred local parts 1'))
-		expect(screen.queryByLabelText('Preferred local parts 2')).toBeNull()
+		fireEvent.click(
+			screen.getByLabelText('Ajouter : Parties locales préférées'),
+		)
+		expect(screen.getByLabelText('Parties locales préférées 2')).toBeTruthy()
+		fireEvent.click(
+			screen.getByLabelText('Supprimer : Parties locales préférées 1'),
+		)
+		expect(screen.queryByLabelText('Parties locales préférées 2')).toBeNull()
 	})
 
 	it('adds a card for lists of objects', () => {
 		const seen = vi.fn()
 		render(<Harness onValue={seen} />)
-		fireEvent.click(screen.getByLabelText('Add Factors'))
-		expect(screen.getByText('Scoring factor 1')).toBeTruthy()
+		fireEvent.click(screen.getByLabelText('Ajouter : Facteurs'))
+		expect(screen.getByText('Facteur 1')).toBeTruthy()
 		const last = seen.mock.calls.at(-1)?.[0]
 		expect(last).toMatchObject({
 			scoring: { factors: [{ signal: '', weight: 5 }] },
@@ -103,18 +109,20 @@ describe('SchemaForm', () => {
 		)
 		const seen = vi.fn()
 		render(<Harness initial={initial} onValue={seen} />)
-		const before = screen.getAllByLabelText(/Relevance criteria/).length
-		fireEvent.click(screen.getByLabelText('Enable LLM'))
-		expect(screen.getAllByLabelText(/Relevance criteria/)).toHaveLength(
+		const before = screen.getAllByLabelText(/Critères de pertinence/).length
+		fireEvent.click(screen.getByLabelText("Activer : Réglages LLM de l'agent"))
+		expect(screen.getAllByLabelText(/Critères de pertinence/)).toHaveLength(
 			before + 1,
 		)
 		expect(seen.mock.calls.at(-1)?.[0]).toMatchObject({
 			agents: [{ llm: {} }],
 		})
-		fireEvent.click(screen.getByLabelText('Enable LLM'))
+		fireEvent.click(screen.getByLabelText("Activer : Réglages LLM de l'agent"))
 		const last = seen.mock.calls.at(-1)?.[0]
 		expect(last).not.toHaveProperty('agents.0.llm')
-		expect(screen.getAllByLabelText(/Relevance criteria/)).toHaveLength(before)
+		expect(screen.getAllByLabelText(/Critères de pertinence/)).toHaveLength(
+			before,
+		)
 	})
 
 	it('switches union variants and resets their fields', () => {
@@ -142,12 +150,15 @@ describe('SchemaForm', () => {
 		)
 		const seen = vi.fn()
 		render(<Harness initial={initial} onValue={seen} />)
-		expect(screen.getAllByLabelText('Name *')).toHaveLength(2)
-		fireEvent.change(screen.getByLabelText('Matcher type'), {
+		expect(screen.getAllByLabelText(/^Nom/)).toHaveLength(2)
+		fireEvent.change(screen.getByLabelText('Type : Condition'), {
 			target: { value: '2' },
 		})
-		expect(screen.getAllByLabelText('Name *')).toHaveLength(1)
-		expect(screen.getByLabelText(/Pattern/)).toHaveProperty('value', '')
+		expect(screen.getAllByLabelText(/^Nom/)).toHaveLength(1)
+		expect(screen.getByLabelText(/Expression régulière/)).toHaveProperty(
+			'value',
+			'',
+		)
 		expect(seen.mock.calls.at(-1)?.[0]).toMatchObject({
 			agents: [
 				{
@@ -173,7 +184,7 @@ describe('SchemaForm', () => {
 				]}
 			/>,
 		)
-		const weight = screen.getByLabelText(/Weight/)
+		const weight = screen.getByLabelText(/Poids/)
 		const message = screen.getByText('must be positive')
 		expect(weight.getAttribute('aria-invalid')).toBe('true')
 		expect(weight.getAttribute('aria-describedby')).toBe(

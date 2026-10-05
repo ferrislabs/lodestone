@@ -16,7 +16,7 @@ describe('scoring explanation', () => {
 				{ signal: 'public_tender', weight: 7, value: '' },
 			]),
 		).toBe(
-			'A lead with a "Product detected · keycloak" signal (strength 0.9) and a "Job offer" signal (strength 0.7): 10 × 0.9 + 8 × 0.7 = 14.6 points',
+			"Un lead avec un signal « Produit détecté · keycloak » (force 0,9) et un signal « Offre d'emploi » (force 0,7) : 10 × 0,9 + 8 × 0,7 = 14,6 points",
 		)
 	})
 
@@ -48,7 +48,7 @@ describe('scoring explanation', () => {
 
 	it('summarizes the threshold', () => {
 		expect(thresholdSummary(40, 18.8)).toBe(
-			'Current threshold: 40% = 18.8 points',
+			`Seuil actuel : 40${String.fromCharCode(160)}% = 18,8 points`,
 		)
 		expect(thresholdSummary(null, null)).toBeNull()
 	})

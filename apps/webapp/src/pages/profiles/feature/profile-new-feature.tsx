@@ -121,13 +121,13 @@ export function ProfileNewFeature() {
 						/>
 					}
 					blockedReason={
-						noAgents ? 'Add at least one agent to create the profile.' : null
+						noAgents ? 'Ajouter au moins un agent pour créer le profil.' : null
 					}
 					problems={unmatchedProblems(editor.value, problems)}
 					notice={null}
 					dirty
 					saving={create.isPending}
-					saveLabel="Create profile"
+					saveLabel="Créer le profil"
 					onSave={save}
 				/>
 			}

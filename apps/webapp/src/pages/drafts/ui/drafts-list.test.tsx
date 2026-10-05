@@ -57,7 +57,7 @@ describe('DraftsList', () => {
 		expect(screen.getAllByText('Fintech').length).toBeGreaterThan(0)
 		expect(screen.getByText('Hello Acme')).toBeTruthy()
 		expect(screen.getByText('cto@acme.test')).toBeTruthy()
-		expect(screen.getByText('Page 1 of 2 - 30 drafts')).toBeTruthy()
+		expect(screen.getByText('Page 1 sur 2 - 30 brouillons')).toBeTruthy()
 	})
 
 	it('opens a draft from its domain', () => {
@@ -68,7 +68,7 @@ describe('DraftsList', () => {
 
 	it('reports the chosen profile filter', () => {
 		const props = renderList()
-		fireEvent.change(screen.getByLabelText('Profile'), {
+		fireEvent.change(screen.getByLabelText('Profil'), {
 			target: { value: 'p1' },
 		})
 		expect(props.onProfileChange).toHaveBeenCalledWith('p1')
@@ -76,13 +76,15 @@ describe('DraftsList', () => {
 
 	it('requests the next page', () => {
 		const props = renderList()
-		fireEvent.click(screen.getByText('Next'))
+		fireEvent.click(screen.getByText('Suivant'))
 		expect(props.onPageChange).toHaveBeenCalledWith(2)
 	})
 
 	it('shows the empty state', () => {
 		renderList({ entries: [] })
-		expect(screen.getByText('No drafts waiting for review.')).toBeTruthy()
+		expect(
+			screen.getByText('Aucun brouillon en attente de relecture.'),
+		).toBeTruthy()
 	})
 
 	it('shows the error state', () => {

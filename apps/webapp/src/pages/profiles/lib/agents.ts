@@ -1,3 +1,4 @@
+import { sourceLabel } from '#/lib/labels'
 import {
 	classify,
 	defaultValue,
@@ -32,43 +33,49 @@ export interface KindMeta {
 
 export const KIND_META: Record<AgentKind, KindMeta> = {
 	certificate_transparency: {
-		label: 'Certificate transparency',
-		description: 'Finds companies from hostnames in public certificate logs.',
+		label: sourceLabel('certificate_transparency'),
+		description:
+			"Trouve des entreprises à partir des noms d'hôte des journaux de certificats publics.",
 		triaged: false,
 	},
 	dns_cname: {
-		label: 'DNS CNAME',
-		description: 'Finds providers from the CNAME target of known domains.',
+		label: sourceLabel('dns_cname'),
+		description:
+			'Identifie des fournisseurs à partir de la cible CNAME de domaines connus.',
 		triaged: false,
 	},
 	http_probe: {
-		label: 'HTTP probe',
-		description: 'Probes hosts over HTTP for product fingerprints.',
+		label: sourceLabel('http_probe'),
+		description:
+			"Sonde des hôtes en HTTP à la recherche d'empreintes de produits.",
 		triaged: false,
 	},
 	boamp: {
-		label: 'BOAMP',
-		description: 'Searches French public procurement notices by keywords.',
+		label: sourceLabel('boamp'),
+		description:
+			'Recherche par mots-clés des avis de marchés publics français.',
 		triaged: true,
 	},
 	decp: {
-		label: 'DECP',
-		description: 'Searches French public contract data by keywords.',
+		label: sourceLabel('decp'),
+		description:
+			'Recherche par mots-clés des données de marchés publics français.',
 		triaged: true,
 	},
 	ted: {
-		label: 'TED',
-		description: 'Searches European tenders by keywords.',
+		label: sourceLabel('ted'),
+		description: "Recherche par mots-clés des appels d'offres européens.",
 		triaged: true,
 	},
 	france_travail: {
-		label: 'France Travail',
-		description: 'Searches France Travail job offers by keywords.',
+		label: sourceLabel('france_travail'),
+		description: "Recherche par mots-clés des offres d'emploi France Travail.",
 		triaged: true,
 	},
 	ats: {
-		label: 'ATS',
-		description: 'Searches job boards of already detected companies.',
+		label: sourceLabel('ats'),
+		description:
+			"Recherche les offres d'emploi des entreprises déjà détectées.",
 		triaged: true,
 	},
 }
@@ -78,8 +85,8 @@ export const KIND_GROUPS: { title: string; kinds: readonly AgentKind[] }[] = [
 		title: 'Infrastructure',
 		kinds: ['certificate_transparency', 'dns_cname', 'http_probe'],
 	},
-	{ title: 'Public procurement', kinds: ['boamp', 'decp', 'ted'] },
-	{ title: 'Job offers', kinds: ['france_travail', 'ats'] },
+	{ title: 'Marchés publics', kinds: ['boamp', 'decp', 'ted'] },
+	{ title: "Offres d'emploi", kinds: ['france_travail', 'ats'] },
 ]
 
 export function isAgentKind(value: unknown): value is AgentKind {
@@ -213,7 +220,12 @@ export function renameAgent(
 	if (!isJsonObject(agent)) return [...agents]
 	const kind = agentKind(agent)
 	const id = agentField(agent, 'id')
-	const untouched = isDerivedId(id, baseId(agentField(agent, 'name'), kind))
+	const currentName = agentField(agent, 'name')
+	const untouched =
+		isDerivedId(id, baseId(currentName, kind)) ||
+		(kind !== null &&
+			currentName === KIND_META[kind].label &&
+			isDerivedId(id, kindSlug(kind)))
 	const next: JsonObject = { ...agent, name }
 	if (untouched) {
 		next.id = uniqueId(baseId(name, kind), idsExcept(agents, index))
@@ -233,13 +245,13 @@ export function dependencyNote(
 	const kinds = agents.map(agentKind)
 	if (kind === 'http_probe') {
 		return {
-			text: 'Probes hosts found by a Certificate transparency agent.',
+			text: 'Sonde les hôtes trouvés par un agent Transparence des certificats.',
 			warn: !kinds.includes('certificate_transparency'),
 		}
 	}
 	if (kind === 'ats') {
 		return {
-			text: 'Only visits companies already detected by Certificate transparency, HTTP probe or DNS CNAME agents.',
+			text: 'Ne visite que les entreprises déjà détectées par des agents Transparence des certificats, Sonde HTTP ou DNS CNAME.',
 			warn: !kinds.some(
 				(other) =>
 					other === 'certificate_transparency' ||
@@ -256,7 +268,7 @@ const SLUG = /^[a-z0-9][a-z0-9-]{0,62}$/
 export function validateAgents(value: JsonObject): Problem[] {
 	const agents = agentList(value)
 	if (agents.length === 0) {
-		return [{ path: 'agents', message: 'must contain at least one agent' }]
+		return [{ path: 'agents', message: 'Doit contenir au moins un agent' }]
 	}
 	const problems: Problem[] = []
 	const seen = new Set<string>()
@@ -266,10 +278,10 @@ export function validateAgents(value: JsonObject): Problem[] {
 		if (id !== '' && !SLUG.test(id)) {
 			problems.push({
 				path,
-				message: 'must be lowercase letters, digits and dashes',
+				message: 'Doit être composé de minuscules, chiffres et tirets',
 			})
 		} else if (id !== '' && seen.has(id)) {
-			problems.push({ path, message: 'must be unique in the profile' })
+			problems.push({ path, message: 'Doit être unique dans le profil' })
 		}
 		seen.add(id)
 	})

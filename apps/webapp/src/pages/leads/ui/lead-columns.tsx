@@ -12,7 +12,7 @@ export function buildLeadColumns(
 	return [
 		{
 			id: 'domain',
-			header: 'Domain',
+			header: 'Domaine',
 			cell: ({ row }) => (
 				<button
 					type="button"
@@ -30,12 +30,12 @@ export function buildLeadColumns(
 		},
 		{
 			id: 'status',
-			header: 'Status',
+			header: 'Statut',
 			cell: ({ row }) => <LeadStatusBadge status={row.original.status} />,
 		},
 		{
 			id: 'last_seen',
-			header: 'Last seen',
+			header: 'Dernière détection',
 			cell: ({ row }) => (
 				<span className="text-muted-foreground">
 					{formatDateTime(row.original.last_seen_at)}

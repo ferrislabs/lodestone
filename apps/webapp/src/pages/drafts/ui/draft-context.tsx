@@ -1,6 +1,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from '#/components/ui/card'
+import { contactMethodLabel } from '#/lib/labels'
 import type { DraftEntry } from '#/pages/drafts/lib/types'
-import { formatDateTime } from '#/pages/leads/lib/format'
+import { formatDateTime, formatRatio } from '#/pages/leads/lib/format'
 import { ProvenanceLink } from '#/pages/leads/ui/provenance-link'
 import { ScoreBar } from '#/pages/leads/ui/score-bar'
 
@@ -33,18 +34,18 @@ export function DraftContext({ entry, onOpenLead }: DraftContextProps) {
 				/>
 				<p>{entry.summary}</p>
 				<p className="text-sm">
-					<span className="font-medium">Approach angle: </span>
+					<span className="font-medium">Angle d'approche : </span>
 					{entry.approach_angle}
 				</p>
 				<p className="text-sm">
-					<span className="font-medium">Best contact: </span>
+					<span className="font-medium">Meilleur contact : </span>
 					{entry.contact
-						? `${entry.contact.address} (${entry.contact.method}, confidence ${Math.round(entry.contact.confidence * 100)}%)`
-						: 'No contact found'}
+						? `${entry.contact.address} (${contactMethodLabel(entry.contact.method)}, confiance ${formatRatio(entry.contact.confidence)})`
+						: 'Aucun contact trouvé'}
 				</p>
 				<div className="flex flex-col gap-3">
 					<span className="text-sm font-medium">
-						Evidence ({entry.evidence.length})
+						Preuves ({entry.evidence.length})
 					</span>
 					{entry.evidence.map((item) => (
 						<blockquote

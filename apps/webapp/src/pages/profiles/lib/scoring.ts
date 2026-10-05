@@ -1,3 +1,5 @@
+import { formatNumber } from '#/lib/format'
+import { signalKindLabel } from '#/lib/labels'
 import {
 	isJsonObject,
 	type JsonObject,
@@ -23,23 +25,23 @@ export interface SignalKindMeta {
 export const SIGNAL_KINDS: readonly SignalKindMeta[] = [
 	{
 		kind: 'product_detected',
-		label: 'Product detected',
-		description: 'A known product was fingerprinted on a host.',
+		label: signalKindLabel('product_detected'),
+		description: 'Un produit connu a été identifié sur un hôte.',
 		group: 'Infrastructure',
 		takesValue: true,
 		emittedBy: ['http_probe'],
 	},
 	{
 		kind: 'debt_marker',
-		label: 'Debt marker',
-		description: 'A technical debt marker was found on a host.',
+		label: signalKindLabel('debt_marker'),
+		description: 'Un marqueur de dette technique a été trouvé sur un hôte.',
 		group: 'Infrastructure',
 		takesValue: true,
 		emittedBy: ['http_probe'],
 	},
 	{
 		kind: 'saas_provider',
-		label: 'SaaS provider',
+		label: signalKindLabel('saas_provider'),
 		description: 'Un domaine pointe vers un fournisseur SaaS connu.',
 		group: 'Infrastructure',
 		takesValue: true,
@@ -47,41 +49,42 @@ export const SIGNAL_KINDS: readonly SignalKindMeta[] = [
 	},
 	{
 		kind: 'public_tender',
-		label: 'Public tender',
-		description: 'A matching public procurement notice was published.',
-		group: 'Public procurement',
+		label: signalKindLabel('public_tender'),
+		description: 'Un avis de marché public correspondant a été publié.',
+		group: 'Marchés publics',
 		takesValue: false,
 		emittedBy: ['boamp', 'ted'],
 	},
 	{
 		kind: 'awarded_contract',
-		label: 'Awarded contract',
-		description: 'A matching public contract was awarded.',
-		group: 'Public procurement',
+		label: signalKindLabel('awarded_contract'),
+		description: 'Un marché public correspondant a été attribué.',
+		group: 'Marchés publics',
 		takesValue: false,
 		emittedBy: ['decp'],
 	},
 	{
 		kind: 'job_offer',
-		label: 'Job offer',
-		description: 'A matching job offer is open.',
-		group: 'Job offers',
+		label: signalKindLabel('job_offer'),
+		description: "Une offre d'emploi correspondante est ouverte.",
+		group: "Offres d'emploi",
 		takesValue: false,
 		emittedBy: ['france_travail', 'ats'],
 	},
 	{
 		kind: 'role_contact_found',
-		label: 'Role contact found',
-		description: 'A contact with a matching role was found.',
+		label: signalKindLabel('role_contact_found'),
+		description: 'Un contact avec un rôle correspondant a été trouvé.',
 		group: 'Contacts',
 		takesValue: false,
 		emittedBy: [],
 	},
 	{
 		kind: DISTINCT_SIGNALS,
-		label: 'Distinct signal kinds',
-		description: 'Counts how many different signal kinds the lead has.',
-		group: 'Combined',
+		label: signalKindLabel(DISTINCT_SIGNALS),
+		description:
+			'Compte combien de types de signaux différents le lead possède.',
+		group: 'Combiné',
 		takesValue: false,
 		emittedBy: [],
 	},
@@ -89,10 +92,10 @@ export const SIGNAL_KINDS: readonly SignalKindMeta[] = [
 
 export const SIGNAL_GROUPS: readonly string[] = [
 	'Infrastructure',
-	'Public procurement',
-	'Job offers',
+	'Marchés publics',
+	"Offres d'emploi",
 	'Contacts',
-	'Combined',
+	'Combiné',
 ]
 
 export interface Factor {
@@ -106,7 +109,10 @@ export function signalMeta(kind: string): SignalKindMeta | null {
 }
 
 export function signalLabel(kind: string): string {
-	return signalMeta(kind)?.label ?? (kind === '' ? 'New factor' : kind)
+	return (
+		signalMeta(kind)?.label ??
+		(kind === '' ? 'Nouveau facteur' : signalKindLabel(kind))
+	)
 }
 
 export function factorList(definition: JsonObject): JsonValue[] {
@@ -199,8 +205,8 @@ export function nextSignal(
 export const MIN_WEIGHT = 1
 export const MAX_WEIGHT = 10
 export const DEFAULT_WEIGHT = 5
-export const WEIGHT_ERROR = 'must be an integer from 1 to 10'
-export const THRESHOLD_ERROR = 'must be a percentage from 0 to 100'
+export const WEIGHT_ERROR = 'Doit être un entier de 1 à 10'
+export const THRESHOLD_ERROR = 'Doit être un pourcentage de 0 à 100'
 
 export const WEIGHTS: readonly number[] = Array.from(
 	{ length: MAX_WEIGHT },
@@ -249,7 +255,7 @@ export function qualificationPoints(thresholdPercent: number, max: number) {
 }
 
 export function formatPoints(points: number): string {
-	return String(Math.round(points * 10) / 10)
+	return formatNumber(points)
 }
 
 export function readThreshold(definition: JsonObject): number | null {
