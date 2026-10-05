@@ -414,9 +414,8 @@ async fn ambiguous_contracts_still_produce_partner_awards() {
         .revision
         .definition
         .definition()
-        .sources
-        .decp
-        .clone()
+        .decp()
+        .cloned()
         .unwrap();
     let awards = partner_awards(&rules, &contracts);
     let standard: Vec<_> = awards

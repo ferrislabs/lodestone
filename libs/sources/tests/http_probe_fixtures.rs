@@ -184,9 +184,7 @@ fn probe_paths(profile: &ActiveProfile) -> Vec<String> {
         .revision
         .definition
         .definition()
-        .sources
-        .http_probe
-        .as_ref()
+        .http_probe()
         .unwrap()
         .fingerprints
         .iter()

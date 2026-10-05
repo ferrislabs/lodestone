@@ -243,13 +243,7 @@ impl<F: Fetcher, H: CandidateHosts, G: ProbeGuard> HttpProbeSource<F, H, G> {
     }
 
     fn compiled_for(&self, profile: &ActiveProfile) -> Option<Arc<CompiledProfile>> {
-        let config = profile
-            .revision
-            .definition
-            .definition()
-            .sources
-            .http_probe
-            .as_ref()?;
+        let config = profile.revision.definition.definition().http_probe()?;
         let key = (profile.profile.id, profile.revision.number);
         let mut cache = self.compiled.lock().ok()?;
         if let Some(found) = cache.get(&key) {
@@ -279,15 +273,7 @@ fn upstream(error: impl std::fmt::Display) -> SourceError {
 fn probe_paths(profiles: &[ActiveProfile]) -> Vec<String> {
     let mut paths: Vec<String> = profiles
         .iter()
-        .filter_map(|profile| {
-            profile
-                .revision
-                .definition
-                .definition()
-                .sources
-                .http_probe
-                .as_ref()
-        })
+        .filter_map(|profile| profile.revision.definition.definition().http_probe())
         .flat_map(|config| config.fingerprints.iter().map(|item| item.path.clone()))
         .collect();
     paths.sort();

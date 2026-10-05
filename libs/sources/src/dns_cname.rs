@@ -143,7 +143,7 @@ where
     }
 
     fn evaluate(&self, item: &Self::Item, profile: &ActiveProfile) -> Vec<Observation> {
-        let Some(config) = &profile.revision.definition.definition().sources.dns_cname else {
+        let Some(config) = profile.revision.definition.definition().dns_cname() else {
             return Vec::new();
         };
         let Ok(kind) = SignalKind::parse(SIGNAL_KIND) else {

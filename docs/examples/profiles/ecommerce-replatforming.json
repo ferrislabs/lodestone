@@ -1,34 +1,55 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "identity": {
     "offer": "Migration of Magento 1 and Magento 2 shops to a modern e-commerce platform, by a web agency",
     "target_customer": "Merchants and organizations running an outdated Magento storefront"
   },
-  "sources": {
-    "http_probe": {
-      "fingerprints": [
-        {
-          "id": "magento-version",
-          "path": "/magento_version",
-          "product": "magento",
-          "matchers": [
-            { "kind": "status", "equals": 200 },
-            { "kind": "body", "pattern": "^Magento/" }
-          ],
-          "version": { "from": "body", "pattern": "^Magento/(\\d+\\.\\d+)" },
-          "debt_markers": [
-            { "id": "outdated_magento", "rule": { "kind": "version_below", "version": "2.4" } }
-          ]
-        }
-      ]
+  "agents": [
+    {
+      "id": "http-probe",
+      "name": "HTTP probe",
+      "enabled": true,
+      "source": {
+        "kind": "http_probe",
+        "fingerprints": [
+          {
+            "id": "magento-version",
+            "path": "/magento_version",
+            "product": "magento",
+            "matchers": [
+              { "kind": "status", "equals": 200 },
+              { "kind": "body", "pattern": "^Magento/" }
+            ],
+            "version": { "from": "body", "pattern": "^Magento/(\\d+\\.\\d+)" },
+            "debt_markers": [
+              {
+                "id": "outdated_magento",
+                "rule": { "kind": "version_below", "version": "2.4" }
+              }
+            ]
+          }
+        ]
+      }
     },
-    "boamp": {
-      "keywords": ["site e-commerce", "Magento", "refonte de site marchand", "boutique en ligne", "plateforme de vente en ligne"]
+    {
+      "id": "boamp",
+      "name": "BOAMP",
+      "enabled": true,
+      "source": {
+        "kind": "boamp",
+        "keywords": ["site e-commerce", "Magento", "refonte de site marchand", "boutique en ligne", "plateforme de vente en ligne"]
+      }
     },
-    "france_travail": {
-      "keywords": ["Magento", "développeur Magento", "e-commerce", "refonte de site marchand", "migration Magento"]
+    {
+      "id": "france-travail",
+      "name": "France Travail",
+      "enabled": true,
+      "source": {
+        "kind": "france_travail",
+        "keywords": ["Magento", "développeur Magento", "e-commerce", "refonte de site marchand", "migration Magento"]
+      }
     }
-  },
+  ],
   "scoring": {
     "factors": [
       { "signal": "product_detected", "value": "magento", "weight": 30 },
