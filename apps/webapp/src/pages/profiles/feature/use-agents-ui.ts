@@ -48,15 +48,18 @@ export function useAgentsUi(
 		closePicker: () => setPicking(false),
 		add: (kind: AgentKind) => {
 			onChange(withAgents(value, [...agents, newAgent(kind, agents)]))
+			setCollapsed(new Set(agents.map((_, index) => index)))
 			setPicking(false)
 			focusName(agents.length)
 		},
 		toggleCollapsed: (index: number) =>
-			setCollapsed((current) => {
-				const next = new Set(current)
-				if (!next.delete(index)) next.add(index)
-				return next
-			}),
+			setCollapsed((current) =>
+				current.has(index)
+					? new Set(
+							agents.map((_, position) => position).filter((p) => p !== index),
+						)
+					: new Set(agents.map((_, position) => position)),
+			),
 		setEnabled: (index: number, enabled: boolean) =>
 			patch(['agents', index, 'enabled'], enabled),
 		setName: (index: number, name: string) =>

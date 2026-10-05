@@ -149,7 +149,7 @@ describe('definition tabs', () => {
 			/>,
 		)
 		expect(screen.queryByText('Ne doit pas être vide')).toBeNull()
-		fireEvent.click(screen.getByRole('button', { name: /Déplier/ }))
+		fireEvent.click(screen.getByRole('button', { name: /Modifier/ }))
 		expect(screen.getByText('Ne doit pas être vide')).toBeTruthy()
 	})
 
@@ -215,11 +215,39 @@ describe('definition tabs', () => {
 		render(<Harness startTab="agents" />)
 		addAgent('ats')
 		addAgent('ats')
-		expect(
-			screen
-				.getAllByLabelText('Identifiant')
-				.map((input) => (input as HTMLInputElement).value),
-		).toEqual(['ats', 'ats-2'])
+		expect(screen.getByLabelText('Identifiant')).toHaveProperty(
+			'value',
+			'ats-2',
+		)
+		fireEvent.click(
+			screen.getAllByRole('button', { name: /Modifier/ })[0] as HTMLElement,
+		)
+		expect(screen.getByLabelText('Identifiant')).toHaveProperty('value', 'ats')
+	})
+
+	it('lays agents out as grid cells with the add card last', () => {
+		const first = newAgent('ats', [])
+		const second = newAgent('ats', [first])
+		const third = newAgent('ats', [first, second])
+		render(
+			<Harness
+				startTab="agents"
+				initial={{ ...blank(), agents: [first, second, third] }}
+			/>,
+		)
+		const grid = document.querySelector('[data-agent]')?.parentElement
+		expect(grid?.className).toContain('xl:grid-cols-3')
+		expect(grid?.querySelectorAll('[data-agent]')).toHaveLength(3)
+		expect(grid?.lastElementChild?.hasAttribute('data-add-agent')).toBe(true)
+		expect(screen.getAllByText('0 mot-clé')).toHaveLength(3)
+		fireEvent.click(
+			screen.getAllByRole('button', { name: /Modifier/ })[1] as HTMLElement,
+		)
+		const cards = grid?.querySelectorAll<HTMLElement>('[data-agent]') ?? []
+		expect(cards[1]?.className).toContain('xl:col-span-3')
+		expect(cards[0]?.className).not.toContain('col-span')
+		expect(cards[2]?.className).not.toContain('col-span')
+		expect(screen.getAllByLabelText('Identifiant')).toHaveLength(1)
 	})
 
 	it('follows the name with the id until the id is edited', () => {
@@ -258,7 +286,7 @@ describe('definition tabs', () => {
 		addAgent('ats')
 		fireEvent.click(screen.getByRole('button', { name: /Replier/ }))
 		expect(screen.queryByLabelText('Identifiant')).toBeNull()
-		fireEvent.click(screen.getByRole('button', { name: /Déplier/ }))
+		fireEvent.click(screen.getByRole('button', { name: /Modifier/ }))
 		expect(screen.getByLabelText('Identifiant')).toBeTruthy()
 	})
 

@@ -1,4 +1,4 @@
-import { sourceLabel } from '#/lib/labels'
+import { pluralize, sourceLabel } from '#/lib/labels'
 import {
 	classify,
 	defaultValue,
@@ -231,6 +231,48 @@ export function renameAgent(
 		next.id = uniqueId(baseId(name, kind), idsExcept(agents, index))
 	}
 	return agents.map((item, position) => (position === index ? next : item))
+}
+
+function sourceCount(agent: JsonValue | undefined, field: string): number {
+	if (!isJsonObject(agent) || !isJsonObject(agent.source)) return 0
+	const items = agent.source[field]
+	return Array.isArray(items) ? items.length : 0
+}
+
+export function agentSummary(agent: JsonValue | undefined): string {
+	const kind = agentKind(agent)
+	if (kind === null) return ''
+	const parts: string[] = []
+	if (kind === 'certificate_transparency') {
+		const labels = sourceCount(agent, 'labels')
+		parts.push(`${labels} ${pluralize(labels, 'label', 'labels')}`)
+	} else if (kind === 'dns_cname') {
+		const patterns = sourceCount(agent, 'patterns')
+		parts.push(
+			`${patterns} ${pluralize(patterns, 'motif CNAME', 'motifs CNAME')}`,
+		)
+	} else if (kind === 'http_probe') {
+		const fingerprints = sourceCount(agent, 'fingerprints')
+		parts.push(
+			`${fingerprints} ${pluralize(fingerprints, 'empreinte', 'empreintes')}`,
+		)
+		const excluded = sourceCount(agent, 'excluded_products')
+		if (excluded > 0) {
+			parts.push(
+				`${excluded} ${pluralize(excluded, 'produit exclu', 'produits exclus')}`,
+			)
+		}
+	} else {
+		const keywords = sourceCount(agent, 'keywords')
+		parts.push(`${keywords} ${pluralize(keywords, 'mot-clé', 'mots-clés')}`)
+		const exclusions = sourceCount(agent, 'exclusions')
+		if (exclusions > 0) {
+			parts.push(
+				`${exclusions} ${pluralize(exclusions, 'exclusion', 'exclusions')}`,
+			)
+		}
+	}
+	return parts.join(' · ')
 }
 
 export interface DependencyNote {
