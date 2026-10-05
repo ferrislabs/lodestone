@@ -1,803 +1,1253 @@
 export namespace Schemas {
-	// <Schemas>
-	export type CreateOrganizationRequest = { name: string; slug: string }
-	export type OrganizationId = string
-	export type UserId = string
-	export type OrganizationResponse = {
-		created_at: string
-		id: OrganizationId
-		name: string
-		owner_id: UserId
-		slug: string
-		updated_at: string
-	}
-	export type UpdateOrganizationRequest = { name: string; slug: string }
+  // <Schemas>
+  export type DraftStatusDto = "pending" | "approved" | "rejected";
+  export type DraftDto = {
+    body: string;
+    edited_at?: (string | null) | undefined;
+    original_body?: (string | null) | undefined;
+    original_subject?: (string | null) | undefined;
+    rejection_reason?: (string | null) | undefined;
+    reviewed_at?: (string | null) | undefined;
+    reviewed_by?: (string | null) | undefined;
+    status: DraftStatusDto;
+    subject: string;
+  };
+  export type EvidenceDto = { provenance: string; quote: string };
+  export type AssessmentDto = {
+    approach_angle: string;
+    created_at: string;
+    draft?: (null | DraftDto) | undefined;
+    evidence: Array<EvidenceDto>;
+    id: string;
+    model: string;
+    profile_revision: number;
+    prompt_version: string;
+    summary: string;
+  };
+  export type DraftOutput = { body: string; status: string; subject: string };
+  export type EvidenceRecord = { provenance: string; quote: string };
+  export type AssessmentRecord = {
+    approach_angle: string;
+    draft?: (null | DraftOutput) | undefined;
+    evidence: Array<EvidenceRecord>;
+    summary: string;
+  };
+  export type AssignTierRequest = { provider_id: string };
+  export type LeadStatusDto = "new" | "qualified" | "validated" | "rejected" | "contacted" | "uncertain";
+  export type ChangeLeadStatusRequest = { status: LeadStatusDto };
+  export type ContactDto = {
+    address: string;
+    confidence: number;
+    found_at: string;
+    id: string;
+    kind: string;
+    method: string;
+    provenance: string;
+  };
+  export type ContactRecord = { address: string; confidence: number; method: string; provenance: string };
+  export type CreateProfileRequest = { definition: Record<string, unknown>; name?: (string | null) | undefined };
+  export type PricingRequest = Partial<{ input_cents_per_mtok: number | null; output_cents_per_mtok: number | null }>;
+  export type CreateProviderRequest = {
+    api_key?: (string | null) | undefined;
+    base_url: string;
+    kind: string;
+    max_retries?: (number | null) | undefined;
+    model: string;
+    name: string;
+    pricing?: (null | PricingRequest) | undefined;
+    timeout_seconds?: (number | null) | undefined;
+  };
+  export type DraftContactDto = { address: string; confidence: number; method: string };
+  export type ProfileRefDto = { id: string; name: string };
+  export type DraftLeadDto = { domain: string; id: string; profile: ProfileRefDto; score: number };
+  export type PaginationMetadata = {
+    current_page: number;
+    first_page: number;
+    is_empty: boolean;
+    last_page?: (number | null) | undefined;
+    next_page?: (number | null) | undefined;
+    per_page: number;
+    prev_page?: (number | null) | undefined;
+    total?: (number | null) | undefined;
+  };
+  export type DataEnvelope_DraftEntryDto = {
+    data: {
+      approach_angle: string;
+      assessment_id: string;
+      contact?: (null | DraftContactDto) | undefined;
+      created_at: string;
+      draft: DraftDto;
+      evidence: Array<EvidenceDto>;
+      lead: DraftLeadDto;
+      summary: string;
+    };
+    pagination?: (null | PaginationMetadata) | undefined;
+  };
+  export type LeadDto = {
+    domain: string;
+    first_seen_at: string;
+    id: string;
+    last_seen_at: string;
+    profile: ProfileRefDto;
+    score: number;
+    status: LeadStatusDto;
+    updated_at: string;
+  };
+  export type ScoreContributionDto = {
+    contribution: number;
+    measure: number;
+    signal: string;
+    value?: (string | null) | undefined;
+    weight: number;
+  };
+  export type SignalDto = {
+    id: string;
+    kind: string;
+    observed_at: string;
+    provenance: string;
+    raw: Record<string, unknown>;
+    source: string;
+    strength: number;
+    value?: (string | null) | undefined;
+  };
+  export type DataEnvelope_LeadDetailDto = {
+    data: {
+      assessments: Array<AssessmentDto>;
+      contacts: Array<ContactDto>;
+      lead: LeadDto;
+      score_breakdown: Array<ScoreContributionDto>;
+      signals: Array<SignalDto>;
+    };
+    pagination?: (null | PaginationMetadata) | undefined;
+  };
+  export type DataEnvelope_LeadDto = {
+    data: {
+      domain: string;
+      first_seen_at: string;
+      id: string;
+      last_seen_at: string;
+      profile: ProfileRefDto;
+      score: number;
+      status: LeadStatusDto;
+      updated_at: string;
+    };
+    pagination?: (null | PaginationMetadata) | undefined;
+  };
+  export type UserId = string;
+  export type DataEnvelope_MeResponse = {
+    data: { kind: "user"; subject: string; user_id: UserId } | { client_id: string; kind: "client" };
+    pagination?: (null | PaginationMetadata) | undefined;
+  };
+  export type ProfileDto = { active: boolean; created_at: string; id: string; name: string; updated_at: string };
+  export type DataEnvelope_ProfileDetailDto = {
+    data: ProfileDto & { definition: Record<string, unknown>; revision: number };
+    pagination?: (null | PaginationMetadata) | undefined;
+  };
+  export type DataEnvelope_ProfileDto = {
+    data: { active: boolean; created_at: string; id: string; name: string; updated_at: string };
+    pagination?: (null | PaginationMetadata) | undefined;
+  };
+  export type PricingDto = { input_cents_per_mtok: number; output_cents_per_mtok: number };
+  export type DataEnvelope_ProviderDto = {
+    data: {
+      base_url: string;
+      created_at: string;
+      enabled: boolean;
+      has_api_key: boolean;
+      id: string;
+      kind: string;
+      max_retries: number;
+      model: string;
+      name: string;
+      pricing: PricingDto;
+      tiers: Array<string>;
+      timeout_seconds: number;
+      updated_at: string;
+    };
+    pagination?: (null | PaginationMetadata) | undefined;
+  };
+  export type RevisionSummaryDto = { created_at: string; created_by?: (string | null) | undefined; number: number };
+  export type DataEnvelope_RevisionDto = {
+    data: RevisionSummaryDto & { definition: Record<string, unknown> };
+    pagination?: (null | PaginationMetadata) | undefined;
+  };
+  export type TestErrorDto = { kind: string; message: string };
+  export type DataEnvelope_TestResultDto = {
+    data: {
+      error?: (null | TestErrorDto) | undefined;
+      latency_ms?: (number | null) | undefined;
+      model?: (string | null) | undefined;
+      ok: boolean;
+    };
+    pagination?: (null | PaginationMetadata) | undefined;
+  };
+  export type DataEnvelope_TierDto = {
+    data: { provider_id?: (string | null) | undefined; tier: string };
+    pagination?: (null | PaginationMetadata) | undefined;
+  };
+  export type DataEnvelope_Vec_DraftEntryDto = {
+    data: Array<{
+      approach_angle: string;
+      assessment_id: string;
+      contact?: (null | DraftContactDto) | undefined;
+      created_at: string;
+      draft: DraftDto;
+      evidence: Array<EvidenceDto>;
+      lead: DraftLeadDto;
+      summary: string;
+    }>;
+    pagination?: (null | PaginationMetadata) | undefined;
+  };
+  export type DataEnvelope_Vec_LeadDto = {
+    data: Array<{
+      domain: string;
+      first_seen_at: string;
+      id: string;
+      last_seen_at: string;
+      profile: ProfileRefDto;
+      score: number;
+      status: LeadStatusDto;
+      updated_at: string;
+    }>;
+    pagination?: (null | PaginationMetadata) | undefined;
+  };
+  export type DataEnvelope_Vec_ProfileSummaryDto = {
+    data: Array<{
+      active: boolean;
+      id: string;
+      lead_count: number;
+      name: string;
+      revision?: (number | null) | undefined;
+    }>;
+    pagination?: (null | PaginationMetadata) | undefined;
+  };
+  export type DataEnvelope_Vec_ProviderDto = {
+    data: Array<{
+      base_url: string;
+      created_at: string;
+      enabled: boolean;
+      has_api_key: boolean;
+      id: string;
+      kind: string;
+      max_retries: number;
+      model: string;
+      name: string;
+      pricing: PricingDto;
+      tiers: Array<string>;
+      timeout_seconds: number;
+      updated_at: string;
+    }>;
+    pagination?: (null | PaginationMetadata) | undefined;
+  };
+  export type DataEnvelope_Vec_RevisionSummaryDto = {
+    data: Array<{ created_at: string; created_by?: (string | null) | undefined; number: number }>;
+    pagination?: (null | PaginationMetadata) | undefined;
+  };
+  export type DataEnvelope_Vec_TierDto = {
+    data: Array<{ provider_id?: (string | null) | undefined; tier: string }>;
+    pagination?: (null | PaginationMetadata) | undefined;
+  };
+  export type DraftEntryDto = {
+    approach_angle: string;
+    assessment_id: string;
+    contact?: (null | DraftContactDto) | undefined;
+    created_at: string;
+    draft: DraftDto;
+    evidence: Array<EvidenceDto>;
+    lead: DraftLeadDto;
+    summary: string;
+  };
+  export type EditDraftRequest = Partial<{ body: string | null; subject: string | null }>;
+  export type ErrorBody = {
+    code: string;
+    details?: (Array<ErrorDetail> | null) | undefined;
+    message: string;
+    status: number;
+  };
+  export type ErrorDetail = { message: string; path: string };
+  export type LeadDetailDto = {
+    assessments: Array<AssessmentDto>;
+    contacts: Array<ContactDto>;
+    lead: LeadDto;
+    score_breakdown: Array<ScoreContributionDto>;
+    signals: Array<SignalDto>;
+  };
+  export type ProfileRecord = { id: string; name: string; revision?: (number | null) | undefined };
+  export type SignalRecord = {
+    kind: string;
+    observed_at: string;
+    provenance: string;
+    source: string;
+    value?: (string | null) | undefined;
+  };
+  export type LeadRecord = {
+    assessment?: (null | AssessmentRecord) | undefined;
+    contact?: (null | ContactRecord) | undefined;
+    domain: string;
+    first_seen_at: string;
+    last_seen_at: string;
+    lead_id: string;
+    profile: ProfileRecord;
+    score: number;
+    score_breakdown: Array<Record<string, unknown>>;
+    signals: Array<SignalRecord>;
+    status: string;
+  };
+  export type MeResponse = { kind: "user"; subject: string; user_id: UserId } | { client_id: string; kind: "client" };
+  export type ProfileDetailDto = ProfileDto & { definition: Record<string, unknown>; revision: number };
+  export type ProfileSummaryDto = {
+    active: boolean;
+    id: string;
+    lead_count: number;
+    name: string;
+    revision?: (number | null) | undefined;
+  };
+  export type ProviderDto = {
+    base_url: string;
+    created_at: string;
+    enabled: boolean;
+    has_api_key: boolean;
+    id: string;
+    kind: string;
+    max_retries: number;
+    model: string;
+    name: string;
+    pricing: PricingDto;
+    tiers: Array<string>;
+    timeout_seconds: number;
+    updated_at: string;
+  };
+  export type RejectDraftRequest = Partial<{ reason: string | null }>;
+  export type RevisionDto = RevisionSummaryDto & { definition: Record<string, unknown> };
+  export type TestResultDto = {
+    error?: (null | TestErrorDto) | undefined;
+    latency_ms?: (number | null) | undefined;
+    model?: (string | null) | undefined;
+    ok: boolean;
+  };
+  export type TierDto = { provider_id?: (string | null) | undefined; tier: string };
+  export type UpdateProfileRequest = { definition: Record<string, unknown> };
+  export type UpdateProviderRequest = Partial<{
+    api_key: string | null;
+    base_url: string | null;
+    kind: string | null;
+    max_retries: number | null;
+    model: string | null;
+    name: string | null;
+    pricing: null | PricingRequest;
+    timeout_seconds: number | null;
+  }>;
 
-	// </Schemas>
+  // </Schemas>
 }
 
 export namespace Endpoints {
-	// <Endpoints>
+  // <Endpoints>
 
-	export type get_ListOrganizations = {
-		method: 'GET'
-		path: '/api/v1/organizations'
-		requestFormat: 'json'
-		parameters: never
-		responses: { 200: Array<Schemas.OrganizationResponse>; 401: unknown }
-	}
-	export type post_CreateOrganization = {
-		method: 'POST'
-		path: '/api/v1/organizations'
-		requestFormat: 'json'
-		parameters: {
-			body: Schemas.CreateOrganizationRequest
-		}
-		responses: {
-			201: Schemas.OrganizationResponse
-			400: unknown
-			401: unknown
-			409: unknown
-		}
-	}
-	export type get_GetOrganization = {
-		method: 'GET'
-		path: '/api/v1/organizations/{organization_id}'
-		requestFormat: 'json'
-		parameters: {
-			path: { organization_id: string }
-		}
-		responses: {
-			200: Schemas.OrganizationResponse
-			401: unknown
-			403: unknown
-			404: unknown
-		}
-	}
-	export type delete_DeleteOrganization = {
-		method: 'DELETE'
-		path: '/api/v1/organizations/{organization_id}'
-		requestFormat: 'json'
-		parameters: {
-			path: { organization_id: string }
-		}
-		responses: { 204: unknown; 401: unknown; 403: unknown; 404: unknown }
-	}
-	export type patch_UpdateOrganization = {
-		method: 'PATCH'
-		path: '/api/v1/organizations/{organization_id}'
-		requestFormat: 'json'
-		parameters: {
-			path: { organization_id: string }
+  export type get_List_drafts = {
+    method: "GET";
+    path: "/api/v1/drafts";
+    requestFormat: "json";
+    parameters: {
+      query: Partial<{ profile_id: string; page: number; per_page: number }>;
+    };
+    responses: { 200: Schemas.DataEnvelope_Vec_DraftEntryDto; 400: unknown; 401: unknown; 404: unknown };
+  };
+  export type get_Get_draft = {
+    method: "GET";
+    path: "/api/v1/drafts/{assessment_id}";
+    requestFormat: "json";
+    parameters: {
+      path: { assessment_id: string };
+    };
+    responses: { 200: Schemas.DataEnvelope_DraftEntryDto; 400: unknown; 401: unknown; 404: unknown };
+  };
+  export type patch_Edit_draft = {
+    method: "PATCH";
+    path: "/api/v1/drafts/{assessment_id}";
+    requestFormat: "json";
+    parameters: {
+      path: { assessment_id: string };
 
-			body: Schemas.UpdateOrganizationRequest
-		}
-		responses: {
-			200: Schemas.OrganizationResponse
-			400: unknown
-			401: unknown
-			403: unknown
-			404: unknown
-			409: unknown
-		}
-	}
+      body: Schemas.EditDraftRequest;
+    };
+    responses: {
+      200: Schemas.DataEnvelope_DraftEntryDto;
+      400: unknown;
+      401: unknown;
+      403: unknown;
+      404: unknown;
+      409: unknown;
+      422: unknown;
+    };
+  };
+  export type post_Approve_draft = {
+    method: "POST";
+    path: "/api/v1/drafts/{assessment_id}/approve";
+    requestFormat: "json";
+    parameters: {
+      path: { assessment_id: string };
+    };
+    responses: {
+      200: Schemas.DataEnvelope_DraftEntryDto;
+      400: unknown;
+      401: unknown;
+      403: unknown;
+      404: unknown;
+      409: unknown;
+    };
+  };
+  export type post_Reject_draft = {
+    method: "POST";
+    path: "/api/v1/drafts/{assessment_id}/reject";
+    requestFormat: "json";
+    parameters: {
+      path: { assessment_id: string };
 
-	// </Endpoints>
+      body: Schemas.RejectDraftRequest;
+    };
+    responses: {
+      200: Schemas.DataEnvelope_DraftEntryDto;
+      400: unknown;
+      401: unknown;
+      403: unknown;
+      404: unknown;
+      409: unknown;
+      422: unknown;
+    };
+  };
+  export type get_Lead_detail = {
+    method: "GET";
+    path: "/api/v1/leads/{lead_id}";
+    requestFormat: "json";
+    parameters: {
+      path: { lead_id: string };
+    };
+    responses: { 200: Schemas.DataEnvelope_LeadDetailDto; 400: unknown; 401: unknown; 404: unknown };
+  };
+  export type patch_Change_lead_status = {
+    method: "PATCH";
+    path: "/api/v1/leads/{lead_id}/status";
+    requestFormat: "json";
+    parameters: {
+      path: { lead_id: string };
+
+      body: Schemas.ChangeLeadStatusRequest;
+    };
+    responses: {
+      200: Schemas.DataEnvelope_LeadDto;
+      400: unknown;
+      401: unknown;
+      403: unknown;
+      404: unknown;
+      409: unknown;
+    };
+  };
+  export type get_List_providers = {
+    method: "GET";
+    path: "/api/v1/llm/providers";
+    requestFormat: "json";
+    parameters: never;
+    responses: { 200: Schemas.DataEnvelope_Vec_ProviderDto; 401: unknown };
+  };
+  export type post_Create_provider = {
+    method: "POST";
+    path: "/api/v1/llm/providers";
+    requestFormat: "json";
+    parameters: {
+      body: Schemas.CreateProviderRequest;
+    };
+    responses: {
+      201: Schemas.DataEnvelope_ProviderDto;
+      401: unknown;
+      403: unknown;
+      409: unknown;
+      422: Schemas.ErrorBody;
+    };
+  };
+  export type get_Get_provider = {
+    method: "GET";
+    path: "/api/v1/llm/providers/{provider_id}";
+    requestFormat: "json";
+    parameters: {
+      path: { provider_id: string };
+    };
+    responses: { 200: Schemas.DataEnvelope_ProviderDto; 400: unknown; 401: unknown; 404: unknown };
+  };
+  export type delete_Delete_provider = {
+    method: "DELETE";
+    path: "/api/v1/llm/providers/{provider_id}";
+    requestFormat: "json";
+    parameters: {
+      path: { provider_id: string };
+    };
+    responses: { 204: unknown; 400: unknown; 401: unknown; 403: unknown; 404: unknown; 409: Schemas.ErrorBody };
+  };
+  export type patch_Update_provider = {
+    method: "PATCH";
+    path: "/api/v1/llm/providers/{provider_id}";
+    requestFormat: "json";
+    parameters: {
+      path: { provider_id: string };
+
+      body: Schemas.UpdateProviderRequest;
+    };
+    responses: {
+      200: Schemas.DataEnvelope_ProviderDto;
+      400: unknown;
+      401: unknown;
+      403: unknown;
+      404: unknown;
+      409: unknown;
+      422: Schemas.ErrorBody;
+    };
+  };
+  export type post_Disable_provider = {
+    method: "POST";
+    path: "/api/v1/llm/providers/{provider_id}/disable";
+    requestFormat: "json";
+    parameters: {
+      path: { provider_id: string };
+    };
+    responses: { 200: Schemas.DataEnvelope_ProviderDto; 400: unknown; 401: unknown; 403: unknown; 404: unknown };
+  };
+  export type post_Enable_provider = {
+    method: "POST";
+    path: "/api/v1/llm/providers/{provider_id}/enable";
+    requestFormat: "json";
+    parameters: {
+      path: { provider_id: string };
+    };
+    responses: { 200: Schemas.DataEnvelope_ProviderDto; 400: unknown; 401: unknown; 403: unknown; 404: unknown };
+  };
+  export type post_Test_provider = {
+    method: "POST";
+    path: "/api/v1/llm/providers/{provider_id}/test";
+    requestFormat: "json";
+    parameters: {
+      path: { provider_id: string };
+    };
+    responses: { 200: Schemas.DataEnvelope_TestResultDto; 400: unknown; 401: unknown; 403: unknown; 404: unknown };
+  };
+  export type get_List_tiers = {
+    method: "GET";
+    path: "/api/v1/llm/tiers";
+    requestFormat: "json";
+    parameters: never;
+    responses: { 200: Schemas.DataEnvelope_Vec_TierDto; 401: unknown };
+  };
+  export type put_Assign_tier = {
+    method: "PUT";
+    path: "/api/v1/llm/tiers/{tier}";
+    requestFormat: "json";
+    parameters: {
+      path: { tier: string };
+
+      body: Schemas.AssignTierRequest;
+    };
+    responses: { 200: Schemas.DataEnvelope_TierDto; 400: unknown; 401: unknown; 403: unknown; 422: Schemas.ErrorBody };
+  };
+  export type delete_Unassign_tier = {
+    method: "DELETE";
+    path: "/api/v1/llm/tiers/{tier}";
+    requestFormat: "json";
+    parameters: {
+      path: { tier: string };
+    };
+    responses: { 204: unknown; 400: unknown; 401: unknown; 403: unknown; 404: unknown };
+  };
+  export type get_Me = {
+    method: "GET";
+    path: "/api/v1/me";
+    requestFormat: "json";
+    parameters: never;
+    responses: { 200: Schemas.DataEnvelope_MeResponse; 401: unknown };
+  };
+  export type get_List_profiles = {
+    method: "GET";
+    path: "/api/v1/profiles";
+    requestFormat: "json";
+    parameters: never;
+    responses: { 200: Schemas.DataEnvelope_Vec_ProfileSummaryDto; 401: unknown };
+  };
+  export type post_Create_profile = {
+    method: "POST";
+    path: "/api/v1/profiles";
+    requestFormat: "json";
+    parameters: {
+      body: Schemas.CreateProfileRequest;
+    };
+    responses: {
+      201: Schemas.DataEnvelope_ProfileDetailDto;
+      401: unknown;
+      403: unknown;
+      409: unknown;
+      422: Schemas.ErrorBody;
+    };
+  };
+  export type post_Import_profile = {
+    method: "POST";
+    path: "/api/v1/profiles/import";
+    requestFormat: "json";
+    parameters: {
+      query: Partial<{ name: string }>;
+
+      body: Record<string, unknown>;
+    };
+    responses: {
+      201: Schemas.DataEnvelope_ProfileDetailDto;
+      401: unknown;
+      403: unknown;
+      409: unknown;
+      422: Schemas.ErrorBody;
+    };
+  };
+  export type get_Get_profile = {
+    method: "GET";
+    path: "/api/v1/profiles/{profile_id}";
+    requestFormat: "json";
+    parameters: {
+      path: { profile_id: string };
+    };
+    responses: { 200: Schemas.DataEnvelope_ProfileDetailDto; 400: unknown; 401: unknown; 404: unknown };
+  };
+  export type put_Update_profile = {
+    method: "PUT";
+    path: "/api/v1/profiles/{profile_id}";
+    requestFormat: "json";
+    parameters: {
+      path: { profile_id: string };
+
+      body: Schemas.UpdateProfileRequest;
+    };
+    responses: {
+      200: Schemas.DataEnvelope_RevisionDto;
+      201: Schemas.DataEnvelope_RevisionDto;
+      400: unknown;
+      401: unknown;
+      403: unknown;
+      404: unknown;
+      422: Schemas.ErrorBody;
+    };
+  };
+  export type post_Activate_profile = {
+    method: "POST";
+    path: "/api/v1/profiles/{profile_id}/activate";
+    requestFormat: "json";
+    parameters: {
+      path: { profile_id: string };
+    };
+    responses: { 200: Schemas.DataEnvelope_ProfileDto; 400: unknown; 401: unknown; 403: unknown; 404: unknown };
+  };
+  export type post_Deactivate_profile = {
+    method: "POST";
+    path: "/api/v1/profiles/{profile_id}/deactivate";
+    requestFormat: "json";
+    parameters: {
+      path: { profile_id: string };
+    };
+    responses: { 200: Schemas.DataEnvelope_ProfileDto; 400: unknown; 401: unknown; 403: unknown; 404: unknown };
+  };
+  export type get_Export_profile = {
+    method: "GET";
+    path: "/api/v1/profiles/{profile_id}/export";
+    requestFormat: "json";
+    parameters: {
+      path: { profile_id: string };
+    };
+    responses: { 200: Record<string, unknown>; 400: unknown; 401: unknown; 404: unknown };
+  };
+  export type get_List_leads = {
+    method: "GET";
+    path: "/api/v1/profiles/{profile_id}/leads";
+    requestFormat: "json";
+    parameters: {
+      query: Partial<{
+        status: "new" | "qualified" | "validated" | "rejected" | "contacted" | "uncertain";
+        min_score: number;
+        domain: string;
+        signal: string;
+        sort: string;
+        page: number;
+        per_page: number;
+      }>;
+      path: { profile_id: string };
+    };
+    responses: { 200: Schemas.DataEnvelope_Vec_LeadDto; 400: unknown; 401: unknown; 404: unknown };
+  };
+  export type get_Export_leads = {
+    method: "GET";
+    path: "/api/v1/profiles/{profile_id}/leads/export";
+    requestFormat: "json";
+    parameters: {
+      query: Partial<{
+        format: string;
+        status: string;
+        min_score: number;
+        domain: string;
+        signal: string;
+        sort: string;
+      }>;
+      path: { profile_id: string };
+    };
+    responses: { 200: Array<Schemas.LeadRecord>; 400: unknown; 401: unknown; 404: unknown; 422: unknown };
+  };
+  export type get_List_revisions = {
+    method: "GET";
+    path: "/api/v1/profiles/{profile_id}/revisions";
+    requestFormat: "json";
+    parameters: {
+      path: { profile_id: string };
+    };
+    responses: { 200: Schemas.DataEnvelope_Vec_RevisionSummaryDto; 400: unknown; 401: unknown; 404: unknown };
+  };
+  export type get_Get_revision = {
+    method: "GET";
+    path: "/api/v1/profiles/{profile_id}/revisions/{number}";
+    requestFormat: "json";
+    parameters: {
+      path: { profile_id: string; number: number };
+    };
+    responses: { 200: Schemas.DataEnvelope_RevisionDto; 400: unknown; 401: unknown; 404: unknown };
+  };
+
+  // </Endpoints>
 }
 
 // <EndpointByMethod>
 export type EndpointByMethod = {
-	get: {
-		'/api/v1/organizations': Endpoints.get_ListOrganizations
-		'/api/v1/organizations/{organization_id}': Endpoints.get_GetOrganization
-	}
-	post: {
-		'/api/v1/organizations': Endpoints.post_CreateOrganization
-	}
-	delete: {
-		'/api/v1/organizations/{organization_id}': Endpoints.delete_DeleteOrganization
-	}
-	patch: {
-		'/api/v1/organizations/{organization_id}': Endpoints.patch_UpdateOrganization
-	}
-}
+  get: {
+    "/api/v1/drafts": Endpoints.get_List_drafts;
+    "/api/v1/drafts/{assessment_id}": Endpoints.get_Get_draft;
+    "/api/v1/leads/{lead_id}": Endpoints.get_Lead_detail;
+    "/api/v1/llm/providers": Endpoints.get_List_providers;
+    "/api/v1/llm/providers/{provider_id}": Endpoints.get_Get_provider;
+    "/api/v1/llm/tiers": Endpoints.get_List_tiers;
+    "/api/v1/me": Endpoints.get_Me;
+    "/api/v1/profiles": Endpoints.get_List_profiles;
+    "/api/v1/profiles/{profile_id}": Endpoints.get_Get_profile;
+    "/api/v1/profiles/{profile_id}/export": Endpoints.get_Export_profile;
+    "/api/v1/profiles/{profile_id}/leads": Endpoints.get_List_leads;
+    "/api/v1/profiles/{profile_id}/leads/export": Endpoints.get_Export_leads;
+    "/api/v1/profiles/{profile_id}/revisions": Endpoints.get_List_revisions;
+    "/api/v1/profiles/{profile_id}/revisions/{number}": Endpoints.get_Get_revision;
+  };
+  patch: {
+    "/api/v1/drafts/{assessment_id}": Endpoints.patch_Edit_draft;
+    "/api/v1/leads/{lead_id}/status": Endpoints.patch_Change_lead_status;
+    "/api/v1/llm/providers/{provider_id}": Endpoints.patch_Update_provider;
+  };
+  post: {
+    "/api/v1/drafts/{assessment_id}/approve": Endpoints.post_Approve_draft;
+    "/api/v1/drafts/{assessment_id}/reject": Endpoints.post_Reject_draft;
+    "/api/v1/llm/providers": Endpoints.post_Create_provider;
+    "/api/v1/llm/providers/{provider_id}/disable": Endpoints.post_Disable_provider;
+    "/api/v1/llm/providers/{provider_id}/enable": Endpoints.post_Enable_provider;
+    "/api/v1/llm/providers/{provider_id}/test": Endpoints.post_Test_provider;
+    "/api/v1/profiles": Endpoints.post_Create_profile;
+    "/api/v1/profiles/import": Endpoints.post_Import_profile;
+    "/api/v1/profiles/{profile_id}/activate": Endpoints.post_Activate_profile;
+    "/api/v1/profiles/{profile_id}/deactivate": Endpoints.post_Deactivate_profile;
+  };
+  delete: {
+    "/api/v1/llm/providers/{provider_id}": Endpoints.delete_Delete_provider;
+    "/api/v1/llm/tiers/{tier}": Endpoints.delete_Unassign_tier;
+  };
+  put: {
+    "/api/v1/llm/tiers/{tier}": Endpoints.put_Assign_tier;
+    "/api/v1/profiles/{profile_id}": Endpoints.put_Update_profile;
+  };
+};
 
 // </EndpointByMethod>
 
 // <EndpointByMethod.Shorthands>
-export type GetEndpoints = EndpointByMethod['get']
-export type PostEndpoints = EndpointByMethod['post']
-export type DeleteEndpoints = EndpointByMethod['delete']
-export type PatchEndpoints = EndpointByMethod['patch']
+export type GetEndpoints = EndpointByMethod["get"];
+export type PatchEndpoints = EndpointByMethod["patch"];
+export type PostEndpoints = EndpointByMethod["post"];
+export type DeleteEndpoints = EndpointByMethod["delete"];
+export type PutEndpoints = EndpointByMethod["put"];
 // </EndpointByMethod.Shorthands>
 
 // <ApiClientTypes>
 export type EndpointParameters = {
-	body?: unknown
-	query?: Record<string, unknown>
-	header?: Record<string, unknown>
-	path?: Record<string, unknown>
-}
+  body?: unknown;
+  query?: Record<string, unknown>;
+  header?: Record<string, unknown>;
+  path?: Record<string, unknown>;
+};
 
-export type MutationMethod = 'post' | 'put' | 'patch' | 'delete'
-export type Method = 'get' | 'head' | 'options' | MutationMethod
+export type MutationMethod = "post" | "put" | "patch" | "delete";
+export type Method = "get" | "head" | "options" | MutationMethod;
 
-type RequestFormat = 'json' | 'form-data' | 'form-url' | 'binary' | 'text'
+type RequestFormat = "json" | "form-data" | "form-url" | "binary" | "text";
 
 export type DefaultEndpoint = {
-	parameters?: EndpointParameters | undefined
-	responses?: Record<string, unknown>
-	responseHeaders?: Record<string, unknown>
-}
+  parameters?: EndpointParameters | undefined;
+  responses?: Record<string, unknown>;
+  responseHeaders?: Record<string, unknown>;
+};
 
 export type Endpoint<TConfig extends DefaultEndpoint = DefaultEndpoint> = {
-	operationId: string
-	method: Method
-	path: string
-	requestFormat: RequestFormat
-	parameters?: TConfig['parameters']
-	meta: {
-		alias: string
-		hasParameters: boolean
-		areParametersRequired: boolean
-	}
-	responses?: TConfig['responses']
-	responseHeaders?: TConfig['responseHeaders']
-}
+  operationId: string;
+  method: Method;
+  path: string;
+  requestFormat: RequestFormat;
+  parameters?: TConfig["parameters"];
+  meta: {
+    alias: string;
+    hasParameters: boolean;
+    areParametersRequired: boolean;
+  };
+  responses?: TConfig["responses"];
+  responseHeaders?: TConfig["responseHeaders"];
+};
 
 export interface Fetcher {
-	decodePathParams?: (
-		path: string,
-		pathParams: Record<string, string>,
-	) => string
-	encodeSearchParams?: (
-		searchParams: Record<string, unknown> | undefined,
-	) => URLSearchParams
-	//
-	fetch: (input: {
-		method: Method
-		url: URL
-		urlSearchParams?: URLSearchParams | undefined
-		parameters?: EndpointParameters | undefined
-		path: string
-		overrides?: RequestInit
-		throwOnStatusError?: boolean
-	}) => Promise<Response>
-	parseResponseData?: (response: Response) => Promise<unknown>
+  decodePathParams?: (path: string, pathParams: Record<string, string>) => string;
+  encodeSearchParams?: (searchParams: Record<string, unknown> | undefined) => URLSearchParams;
+  //
+  fetch: (input: {
+    method: Method;
+    url: URL;
+    urlSearchParams?: URLSearchParams | undefined;
+    parameters?: EndpointParameters | undefined;
+    path: string;
+    overrides?: RequestInit;
+    throwOnStatusError?: boolean;
+  }) => Promise<Response>;
+  parseResponseData?: (response: Response) => Promise<unknown>;
 }
 
 export const successStatusCodes = [
-	200, 201, 202, 203, 204, 205, 206, 207, 208, 226, 300, 301, 302, 303, 304,
-	305, 306, 307, 308,
-] as const
-export type SuccessStatusCode = (typeof successStatusCodes)[number]
+  200, 201, 202, 203, 204, 205, 206, 207, 208, 226, 300, 301, 302, 303, 304, 305, 306, 307, 308,
+] as const;
+export type SuccessStatusCode = (typeof successStatusCodes)[number];
 
 export const errorStatusCodes = [
-	400, 401, 402, 403, 404, 405, 406, 407, 408, 409, 410, 411, 412, 413, 414,
-	415, 416, 417, 418, 421, 422, 423, 424, 425, 426, 428, 429, 431, 451, 500,
-	501, 502, 503, 504, 505, 506, 507, 508, 510, 511,
-] as const
-export type ErrorStatusCode = (typeof errorStatusCodes)[number]
+  400, 401, 402, 403, 404, 405, 406, 407, 408, 409, 410, 411, 412, 413, 414, 415, 416, 417, 418, 421, 422, 423, 424,
+  425, 426, 428, 429, 431, 451, 500, 501, 502, 503, 504, 505, 506, 507, 508, 510, 511,
+] as const;
+export type ErrorStatusCode = (typeof errorStatusCodes)[number];
 
 // Taken from https://github.com/unjs/fetchdts/blob/ec4eaeab5d287116171fc1efd61f4a1ad34e4609/src/fetch.ts#L3
-export interface TypedHeaders<
-	TypedHeaderValues extends Record<string, string> | unknown,
-> extends Omit<
-		Headers,
-		'append' | 'delete' | 'get' | 'getSetCookie' | 'has' | 'set' | 'forEach'
-	> {
-	/** [MDN Reference](https://developer.mozilla.org/docs/Web/API/Headers/append) */
-	append: <
-		Name extends Extract<keyof TypedHeaderValues, string> | (string & {}),
-	>(
-		name: Name,
-		value: Lowercase<Name> extends keyof TypedHeaderValues
-			? TypedHeaderValues[Lowercase<Name>]
-			: string,
-	) => void
-	/** [MDN Reference](https://developer.mozilla.org/docs/Web/API/Headers/delete) */
-	delete: <
-		Name extends Extract<keyof TypedHeaderValues, string> | (string & {}),
-	>(
-		name: Name,
-	) => void
-	/** [MDN Reference](https://developer.mozilla.org/docs/Web/API/Headers/get) */
-	get: <Name extends Extract<keyof TypedHeaderValues, string> | (string & {})>(
-		name: Name,
-	) =>
-		| (Lowercase<Name> extends keyof TypedHeaderValues
-				? TypedHeaderValues[Lowercase<Name>]
-				: string)
-		| null
-	/** [MDN Reference](https://developer.mozilla.org/docs/Web/API/Headers/getSetCookie) */
-	getSetCookie: () => string[]
-	/** [MDN Reference](https://developer.mozilla.org/docs/Web/API/Headers/has) */
-	has: <Name extends Extract<keyof TypedHeaderValues, string> | (string & {})>(
-		name: Name,
-	) => boolean
-	/** [MDN Reference](https://developer.mozilla.org/docs/Web/API/Headers/set) */
-	set: <Name extends Extract<keyof TypedHeaderValues, string> | (string & {})>(
-		name: Name,
-		value: Lowercase<Name> extends keyof TypedHeaderValues
-			? TypedHeaderValues[Lowercase<Name>]
-			: string,
-	) => void
-	forEach: (
-		callbackfn: (
-			value: TypedHeaderValues[keyof TypedHeaderValues] | (string & {}),
-			key: Extract<keyof TypedHeaderValues, string> | (string & {}),
-			parent: TypedHeaders<TypedHeaderValues>,
-		) => void,
-		thisArg?: any,
-	) => void
+export interface TypedHeaders<TypedHeaderValues extends Record<string, string> | unknown>
+  extends Omit<Headers, "append" | "delete" | "get" | "getSetCookie" | "has" | "set" | "forEach"> {
+  /** [MDN Reference](https://developer.mozilla.org/docs/Web/API/Headers/append) */
+  append: <Name extends Extract<keyof TypedHeaderValues, string> | (string & {})>(
+    name: Name,
+    value: Lowercase<Name> extends keyof TypedHeaderValues ? TypedHeaderValues[Lowercase<Name>] : string,
+  ) => void;
+  /** [MDN Reference](https://developer.mozilla.org/docs/Web/API/Headers/delete) */
+  delete: <Name extends Extract<keyof TypedHeaderValues, string> | (string & {})>(name: Name) => void;
+  /** [MDN Reference](https://developer.mozilla.org/docs/Web/API/Headers/get) */
+  get: <Name extends Extract<keyof TypedHeaderValues, string> | (string & {})>(
+    name: Name,
+  ) => (Lowercase<Name> extends keyof TypedHeaderValues ? TypedHeaderValues[Lowercase<Name>] : string) | null;
+  /** [MDN Reference](https://developer.mozilla.org/docs/Web/API/Headers/getSetCookie) */
+  getSetCookie: () => string[];
+  /** [MDN Reference](https://developer.mozilla.org/docs/Web/API/Headers/has) */
+  has: <Name extends Extract<keyof TypedHeaderValues, string> | (string & {})>(name: Name) => boolean;
+  /** [MDN Reference](https://developer.mozilla.org/docs/Web/API/Headers/set) */
+  set: <Name extends Extract<keyof TypedHeaderValues, string> | (string & {})>(
+    name: Name,
+    value: Lowercase<Name> extends keyof TypedHeaderValues ? TypedHeaderValues[Lowercase<Name>] : string,
+  ) => void;
+  forEach: (
+    callbackfn: (
+      value: TypedHeaderValues[keyof TypedHeaderValues] | (string & {}),
+      key: Extract<keyof TypedHeaderValues, string> | (string & {}),
+      parent: TypedHeaders<TypedHeaderValues>,
+    ) => void,
+    thisArg?: any,
+  ) => void;
 }
 
 /** @see https://developer.mozilla.org/en-US/docs/Web/API/Response */
 export interface TypedSuccessResponse<TSuccess, TStatusCode, THeaders>
-	extends Omit<Response, 'ok' | 'status' | 'json' | 'headers'> {
-	ok: true
-	status: TStatusCode
-	headers: never extends THeaders ? Headers : TypedHeaders<THeaders>
-	data: TSuccess
-	/** [MDN Reference](https://developer.mozilla.org/en-US/docs/Web/API/Response/json) */
-	json: () => Promise<TSuccess>
+  extends Omit<Response, "ok" | "status" | "json" | "headers"> {
+  ok: true;
+  status: TStatusCode;
+  headers: never extends THeaders ? Headers : TypedHeaders<THeaders>;
+  data: TSuccess;
+  /** [MDN Reference](https://developer.mozilla.org/en-US/docs/Web/API/Response/json) */
+  json: () => Promise<TSuccess>;
 }
 
 /** @see https://developer.mozilla.org/en-US/docs/Web/API/Response */
 export interface TypedErrorResponse<TData, TStatusCode, THeaders>
-	extends Omit<Response, 'ok' | 'status' | 'json' | 'headers'> {
-	ok: false
-	status: TStatusCode
-	headers: never extends THeaders ? Headers : TypedHeaders<THeaders>
-	data: TData
-	/** [MDN Reference](https://developer.mozilla.org/en-US/docs/Web/API/Response/json) */
-	json: () => Promise<TData>
+  extends Omit<Response, "ok" | "status" | "json" | "headers"> {
+  ok: false;
+  status: TStatusCode;
+  headers: never extends THeaders ? Headers : TypedHeaders<THeaders>;
+  data: TData;
+  /** [MDN Reference](https://developer.mozilla.org/en-US/docs/Web/API/Response/json) */
+  json: () => Promise<TData>;
 }
 
-export type TypedApiResponse<
-	TAllResponses extends Record<string | number, unknown> = {},
-	THeaders = {},
-> = {
-	[K in keyof TAllResponses]: K extends string
-		? K extends `${infer TStatusCode extends number}`
-			? TStatusCode extends SuccessStatusCode
-				? TypedSuccessResponse<
-						TAllResponses[K],
-						TStatusCode,
-						K extends keyof THeaders ? THeaders[K] : never
-					>
-				: TypedErrorResponse<
-						TAllResponses[K],
-						TStatusCode,
-						K extends keyof THeaders ? THeaders[K] : never
-					>
-			: never
-		: K extends number
-			? K extends SuccessStatusCode
-				? TypedSuccessResponse<
-						TAllResponses[K],
-						K,
-						K extends keyof THeaders ? THeaders[K] : never
-					>
-				: TypedErrorResponse<
-						TAllResponses[K],
-						K,
-						K extends keyof THeaders ? THeaders[K] : never
-					>
-			: never
-}[keyof TAllResponses]
+export type TypedApiResponse<TAllResponses extends Record<string | number, unknown> = {}, THeaders = {}> = {
+  [K in keyof TAllResponses]: K extends string
+    ? K extends `${infer TStatusCode extends number}`
+      ? TStatusCode extends SuccessStatusCode
+        ? TypedSuccessResponse<TAllResponses[K], TStatusCode, K extends keyof THeaders ? THeaders[K] : never>
+        : TypedErrorResponse<TAllResponses[K], TStatusCode, K extends keyof THeaders ? THeaders[K] : never>
+      : never
+    : K extends number
+      ? K extends SuccessStatusCode
+        ? TypedSuccessResponse<TAllResponses[K], K, K extends keyof THeaders ? THeaders[K] : never>
+        : TypedErrorResponse<TAllResponses[K], K, K extends keyof THeaders ? THeaders[K] : never>
+      : never;
+}[keyof TAllResponses];
 
-export type SafeApiResponse<TEndpoint> = TEndpoint extends {
-	responses: infer TResponses
-}
-	? TResponses extends Record<string, unknown>
-		? TypedApiResponse<
-				TResponses,
-				TEndpoint extends { responseHeaders: infer THeaders } ? THeaders : never
-			>
-		: never
-	: never
+export type SafeApiResponse<TEndpoint> = TEndpoint extends { responses: infer TResponses }
+  ? TResponses extends Record<string, unknown>
+    ? TypedApiResponse<TResponses, TEndpoint extends { responseHeaders: infer THeaders } ? THeaders : never>
+    : never
+  : never;
 
 export type InferResponseByStatus<TEndpoint, TStatusCode> = Extract<
-	SafeApiResponse<TEndpoint>,
-	{ status: TStatusCode }
->
+  SafeApiResponse<TEndpoint>,
+  { status: TStatusCode }
+>;
 
 type RequiredKeys<T> = {
-	[P in keyof T]-?: undefined extends T[P] ? never : P
-}[keyof T]
+  [P in keyof T]-?: undefined extends T[P] ? never : P;
+}[keyof T];
 
-type MaybeOptionalArg<T> =
-	RequiredKeys<T> extends never ? [config?: T] : [config: T]
-type NotNever<T> = [T] extends [never] ? false : true
+type MaybeOptionalArg<T> = RequiredKeys<T> extends never ? [config?: T] : [config: T];
+type NotNever<T> = [T] extends [never] ? false : true;
 
 // </ApiClientTypes>
 
 // <TypedStatusError>
 export class TypedStatusError<TData = unknown> extends Error {
-	response: TypedErrorResponse<TData, ErrorStatusCode, unknown>
-	status: number
-	constructor(response: TypedErrorResponse<TData, ErrorStatusCode, unknown>) {
-		super(`HTTP ${response.status}: ${response.statusText}`)
-		this.name = 'TypedStatusError'
-		this.response = response
-		this.status = response.status
-	}
+  response: TypedErrorResponse<TData, ErrorStatusCode, unknown>;
+  status: number;
+  constructor(response: TypedErrorResponse<TData, ErrorStatusCode, unknown>) {
+    super(`HTTP ${response.status}: ${response.statusText}`);
+    this.name = "TypedStatusError";
+    this.response = response;
+    this.status = response.status;
+  }
 }
 // </TypedStatusError>
 
 // <ApiClient>
 export class ApiClient {
-	baseUrl: string = ''
-	successStatusCodes = successStatusCodes
-	errorStatusCodes = errorStatusCodes
+  baseUrl: string = "";
+  successStatusCodes = successStatusCodes;
+  errorStatusCodes = errorStatusCodes;
 
-	constructor(public fetcher: Fetcher) {}
+  constructor(public fetcher: Fetcher) {}
 
-	setBaseUrl(baseUrl: string) {
-		this.baseUrl = baseUrl
-		return this
-	}
+  setBaseUrl(baseUrl: string) {
+    this.baseUrl = baseUrl;
+    return this;
+  }
 
-	/**
-	 * Replace path parameters in URL
-	 * Supports both OpenAPI format {param} and Express format :param
-	 */
-	defaultDecodePathParams = (
-		url: string,
-		params: Record<string, string>,
-	): string => {
-		return url
-			.replace(/{(\w+)}/g, (_, key: string) => params[key] || `{${key}}`)
-			.replace(
-				/:([a-zA-Z0-9_]+)/g,
-				(_, key: string) => params[key] || `:${key}`,
-			)
-	}
+  /**
+   * Replace path parameters in URL
+   * Supports both OpenAPI format {param} and Express format :param
+   */
+  defaultDecodePathParams = (url: string, params: Record<string, string>): string => {
+    return url
+      .replace(/{(\w+)}/g, (_, key: string) => params[key] || `{${key}}`)
+      .replace(/:([a-zA-Z0-9_]+)/g, (_, key: string) => params[key] || `:${key}`);
+  };
 
-	/** Uses URLSearchParams, skips null/undefined values */
-	defaultEncodeSearchParams = (
-		queryParams: Record<string, unknown> | undefined,
-	): URLSearchParams | undefined => {
-		if (!queryParams) return
+  /** Uses URLSearchParams, skips null/undefined values */
+  defaultEncodeSearchParams = (queryParams: Record<string, unknown> | undefined): URLSearchParams | undefined => {
+    if (!queryParams) return;
 
-		const searchParams = new URLSearchParams()
-		Object.entries(queryParams).forEach(([key, value]) => {
-			if (value != null) {
-				// Skip null/undefined values
-				if (Array.isArray(value)) {
-					value.forEach(
-						(val) => val != null && searchParams.append(key, String(val)),
-					)
-				} else {
-					searchParams.append(key, String(value))
-				}
-			}
-		})
+    const searchParams = new URLSearchParams();
+    Object.entries(queryParams).forEach(([key, value]) => {
+      if (value != null) {
+        // Skip null/undefined values
+        if (Array.isArray(value)) {
+          value.forEach((val) => val != null && searchParams.append(key, String(val)));
+        } else {
+          searchParams.append(key, String(value));
+        }
+      }
+    });
 
-		return searchParams
-	}
+    return searchParams;
+  };
 
-	defaultParseResponseData = async (response: Response): Promise<unknown> => {
-		const contentType = response.headers.get('content-type') ?? ''
-		if (contentType.startsWith('text/')) {
-			return await response.text()
-		}
+  defaultParseResponseData = async (response: Response): Promise<unknown> => {
+    const contentType = response.headers.get("content-type") ?? "";
+    if (contentType.startsWith("text/")) {
+      return await response.text();
+    }
 
-		if (contentType === 'application/octet-stream') {
-			return await response.arrayBuffer()
-		}
+    if (contentType === "application/octet-stream") {
+      return await response.arrayBuffer();
+    }
 
-		if (
-			contentType.includes('application/json') ||
-			(contentType.includes('application/') && contentType.includes('json')) ||
-			contentType === '*/*'
-		) {
-			try {
-				return await response.json()
-			} catch {
-				return undefined
-			}
-		}
+    if (
+      contentType.includes("application/json") ||
+      (contentType.includes("application/") && contentType.includes("json")) ||
+      contentType === "*/*"
+    ) {
+      try {
+        return await response.json();
+      } catch {
+        return undefined;
+      }
+    }
 
-		return
-	}
+    return;
+  };
 
-	// <ApiClient.get>
-	get<Path extends keyof GetEndpoints, TEndpoint extends GetEndpoints[Path]>(
-		path: Path,
-		...params: MaybeOptionalArg<
-			TEndpoint extends { parameters: infer UParams }
-				? NotNever<UParams> extends true
-					? UParams & {
-							overrides?: RequestInit
-							withResponse?: false
-							throwOnStatusError?: boolean
-						}
-					: {
-							overrides?: RequestInit
-							withResponse?: false
-							throwOnStatusError?: boolean
-						}
-				: {
-						overrides?: RequestInit
-						withResponse?: false
-						throwOnStatusError?: boolean
-					}
-		>
-	): Promise<
-		Extract<
-			InferResponseByStatus<TEndpoint, SuccessStatusCode>,
-			{ data: {} }
-		>['data']
-	>
+  // <ApiClient.get>
+  get<Path extends keyof GetEndpoints, TEndpoint extends GetEndpoints[Path]>(
+    path: Path,
+    ...params: MaybeOptionalArg<
+      TEndpoint extends { parameters: infer UParams }
+        ? NotNever<UParams> extends true
+          ? UParams & { overrides?: RequestInit; withResponse?: false; throwOnStatusError?: boolean }
+          : { overrides?: RequestInit; withResponse?: false; throwOnStatusError?: boolean }
+        : { overrides?: RequestInit; withResponse?: false; throwOnStatusError?: boolean }
+    >
+  ): Promise<Extract<InferResponseByStatus<TEndpoint, SuccessStatusCode>, { data: {} }>["data"]>;
 
-	get<Path extends keyof GetEndpoints, TEndpoint extends GetEndpoints[Path]>(
-		path: Path,
-		...params: MaybeOptionalArg<
-			TEndpoint extends { parameters: infer UParams }
-				? NotNever<UParams> extends true
-					? UParams & {
-							overrides?: RequestInit
-							withResponse?: true
-							throwOnStatusError?: boolean
-						}
-					: {
-							overrides?: RequestInit
-							withResponse?: true
-							throwOnStatusError?: boolean
-						}
-				: {
-						overrides?: RequestInit
-						withResponse?: true
-						throwOnStatusError?: boolean
-					}
-		>
-	): Promise<SafeApiResponse<TEndpoint>>
+  get<Path extends keyof GetEndpoints, TEndpoint extends GetEndpoints[Path]>(
+    path: Path,
+    ...params: MaybeOptionalArg<
+      TEndpoint extends { parameters: infer UParams }
+        ? NotNever<UParams> extends true
+          ? UParams & { overrides?: RequestInit; withResponse?: true; throwOnStatusError?: boolean }
+          : { overrides?: RequestInit; withResponse?: true; throwOnStatusError?: boolean }
+        : { overrides?: RequestInit; withResponse?: true; throwOnStatusError?: boolean }
+    >
+  ): Promise<SafeApiResponse<TEndpoint>>;
 
-	get<Path extends keyof GetEndpoints, _TEndpoint extends GetEndpoints[Path]>(
-		path: Path,
-		...params: MaybeOptionalArg<any>
-	): Promise<any> {
-		return this.request('get', path, ...params)
-	}
-	// </ApiClient.get>
+  get<Path extends keyof GetEndpoints, _TEndpoint extends GetEndpoints[Path]>(
+    path: Path,
+    ...params: MaybeOptionalArg<any>
+  ): Promise<any> {
+    return this.request("get", path, ...params);
+  }
+  // </ApiClient.get>
 
-	// <ApiClient.post>
-	post<Path extends keyof PostEndpoints, TEndpoint extends PostEndpoints[Path]>(
-		path: Path,
-		...params: MaybeOptionalArg<
-			TEndpoint extends { parameters: infer UParams }
-				? NotNever<UParams> extends true
-					? UParams & {
-							overrides?: RequestInit
-							withResponse?: false
-							throwOnStatusError?: boolean
-						}
-					: {
-							overrides?: RequestInit
-							withResponse?: false
-							throwOnStatusError?: boolean
-						}
-				: {
-						overrides?: RequestInit
-						withResponse?: false
-						throwOnStatusError?: boolean
-					}
-		>
-	): Promise<
-		Extract<
-			InferResponseByStatus<TEndpoint, SuccessStatusCode>,
-			{ data: {} }
-		>['data']
-	>
+  // <ApiClient.patch>
+  patch<Path extends keyof PatchEndpoints, TEndpoint extends PatchEndpoints[Path]>(
+    path: Path,
+    ...params: MaybeOptionalArg<
+      TEndpoint extends { parameters: infer UParams }
+        ? NotNever<UParams> extends true
+          ? UParams & { overrides?: RequestInit; withResponse?: false; throwOnStatusError?: boolean }
+          : { overrides?: RequestInit; withResponse?: false; throwOnStatusError?: boolean }
+        : { overrides?: RequestInit; withResponse?: false; throwOnStatusError?: boolean }
+    >
+  ): Promise<Extract<InferResponseByStatus<TEndpoint, SuccessStatusCode>, { data: {} }>["data"]>;
 
-	post<Path extends keyof PostEndpoints, TEndpoint extends PostEndpoints[Path]>(
-		path: Path,
-		...params: MaybeOptionalArg<
-			TEndpoint extends { parameters: infer UParams }
-				? NotNever<UParams> extends true
-					? UParams & {
-							overrides?: RequestInit
-							withResponse?: true
-							throwOnStatusError?: boolean
-						}
-					: {
-							overrides?: RequestInit
-							withResponse?: true
-							throwOnStatusError?: boolean
-						}
-				: {
-						overrides?: RequestInit
-						withResponse?: true
-						throwOnStatusError?: boolean
-					}
-		>
-	): Promise<SafeApiResponse<TEndpoint>>
+  patch<Path extends keyof PatchEndpoints, TEndpoint extends PatchEndpoints[Path]>(
+    path: Path,
+    ...params: MaybeOptionalArg<
+      TEndpoint extends { parameters: infer UParams }
+        ? NotNever<UParams> extends true
+          ? UParams & { overrides?: RequestInit; withResponse?: true; throwOnStatusError?: boolean }
+          : { overrides?: RequestInit; withResponse?: true; throwOnStatusError?: boolean }
+        : { overrides?: RequestInit; withResponse?: true; throwOnStatusError?: boolean }
+    >
+  ): Promise<SafeApiResponse<TEndpoint>>;
 
-	post<
-		Path extends keyof PostEndpoints,
-		_TEndpoint extends PostEndpoints[Path],
-	>(path: Path, ...params: MaybeOptionalArg<any>): Promise<any> {
-		return this.request('post', path, ...params)
-	}
-	// </ApiClient.post>
+  patch<Path extends keyof PatchEndpoints, _TEndpoint extends PatchEndpoints[Path]>(
+    path: Path,
+    ...params: MaybeOptionalArg<any>
+  ): Promise<any> {
+    return this.request("patch", path, ...params);
+  }
+  // </ApiClient.patch>
 
-	// <ApiClient.delete>
-	delete<
-		Path extends keyof DeleteEndpoints,
-		TEndpoint extends DeleteEndpoints[Path],
-	>(
-		path: Path,
-		...params: MaybeOptionalArg<
-			TEndpoint extends { parameters: infer UParams }
-				? NotNever<UParams> extends true
-					? UParams & {
-							overrides?: RequestInit
-							withResponse?: false
-							throwOnStatusError?: boolean
-						}
-					: {
-							overrides?: RequestInit
-							withResponse?: false
-							throwOnStatusError?: boolean
-						}
-				: {
-						overrides?: RequestInit
-						withResponse?: false
-						throwOnStatusError?: boolean
-					}
-		>
-	): Promise<
-		Extract<
-			InferResponseByStatus<TEndpoint, SuccessStatusCode>,
-			{ data: {} }
-		>['data']
-	>
+  // <ApiClient.post>
+  post<Path extends keyof PostEndpoints, TEndpoint extends PostEndpoints[Path]>(
+    path: Path,
+    ...params: MaybeOptionalArg<
+      TEndpoint extends { parameters: infer UParams }
+        ? NotNever<UParams> extends true
+          ? UParams & { overrides?: RequestInit; withResponse?: false; throwOnStatusError?: boolean }
+          : { overrides?: RequestInit; withResponse?: false; throwOnStatusError?: boolean }
+        : { overrides?: RequestInit; withResponse?: false; throwOnStatusError?: boolean }
+    >
+  ): Promise<Extract<InferResponseByStatus<TEndpoint, SuccessStatusCode>, { data: {} }>["data"]>;
 
-	delete<
-		Path extends keyof DeleteEndpoints,
-		TEndpoint extends DeleteEndpoints[Path],
-	>(
-		path: Path,
-		...params: MaybeOptionalArg<
-			TEndpoint extends { parameters: infer UParams }
-				? NotNever<UParams> extends true
-					? UParams & {
-							overrides?: RequestInit
-							withResponse?: true
-							throwOnStatusError?: boolean
-						}
-					: {
-							overrides?: RequestInit
-							withResponse?: true
-							throwOnStatusError?: boolean
-						}
-				: {
-						overrides?: RequestInit
-						withResponse?: true
-						throwOnStatusError?: boolean
-					}
-		>
-	): Promise<SafeApiResponse<TEndpoint>>
+  post<Path extends keyof PostEndpoints, TEndpoint extends PostEndpoints[Path]>(
+    path: Path,
+    ...params: MaybeOptionalArg<
+      TEndpoint extends { parameters: infer UParams }
+        ? NotNever<UParams> extends true
+          ? UParams & { overrides?: RequestInit; withResponse?: true; throwOnStatusError?: boolean }
+          : { overrides?: RequestInit; withResponse?: true; throwOnStatusError?: boolean }
+        : { overrides?: RequestInit; withResponse?: true; throwOnStatusError?: boolean }
+    >
+  ): Promise<SafeApiResponse<TEndpoint>>;
 
-	delete<
-		Path extends keyof DeleteEndpoints,
-		_TEndpoint extends DeleteEndpoints[Path],
-	>(path: Path, ...params: MaybeOptionalArg<any>): Promise<any> {
-		return this.request('delete', path, ...params)
-	}
-	// </ApiClient.delete>
+  post<Path extends keyof PostEndpoints, _TEndpoint extends PostEndpoints[Path]>(
+    path: Path,
+    ...params: MaybeOptionalArg<any>
+  ): Promise<any> {
+    return this.request("post", path, ...params);
+  }
+  // </ApiClient.post>
 
-	// <ApiClient.patch>
-	patch<
-		Path extends keyof PatchEndpoints,
-		TEndpoint extends PatchEndpoints[Path],
-	>(
-		path: Path,
-		...params: MaybeOptionalArg<
-			TEndpoint extends { parameters: infer UParams }
-				? NotNever<UParams> extends true
-					? UParams & {
-							overrides?: RequestInit
-							withResponse?: false
-							throwOnStatusError?: boolean
-						}
-					: {
-							overrides?: RequestInit
-							withResponse?: false
-							throwOnStatusError?: boolean
-						}
-				: {
-						overrides?: RequestInit
-						withResponse?: false
-						throwOnStatusError?: boolean
-					}
-		>
-	): Promise<
-		Extract<
-			InferResponseByStatus<TEndpoint, SuccessStatusCode>,
-			{ data: {} }
-		>['data']
-	>
+  // <ApiClient.delete>
+  delete<Path extends keyof DeleteEndpoints, TEndpoint extends DeleteEndpoints[Path]>(
+    path: Path,
+    ...params: MaybeOptionalArg<
+      TEndpoint extends { parameters: infer UParams }
+        ? NotNever<UParams> extends true
+          ? UParams & { overrides?: RequestInit; withResponse?: false; throwOnStatusError?: boolean }
+          : { overrides?: RequestInit; withResponse?: false; throwOnStatusError?: boolean }
+        : { overrides?: RequestInit; withResponse?: false; throwOnStatusError?: boolean }
+    >
+  ): Promise<Extract<InferResponseByStatus<TEndpoint, SuccessStatusCode>, { data: {} }>["data"]>;
 
-	patch<
-		Path extends keyof PatchEndpoints,
-		TEndpoint extends PatchEndpoints[Path],
-	>(
-		path: Path,
-		...params: MaybeOptionalArg<
-			TEndpoint extends { parameters: infer UParams }
-				? NotNever<UParams> extends true
-					? UParams & {
-							overrides?: RequestInit
-							withResponse?: true
-							throwOnStatusError?: boolean
-						}
-					: {
-							overrides?: RequestInit
-							withResponse?: true
-							throwOnStatusError?: boolean
-						}
-				: {
-						overrides?: RequestInit
-						withResponse?: true
-						throwOnStatusError?: boolean
-					}
-		>
-	): Promise<SafeApiResponse<TEndpoint>>
+  delete<Path extends keyof DeleteEndpoints, TEndpoint extends DeleteEndpoints[Path]>(
+    path: Path,
+    ...params: MaybeOptionalArg<
+      TEndpoint extends { parameters: infer UParams }
+        ? NotNever<UParams> extends true
+          ? UParams & { overrides?: RequestInit; withResponse?: true; throwOnStatusError?: boolean }
+          : { overrides?: RequestInit; withResponse?: true; throwOnStatusError?: boolean }
+        : { overrides?: RequestInit; withResponse?: true; throwOnStatusError?: boolean }
+    >
+  ): Promise<SafeApiResponse<TEndpoint>>;
 
-	patch<
-		Path extends keyof PatchEndpoints,
-		_TEndpoint extends PatchEndpoints[Path],
-	>(path: Path, ...params: MaybeOptionalArg<any>): Promise<any> {
-		return this.request('patch', path, ...params)
-	}
-	// </ApiClient.patch>
+  delete<Path extends keyof DeleteEndpoints, _TEndpoint extends DeleteEndpoints[Path]>(
+    path: Path,
+    ...params: MaybeOptionalArg<any>
+  ): Promise<any> {
+    return this.request("delete", path, ...params);
+  }
+  // </ApiClient.delete>
 
-	// <ApiClient.request>
-	/**
-	 * Generic request method with full type-safety for any endpoint
-	 */
-	request<
-		TMethod extends keyof EndpointByMethod,
-		TPath extends keyof EndpointByMethod[TMethod],
-		TEndpoint extends EndpointByMethod[TMethod][TPath],
-	>(
-		method: TMethod,
-		path: TPath,
-		...params: MaybeOptionalArg<
-			TEndpoint extends { parameters: infer UParams }
-				? NotNever<UParams> extends true
-					? UParams & {
-							overrides?: RequestInit
-							withResponse?: false
-							throwOnStatusError?: boolean
-						}
-					: {
-							overrides?: RequestInit
-							withResponse?: false
-							throwOnStatusError?: boolean
-						}
-				: {
-						overrides?: RequestInit
-						withResponse?: false
-						throwOnStatusError?: boolean
-					}
-		>
-	): Promise<
-		Extract<
-			InferResponseByStatus<TEndpoint, SuccessStatusCode>,
-			{ data: {} }
-		>['data']
-	>
+  // <ApiClient.put>
+  put<Path extends keyof PutEndpoints, TEndpoint extends PutEndpoints[Path]>(
+    path: Path,
+    ...params: MaybeOptionalArg<
+      TEndpoint extends { parameters: infer UParams }
+        ? NotNever<UParams> extends true
+          ? UParams & { overrides?: RequestInit; withResponse?: false; throwOnStatusError?: boolean }
+          : { overrides?: RequestInit; withResponse?: false; throwOnStatusError?: boolean }
+        : { overrides?: RequestInit; withResponse?: false; throwOnStatusError?: boolean }
+    >
+  ): Promise<Extract<InferResponseByStatus<TEndpoint, SuccessStatusCode>, { data: {} }>["data"]>;
 
-	request<
-		TMethod extends keyof EndpointByMethod,
-		TPath extends keyof EndpointByMethod[TMethod],
-		TEndpoint extends EndpointByMethod[TMethod][TPath],
-	>(
-		method: TMethod,
-		path: TPath,
-		...params: MaybeOptionalArg<
-			TEndpoint extends { parameters: infer UParams }
-				? NotNever<UParams> extends true
-					? UParams & {
-							overrides?: RequestInit
-							withResponse?: true
-							throwOnStatusError?: boolean
-						}
-					: {
-							overrides?: RequestInit
-							withResponse?: true
-							throwOnStatusError?: boolean
-						}
-				: {
-						overrides?: RequestInit
-						withResponse?: true
-						throwOnStatusError?: boolean
-					}
-		>
-	): Promise<SafeApiResponse<TEndpoint>>
+  put<Path extends keyof PutEndpoints, TEndpoint extends PutEndpoints[Path]>(
+    path: Path,
+    ...params: MaybeOptionalArg<
+      TEndpoint extends { parameters: infer UParams }
+        ? NotNever<UParams> extends true
+          ? UParams & { overrides?: RequestInit; withResponse?: true; throwOnStatusError?: boolean }
+          : { overrides?: RequestInit; withResponse?: true; throwOnStatusError?: boolean }
+        : { overrides?: RequestInit; withResponse?: true; throwOnStatusError?: boolean }
+    >
+  ): Promise<SafeApiResponse<TEndpoint>>;
 
-	request<
-		TMethod extends keyof EndpointByMethod,
-		TPath extends keyof EndpointByMethod[TMethod],
-		TEndpoint extends EndpointByMethod[TMethod][TPath],
-	>(
-		method: TMethod,
-		path: TPath,
-		...params: MaybeOptionalArg<any>
-	): Promise<any> {
-		const requestParams = params[0]
-		const withResponse = requestParams?.withResponse
-		const {
-			withResponse: _,
-			throwOnStatusError = withResponse ? false : true,
-			overrides,
-			...fetchParams
-		} = requestParams || {}
+  put<Path extends keyof PutEndpoints, _TEndpoint extends PutEndpoints[Path]>(
+    path: Path,
+    ...params: MaybeOptionalArg<any>
+  ): Promise<any> {
+    return this.request("put", path, ...params);
+  }
+  // </ApiClient.put>
 
-		const parametersToSend: EndpointParameters = {}
-		if (requestParams?.body !== undefined)
-			(parametersToSend as any).body = requestParams.body
-		if (requestParams?.query !== undefined)
-			(parametersToSend as any).query = requestParams.query
-		if (requestParams?.header !== undefined)
-			(parametersToSend as any).header = requestParams.header
-		if (requestParams?.path !== undefined)
-			(parametersToSend as any).path = requestParams.path
+  // <ApiClient.request>
+  /**
+   * Generic request method with full type-safety for any endpoint
+   */
+  request<
+    TMethod extends keyof EndpointByMethod,
+    TPath extends keyof EndpointByMethod[TMethod],
+    TEndpoint extends EndpointByMethod[TMethod][TPath],
+  >(
+    method: TMethod,
+    path: TPath,
+    ...params: MaybeOptionalArg<
+      TEndpoint extends { parameters: infer UParams }
+        ? NotNever<UParams> extends true
+          ? UParams & { overrides?: RequestInit; withResponse?: false; throwOnStatusError?: boolean }
+          : { overrides?: RequestInit; withResponse?: false; throwOnStatusError?: boolean }
+        : { overrides?: RequestInit; withResponse?: false; throwOnStatusError?: boolean }
+    >
+  ): Promise<Extract<InferResponseByStatus<TEndpoint, SuccessStatusCode>, { data: {} }>["data"]>;
 
-		const resolvedPath = (
-			this.fetcher.decodePathParams ?? this.defaultDecodePathParams
-		)(
-			this.baseUrl + (path as string),
-			(parametersToSend.path ?? {}) as Record<string, string>,
-		)
-		const url = new URL(resolvedPath)
-		const urlSearchParams = (
-			this.fetcher.encodeSearchParams ?? this.defaultEncodeSearchParams
-		)(parametersToSend.query)
+  request<
+    TMethod extends keyof EndpointByMethod,
+    TPath extends keyof EndpointByMethod[TMethod],
+    TEndpoint extends EndpointByMethod[TMethod][TPath],
+  >(
+    method: TMethod,
+    path: TPath,
+    ...params: MaybeOptionalArg<
+      TEndpoint extends { parameters: infer UParams }
+        ? NotNever<UParams> extends true
+          ? UParams & { overrides?: RequestInit; withResponse?: true; throwOnStatusError?: boolean }
+          : { overrides?: RequestInit; withResponse?: true; throwOnStatusError?: boolean }
+        : { overrides?: RequestInit; withResponse?: true; throwOnStatusError?: boolean }
+    >
+  ): Promise<SafeApiResponse<TEndpoint>>;
 
-		const promise = this.fetcher
-			.fetch({
-				method: method,
-				path: path as string,
-				url,
-				urlSearchParams,
-				parameters: Object.keys(fetchParams).length ? fetchParams : undefined,
-				overrides,
-				throwOnStatusError,
-			})
-			.then(async (response) => {
-				const data = await (
-					this.fetcher.parseResponseData ?? this.defaultParseResponseData
-				)(response)
-				const typedResponse = Object.assign(response, {
-					data: data,
-					json: () => Promise.resolve(data),
-				}) as SafeApiResponse<TEndpoint>
+  request<
+    TMethod extends keyof EndpointByMethod,
+    TPath extends keyof EndpointByMethod[TMethod],
+    TEndpoint extends EndpointByMethod[TMethod][TPath],
+  >(method: TMethod, path: TPath, ...params: MaybeOptionalArg<any>): Promise<any> {
+    const requestParams = params[0];
+    const withResponse = requestParams?.withResponse;
+    const {
+      withResponse: _,
+      throwOnStatusError = withResponse ? false : true,
+      overrides,
+      ...fetchParams
+    } = requestParams || {};
 
-				if (
-					throwOnStatusError &&
-					errorStatusCodes.includes(response.status as never)
-				) {
-					throw new TypedStatusError(typedResponse as never)
-				}
+    const parametersToSend: EndpointParameters = {};
+    if (requestParams?.body !== undefined) (parametersToSend as any).body = requestParams.body;
+    if (requestParams?.query !== undefined) (parametersToSend as any).query = requestParams.query;
+    if (requestParams?.header !== undefined) (parametersToSend as any).header = requestParams.header;
+    if (requestParams?.path !== undefined) (parametersToSend as any).path = requestParams.path;
 
-				return withResponse ? typedResponse : data
-			})
+    const resolvedPath = (this.fetcher.decodePathParams ?? this.defaultDecodePathParams)(
+      this.baseUrl + (path as string),
+      (parametersToSend.path ?? {}) as Record<string, string>,
+    );
+    const url = new URL(resolvedPath);
+    const urlSearchParams = (this.fetcher.encodeSearchParams ?? this.defaultEncodeSearchParams)(parametersToSend.query);
 
-		return promise as Extract<
-			InferResponseByStatus<TEndpoint, SuccessStatusCode>,
-			{ data: {} }
-		>['data']
-	}
-	// </ApiClient.request>
+    const promise = this.fetcher
+      .fetch({
+        method: method,
+        path: path as string,
+        url,
+        urlSearchParams,
+        parameters: Object.keys(fetchParams).length ? fetchParams : undefined,
+        overrides,
+        throwOnStatusError,
+      })
+      .then(async (response) => {
+        const data = await (this.fetcher.parseResponseData ?? this.defaultParseResponseData)(response);
+        const typedResponse = Object.assign(response, {
+          data: data,
+          json: () => Promise.resolve(data),
+        }) as SafeApiResponse<TEndpoint>;
+
+        if (throwOnStatusError && errorStatusCodes.includes(response.status as never)) {
+          throw new TypedStatusError(typedResponse as never);
+        }
+
+        return withResponse ? typedResponse : data;
+      });
+
+    return promise as Extract<InferResponseByStatus<TEndpoint, SuccessStatusCode>, { data: {} }>["data"];
+  }
+  // </ApiClient.request>
 }
 
 export function createApiClient(fetcher: Fetcher, baseUrl?: string) {
-	return new ApiClient(fetcher).setBaseUrl(baseUrl ?? '')
+  return new ApiClient(fetcher).setBaseUrl(baseUrl ?? "");
 }
 
 /**
