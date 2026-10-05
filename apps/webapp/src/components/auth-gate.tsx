@@ -68,7 +68,7 @@ export function AuthGate({ children }: AuthGateProps) {
 			<FullscreenMessage
 				icon={<Loader2 className="size-8 animate-spin text-orange-600" />}
 				title="Redirection vers le fournisseur d'identité…"
-				message="Vous allez être redirigé pour vous connecter"
+				message="You are being redirected to sign in"
 			/>
 		)
 	}

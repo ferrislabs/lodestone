@@ -11,8 +11,16 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as AppRouteImport } from './routes/_app'
 import { Route as AppIndexRouteImport } from './routes/_app.index'
+import { Route as AppProfilesIndexRouteImport } from './routes/_app.profiles.index'
+import { Route as AppLlmIndexRouteImport } from './routes/_app.llm.index'
 import { Route as AppLeadsIndexRouteImport } from './routes/_app.leads.index'
+import { Route as AppDraftsIndexRouteImport } from './routes/_app.drafts.index'
+import { Route as AppProfilesNewRouteImport } from './routes/_app.profiles.new'
+import { Route as AppProfilesProfileIdRouteImport } from './routes/_app.profiles.$profileId'
+import { Route as AppLlmNewRouteImport } from './routes/_app.llm.new'
+import { Route as AppLlmProviderIdRouteImport } from './routes/_app.llm.$providerId'
 import { Route as AppLeadsLeadIdRouteImport } from './routes/_app.leads.$leadId'
+import { Route as AppDraftsAssessmentIdRouteImport } from './routes/_app.drafts.$assessmentId'
 
 const AppRoute = AppRouteImport.update({
   id: '/_app',
@@ -23,9 +31,44 @@ const AppIndexRoute = AppIndexRouteImport.update({
   path: '/',
   getParentRoute: () => AppRoute,
 } as any)
+const AppProfilesIndexRoute = AppProfilesIndexRouteImport.update({
+  id: '/profiles/',
+  path: '/profiles/',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppLlmIndexRoute = AppLlmIndexRouteImport.update({
+  id: '/llm/',
+  path: '/llm/',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppLeadsIndexRoute = AppLeadsIndexRouteImport.update({
   id: '/leads/',
   path: '/leads/',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppDraftsIndexRoute = AppDraftsIndexRouteImport.update({
+  id: '/drafts/',
+  path: '/drafts/',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppProfilesNewRoute = AppProfilesNewRouteImport.update({
+  id: '/profiles/new',
+  path: '/profiles/new',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppProfilesProfileIdRoute = AppProfilesProfileIdRouteImport.update({
+  id: '/profiles/$profileId',
+  path: '/profiles/$profileId',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppLlmNewRoute = AppLlmNewRouteImport.update({
+  id: '/llm/new',
+  path: '/llm/new',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppLlmProviderIdRoute = AppLlmProviderIdRouteImport.update({
+  id: '/llm/$providerId',
+  path: '/llm/$providerId',
   getParentRoute: () => AppRoute,
 } as any)
 const AppLeadsLeadIdRoute = AppLeadsLeadIdRouteImport.update({
@@ -33,30 +76,94 @@ const AppLeadsLeadIdRoute = AppLeadsLeadIdRouteImport.update({
   path: '/leads/$leadId',
   getParentRoute: () => AppRoute,
 } as any)
+const AppDraftsAssessmentIdRoute = AppDraftsAssessmentIdRouteImport.update({
+  id: '/drafts/$assessmentId',
+  path: '/drafts/$assessmentId',
+  getParentRoute: () => AppRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof AppIndexRoute
+  '/drafts/$assessmentId': typeof AppDraftsAssessmentIdRoute
   '/leads/$leadId': typeof AppLeadsLeadIdRoute
+  '/llm/$providerId': typeof AppLlmProviderIdRoute
+  '/llm/new': typeof AppLlmNewRoute
+  '/profiles/$profileId': typeof AppProfilesProfileIdRoute
+  '/profiles/new': typeof AppProfilesNewRoute
+  '/drafts/': typeof AppDraftsIndexRoute
   '/leads/': typeof AppLeadsIndexRoute
+  '/llm/': typeof AppLlmIndexRoute
+  '/profiles/': typeof AppProfilesIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof AppIndexRoute
+  '/drafts/$assessmentId': typeof AppDraftsAssessmentIdRoute
   '/leads/$leadId': typeof AppLeadsLeadIdRoute
+  '/llm/$providerId': typeof AppLlmProviderIdRoute
+  '/llm/new': typeof AppLlmNewRoute
+  '/profiles/$profileId': typeof AppProfilesProfileIdRoute
+  '/profiles/new': typeof AppProfilesNewRoute
+  '/drafts': typeof AppDraftsIndexRoute
   '/leads': typeof AppLeadsIndexRoute
+  '/llm': typeof AppLlmIndexRoute
+  '/profiles': typeof AppProfilesIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/_app': typeof AppRouteWithChildren
   '/_app/': typeof AppIndexRoute
+  '/_app/drafts/$assessmentId': typeof AppDraftsAssessmentIdRoute
   '/_app/leads/$leadId': typeof AppLeadsLeadIdRoute
+  '/_app/llm/$providerId': typeof AppLlmProviderIdRoute
+  '/_app/llm/new': typeof AppLlmNewRoute
+  '/_app/profiles/$profileId': typeof AppProfilesProfileIdRoute
+  '/_app/profiles/new': typeof AppProfilesNewRoute
+  '/_app/drafts/': typeof AppDraftsIndexRoute
   '/_app/leads/': typeof AppLeadsIndexRoute
+  '/_app/llm/': typeof AppLlmIndexRoute
+  '/_app/profiles/': typeof AppProfilesIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/leads/$leadId' | '/leads/'
+  fullPaths:
+    | '/'
+    | '/drafts/$assessmentId'
+    | '/leads/$leadId'
+    | '/llm/$providerId'
+    | '/llm/new'
+    | '/profiles/$profileId'
+    | '/profiles/new'
+    | '/drafts/'
+    | '/leads/'
+    | '/llm/'
+    | '/profiles/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/leads/$leadId' | '/leads'
-  id: '__root__' | '/_app' | '/_app/' | '/_app/leads/$leadId' | '/_app/leads/'
+  to:
+    | '/'
+    | '/drafts/$assessmentId'
+    | '/leads/$leadId'
+    | '/llm/$providerId'
+    | '/llm/new'
+    | '/profiles/$profileId'
+    | '/profiles/new'
+    | '/drafts'
+    | '/leads'
+    | '/llm'
+    | '/profiles'
+  id:
+    | '__root__'
+    | '/_app'
+    | '/_app/'
+    | '/_app/drafts/$assessmentId'
+    | '/_app/leads/$leadId'
+    | '/_app/llm/$providerId'
+    | '/_app/llm/new'
+    | '/_app/profiles/$profileId'
+    | '/_app/profiles/new'
+    | '/_app/drafts/'
+    | '/_app/leads/'
+    | '/_app/llm/'
+    | '/_app/profiles/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -79,11 +186,60 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppIndexRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/profiles/': {
+      id: '/_app/profiles/'
+      path: '/profiles'
+      fullPath: '/profiles/'
+      preLoaderRoute: typeof AppProfilesIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/llm/': {
+      id: '/_app/llm/'
+      path: '/llm'
+      fullPath: '/llm/'
+      preLoaderRoute: typeof AppLlmIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/leads/': {
       id: '/_app/leads/'
       path: '/leads'
       fullPath: '/leads/'
       preLoaderRoute: typeof AppLeadsIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/drafts/': {
+      id: '/_app/drafts/'
+      path: '/drafts'
+      fullPath: '/drafts/'
+      preLoaderRoute: typeof AppDraftsIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/profiles/new': {
+      id: '/_app/profiles/new'
+      path: '/profiles/new'
+      fullPath: '/profiles/new'
+      preLoaderRoute: typeof AppProfilesNewRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/profiles/$profileId': {
+      id: '/_app/profiles/$profileId'
+      path: '/profiles/$profileId'
+      fullPath: '/profiles/$profileId'
+      preLoaderRoute: typeof AppProfilesProfileIdRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/llm/new': {
+      id: '/_app/llm/new'
+      path: '/llm/new'
+      fullPath: '/llm/new'
+      preLoaderRoute: typeof AppLlmNewRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/llm/$providerId': {
+      id: '/_app/llm/$providerId'
+      path: '/llm/$providerId'
+      fullPath: '/llm/$providerId'
+      preLoaderRoute: typeof AppLlmProviderIdRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/leads/$leadId': {
@@ -93,19 +249,42 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppLeadsLeadIdRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/drafts/$assessmentId': {
+      id: '/_app/drafts/$assessmentId'
+      path: '/drafts/$assessmentId'
+      fullPath: '/drafts/$assessmentId'
+      preLoaderRoute: typeof AppDraftsAssessmentIdRouteImport
+      parentRoute: typeof AppRoute
+    }
   }
 }
 
 interface AppRouteChildren {
   AppIndexRoute: typeof AppIndexRoute
+  AppDraftsAssessmentIdRoute: typeof AppDraftsAssessmentIdRoute
   AppLeadsLeadIdRoute: typeof AppLeadsLeadIdRoute
+  AppLlmProviderIdRoute: typeof AppLlmProviderIdRoute
+  AppLlmNewRoute: typeof AppLlmNewRoute
+  AppProfilesProfileIdRoute: typeof AppProfilesProfileIdRoute
+  AppProfilesNewRoute: typeof AppProfilesNewRoute
+  AppDraftsIndexRoute: typeof AppDraftsIndexRoute
   AppLeadsIndexRoute: typeof AppLeadsIndexRoute
+  AppLlmIndexRoute: typeof AppLlmIndexRoute
+  AppProfilesIndexRoute: typeof AppProfilesIndexRoute
 }
 
 const AppRouteChildren: AppRouteChildren = {
   AppIndexRoute: AppIndexRoute,
+  AppDraftsAssessmentIdRoute: AppDraftsAssessmentIdRoute,
   AppLeadsLeadIdRoute: AppLeadsLeadIdRoute,
+  AppLlmProviderIdRoute: AppLlmProviderIdRoute,
+  AppLlmNewRoute: AppLlmNewRoute,
+  AppProfilesProfileIdRoute: AppProfilesProfileIdRoute,
+  AppProfilesNewRoute: AppProfilesNewRoute,
+  AppDraftsIndexRoute: AppDraftsIndexRoute,
   AppLeadsIndexRoute: AppLeadsIndexRoute,
+  AppLlmIndexRoute: AppLlmIndexRoute,
+  AppProfilesIndexRoute: AppProfilesIndexRoute,
 }
 
 const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)

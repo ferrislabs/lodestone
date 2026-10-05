@@ -36,7 +36,7 @@ export function NavMain({ label, items }: NavMainProps) {
 					<SidebarMenuItem key={item.title}>
 						{item.disabled ? (
 							<SidebarMenuButton
-								tooltip={`${item.title} · bientôt`}
+								tooltip={`${item.title} (coming soon)`}
 								className="cursor-not-allowed rounded-lg opacity-50"
 							>
 								{item.icon ? <item.icon /> : null}
