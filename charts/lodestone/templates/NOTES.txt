@@ -1,0 +1,13 @@
+Lodestone {{ .Chart.AppVersion }} installed as {{ .Release.Name }}.
+
+Migrations ran in a pre-install/pre-upgrade hook Job. helm rollback does not revert them.
+
+Local access:
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "lodestone.fullname" . }}-webapp 8080:{{ .Values.service.port }}
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "lodestone.fullname" . }}-api 3456:{{ .Values.service.port }}
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "lodestone.fullname" . }}-api-internal {{ int .Values.config.SERVER_INTERNAL_PORT }}:{{ int .Values.config.SERVER_INTERNAL_PORT }}
+
+Secrets are referenced by name only; the chart holds no secret value.
+{{- if .Values.httpRoute.enabled }}
+Routed through HTTPRoute {{ include "lodestone.fullname" . }}: / to the webapp, /api to the API.
+{{- end }}

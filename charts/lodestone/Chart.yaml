@@ -1,0 +1,10 @@
+apiVersion: v2
+name: lodestone
+description: Lodestone lead detection service (API, webapp, migrations)
+type: application
+version: 0.1.0
+appVersion: latest
+kubeVersion: ">=1.27.0-0"
+home: https://github.com/ferrislabs/lodestone
+sources:
+  - https://github.com/ferrislabs/lodestone

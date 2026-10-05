@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": ["api", "migrator", "webapp", "config", "secrets"],
+  "properties": {
+    "imageRegistry": {"type": "string"},
+    "imagePullPolicy": {"enum": ["Always", "IfNotPresent", "Never"]},
+    "terminationMarginSeconds": {"type": "integer", "minimum": 0},
+    "config": {
+      "type": "object",
+      "required": ["DATABASE_HOST", "AUTH_ISSUER", "OUTBOUND_CONTACT"],
+      "properties": {
+        "DATABASE_HOST": {"type": "string"},
+        "AUTH_ISSUER": {"type": "string"},
+        "OUTBOUND_CONTACT": {"type": "string"},
+        "JOBS_LEASE_SECONDS": {"type": "integer", "minimum": 1},
+        "JOBS_SHUTDOWN_GRACE_SECONDS": {"type": "integer", "minimum": 0},
+        "SERVER_PORT": {"type": "integer"},
+        "SERVER_INTERNAL_PORT": {"type": "integer"}
+      }
+    },
+    "secrets": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "name": {"type": "string", "minLength": 1},
+          "key": {"type": "string", "minLength": 1}
+        },
+        "additionalProperties": false
+      }
+    },
+    "api": {
+      "type": "object",
+      "required": ["image", "replicas", "resources"],
+      "properties": {
+        "image": {
+          "type": "object",
+          "required": ["repository", "tag"],
+          "properties": {
+            "repository": {"type": "string", "minLength": 1},
+            "tag": {"type": "string"}
+          }
+        },
+        "replicas": {"type": "integer", "minimum": 0},
+        "preStopSleepSeconds": {"type": "integer", "minimum": 0},
+        "resources": {"type": "object"}
+      }
+    },
+    "migrator": {
+      "type": "object",
+      "required": ["image", "resources"],
+      "properties": {
+        "image": {
+          "type": "object",
+          "required": ["repository", "tag"],
+          "properties": {
+            "repository": {"type": "string", "minLength": 1},
+            "tag": {"type": "string"}
+          }
+        },
+        "backoffLimit": {"type": "integer", "minimum": 0},
+        "resources": {"type": "object"}
+      }
+    },
+    "webapp": {
+      "type": "object",
+      "required": ["image", "replicas", "resources", "config"],
+      "properties": {
+        "image": {
+          "type": "object",
+          "required": ["repository", "tag"],
+          "properties": {
+            "repository": {"type": "string", "minLength": 1},
+            "tag": {"type": "string"}
+          }
+        },
+        "replicas": {"type": "integer", "minimum": 0},
+        "resources": {"type": "object"},
+        "config": {
+          "type": "object",
+          "required": ["issuerUrl"],
+          "properties": {"issuerUrl": {"type": "string"}}
+        }
+      }
+    },
+    "httpRoute": {
+      "type": "object",
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "parentRefs": {"type": "array"},
+        "hostnames": {"type": "array", "items": {"type": "string"}}
+      }
+    }
+  }
+}

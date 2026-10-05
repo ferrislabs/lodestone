@@ -1,0 +1,66 @@
+config:
+  DATABASE_HOST: postgres.lodestone-db.svc
+  AUTH_ISSUER: https://auth.example.com/realms/lodestone
+  AUTH_AUDIENCE: lodestone
+  OUTBOUND_CONTACT: https://example.com/contact
+  SERVER_TRUST_FORWARDED_HEADERS: true
+  JOBS_LEASE_SECONDS: 300
+  JOBS_SHUTDOWN_GRACE_SECONDS: 30
+  ACTIVE_OBSERVABILITY: true
+  OTLP_ENDPOINT: http://otel-collector.observability.svc:4317
+  METRICS_ENDPOINT: http://otel-collector.observability.svc:4317
+
+secrets:
+  DATABASE_PASSWORD: {name: lodestone-db, key: password}
+  AUTH_CLIENT_SECRET: {name: lodestone-auth, key: client-secret}
+  LLM_SECRETS_ENCRYPTION_KEY: {name: lodestone-llm, key: encryption-key}
+  WEBHOOK_URL: {name: lodestone-webhook, key: url}
+  WEBHOOK_SECRET: {name: lodestone-webhook, key: secret}
+  FRANCE_TRAVAIL_CLIENT_ID: {name: lodestone-france-travail, key: client-id}
+  FRANCE_TRAVAIL_CLIENT_SECRET: {name: lodestone-france-travail, key: client-secret}
+
+imagePullSecrets:
+  - name: ghcr-pull
+
+api:
+  image:
+    tag: sha-abc1234
+  replicas: 2
+
+migrator:
+  image:
+    tag: sha-abc1234
+
+webapp:
+  image:
+    tag: sha-abc1234
+  replicas: 2
+  config:
+    apiUrl: https://lodestone.example.com
+    issuerUrl: https://auth.example.com/realms/lodestone
+
+httpRoute:
+  enabled: true
+  parentRefs:
+    - name: public-gateway
+      namespace: infra
+  hostnames:
+    - lodestone.example.com
+
+ingress:
+  enabled: true
+  className: nginx
+  hosts:
+    - lodestone.example.com
+  tls:
+    - secretName: lodestone-tls
+      hosts:
+        - lodestone.example.com
+
+networkPolicy:
+  enabled: true
+
+serviceMonitor:
+  enabled: true
+  labels:
+    release: prometheus
