@@ -157,13 +157,14 @@ export function DefinitionTabContent({
 							context={context}
 							agents={agents.agents}
 							problems={problems}
-							collapsed={agents.collapsed}
+							editing={agents.editing}
 							confirmingRemove={agents.confirmingRemove}
 							picking={agents.picking}
 							onOpenPicker={agents.openPicker}
 							onClosePicker={agents.closePicker}
 							onAdd={agents.add}
-							onToggleCollapsed={agents.toggleCollapsed}
+							onEdit={agents.edit}
+							onCloseEdit={agents.closeEdit}
 							onEnabled={agents.setEnabled}
 							onName={agents.setName}
 							onId={agents.setId}

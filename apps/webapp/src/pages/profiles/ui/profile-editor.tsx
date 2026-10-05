@@ -12,7 +12,11 @@ interface ProfileEditorProps {
 	saving: boolean
 	saveLabel: string
 	blockedReason?: string | null
+	confirmingReset: boolean
 	onSave: () => void
+	onRequestReset: () => void
+	onConfirmReset: () => void
+	onCancelReset: () => void
 }
 
 export function ProfileEditor({
@@ -23,7 +27,11 @@ export function ProfileEditor({
 	saving,
 	saveLabel,
 	blockedReason = null,
+	confirmingReset,
 	onSave,
+	onRequestReset,
+	onConfirmReset,
+	onCancelReset,
 }: ProfileEditorProps) {
 	return (
 		<form
@@ -44,21 +52,57 @@ export function ProfileEditor({
 					{notice}
 				</output>
 			) : null}
-			<div className="flex items-center gap-3">
-				<Button
-					type="submit"
-					disabled={saving || !dirty || blockedReason !== null}
+			{dirty ? (
+				<div
+					data-testid="save-bar"
+					className="sticky bottom-0 z-10 -mx-4 flex flex-wrap items-center justify-between gap-3 border-t bg-background px-4 py-3 md:-mx-8 md:px-8"
 				>
-					{saving ? 'Enregistrement…' : saveLabel}
-				</Button>
-				{blockedReason ? (
-					<span className="text-xs text-muted-foreground">{blockedReason}</span>
-				) : dirty ? (
-					<span className="text-xs text-muted-foreground">
-						Modifications non enregistrées
-					</span>
-				) : null}
-			</div>
+					<div className="flex flex-col text-sm">
+						<span className="font-medium">Modifications non enregistrées</span>
+						{blockedReason ? (
+							<span className="text-xs text-muted-foreground">
+								{blockedReason}
+							</span>
+						) : null}
+					</div>
+					<div className="flex flex-wrap items-center gap-2">
+						{confirmingReset ? (
+							<>
+								<Button
+									type="button"
+									variant="destructive"
+									size="sm"
+									disabled={saving}
+									onClick={onConfirmReset}
+								>
+									Confirmer l'annulation
+								</Button>
+								<Button
+									type="button"
+									variant="ghost"
+									size="sm"
+									onClick={onCancelReset}
+								>
+									Conserver mes modifications
+								</Button>
+							</>
+						) : (
+							<Button
+								type="button"
+								variant="ghost"
+								size="sm"
+								disabled={saving}
+								onClick={onRequestReset}
+							>
+								Annuler les modifications
+							</Button>
+						)}
+						<Button type="submit" disabled={saving || blockedReason !== null}>
+							{saving ? 'Enregistrement…' : saveLabel}
+						</Button>
+					</div>
+				</div>
+			) : null}
 		</form>
 	)
 }

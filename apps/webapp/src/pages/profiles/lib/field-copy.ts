@@ -77,13 +77,14 @@ export const FIELD_COPY: Readonly<Record<string, FieldCopy>> = {
 	'agents[].source.patterns[]': {
 		label: 'Motif CNAME',
 		description: "Un fournisseur et le suffixe de cible CNAME qui l'identifie.",
+		add: 'Ajouter un motif',
 	},
 	'agents[].source.patterns[].provider': {
 		label: 'Fournisseur',
 		description: 'Nom du fournisseur.',
 	},
 	'agents[].source.patterns[].target_suffix': {
-		label: 'Suffixe de la cible',
+		label: 'Suffixe cible',
 		description: 'Suffixe de la cible CNAME qui identifie le fournisseur.',
 	},
 	'agents[].source.fingerprints': {
@@ -114,6 +115,7 @@ export const FIELD_COPY: Readonly<Record<string, FieldCopy>> = {
 	[`${FINGERPRINT}.matchers[]`]: {
 		label: 'Condition',
 		description: 'Une condition sur la réponse HTTP.',
+		add: 'Ajouter une condition',
 	},
 	[`${FINGERPRINT}.matchers[].equals`]: MATCHER_EQUALS,
 	[`${FINGERPRINT}.matchers[].name`]: MATCHER_NAME,
@@ -167,7 +169,7 @@ export const FIELD_COPY: Readonly<Record<string, FieldCopy>> = {
 		description: 'Mots-clés à rechercher.',
 	},
 	'agents[].source.accept_min_keywords': {
-		label: 'Mots-clés minimum pour accepter',
+		label: 'Mots-clés distincts pour accepter sans LLM',
 		description:
 			"Nombre de mots-clés distincts requis pour accepter un candidat sans le LLM. En dessous, ou en présence d'une exclusion, il passe au tri par le LLM.",
 	},

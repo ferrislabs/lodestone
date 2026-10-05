@@ -32,4 +32,17 @@ export const PROFILE_HINTS: UiHints = {
 	fields: FIELD_COPY,
 	variants: VARIANT_TITLES,
 	messages: FORM_MESSAGES,
+	layout: {
+		'agents.source': { row: ['keywords', 'exclusions'] },
+		'agents.source.fingerprints': {
+			row: ['id', 'path', 'product'],
+			collapsed: {
+				title: 'Version et dette technique',
+				keys: ['version', 'debt_markers'],
+			},
+		},
+	},
+	choices: {
+		'agents.source.accept_min_keywords': { min: 1, max: 5 },
+	},
 }
