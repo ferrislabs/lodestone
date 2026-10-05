@@ -21,6 +21,7 @@ function source(name: string, overrides: Partial<Source> = {}): Source {
 		kind: 'source.run',
 		label_key: `source.${name}`,
 		status: 'pending',
+		mode: 'scheduled',
 		attempts: 0,
 		next_run_at: '2026-10-05T18:00:00Z',
 		last_runs: [],
@@ -62,7 +63,42 @@ describe('groupedSources', () => {
 
 	it('keeps an unknown source in a trailing group', () => {
 		const groups = groupedSources([source('mystery')])
-		expect(groups).toEqual([{ title: 'Autres', sources: [source('mystery')] }])
+		expect(groups).toEqual([
+			{ title: 'Autres', continuous: false, sources: [source('mystery')] },
+		])
+	})
+})
+
+describe('continuous sources', () => {
+	const listening = (name: string) =>
+		source(name, {
+			mode: 'continuous',
+			status: 'listening',
+			next_run_at: null,
+		})
+
+	it('collects them first in their own group and out of the families', () => {
+		const groups = groupedSources([
+			source('boamp'),
+			listening('dns_cname'),
+			listening('role_guess'),
+			listening('certificate_transparency'),
+		])
+		expect(groups.map((group) => group.title)).toEqual([
+			'Écoute continue',
+			'Marchés publics',
+		])
+		expect(groups[0]?.continuous).toBe(true)
+		expect(groups[0]?.sources.map((item) => item.source)).toEqual([
+			'certificate_transparency',
+			'dns_cname',
+			'role_guess',
+		])
+	})
+
+	it('keeps polling while a listener is shown', () => {
+		expect(shouldPoll([listening('dns_cname')], {}, NOW)).toBe(true)
+		expect(shouldPoll([source('boamp')], {}, NOW)).toBe(false)
 	})
 })
 

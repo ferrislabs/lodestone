@@ -161,6 +161,9 @@ describe('source run errors', () => {
 		expect(translateApiMessage('Conflict: source is already running')).toBe(
 			'La source est déjà en cours',
 		)
+		expect(translateApiMessage('Conflict: source listens continuously')).toBe(
+			"La source écoute en continu, il n'y a rien à lancer",
+		)
 		expect(translateApiMessage('source has no scheduled job')).toBe(
 			"La source n'a pas de tâche planifiée",
 		)

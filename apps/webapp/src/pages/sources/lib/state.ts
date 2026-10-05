@@ -1,5 +1,9 @@
 import { formatDateTime, formatRelative } from '#/lib/format'
 import { sourceLabel } from '#/lib/labels'
+import {
+	CONTINUOUS_GROUP_TITLE,
+	isContinuous,
+} from '#/pages/sources/lib/listener'
 import type {
 	Source,
 	SourceRun,
@@ -108,23 +112,51 @@ export function shouldPoll(
 	now: number,
 ): boolean {
 	return (
-		sources.some((source) => sourceState(source) === 'running') ||
-		activeTriggers(sources, triggeredAt, now).size > 0
+		sources.some(
+			(source) => isContinuous(source) || sourceState(source) === 'running',
+		) || activeTriggers(sources, triggeredAt, now).size > 0
 	)
 }
 
-export function groupedSources(
-	sources: readonly Source[],
-): { title: string; sources: Source[] }[] {
+export interface SourceGroup {
+	title: string
+	continuous: boolean
+	sources: Source[]
+}
+
+export function groupedSources(sources: readonly Source[]): SourceGroup[] {
 	const known = new Set(SOURCE_GROUPS.flatMap((group) => group.sources))
-	const groups = SOURCE_GROUPS.map((group) => ({
-		title: group.title,
-		sources: group.sources.flatMap((name) =>
+	const inOrder = SOURCE_GROUPS.flatMap((group) =>
+		group.sources.flatMap((name) =>
 			sources.filter((source) => source.source === name),
 		),
+	)
+	const continuous: SourceGroup = {
+		title: CONTINUOUS_GROUP_TITLE,
+		continuous: true,
+		sources: [
+			...inOrder.filter(isContinuous),
+			...sources.filter(
+				(source) => !known.has(source.source) && isContinuous(source),
+			),
+		],
+	}
+	const scheduled = SOURCE_GROUPS.map((group) => ({
+		title: group.title,
+		continuous: false,
+		sources: group.sources.flatMap((name) =>
+			sources.filter(
+				(source) => source.source === name && !isContinuous(source),
+			),
+		),
 	}))
-	const others = sources.filter((source) => !known.has(source.source))
-	if (others.length > 0) groups.push({ title: 'Autres', sources: others })
+	const others = sources.filter(
+		(source) => !known.has(source.source) && !isContinuous(source),
+	)
+	const groups = [continuous, ...scheduled]
+	if (others.length > 0) {
+		groups.push({ title: 'Autres', continuous: false, sources: others })
+	}
 	return groups.filter((group) => group.sources.length > 0)
 }
 

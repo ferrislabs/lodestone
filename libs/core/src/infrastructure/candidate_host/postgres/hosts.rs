@@ -20,6 +20,34 @@ impl PgCandidateHosts {
     }
 }
 
+impl PgCandidateHosts {
+    #[tracing::instrument(skip(self), fields(db.system = "postgresql", db.operation = "select", db.table = "candidate_hosts"), err)]
+    pub async fn count_due(
+        &self,
+        source: SourceName,
+        checked_before: DateTime<Utc>,
+    ) -> Result<u64, CoreError> {
+        let count = sqlx::query_scalar!(
+            r#"
+            SELECT COUNT(*) AS "count!"
+            FROM candidate_hosts h
+            LEFT JOIN host_source_checks c ON c.host = h.host AND c.source = $1
+            WHERE (c.checked_at IS NULL OR c.checked_at < $2)
+              AND NOT EXISTS (
+                  SELECT 1 FROM suppression_list s WHERE s.kind = 'domain' AND s.value = h.domain
+              )
+            "#,
+            source.as_str(),
+            checked_before,
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+        u64::try_from(count)
+            .map_err(|_| CoreError::Internal("due host count is out of range".to_owned()))
+    }
+}
+
 impl CandidateHosts for PgCandidateHosts {
     #[tracing::instrument(skip(self, hosts), fields(db.system = "postgresql", db.operation = "upsert", db.table = "candidate_hosts", batch = hosts.len()), err)]
     async fn upsert(&self, hosts: &[CandidateHost]) -> Result<u64, CoreError> {

@@ -3,7 +3,7 @@ use axum::{
     extract::{Path, State},
 };
 use lodestone_core::{
-    JobStatus, ScheduledJob, SourceName, SourceRunRecord,
+    JobStatus, ListenerStatus, ScheduledJob, SourceName, SourceRunRecord, is_continuous,
     schedule::{schedule_key, source_of_schedule_key},
 };
 use serde::Serialize;
@@ -53,13 +53,63 @@ impl From<&SourceRunRecord> for SourceRunDto {
 }
 
 #[derive(Debug, Serialize, PartialEq, Eq, ToSchema)]
+pub struct ListenerDto {
+    /// One of `standby`, `listening`, `idle`, `idle_no_agent`, `error`, `stopped`, `stale`.
+    pub state: String,
+    /// Instance currently holding the listener, when one does.
+    pub holder: Option<String>,
+    #[schema(format = DateTime)]
+    pub last_activity_at: Option<String>,
+    pub last_error: Option<String>,
+    pub items_total: u64,
+    pub signals_total: u64,
+    /// Work waiting: lag in tiles (certificate transparency), due hosts or due contact targets.
+    pub backlog: Option<u64>,
+    /// Last time the holder reported in; a listener silent for too long is `stale`.
+    #[schema(format = DateTime)]
+    pub updated_at: Option<String>,
+}
+
+impl ListenerDto {
+    fn from_status(status: Option<&ListenerStatus>) -> Self {
+        match status {
+            Some(status) => Self {
+                state: status.state.as_str().to_owned(),
+                holder: status.holder.clone(),
+                last_activity_at: status.last_activity_at.map(|at| at.to_rfc3339()),
+                last_error: status.last_error.clone(),
+                items_total: status.items_total,
+                signals_total: status.signals_total,
+                backlog: status.backlog,
+                updated_at: Some(status.updated_at.to_rfc3339()),
+            },
+            None => Self {
+                state: "stopped".to_owned(),
+                holder: None,
+                last_activity_at: None,
+                last_error: None,
+                items_total: 0,
+                signals_total: 0,
+                backlog: None,
+                updated_at: None,
+            },
+        }
+    }
+}
+
+#[derive(Debug, Serialize, PartialEq, Eq, ToSchema)]
 pub struct SourceDto {
     pub source: String,
+    /// `continuous` for sources that listen around the clock, `scheduled` for recurring jobs.
+    pub mode: String,
+    /// Listener state of a continuous source; absent for scheduled sources.
+    pub listener: Option<ListenerDto>,
     /// Job kind: `source.run` or `llm.qualify`.
     pub kind: String,
     /// Translation key of the source label.
     pub label_key: String,
-    /// One of `pending`, `running`, `succeeded`, `failed`, `unavailable`.
+    /// One of `pending`, `running`, `succeeded`, `failed`, `unavailable` for scheduled sources;
+    /// the listener state for continuous ones.
     pub status: String,
     /// Why the source has no job; set only when `status` is `unavailable`.
     /// One of `missing_credentials`, `not_scheduled`.
@@ -92,6 +142,8 @@ impl SourceDto {
         let running = job.status == JobStatus::Running;
         Self {
             source: source.as_str().to_owned(),
+            mode: "scheduled".to_owned(),
+            listener: None,
             kind: job.kind.as_str().to_owned(),
             label_key: label_key(source),
             status: job.status.as_str().to_owned(),
@@ -105,6 +157,29 @@ impl SourceDto {
         }
     }
 
+    fn continuous(
+        source: SourceName,
+        status: Option<&ListenerStatus>,
+        runs: &[&SourceRunRecord],
+    ) -> Self {
+        let listener = ListenerDto::from_status(status);
+        Self {
+            source: source.as_str().to_owned(),
+            mode: "continuous".to_owned(),
+            kind: kind_of(source).to_owned(),
+            label_key: label_key(source),
+            status: listener.state.clone(),
+            unavailable_reason: None,
+            next_run_at: None,
+            attempts: 0,
+            lease_until: None,
+            running_since: None,
+            last_error: listener.last_error.clone(),
+            last_runs: runs.iter().map(|run| SourceRunDto::from(*run)).collect(),
+            listener: Some(listener),
+        }
+    }
+
     fn unavailable(source: SourceName, runs: &[&SourceRunRecord]) -> Self {
         let reason = match source {
             SourceName::FranceTravail => "missing_credentials",
@@ -112,6 +187,8 @@ impl SourceDto {
         };
         Self {
             source: source.as_str().to_owned(),
+            mode: "scheduled".to_owned(),
+            listener: None,
             kind: kind_of(source).to_owned(),
             label_key: label_key(source),
             status: "unavailable".to_owned(),
@@ -147,7 +224,7 @@ fn parse_source(raw: &str) -> Result<SourceName, ApiError> {
     tag = "sources",
     security(("bearer_auth" = [])),
     responses(
-        (status = 200, description = "Every known source with its job state and latest runs; a source without a job is `unavailable`", body = DataEnvelope<Vec<SourceDto>>),
+        (status = 200, description = "Every known source with its job state or listener state and latest runs; a scheduled source without a job is `unavailable`", body = DataEnvelope<Vec<SourceDto>>),
         (status = 401, description = "Missing, malformed, invalid or expired bearer token"),
     )
 )]
@@ -155,6 +232,7 @@ pub async fn list_sources(
     State(state): State<AppState>,
 ) -> Result<Response<Vec<SourceDto>>, ApiError> {
     let schedule = state.usecase.list_source_schedule().await?;
+    let listeners = state.usecase.list_listener_statuses().await?;
     let sources = SourceName::ALL
         .into_iter()
         .map(|source| {
@@ -163,6 +241,12 @@ pub async fn list_sources(
                 .iter()
                 .filter(|run| run.source == source)
                 .collect();
+            if is_continuous(source) {
+                let status = listeners
+                    .iter()
+                    .find(|listener| listener.name == source.as_str());
+                return SourceDto::continuous(source, status, &runs);
+            }
             match schedule
                 .jobs
                 .iter()
@@ -200,6 +284,9 @@ pub async fn run_source(
         return Err(ApiError::Forbidden);
     }
     let source = parse_source(&raw)?;
+    if is_continuous(source) {
+        return Err(ApiError::Conflict("source listens continuously".to_owned()));
+    }
     match state.usecase.run_job_now(&schedule_key(source)).await {
         Ok(job) => Ok(Response::Accepted(SourceDto::scheduled(source, &job, &[]))),
         Err(common::CoreError::NotFound) => Err(ApiError::NotFoundBecause(

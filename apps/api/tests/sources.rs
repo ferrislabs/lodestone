@@ -233,6 +233,97 @@ async fn list_shows_every_source_with_states_and_last_runs(pool: PgPool) {
     );
 }
 
+#[sqlx::test(migrations = "../../migrations")]
+async fn continuous_sources_report_their_listener_and_refuse_run_now(pool: PgPool) {
+    let api = Api::new(pool.clone()).await;
+    api.schedule("source.run", "source:boamp", 6).await;
+    sqlx::query(
+        "INSERT INTO listeners (name, holder, state, last_activity_at, items_total, signals_total, backlog, updated_at)
+         VALUES ('dns_cname', 'node-a-1', 'listening', now(), 40, 5, 12, now())",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO listeners (name, holder, state, last_error, updated_at)
+         VALUES ('http_probe', 'node-a-1', 'error', 'dns down', now())",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let listed = api.list().await;
+
+    let dns = entry(&listed, "dns_cname");
+    assert_eq!(dns["mode"], "continuous");
+    assert_eq!(dns["status"], "listening");
+    assert_eq!(dns["listener"]["state"], "listening");
+    assert_eq!(dns["listener"]["holder"], "node-a-1");
+    assert_eq!(dns["listener"]["items_total"], 40);
+    assert_eq!(dns["listener"]["signals_total"], 5);
+    assert_eq!(dns["listener"]["backlog"], 12);
+    assert!(dns["listener"]["last_activity_at"].is_string());
+    assert!(dns["next_run_at"].is_null());
+    let probe = entry(&listed, "http_probe");
+    assert_eq!(probe["listener"]["state"], "error");
+    assert_eq!(probe["listener"]["last_error"], "dns down");
+    let silent = entry(&listed, "role_guess");
+    assert_eq!(silent["mode"], "continuous");
+    assert_eq!(silent["listener"]["state"], "stopped");
+    for name in [
+        "certificate_transparency",
+        "dns_cname",
+        "http_probe",
+        "security_txt",
+        "public_page",
+        "role_guess",
+    ] {
+        assert_eq!(entry(&listed, name)["mode"], "continuous", "{name}");
+    }
+    let boamp = entry(&listed, "boamp");
+    assert_eq!(boamp["mode"], "scheduled");
+    assert!(boamp["listener"].is_null());
+    assert_eq!(entry(&listed, "llm_qualification")["mode"], "scheduled");
+
+    for name in ["dns_cname", "certificate_transparency", "role_guess"] {
+        let (status, body) = api
+            .call(Method::POST, &format!("/api/v1/sources/{name}/run"))
+            .await;
+        assert_eq!(status, StatusCode::CONFLICT, "{body}");
+        assert_eq!(body["message"], "Conflict: source listens continuously");
+    }
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_silent_listener_is_reported_stale(pool: PgPool) {
+    let api = Api::new(pool.clone()).await;
+    sqlx::query(
+        "INSERT INTO listeners (name, holder, state, updated_at) VALUES
+         ('dns_cname', 'node-a-1', 'listening', now() - interval '10 minutes'),
+         ('http_probe', 'node-a-1', 'listening', now() - interval '10 seconds'),
+         ('role_guess', NULL, 'standby', now() - interval '10 minutes'),
+         ('public_page', 'node-a-1', 'stopped', now() - interval '10 minutes')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let listed = api.list().await;
+
+    assert_eq!(entry(&listed, "dns_cname")["listener"]["state"], "stale");
+    assert_eq!(entry(&listed, "dns_cname")["status"], "stale");
+    assert!(entry(&listed, "dns_cname")["listener"]["updated_at"].is_string());
+    assert_eq!(
+        entry(&listed, "http_probe")["listener"]["state"],
+        "listening"
+    );
+    assert_eq!(entry(&listed, "role_guess")["listener"]["state"], "standby");
+    assert_eq!(
+        entry(&listed, "public_page")["listener"]["state"],
+        "stopped"
+    );
+}
+
 #[test]
 fn the_endpoints_are_documented() {
     let spec = serde_json::to_value(api::openapi::ApiDoc::openapi()).unwrap();

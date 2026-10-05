@@ -160,3 +160,74 @@ async fn sources_are_independent(pool: PgPool) {
         1
     );
 }
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn count_due_matches_the_due_listing(pool: PgPool) {
+    let repo = PgCandidateHosts::new(pool);
+    repo.upsert(&[
+        host("a.acme.com", HostOrigin::Import, 1, 1),
+        host("b.acme.com", HostOrigin::Import, 1, 1),
+    ])
+    .await
+    .unwrap();
+    assert_eq!(
+        repo.count_due(SourceName::DnsCname, at(100)).await.unwrap(),
+        2
+    );
+    let checked = Hostname::parse("a.acme.com").unwrap();
+    repo.mark_checked(&[checked], SourceName::DnsCname, at(200))
+        .await
+        .unwrap();
+    assert_eq!(
+        repo.count_due(SourceName::DnsCname, at(100)).await.unwrap(),
+        1
+    );
+    assert_eq!(
+        repo.count_due(SourceName::HttpProbe, at(100))
+            .await
+            .unwrap(),
+        2
+    );
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn failed_hosts_wait_for_the_revisit_and_new_hosts_come_first(pool: PgPool) {
+    let repo = PgCandidateHosts::new(pool);
+    let revisit = std::time::Duration::from_secs(720 * 3600);
+    let revisit_delta = chrono::Duration::from_std(revisit).unwrap();
+    repo.upsert(&[host("a-failing.acme.com", HostOrigin::Import, 1, 1)])
+        .await
+        .unwrap();
+    let now = at(10_000);
+    repo.mark_checked(
+        &[Hostname::parse("a-failing.acme.com").unwrap()],
+        SourceName::DnsCname,
+        now,
+    )
+    .await
+    .unwrap();
+    repo.upsert(&[host("z-new.acme.com", HostOrigin::Import, 5, 5)])
+        .await
+        .unwrap();
+
+    let due = repo
+        .list_due(SourceName::DnsCname, now - revisit_delta, 10)
+        .await
+        .unwrap();
+    assert_eq!(names(&due), vec!["z-new.acme.com"]);
+
+    let transient = lodestone_core::transient_checked_at(now, revisit);
+    repo.mark_checked(
+        &[Hostname::parse("z-new.acme.com").unwrap()],
+        SourceName::DnsCname,
+        transient,
+    )
+    .await
+    .unwrap();
+    let in_two_hours = now + chrono::Duration::hours(2);
+    let due = repo
+        .list_due(SourceName::DnsCname, in_two_hours - revisit_delta, 10)
+        .await
+        .unwrap();
+    assert_eq!(names(&due), vec!["z-new.acme.com"]);
+}

@@ -20,6 +20,7 @@ function source(name: string, overrides: Partial<Source> = {}): Source {
 		kind: 'source.run',
 		label_key: `source.${name}`,
 		status: 'pending',
+		mode: 'scheduled',
 		attempts: 0,
 		next_run_at: '2026-10-05T14:00:00Z',
 		last_runs: [],
@@ -67,6 +68,49 @@ const SOURCES: Source[] = [
 		next_run_at: null,
 	}),
 ]
+
+function listening(
+	name: string,
+	listener: Partial<NonNullable<Source['listener']>> = {},
+): Source {
+	return source(name, {
+		mode: 'continuous',
+		status: listener.state ?? 'listening',
+		next_run_at: null,
+		listener: {
+			state: 'listening',
+			holder: 'node-a-1',
+			last_activity_at: '2026-10-05T11:57:00Z',
+			items_total: 1200,
+			signals_total: 8,
+			backlog: 12,
+			...listener,
+		},
+	})
+}
+
+const LISTENERS: Source[] = [
+	listening('certificate_transparency', { backlog: 42 }),
+	listening('dns_cname', { backlog: 1 }),
+	listening('http_probe', {
+		state: 'standby',
+		holder: null,
+		last_activity_at: null,
+		backlog: null,
+	}),
+	listening('security_txt', { state: 'idle_no_agent', backlog: 0 }),
+	listening('public_page', {
+		state: 'error',
+		last_error: 'upstream error: dns down',
+		backlog: 3,
+	}),
+	listening('role_guess', { state: 'idle', backlog: 5 }),
+]
+
+const STALE_LISTENER = listening('dns_cname', {
+	state: 'stale',
+	updated_at: '2026-10-05T11:50:00Z',
+})
 
 function renderPage(
 	overrides: Partial<Parameters<typeof SourcesPage>[0]> = {},
@@ -179,5 +223,84 @@ describe('SourcesPage', () => {
 			sources: [],
 		})
 		expect(screen.getByRole('alert').textContent).toBe('Serveur injoignable')
+	})
+
+	describe('continuous listeners', () => {
+		function renderListeners() {
+			return renderPage({ sources: [...LISTENERS, ...SOURCES] })
+		}
+
+		it('shows them in their own group before the scheduled ones', () => {
+			renderListeners()
+			const regions = screen.getAllByRole('region')
+			expect(regions[0]?.getAttribute('aria-label')).toBe('Écoute continue')
+			const group = within(
+				screen.getByRole('region', { name: 'Écoute continue' }),
+			)
+			expect(group.getAllByRole('row').length).toBe(1 + LISTENERS.length)
+			expect(group.queryByRole('button')).toBeNull()
+		})
+
+		it('labels the listener states', () => {
+			renderListeners()
+			expect(
+				row('Transparence des certificats').getByText('En écoute'),
+			).toBeTruthy()
+			expect(
+				row('Sonde HTTP').getByText('En veille (autre instance)'),
+			).toBeTruthy()
+			expect(
+				row('security\\.txt').getByText('Inactif (aucun agent)'),
+			).toBeTruthy()
+			expect(row('Page publique').getByText('Erreur')).toBeTruthy()
+			expect(
+				row('Page publique').getByText('upstream error: dns down'),
+			).toBeTruthy()
+			expect(row('Adresse de rôle devinée').getByText('En écoute')).toBeTruthy()
+		})
+
+		it('shows the last activity relative to now', () => {
+			renderListeners()
+			expect(
+				row('Transparence des certificats').getByText('il y a 3 minutes'),
+			).toBeTruthy()
+			expect(row('Sonde HTTP').getByText('Aucune activité')).toBeTruthy()
+		})
+
+		it('labels the backlog per source', () => {
+			renderListeners()
+			expect(
+				row('Transparence des certificats').getByText(
+					'En attente : 42 tuiles de retard',
+				),
+			).toBeTruthy()
+			expect(
+				row('DNS CNAME').getByText('En attente : 1 hôte à sonder'),
+			).toBeTruthy()
+			expect(
+				row('Page publique').getByText('En attente : 3 cibles de contact'),
+			).toBeTruthy()
+			expect(row('Sonde HTTP').getByText('—')).toBeTruthy()
+		})
+
+		it('flags a silent listener with its last update and an explanation', () => {
+			renderPage({ sources: [STALE_LISTENER] })
+			const dns = row('DNS CNAME')
+			expect(dns.getByText('Sans nouvelles')).toBeTruthy()
+			expect(
+				dns.getByText(
+					/dernière mise à jour il y a 10 minutes\. L'instance qui écoutait ne répond plus ; une autre prendra le relais\./,
+				),
+			).toBeTruthy()
+		})
+
+		it('shows the totals', () => {
+			renderListeners()
+			expect(
+				row('Transparence des certificats').getByText(
+					/1\s200 éléments traités, 8 signaux/,
+				),
+			).toBeTruthy()
+		})
 	})
 })

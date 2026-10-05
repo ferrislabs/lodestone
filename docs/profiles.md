@@ -80,12 +80,23 @@ Validation paths include the agent index, for example `agents[1].source.keywords
 
 ## Run a source now
 
-Each source runs on a recurring job, so an edited agent otherwise waits for the next interval. The Sources screen (Configuration > Sources) lists every source with its state, next run and latest run; "Lancer maintenant" moves the pending job to the present. Each agent card has a "Lancer la source" action for the same effect.
+Sources come in two modes (ADR 0006).
 
-- `GET /api/v1/sources` lists every known source with its job state and its latest runs. A source without a job, for example `france_travail` without credentials, has `status: "unavailable"`.
-- `POST /api/v1/sources/{source}/run` answers 202 with the updated job. It answers 409 when the source is already running, 404 for an unknown source or one without a job, and 403 for service accounts. `llm_qualification` is the qualification job.
+- **Continuous** sources listen around the clock inside the binary: `certificate_transparency`, `dns_cname`, `http_probe`, `security_txt`, `public_page` and `role_guess`. They have no recurring job and nothing to run on demand: an edited agent is picked up on the listener's next loop (a few seconds when idle), and a new certificate or lead flows through the pipeline within minutes. A listener is active while at least one enabled agent of its kind exists in an active profile (contact finders are always active); otherwise it is "Inactif (aucun agent)". With several replicas one holds each listener at a time (Postgres advisory lock); the others show "En veille (autre instance)" and take over when it stops.
+- **Scheduled** sources (`boamp`, `decp`, `ted`, `france_travail`, `ats`, `llm_qualification`) run on a recurring job, so an edited agent otherwise waits for the next interval. "Lancer maintenant" on the Sources screen (Configuration > Sources), or "Lancer la source" on an agent card, moves the pending job to the present.
 
-The worker picks the job up on its next poll. The run covers every active profile with an enabled agent of that kind, using the saved revisions only.
+The Sources screen shows continuous sources in their own "Écoute continue" group with the listener state, last activity, backlog (tiles of lag for certificate transparency, hosts to probe, contact targets), totals and last error. Agent cards of continuous kinds show an "En écoute" status line instead of the run button.
+
+- `GET /api/v1/sources` lists every known source. `mode` is `continuous` or `scheduled`. A continuous source carries a `listener` object (`state`, `holder`, `last_activity_at`, `last_error`, `items_total`, `signals_total`, `backlog`) and `status` mirrors the listener state; a scheduled source carries its job state, and one without a job, for example `france_travail` without credentials, has `status: "unavailable"`. Both list their latest runs; a continuous source records a run only for a loop that processed at least one item.
+- `POST /api/v1/sources/{source}/run` answers 202 with the updated job. It answers 409 when the source is already running or listens continuously, 404 for an unknown source or one without a job, and 403 for service accounts. `llm_qualification` is the qualification job.
+
+For a scheduled source the worker picks the job up on its next poll. The run covers every active profile with an enabled agent of that kind, using the saved revisions only.
+
+A holder refreshes its status every `LISTENER_IDLE_SECONDS`, even in the middle of a long step. A listener silent for longer than `max(3 × LISTENER_IDLE_SECONDS, 120 s)` is reported `stale` ("Sans nouvelles"): its instance no longer answers and another replica takes over.
+
+A host or domain whose lookup, probe or crawl fails is marked checked like a success, so it waits for the normal revisit interval instead of being retried on every loop. Timeouts and rate limits retry after one hour.
+
+`LISTENER_IDLE_SECONDS` (default 15) is the sleep after a loop that found nothing; `LISTENER_LOCK_RETRY_SECONDS` (default 15) is how often a standby replica retries the lock.
 
 ## Older versions
 

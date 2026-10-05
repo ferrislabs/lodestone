@@ -1,6 +1,9 @@
 use std::{
     collections::{BTreeSet, HashSet},
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicU64, Ordering},
+    },
     time::Duration,
 };
 
@@ -41,6 +44,14 @@ pub struct CtSource<F: Fetcher, H: CandidateHosts, C: CtCursors> {
     cursors: Arc<C>,
     settings: CtSettings,
     logs: Mutex<Option<CachedLogs>>,
+    tiles_read: AtomicU64,
+    lag_tiles: AtomicU64,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct CtPass {
+    pub tiles_read: u64,
+    pub lag_tiles: u64,
 }
 
 pub fn label_filter(profiles: &[ActiveProfile]) -> HashSet<String> {
@@ -89,6 +100,15 @@ where
             cursors,
             settings,
             logs: Mutex::new(None),
+            tiles_read: AtomicU64::new(0),
+            lag_tiles: AtomicU64::new(0),
+        }
+    }
+
+    pub fn last_pass(&self) -> CtPass {
+        CtPass {
+            tiles_read: self.tiles_read.load(Ordering::Relaxed),
+            lag_tiles: self.lag_tiles.load(Ordering::Relaxed),
         }
     }
 
@@ -144,6 +164,8 @@ where
             next_tile += skipped;
         }
         let end = full_tiles.min(next_tile + self.settings.tiles_per_log);
+        self.lag_tiles
+            .fetch_add(full_tiles.saturating_sub(next_tile), Ordering::Relaxed);
         for tile in next_tile..end {
             let entries = fetch_data_tile(self.fetcher.as_ref(), log, tile).await?;
             for entry in &entries {
@@ -156,6 +178,8 @@ where
                 }
             }
             self.advance(log, tile + 1, now).await?;
+            self.tiles_read.fetch_add(1, Ordering::Relaxed);
+            self.lag_tiles.fetch_sub(1, Ordering::Relaxed);
         }
         Ok(())
     }
@@ -185,6 +209,8 @@ where
         profiles: &[ActiveProfile],
         now: DateTime<Utc>,
     ) -> Result<Vec<CandidateHost>, SourceError> {
+        self.tiles_read.store(0, Ordering::Relaxed);
+        self.lag_tiles.store(0, Ordering::Relaxed);
         let labels = label_filter(profiles);
         if labels.is_empty() {
             return Ok(Vec::new());

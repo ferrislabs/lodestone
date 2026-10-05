@@ -20,6 +20,7 @@ function source(name: string, overrides: Partial<Source> = {}): Source {
 		kind: 'source.run',
 		label_key: `source.${name}`,
 		status: 'pending',
+		mode: 'scheduled',
 		attempts: 0,
 		next_run_at: FUTURE,
 		last_runs: [],

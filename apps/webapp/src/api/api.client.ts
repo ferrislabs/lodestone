@@ -183,6 +183,16 @@ export namespace Schemas {
     status: string;
     volume: number;
   };
+  export type ListenerDto = {
+    backlog?: (number | null) | undefined;
+    holder?: (string | null) | undefined;
+    items_total: number;
+    last_activity_at?: (string | null) | undefined;
+    last_error?: (string | null) | undefined;
+    signals_total: number;
+    state: string;
+    updated_at?: (string | null) | undefined;
+  };
   export type DataEnvelope_SourceDto = {
     data: {
       attempts: number;
@@ -191,6 +201,8 @@ export namespace Schemas {
       last_error?: (string | null) | undefined;
       last_runs: Array<SourceRunDto>;
       lease_until?: (string | null) | undefined;
+      listener?: (null | ListenerDto) | undefined;
+      mode: string;
       next_run_at?: (string | null) | undefined;
       running_since?: (string | null) | undefined;
       source: string;
@@ -279,6 +291,8 @@ export namespace Schemas {
       last_error?: (string | null) | undefined;
       last_runs: Array<SourceRunDto>;
       lease_until?: (string | null) | undefined;
+      listener?: (null | ListenerDto) | undefined;
+      mode: string;
       next_run_at?: (string | null) | undefined;
       running_since?: (string | null) | undefined;
       source: string;
@@ -370,6 +384,8 @@ export namespace Schemas {
     last_error?: (string | null) | undefined;
     last_runs: Array<SourceRunDto>;
     lease_until?: (string | null) | undefined;
+    listener?: (null | ListenerDto) | undefined;
+    mode: string;
     next_run_at?: (string | null) | undefined;
     running_since?: (string | null) | undefined;
     source: string;

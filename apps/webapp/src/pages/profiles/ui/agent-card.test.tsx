@@ -2,13 +2,20 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { JsonValue } from '#/lib/schema-form'
-import { newAgent } from '#/pages/profiles/lib/agents'
+import { type AgentKind, newAgent } from '#/pages/profiles/lib/agents'
 import { AgentCard } from './agent-card'
 
 afterEach(cleanup)
 
-function renderCard(overrides: Partial<Parameters<typeof AgentCard>[0]> = {}) {
-	const agent: JsonValue = newAgent('boamp', [])
+const NOW = Date.parse('2026-10-05T12:00:00Z')
+
+function renderCard(
+	overrides: Partial<Parameters<typeof AgentCard>[0]> & {
+		kind?: AgentKind
+	} = {},
+) {
+	const { kind, ...rest } = overrides
+	const agent: JsonValue = newAgent(kind ?? 'boamp', [])
 	const props = {
 		agent,
 		index: 0,
@@ -21,7 +28,7 @@ function renderCard(overrides: Partial<Parameters<typeof AgentCard>[0]> = {}) {
 		onRequestRemove: vi.fn(),
 		onConfirmRemove: vi.fn(),
 		onCancelRemove: vi.fn(),
-		...overrides,
+		...rest,
 	}
 	render(
 		<ul>
@@ -71,5 +78,69 @@ describe('AgentCard run action', () => {
 		expect(screen.getByRole('status').textContent).toBe(
 			"La source n'a pas de tâche planifiée",
 		)
+	})
+})
+
+describe('AgentCard continuous kinds', () => {
+	it('shows the listening state and last activity instead of the run button', () => {
+		renderCard({
+			kind: 'dns_cname',
+			onRunSource: vi.fn(),
+			now: NOW,
+			listener: {
+				state: 'listening',
+				last_activity_at: '2026-10-05T11:57:00Z',
+			},
+		})
+		expect(
+			screen.queryByRole('button', { name: /Lancer la source/ }),
+		).toBeNull()
+		expect(
+			screen.getByText('En écoute · dernière activité il y a 3 minutes'),
+		).toBeTruthy()
+	})
+
+	it('says so when nothing was processed yet', () => {
+		renderCard({
+			kind: 'http_probe',
+			now: NOW,
+			listener: { state: 'idle', last_activity_at: null },
+		})
+		expect(
+			screen.getByText('En écoute · aucune activité pour le moment'),
+		).toBeTruthy()
+	})
+
+	it('shows the other listener states', () => {
+		renderCard({
+			kind: 'certificate_transparency',
+			now: NOW,
+			listener: { state: 'idle_no_agent' },
+		})
+		expect(screen.getByText('Inactif (aucun agent)')).toBeTruthy()
+		cleanup()
+		renderCard({ kind: 'certificate_transparency', now: NOW })
+		expect(screen.getByText('Écoute continue')).toBeTruthy()
+	})
+
+	it('flags a silent listener', () => {
+		renderCard({
+			kind: 'dns_cname',
+			now: NOW,
+			listener: { state: 'stale', last_activity_at: null },
+		})
+		expect(
+			screen.getByText(
+				"Sans nouvelles · L'instance qui écoutait ne répond plus ; une autre prendra le relais",
+			),
+		).toBeTruthy()
+	})
+
+	it('keeps the run button on scheduled kinds', () => {
+		renderCard({ kind: 'boamp', onRunSource: vi.fn(), now: NOW })
+		expect(
+			screen.getByRole('button', { name: /Lancer la source/ }),
+		).toBeTruthy()
+		expect(document.querySelector('[data-listener-line]')).toBeNull()
 	})
 })

@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE listeners SET updated_at = $3\n            WHERE name = $1 AND holder = $2\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "946d634a38b85cb8b849c667da132adcd86072339957686323e9769af9132737"
+}

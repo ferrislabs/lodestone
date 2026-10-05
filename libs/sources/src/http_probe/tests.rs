@@ -400,7 +400,7 @@ async fn no_paths_means_no_listing() {
 }
 
 #[tokio::test]
-async fn guard_refusal_skips_the_host_unmarked() {
+async fn guard_refusal_skips_the_host_but_marks_it_checked() {
     let guard = FakeGuard {
         refused: vec!["sso.acme.com".to_owned()],
         ..FakeGuard::default()
@@ -420,7 +420,7 @@ async fn guard_refusal_skips_the_host_unmarked() {
     assert_eq!(fetcher.requests.lock().unwrap().len(), 1);
     assert_eq!(
         hosts.marked.lock().unwrap()[0].0,
-        vec!["id.acme.org".to_owned()]
+        vec!["id.acme.org".to_owned(), "sso.acme.com".to_owned()]
     );
     let reserved = guard.reserved.lock().unwrap();
     assert_eq!(reserved.len(), 2);
@@ -432,7 +432,7 @@ async fn guard_refusal_skips_the_host_unmarked() {
 }
 
 #[tokio::test]
-async fn rate_limit_drops_the_host_unmarked() {
+async fn rate_limit_drops_the_host_and_retries_it_later() {
     let limited = FakeFetcher::scripted(&[(
         "https://sso.acme.com/ui/console",
         Err(FetchError::RateLimited {
@@ -456,6 +456,9 @@ async fn rate_limit_drops_the_host_unmarked() {
         vec!["id.acme.org".to_owned()]
     );
     assert_eq!(fetcher.requests.lock().unwrap().len(), 4);
+    let marked = hosts.marked.lock().unwrap();
+    assert_eq!(marked[1].0, vec!["sso.acme.com".to_owned()]);
+    assert_eq!(marked[1].2, at(100));
 }
 
 #[tokio::test]
