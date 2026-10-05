@@ -1592,6 +1592,7 @@ dependencies = [
  "common",
  "http 1.4.0",
  "itoa",
+ "llm",
  "lodestone-core",
  "pagination",
  "rate-limit",
@@ -1601,6 +1602,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+ "url",
  "utoipa",
 ]
 

@@ -184,6 +184,10 @@ impl From<CoreError> for ApiError {
         match err {
             CoreError::NotFound => Self::NotFound,
             CoreError::Conflict(msg) => Self::Conflict(msg),
+            CoreError::Invalid { field, message } => Self::Rejected(vec![ErrorDetail {
+                path: field,
+                message,
+            }]),
             CoreError::Forbidden { .. } => Self::Forbidden,
             CoreError::Database(msg) => {
                 tracing::error!(error = %msg, "core database error");

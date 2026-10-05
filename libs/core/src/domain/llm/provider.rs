@@ -127,4 +127,13 @@ pub trait LlmProviderRepository: Send {
         &mut self,
         tier: Tier,
     ) -> impl Future<Output = Result<Option<LlmProviderRecord>, CoreError>> + Send;
+
+    fn delete(&mut self, id: ProviderId) -> impl Future<Output = Result<bool, CoreError>> + Send;
+
+    fn list_tiers(
+        &mut self,
+    ) -> impl Future<Output = Result<Vec<(Tier, ProviderId)>, CoreError>> + Send;
+
+    fn unassign_tier(&mut self, tier: Tier)
+    -> impl Future<Output = Result<bool, CoreError>> + Send;
 }

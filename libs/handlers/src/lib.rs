@@ -2,6 +2,7 @@ pub mod api;
 pub mod auth;
 pub mod errors;
 pub mod leads;
+pub mod llm;
 pub mod profiles;
 pub mod rate_limit;
 pub mod response;

@@ -11,7 +11,7 @@ use utoipa::ToSchema;
 use crate::{
     auth::{AuthenticatedUser, auth_middleware},
     errors::ApiError,
-    leads, profiles,
+    leads, llm, profiles,
     response::{DataEnvelope, Response},
     state::AppState,
 };
@@ -51,6 +51,33 @@ pub fn router(state: AppState) -> Router<AppState> {
             get(profiles::export_profile),
         )
         .route("/profiles/{profile_id}/leads", get(leads::list_leads))
+        .route(
+            "/llm/providers",
+            get(llm::list_providers).post(llm::create_provider),
+        )
+        .route(
+            "/llm/providers/{provider_id}",
+            get(llm::get_provider)
+                .patch(llm::update_provider)
+                .delete(llm::delete_provider),
+        )
+        .route(
+            "/llm/providers/{provider_id}/enable",
+            post(llm::enable_provider),
+        )
+        .route(
+            "/llm/providers/{provider_id}/disable",
+            post(llm::disable_provider),
+        )
+        .route(
+            "/llm/providers/{provider_id}/test",
+            post(llm::test_provider),
+        )
+        .route("/llm/tiers", get(llm::list_tiers))
+        .route(
+            "/llm/tiers/{tier}",
+            axum::routing::put(llm::assign_tier).delete(llm::unassign_tier),
+        )
         .route("/leads/{lead_id}", get(leads::lead_detail))
         .route("/leads/{lead_id}/status", patch(leads::change_lead_status));
 

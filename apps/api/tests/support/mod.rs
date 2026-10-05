@@ -12,6 +12,7 @@ use axum::{
 };
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use clap::Parser;
+use common::{EncryptionKey, Secret};
 use handlers::AppState;
 use http::{
     Method, Request, StatusCode,
@@ -19,7 +20,7 @@ use http::{
 };
 use httpmock::{Method::GET, MockServer};
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
-use lodestone_core::LodestoneUseCase;
+use lodestone_core::{LodestoneUseCase, infrastructure::crypto::AesGcmCipher};
 use rate_limit::{InMemoryRateLimiter, Quota, RateLimitService};
 use rsa::{RsaPrivateKey, pkcs1::EncodeRsaPrivateKey, rand_core::OsRng, traits::PublicKeyParts};
 use serde_json::{Value, json};
@@ -27,6 +28,7 @@ use sqlx::PgPool;
 use tower::ServiceExt;
 
 pub const KID: &str = "lodestone-test-key";
+pub const KEY: &str = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
 
 pub struct TestKey {
     encoding: EncodingKey,
@@ -113,7 +115,7 @@ impl Harness {
             "--outbound-contact",
             "security@example.com",
             "--llm-secrets-encryption-key",
-            "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+            KEY,
         ])
         .expect("parse default args");
         let repository = FerrisKeyRepository::new(server.base_url(), Some("lodestone".to_owned()));
@@ -123,6 +125,10 @@ impl Harness {
             usecase: LodestoneUseCase::new(pool),
             rate_limit: RateLimitService::new(InMemoryRateLimiter::new()),
             rate_limit_quota: Quota::per_minute(1000),
+            cipher: Arc::new(
+                AesGcmCipher::new(&EncryptionKey::from_base64(&Secret::new(KEY)).expect("key"))
+                    .expect("cipher"),
+            ),
         };
 
         Self { server, key, state }
