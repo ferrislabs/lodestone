@@ -97,7 +97,7 @@ export const SIGNAL_GROUPS: readonly string[] = [
 
 export interface Factor {
 	signal: string
-	weight: number
+	weight: number | null
 	value: string
 }
 
@@ -116,10 +116,10 @@ export function factorList(definition: JsonObject): JsonValue[] {
 }
 
 export function readFactor(item: JsonValue | undefined): Factor {
-	if (!isJsonObject(item)) return { signal: '', weight: 0, value: '' }
+	if (!isJsonObject(item)) return { signal: '', weight: null, value: '' }
 	return {
 		signal: typeof item.signal === 'string' ? item.signal : '',
-		weight: typeof item.weight === 'number' ? item.weight : 0,
+		weight: typeof item.weight === 'number' ? item.weight : null,
 		value: typeof item.value === 'string' ? item.value : '',
 	}
 }
@@ -197,5 +197,5 @@ export function nextSignal(
 }
 
 export function maxWeight(factors: readonly Factor[]): number {
-	return factors.reduce((max, factor) => Math.max(max, factor.weight), 0)
+	return factors.reduce((max, factor) => Math.max(max, factor.weight ?? 0), 0)
 }

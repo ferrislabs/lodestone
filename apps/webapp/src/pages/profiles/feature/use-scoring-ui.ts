@@ -59,8 +59,12 @@ export function useScoringUi(
 					: removeIn(withSignal, [...path, 'value']),
 			)
 		},
-		setWeight: (index: number, weight: number) =>
-			apply(setIn(value, ['scoring', 'factors', index, 'weight'], weight)),
+		setWeight: (index: number, weight: number | null) => {
+			const path = ['scoring', 'factors', index, 'weight']
+			apply(
+				weight === null ? removeIn(value, path) : setIn(value, path, weight),
+			)
+		},
 		setValue: (index: number, next: string) => {
 			const path = ['scoring', 'factors', index, 'value']
 			apply(next === '' ? removeIn(value, path) : setIn(value, path, next))

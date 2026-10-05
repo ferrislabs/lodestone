@@ -20,7 +20,7 @@ interface FactorCardProps {
 	available: boolean
 	problems: readonly Problem[]
 	onSignal: (signal: string) => void
-	onWeight: (weight: number) => void
+	onWeight: (weight: number | null) => void
 	onValue: (value: string) => void
 	onRemove: () => void
 }
@@ -100,11 +100,11 @@ export function FactorCard({
 					type="number"
 					step={1}
 					className="h-14 text-center text-3xl font-semibold"
-					value={factor.weight}
+					value={factor.weight ?? ''}
 					aria-invalid={weightProblems.length > 0}
 					onChange={(event) => {
 						const parsed = event.currentTarget.valueAsNumber
-						onWeight(Number.isNaN(parsed) ? 0 : parsed)
+						onWeight(Number.isNaN(parsed) ? null : parsed)
 					}}
 				/>
 				<p className="text-xs text-muted-foreground">{helper}</p>

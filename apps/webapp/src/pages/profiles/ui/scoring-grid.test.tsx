@@ -90,6 +90,15 @@ describe('scoring grid', () => {
 		)
 	})
 
+	it('lets the weight be cleared before typing a new one', () => {
+		render(<Harness initial={withFactors(FACTORS)} />)
+		const weight = screen.getAllByLabelText('Weight')[0] as HTMLInputElement
+		fireEvent.change(weight, { target: { value: '' } })
+		expect(weight.value).toBe('')
+		fireEvent.change(weight, { target: { value: '45' } })
+		expect(weight.value).toBe('45')
+	})
+
 	it('removes a factor', () => {
 		render(<Harness initial={withFactors(FACTORS)} />)
 		fireEvent.click(
