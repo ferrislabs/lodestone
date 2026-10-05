@@ -1,0 +1,71 @@
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useNavigate, useParams } from '@tanstack/react-router'
+
+import { errorMessage, lodestoneApi } from '#/api/lodestone'
+import { nextStatuses } from '#/pages/leads/lib/transitions'
+import { LeadDetail } from '#/pages/leads/ui/lead-detail'
+
+export function LeadDetailFeature() {
+	const { leadId } = useParams({ from: '/_app/leads/$leadId' })
+	const navigate = useNavigate()
+	const queryClient = useQueryClient()
+
+	const detailQuery = useQuery(
+		lodestoneApi().get('/api/v1/leads/{lead_id}', {
+			path: { lead_id: leadId },
+		}).queryOptions,
+	)
+
+	const changeStatus = useMutation({
+		...lodestoneApi().mutation('patch', '/api/v1/leads/{lead_id}/status')
+			.mutationOptions,
+		onSuccess: async () => {
+			await Promise.all([
+				queryClient.invalidateQueries({
+					queryKey: [{ _id: '/api/v1/leads/{lead_id}' }],
+				}),
+				queryClient.invalidateQueries({
+					queryKey: [{ _id: '/api/v1/profiles/{profile_id}/leads' }],
+				}),
+				queryClient.invalidateQueries({
+					queryKey: [{ _id: '/api/v1/profiles' }],
+				}),
+			])
+		},
+	})
+
+	const detail = detailQuery.data?.data ?? null
+
+	return (
+		<LeadDetail
+			state={
+				detailQuery.isError
+					? 'error'
+					: detailQuery.isPending
+						? 'loading'
+						: 'ready'
+			}
+			errorMessage={
+				detailQuery.isError ? errorMessage(detailQuery.error) : null
+			}
+			detail={detail}
+			nextStatuses={detail ? nextStatuses(detail.lead.status) : []}
+			onBack={() => {
+				void navigate({
+					to: '/leads',
+					search: detail ? { profile: detail.lead.profile.id } : {},
+				})
+			}}
+			onChangeStatus={(status) =>
+				changeStatus.mutate({
+					path: { lead_id: leadId },
+					body: { status },
+				})
+			}
+			changing={changeStatus.isPending}
+			changeError={
+				changeStatus.isError ? errorMessage(changeStatus.error) : null
+			}
+		/>
+	)
+}

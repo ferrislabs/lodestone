@@ -1,5 +1,5 @@
 import { Link } from '@tanstack/react-router'
-import { Hammer, LayoutDashboard } from 'lucide-react'
+import { Hammer, Users } from 'lucide-react'
 import type * as React from 'react'
 
 import { type NavItem, NavMain } from '#/components/nav-main'
@@ -14,9 +14,7 @@ import {
 	SidebarRail,
 } from '#/components/ui/sidebar'
 
-const coreItems: NavItem[] = [
-	{ title: 'Home', to: '/', icon: LayoutDashboard, exact: true },
-]
+const coreItems: NavItem[] = [{ title: 'Leads', to: '/leads', icon: Users }]
 
 export function AppSidebar(props: React.ComponentProps<typeof Sidebar>) {
 	return (

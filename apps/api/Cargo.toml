@@ -53,3 +53,7 @@ tower = { version = "0.5", features = ["util"] }
 [[bin]]
 name = "import-hosts"
 path = "src/bin/import_hosts.rs"
+
+[[bin]]
+name = "openapi"
+path = "src/bin/openapi.rs"
