@@ -12,7 +12,7 @@ use crate::{
     auth::{AuthenticatedUser, auth_middleware},
     company, drafts,
     errors::ApiError,
-    exports, leads, llm, profiles,
+    exports, leads, llm, profiles, quality,
     response::{DataEnvelope, Response},
     sources,
     state::AppState,
@@ -96,6 +96,7 @@ pub fn router(state: AppState) -> Router<AppState> {
             post(drafts::approve_draft),
         )
         .route("/drafts/{assessment_id}/reject", post(drafts::reject_draft))
+        .route("/quality", get(quality::quality))
         .route("/leads/{lead_id}", get(leads::lead_detail))
         .route("/leads/{lead_id}/status", patch(leads::change_lead_status))
         .route(

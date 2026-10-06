@@ -98,6 +98,12 @@ pub use domain::{
         prompt::{AgentPrompt, build as agent_prompt, lead_document, with_violations},
         question_score, summary_retry_delay, validate_answers, verdict_for,
     },
+    quality::{
+        AgentSeparation, AgentSnapshot, ConfidenceBucket, DecisionCounts, DecisionKind,
+        DecisionLabel, DecisionSnapshot, DiscardedShare, LabelFilter, MIN_LABELLED_LEADS,
+        ProfileInfo, ProfileQuality, QualityReport, Suggestion, VerdictCounts, VerdictPrecision,
+        ports::DecisionRepository,
+    },
     run::{Run, RunId, RunOutcome, RunStatus, ports::RunRepository},
     scoring::{DISTINCT_SIGNALS_FACTOR, ScoreBreakdown, ScoreContribution, score},
     source::{Observation, Source, SourceError},

@@ -4,7 +4,7 @@ use lodestone_macros::transactional;
 
 use crate::{
     UserId,
-    application::{LodestoneUseCase, output::schedule_webhook},
+    application::{LodestoneUseCase, output::schedule_webhook, quality::record_decisions},
     domain::{
         lead::{
             AssessmentId, ContactEmail, Lead, LeadStatus,
@@ -16,6 +16,7 @@ use crate::{
             query::VerdictFilter,
         },
         profile::{ProfileId, ports::ProfileRepository},
+        quality::DecisionKind,
         suppression::ports::SuppressionRepository,
     },
     infrastructure::job::postgres::PgJobOutbox,
@@ -28,6 +29,13 @@ enum Decision {
 }
 
 impl Decision {
+    fn kind(&self) -> DecisionKind {
+        match self {
+            Self::Approve => DecisionKind::DraftApproved,
+            Self::Reject(_) => DecisionKind::DraftRejected,
+        }
+    }
+
     fn target(&self) -> LeadStatus {
         match self {
             Self::Approve => LeadStatus::Validated,
@@ -180,7 +188,15 @@ impl LodestoneUseCase {
         self.decide_draft(id, actor, Decision::Reject(reason)).await
     }
 
-    #[transactional(assessment, lead, contact, suppression)]
+    #[transactional(
+        assessment,
+        lead,
+        contact,
+        suppression,
+        qualification,
+        profile,
+        decision
+    )]
     async fn decide_draft(
         &self,
         id: AssessmentId,
@@ -191,6 +207,9 @@ impl LodestoneUseCase {
         let mut leads = lead_repository;
         let mut contacts = contact_repository;
         let mut suppression = suppression_repository;
+        let mut qualification = qualification_repository;
+        let mut profiles = profile_repository;
+        let mut decisions = decision_repository;
 
         let record = visible_draft(&mut assessments, &mut suppression, id).await?;
         let review = require_pending(&record)?;
@@ -220,6 +239,18 @@ impl LodestoneUseCase {
             .update_status(record.lead.id, from, to, now)
             .await?
             .ok_or_else(|| conflict("lead status changed concurrently, reload and retry"))?;
+        let lead_kind = DecisionKind::for_lead(to);
+        let kinds: Vec<DecisionKind> = std::iter::once(decision.kind()).chain(lead_kind).collect();
+        record_decisions(
+            &mut decisions,
+            &mut qualification,
+            &mut profiles,
+            &record.lead,
+            &kinds,
+            actor,
+            now,
+        )
+        .await?;
         if to == LeadStatus::Validated {
             schedule_webhook(&mut PgJobOutbox::new(&tx), self.webhooks.as_ref(), &updated).await?;
         }
