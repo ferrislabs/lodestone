@@ -35,6 +35,8 @@ describe('tabs', () => {
 	it('maps server paths to their tab', () => {
 		expect(tabOfPath('agents[0].id')).toBe('sourcing')
 		expect(tabOfPath('qualification_agents')).toBe('qualification')
+		expect(tabOfPath('evidence.weights.volume')).toBe('qualification')
+		expect(tabOfPath('verdict.min_evidence')).toBe('qualification')
 		expect(
 			tabOfPath('qualification_agents[1].questions[0].options[2].score'),
 		).toBe('qualification')

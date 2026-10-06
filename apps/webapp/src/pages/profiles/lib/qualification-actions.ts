@@ -1,3 +1,5 @@
+import type { EvidenceWeightKey } from '#/pages/profiles/lib/qualification'
+
 export interface QualificationActions {
 	openPicker: () => void
 	closePicker: () => void
@@ -44,4 +46,9 @@ export interface QualificationActions {
 	setAggregatorPrompt: (prompt: string) => void
 	setReliableFrom: (percent: number | null) => void
 	setDiscardBelow: (percent: number | null) => void
+	setCalibrationFloor: (percent: number | null) => void
+	setMinEvidence: (percent: number | null) => void
+	setInfluence: (percent: number | null) => void
+	setReferenceScore: (score: number | null) => void
+	setEvidenceWeight: (key: EvidenceWeightKey, weight: number | null) => void
 }

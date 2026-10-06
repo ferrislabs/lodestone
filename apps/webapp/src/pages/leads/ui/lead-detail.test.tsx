@@ -17,7 +17,21 @@ const detail: LeadDetailData = {
 		last_seen_at: '2026-02-01T00:00:00Z',
 		updated_at: '2026-02-01T00:00:00Z',
 		confidence: 72.5,
-		verdict: 'fiable',
+		verdict: 'a_verifier',
+		opinion: 92.9,
+		evidence: {
+			strength: 35,
+			components: {
+				volume: 28.4,
+				diversity: 50,
+				environment: 0,
+				strength: 24.2,
+			},
+			signal_count: 1,
+			signal_score: 12.1,
+			only_non_production: true,
+		},
+		verdict_reason: 'non_production',
 		qualified_at: '2026-02-01T00:00:00Z',
 	},
 	qualification_results: [
@@ -262,10 +276,76 @@ describe('LeadDetail', () => {
 	it('shows the verdict and the confidence of the lead', () => {
 		const { container } = renderDetail()
 		const badge = container.querySelector('[data-verdict]')
-		expect(badge?.getAttribute('data-verdict')).toBe('fiable')
-		expect(badge?.textContent).toBe('Fiable')
+		expect(badge?.getAttribute('data-verdict')).toBe('a_verifier')
+		expect(badge?.textContent).toBe('À vérifier')
 		expect(screen.getByText('Confiance')).toBeTruthy()
 		expect(screen.getByText(/^72,5\s%$/)).toBeTruthy()
+	})
+
+	it('names the signal score and splits the confidence into opinion and evidence', () => {
+		renderDetail()
+		expect(screen.getByText('Score des signaux')).toBeTruthy()
+		expect(screen.queryByText('Score')).toBeNull()
+		expect(
+			screen.getByText('Avis des agents').nextSibling?.textContent,
+		).toMatch(/^92,9\s%$/)
+		expect(
+			screen.getByText('Solidité des preuves').nextSibling?.textContent,
+		).toMatch(/^35\s%$/)
+	})
+
+	it('lists the evidence components and the verdict reason in the calculation', () => {
+		const { container } = renderDetail()
+		const calculation = container.querySelector(
+			'[data-section="confidence-calculation"]',
+		)
+		expect(calculation?.textContent).toContain('Calcul')
+		for (const label of [
+			'Volume de signaux',
+			'Diversité des sources',
+			'Environnement',
+			'Force des signaux',
+		]) {
+			expect(calculation?.textContent).toContain(label)
+		}
+		expect(
+			calculation?.querySelector('[data-evidence-component="volume"]')
+				?.textContent,
+		).toMatch(/28,4\s%/)
+		expect(
+			calculation?.querySelector('[data-verdict-reason]')?.textContent,
+		).toBe('Plafonné à « À vérifier » : uniquement des hôtes hors production')
+	})
+
+	it('shows no verdict reason when no rule applied, and no calculation before scoring', () => {
+		const { container } = renderDetail({
+			detail: {
+				...detail,
+				lead: { ...detail.lead, verdict_reason: null },
+			},
+		})
+		expect(container.querySelector('[data-verdict-reason]')).toBeNull()
+		expect(
+			container.querySelector('[data-section="confidence-calculation"]'),
+		).not.toBeNull()
+		cleanup()
+		const bare = renderDetail({
+			detail: {
+				...detail,
+				lead: {
+					...detail.lead,
+					evidence: null,
+					opinion: null,
+					verdict_reason: null,
+				},
+			},
+		})
+		expect(
+			bare.container.querySelector('[data-section="confidence-calculation"]'),
+		).toBeNull()
+		expect(screen.getByText('Avis des agents').nextSibling?.textContent).toBe(
+			'—',
+		)
 	})
 
 	it('puts the summary on top with verdict narrative, angle and evidence', () => {

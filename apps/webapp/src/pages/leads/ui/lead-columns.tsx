@@ -1,5 +1,6 @@
 import type { ColumnDef } from '@tanstack/react-table'
 
+import { confidenceBreakdown } from '#/pages/leads/lib/confidence'
 import { formatDateTime } from '#/pages/leads/lib/format'
 import type { Lead } from '#/pages/leads/lib/types'
 import { summaryExcerpt } from '#/pages/leads/lib/verdict'
@@ -34,7 +35,12 @@ export function buildLeadColumns(
 		{
 			id: 'confidence',
 			header: 'Confiance',
-			cell: ({ row }) => <ConfidenceBar confidence={row.original.confidence} />,
+			cell: ({ row }) => (
+				<ConfidenceBar
+					confidence={row.original.confidence}
+					breakdown={confidenceBreakdown(row.original)}
+				/>
+			),
 		},
 		{
 			id: 'summary',

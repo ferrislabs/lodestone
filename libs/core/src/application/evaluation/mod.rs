@@ -27,8 +27,8 @@ use crate::{
             definition::{ProfileDefinition, QualificationAgent},
         },
         qualification::{
-            Completion, QualificationResult, ResultId, ResultStatus, ValidOutput, Violations,
-            agent_score, judge,
+            AgentOpinion, Completion, EvidenceStrength, QualificationResult, ResultId,
+            ResultStatus, SCORING_VERSION, ValidOutput, Violations, agent_score, judge,
             ports::QualificationRepository,
             prompt::{AgentPrompt, build, lead_document, with_violations},
             validate_answers,
@@ -37,6 +37,7 @@ use crate::{
 };
 
 pub const QUALIFICATION_LISTENER: &str = "qualification";
+const RESCORE_BATCH_SIZE: u32 = 500;
 const PROVIDER_UNAVAILABLE: &str = "fournisseur indisponible";
 
 pub trait ProviderBuilder: Send + Sync {
@@ -58,6 +59,7 @@ pub struct EvaluationReport {
     pub leads: u64,
     pub valid: u64,
     pub invalid: u64,
+    pub rescored: u64,
     pub backlog: u64,
     pub budget_exhausted: bool,
 }
@@ -142,7 +144,7 @@ struct Evaluator<'a, B, S, C> {
 }
 
 enum AgentOutcome {
-    Result(Box<QualificationResult>, Option<f64>),
+    Result(Box<QualificationResult>, Option<AgentOpinion>),
     BudgetExhausted,
 }
 
@@ -197,8 +199,12 @@ fn succeeded(
     model: &str,
     output: &ValidOutput,
     at: DateTime<Utc>,
-) -> (QualificationResult, f64) {
-    let score = agent_score(agent, &output.answers);
+) -> (QualificationResult, AgentOpinion) {
+    let score = agent_score(
+        agent,
+        &output.answers,
+        subject.definition.verdict.calibration_floor,
+    );
     let result = QualificationResult {
         id: ResultId(generate_uuid_v7()),
         lead_id: subject.lead.id,
@@ -215,7 +221,12 @@ fn succeeded(
         error: None,
         created_at: at,
     };
-    (result, score)
+    let opinion = AgentOpinion {
+        weight: agent.weight,
+        score,
+        axes: output.answers.0.len(),
+    };
+    (result, opinion)
 }
 
 impl<B, S, C> Evaluator<'_, B, S, C>
@@ -343,7 +354,7 @@ where
             };
             match validate_answers(agent, &structured.value) {
                 Ok(output) => {
-                    let (result, score) = succeeded(
+                    let (result, opinion) = succeeded(
                         subject,
                         agent,
                         &prompt,
@@ -352,7 +363,7 @@ where
                         &output,
                         at,
                     );
-                    return Ok(AgentOutcome::Result(Box::new(result), Some(score)));
+                    return Ok(AgentOutcome::Result(Box::new(result), Some(opinion)));
                 }
                 Err(violations) => {
                     warn!(agent = agent.id.as_str(), %violations, "qualification answer broke the contract");
@@ -406,7 +417,7 @@ where
         };
         let at = clock.now();
         let mut results = Vec::new();
-        let mut scored: Vec<(u8, f64)> = Vec::new();
+        let mut scored: Vec<AgentOpinion> = Vec::new();
         for agent in definition
             .qualification_agents
             .iter()
@@ -417,7 +428,7 @@ where
                 .await?
             {
                 AgentOutcome::BudgetExhausted => return Ok(LeadOutcome::BudgetExhausted),
-                AgentOutcome::Result(result, score) => {
+                AgentOutcome::Result(result, opinion) => {
                     let status = result.status.as_str();
                     info!(
                         monotonic_counter.qualification_results = 1u64,
@@ -425,8 +436,8 @@ where
                         status,
                         "qualification result recorded"
                     );
-                    if let Some(score) = score {
-                        scored.push((agent.weight, score));
+                    if let Some(opinion) = opinion {
+                        scored.push(opinion);
                     }
                     results.push(*result);
                 }
@@ -444,7 +455,13 @@ where
             lead_id: lead.id,
             profile_revision: active.revision.number,
             sources,
-            judgement: judge(&scored, definition.verdict),
+            judgement: judge(
+                &scored,
+                EvidenceStrength::compute(&facts, lead.score.get(), &definition.evidence),
+                definition.verdict,
+                &definition.evidence,
+            ),
+            scoring_version: SCORING_VERSION,
             at,
         };
         usecase.store_evaluation(&results, &completion).await?;
@@ -503,6 +520,8 @@ impl LodestoneUseCase {
         let mut budget = RunBudget::new(settings.budget_cents);
         let mut providers = Providers::new();
         let mut remaining = settings.batch_size;
+        let rescoring = self.rescore_stale_leads(RESCORE_BATCH_SIZE).await?;
+        report.rescored = rescoring.leads;
         'profiles: for active in &profiles {
             if remaining == 0 {
                 break;
@@ -527,7 +546,7 @@ impl LodestoneUseCase {
                 }
             }
         }
-        report.backlog = self.due_backlog(&profiles).await?;
+        report.backlog = self.due_backlog(&profiles).await? + rescoring.backlog;
         Ok(report)
     }
 

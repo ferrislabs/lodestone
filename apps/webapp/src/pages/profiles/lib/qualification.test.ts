@@ -8,6 +8,11 @@ import {
 	allAgentIds,
 	contractSchema,
 	DEFAULT_AGGREGATOR_PROMPT,
+	EVIDENCE_WEIGHT_KEYS,
+	evidenceProblems,
+	evidenceSettingsOf,
+	FLOOR_ERROR,
+	NO_WEIGHT_ERROR,
 	newQualificationAgent,
 	optionsOf,
 	PERCENT_ERROR,
@@ -15,16 +20,21 @@ import {
 	qualificationList,
 	qualificationSummary,
 	questionsOf,
+	REFERENCE_SCORE_ERROR,
 	removeOption,
 	removeQuestion,
 	renameQualificationAgent,
+	setEvidenceField,
+	setEvidenceWeight,
 	setOptionField,
 	setQuestionWording,
+	setVerdictField,
 	VERDICT_ORDER_ERROR,
 	validateQualification,
 	verdictBands,
 	verdictOf,
 	verdictProblems,
+	WEIGHT_ERROR,
 	withQualification,
 } from '#/pages/profiles/lib/qualification'
 
@@ -284,6 +294,98 @@ describe('verdict thresholds', () => {
 		expect(verdictProblems({ reliableFrom: 70.5, discardBelow: 101 })).toEqual([
 			{ path: 'verdict.reliable_from', message: PERCENT_ERROR },
 			{ path: 'verdict.discard_below', message: PERCENT_ERROR },
+		])
+	})
+})
+
+describe('evidence settings', () => {
+	it('defaults to the engine defaults when the sections are absent', () => {
+		expect(evidenceSettingsOf({})).toEqual({
+			calibrationFloor: 5,
+			minEvidence: 50,
+			influence: 60,
+			referenceScore: 50,
+			weights: { volume: 1, diversity: 1, environment: 1, strength: 1 },
+		})
+		expect(evidenceProblems(evidenceSettingsOf({}))).toEqual([])
+	})
+
+	it('reads the stored fractions as percentages', () => {
+		const settings = evidenceSettingsOf({
+			verdict: { calibration_floor: 0.1, min_evidence: 0.7 },
+			evidence: {
+				influence: 0.25,
+				reference_score: 30,
+				weights: { volume: 3, diversity: 0, environment: 2, strength: 1 },
+			},
+		})
+		expect(settings).toEqual({
+			calibrationFloor: 10,
+			minEvidence: 70,
+			influence: 25,
+			referenceScore: 30,
+			weights: { volume: 3, diversity: 0, environment: 2, strength: 1 },
+		})
+	})
+
+	it('writes each field without touching its siblings', () => {
+		const value = profile()
+		const floor = setVerdictField(value, 'calibration_floor', 0.1)
+		expect(floor.verdict).toEqual({
+			reliable_from: 70,
+			discard_below: 30,
+			calibration_floor: 0.1,
+		})
+		const influence = setEvidenceField(floor, 'influence', 0.4)
+		expect(influence.evidence).toEqual({ influence: 0.4 })
+		const weight = setEvidenceWeight(influence, 'volume', 4)
+		expect(weight.evidence).toEqual({ influence: 0.4, weights: { volume: 4 } })
+		expect(setEvidenceWeight(weight, 'strength', 2).evidence).toEqual({
+			influence: 0.4,
+			weights: { volume: 4, strength: 2 },
+		})
+	})
+
+	it('rejects a floor above 20 %, an empty percentage and a small reference', () => {
+		const settings = {
+			...evidenceSettingsOf({}),
+			calibrationFloor: 25,
+			minEvidence: null,
+			referenceScore: 0,
+		}
+		expect(evidenceProblems(settings)).toEqual([
+			{ path: 'verdict.calibration_floor', message: FLOOR_ERROR },
+			{ path: 'verdict.min_evidence', message: PERCENT_ERROR },
+			{ path: 'evidence.reference_score', message: REFERENCE_SCORE_ERROR },
+		])
+	})
+
+	it('rejects weights outside 0 to 10 and all-zero weights', () => {
+		const base = evidenceSettingsOf({})
+		expect(
+			evidenceProblems({
+				...base,
+				weights: { ...base.weights, volume: 11, diversity: null },
+			}),
+		).toEqual([
+			{ path: 'evidence.weights.volume', message: WEIGHT_ERROR },
+			{ path: 'evidence.weights.diversity', message: WEIGHT_ERROR },
+		])
+		const zero = Object.fromEntries(
+			EVIDENCE_WEIGHT_KEYS.map((key) => [key, 0]),
+		) as typeof base.weights
+		expect(evidenceProblems({ ...base, weights: zero })).toEqual([
+			{ path: 'evidence.weights', message: NO_WEIGHT_ERROR },
+		])
+	})
+
+	it('reports evidence problems through the qualification validation', () => {
+		const value = {
+			...profile(),
+			evidence: { influence: 1.5 },
+		}
+		expect(validateQualification(value).map((item) => item.path)).toEqual([
+			'evidence.influence',
 		])
 	})
 })

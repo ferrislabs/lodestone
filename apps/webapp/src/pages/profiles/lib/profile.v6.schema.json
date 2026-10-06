@@ -17,6 +17,19 @@
 		"contact_ranking": {
 			"$ref": "#/$defs/ContactRanking"
 		},
+		"evidence": {
+			"$ref": "#/$defs/EvidenceSettings",
+			"default": {
+				"influence": 0.6,
+				"reference_score": 50.0,
+				"weights": {
+					"diversity": 1,
+					"environment": 1,
+					"strength": 1,
+					"volume": 1
+				}
+			}
+		},
 		"identity": {
 			"$ref": "#/$defs/Identity"
 		},
@@ -31,7 +44,7 @@
 			}
 		},
 		"schema_version": {
-			"description": "Profile format version. Must be 5.",
+			"description": "Profile format version. Must be 6.",
 			"type": "integer",
 			"format": "uint32",
 			"minimum": 0
@@ -42,7 +55,9 @@
 		"verdict": {
 			"$ref": "#/$defs/VerdictThresholds",
 			"default": {
+				"calibration_floor": 0.05,
 				"discard_below": 30,
+				"min_evidence": 0.5,
 				"reliable_from": 70
 			}
 		}
@@ -486,6 +501,78 @@
 				}
 			]
 		},
+		"EvidenceSettings": {
+			"title": "Evidence settings",
+			"description": "How the strength of the evidence behind a lead (signals, sources, hosts) weighs on its confidence.",
+			"type": "object",
+			"properties": {
+				"influence": {
+					"description": "Confidence = agents opinion x ((1 - influence) + influence x evidence strength). 0 ignores the evidence, 1 multiplies the opinion by it.",
+					"type": "number",
+					"format": "double",
+					"default": 0.6,
+					"maximum": 1.0,
+					"minimum": 0.0
+				},
+				"reference_score": {
+					"description": "Signal score at which the signal strength component reaches 1.",
+					"type": "number",
+					"format": "double",
+					"default": 50.0,
+					"minimum": 1.0
+				},
+				"weights": {
+					"$ref": "#/$defs/EvidenceWeights",
+					"default": {
+						"diversity": 1,
+						"environment": 1,
+						"strength": 1,
+						"volume": 1
+					}
+				}
+			},
+			"additionalProperties": false
+		},
+		"EvidenceWeights": {
+			"title": "Evidence weights",
+			"description": "Relative weight of each component of the evidence strength. A weight of 0 ignores the component.",
+			"type": "object",
+			"properties": {
+				"diversity": {
+					"description": "Number of distinct sources.",
+					"type": "integer",
+					"format": "uint8",
+					"default": 1,
+					"maximum": 10,
+					"minimum": 0
+				},
+				"environment": {
+					"description": "Share of production hosts among the hosts carrying signals.",
+					"type": "integer",
+					"format": "uint8",
+					"default": 1,
+					"maximum": 10,
+					"minimum": 0
+				},
+				"strength": {
+					"description": "Signal score of the lead against the reference score.",
+					"type": "integer",
+					"format": "uint8",
+					"default": 1,
+					"maximum": 10,
+					"minimum": 0
+				},
+				"volume": {
+					"description": "Number of signals.",
+					"type": "integer",
+					"format": "uint8",
+					"default": 1,
+					"maximum": 10,
+					"minimum": 0
+				}
+			},
+			"additionalProperties": false
+		},
 		"Fingerprint": {
 			"title": "Fingerprint",
 			"description": "A product fingerprint: path to request, matchers, optional version extractor and debt markers.",
@@ -802,9 +889,17 @@
 		},
 		"VerdictThresholds": {
 			"title": "Verdict thresholds",
-			"description": "Percentages of the lead confidence that decide its verdict: reliable, to check or discarded.",
+			"description": "Rules that decide the verdict of a lead from its confidence: reliable, to check or discarded.",
 			"type": "object",
 			"properties": {
+				"calibration_floor": {
+					"description": "Each answer probability is clamped to [floor, 1 - floor] then renormalised before scoring, so a small model cannot claim absolute certainty. 0 disables the calibration.",
+					"type": "number",
+					"format": "double",
+					"default": 0.05,
+					"maximum": 0.2,
+					"minimum": 0.0
+				},
 				"discard_below": {
 					"description": "A lead is discarded below this confidence percentage. Must be lower than reliable_from.",
 					"type": "integer",
@@ -813,8 +908,16 @@
 					"maximum": 100,
 					"minimum": 0
 				},
+				"min_evidence": {
+					"description": "A lead is reliable only when its evidence strength (0 to 1) reaches this value.",
+					"type": "number",
+					"format": "double",
+					"default": 0.5,
+					"maximum": 1.0,
+					"minimum": 0.0
+				},
 				"reliable_from": {
-					"description": "A lead is reliable from this confidence percentage.",
+					"description": "A lead is reliable from this confidence percentage, provided it also has two independent angles and enough evidence.",
 					"type": "integer",
 					"format": "uint8",
 					"default": 70,

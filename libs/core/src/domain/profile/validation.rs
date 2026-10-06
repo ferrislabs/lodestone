@@ -7,12 +7,15 @@ use thiserror::Error;
 use super::{
     definition::{
         Agent, AgentSource, Aggregator, CertificateTransparency, CnamePattern, ContactRanking,
-        DebtRule, DnsCname, Fingerprint, HttpProbe, Identity, KeywordSource, LlmSettings,
-        MAX_DESCRIPTION_CHARS, MAX_OPTIONS, MAX_PROMPT_CHARS, MIN_OPTIONS, Matcher,
-        PROFILE_SCHEMA_VERSION, ProfileDefinition, QualificationAgent, Question, Scoring,
-        VerdictThresholds, VersionExtractor,
+        DebtRule, DnsCname, EvidenceSettings, Fingerprint, HttpProbe, Identity, KeywordSource,
+        LlmSettings, MAX_CALIBRATION_FLOOR, MAX_DESCRIPTION_CHARS, MAX_OPTIONS, MAX_PROMPT_CHARS,
+        MIN_OPTIONS, Matcher, PROFILE_SCHEMA_VERSION, ProfileDefinition, QualificationAgent,
+        Question, Scoring, VerdictThresholds, VersionExtractor,
     },
-    legacy::{ProfileDefinitionV1, ProfileDefinitionV2, ProfileDefinitionV3, ProfileDefinitionV4},
+    legacy::{
+        ProfileDefinitionV1, ProfileDefinitionV2, ProfileDefinitionV3, ProfileDefinitionV4,
+        ProfileDefinitionV5,
+    },
 };
 
 const REGEX_SIZE_LIMIT: usize = 1 << 20;
@@ -22,7 +25,9 @@ const MAX_PATTERN_LENGTH: usize = 1024;
 pub enum ProfileProblem {
     #[error("malformed: {0}")]
     Malformed(String),
-    #[error("unsupported schema version {found}, expected 1, 2, 3, 4 or {PROFILE_SCHEMA_VERSION}")]
+    #[error(
+        "unsupported schema version {found}, expected 1, 2, 3, 4, 5 or {PROFILE_SCHEMA_VERSION}"
+    )]
     UnsupportedSchemaVersion { found: u32 },
     #[error("must not be empty")]
     Empty,
@@ -66,6 +71,16 @@ pub enum ProfileProblem {
     InvalidWeight,
     #[error("must be a percentage from 0 to 100")]
     InvalidThreshold,
+    #[error("must be a number from 0 to 1")]
+    InvalidFraction,
+    #[error("must be a number from 0 to {MAX_CALIBRATION_FLOOR}")]
+    InvalidCalibrationFloor,
+    #[error("must be an integer from 0 to 10")]
+    InvalidEvidenceWeight,
+    #[error("at least one weight must be above 0")]
+    NoEvidenceWeight,
+    #[error("must be a number of at least 1")]
+    InvalidReferenceScore,
     #[error("must be a dotted numeric version")]
     InvalidVersion,
     #[error("must be at least 1")]
@@ -102,6 +117,7 @@ impl ValidatedProfile {
             Some(2) => decode::<ProfileDefinitionV2>(value)?.upgrade(),
             Some(3) => decode::<ProfileDefinitionV3>(value)?.upgrade(),
             Some(4) => decode::<ProfileDefinitionV4>(value)?.upgrade(),
+            Some(5) => decode::<ProfileDefinitionV5>(value)?.upgrade(),
             Some(PROFILE_SCHEMA_VERSION) | None => decode::<ProfileDefinition>(value)?,
             Some(found) => {
                 return Err(Path::root()
@@ -194,6 +210,7 @@ fn validate(definition: &ProfileDefinition) -> Check {
     )?;
     validate_aggregator(&definition.aggregator, &root.field("aggregator"))?;
     validate_verdict(&definition.verdict, &root.field("verdict"))?;
+    validate_evidence(&definition.evidence, &root.field("evidence"))?;
     validate_scoring(&definition.scoring, &root.field("scoring"))?;
     validate_contact_ranking(&definition.contact_ranking, &root.field("contact_ranking"))?;
     validate_llm(&definition.llm, &root.field("llm"))
@@ -394,6 +411,47 @@ fn validate_verdict(verdict: &VerdictThresholds, path: &Path) -> Check {
         return Err(path
             .field("reliable_from")
             .fail(ProfileProblem::ThresholdOrder));
+    }
+    if !(0.0..=MAX_CALIBRATION_FLOOR).contains(&verdict.calibration_floor) {
+        return Err(path
+            .field("calibration_floor")
+            .fail(ProfileProblem::InvalidCalibrationFloor));
+    }
+    if !(0.0..=1.0).contains(&verdict.min_evidence) {
+        return Err(path
+            .field("min_evidence")
+            .fail(ProfileProblem::InvalidFraction));
+    }
+    Ok(())
+}
+
+fn validate_evidence(evidence: &EvidenceSettings, path: &Path) -> Check {
+    if !(0.0..=1.0).contains(&evidence.influence) {
+        return Err(path
+            .field("influence")
+            .fail(ProfileProblem::InvalidFraction));
+    }
+    if !evidence.reference_score.is_finite() || evidence.reference_score < 1.0 {
+        return Err(path
+            .field("reference_score")
+            .fail(ProfileProblem::InvalidReferenceScore));
+    }
+    let weights = path.field("weights");
+    let all = [
+        ("volume", evidence.weights.volume),
+        ("diversity", evidence.weights.diversity),
+        ("environment", evidence.weights.environment),
+        ("strength", evidence.weights.strength),
+    ];
+    for (name, weight) in all {
+        if weight > 10 {
+            return Err(weights
+                .field(name)
+                .fail(ProfileProblem::InvalidEvidenceWeight));
+        }
+    }
+    if all.iter().all(|(_, weight)| *weight == 0) {
+        return Err(weights.fail(ProfileProblem::NoEvidenceWeight));
     }
     Ok(())
 }
@@ -753,10 +811,10 @@ mod tests {
             v["scoring"] = iam_scoring_v2();
             v["llm"]["qualification_threshold"] = json!(50);
         });
-        assert_eq!(profile.definition().schema_version, 5);
+        assert_eq!(profile.definition().schema_version, 6);
         assert_eq!(weights(&profile), [10, 5, 3, 8, 7, 2, 2]);
         assert_eq!(profile.definition().llm.qualification_threshold, 37);
-        assert_eq!(profile.to_json()["schema_version"], 5);
+        assert_eq!(profile.to_json()["schema_version"], 6);
     }
 
     #[test]
@@ -855,11 +913,11 @@ mod tests {
 
     #[test]
     fn unsupported_schema_version_is_rejected() {
-        let error = error_for(|v| v["schema_version"] = json!(6));
+        let error = error_for(|v| v["schema_version"] = json!(7));
         assert_eq!(error.path, "schema_version");
         assert_eq!(
             error.problem,
-            ProfileProblem::UnsupportedSchemaVersion { found: 6 }
+            ProfileProblem::UnsupportedSchemaVersion { found: 7 }
         );
         let error = error_for(|v| v["schema_version"] = json!(0));
         assert_eq!(
@@ -1185,7 +1243,7 @@ mod tests {
         value["sources"] = json!({"http_probe": source, "ats": {"keywords": ["sso"]}});
         let profile = ValidatedProfile::parse(value).unwrap();
         let definition = profile.definition();
-        assert_eq!(definition.schema_version, 5);
+        assert_eq!(definition.schema_version, 6);
         let summary: Vec<_> = definition
             .agents
             .iter()
@@ -1195,7 +1253,7 @@ mod tests {
             summary,
             [("http-probe", "HTTP probe", true), ("ats", "ATS", true)]
         );
-        assert_eq!(profile.to_json()["schema_version"], 5);
+        assert_eq!(profile.to_json()["schema_version"], 6);
         assert_eq!(profile.to_json()["agents"][0]["source"], agent);
     }
 
@@ -1267,7 +1325,7 @@ mod tests {
     fn version_three_is_upgraded_with_a_default_qualification_agent() {
         let profile = ValidatedProfile::parse(minimal()).unwrap();
         let definition = profile.definition();
-        assert_eq!(definition.schema_version, 5);
+        assert_eq!(definition.schema_version, 6);
         assert_eq!(definition.qualification_agents.len(), 1);
         let agent = &definition.qualification_agents[0];
         assert_eq!(agent.id.as_str(), "pertinence");
@@ -1342,6 +1400,104 @@ mod tests {
         assert_eq!(error.path, "$");
     }
 
+    fn v5() -> Value {
+        let mut value = v4();
+        value["schema_version"] = json!(5);
+        let object = value.as_object_mut().unwrap();
+        object.remove("evidence");
+        object["verdict"] = json!({"reliable_from": 80, "discard_below": 20});
+        value
+    }
+
+    #[test]
+    fn version_five_is_upgraded_with_default_evidence_settings() {
+        let profile = ValidatedProfile::parse(v5()).unwrap();
+        let definition = profile.definition();
+        assert_eq!(definition.schema_version, 6);
+        assert_eq!(definition.verdict.reliable_from, 80);
+        assert_eq!(definition.verdict.discard_below, 20);
+        assert_eq!(definition.verdict.calibration_floor, 0.05);
+        assert_eq!(definition.verdict.min_evidence, 0.5);
+        assert_eq!(definition.evidence, EvidenceSettings::default());
+        assert_eq!(definition.evidence.influence, 0.6);
+        assert_eq!(definition.evidence.reference_score, 50.0);
+        assert_eq!(profile.to_json()["schema_version"], 6);
+    }
+
+    #[test]
+    fn version_five_rejects_the_evidence_section() {
+        let mut value = v5();
+        value["evidence"] = json!({});
+        let error = ValidatedProfile::parse(value).unwrap_err();
+        assert_eq!(error.path, "evidence");
+    }
+
+    #[test]
+    fn a_version_six_document_without_the_new_sections_gets_defaults() {
+        let profile = v4_ok(|v| {
+            let object = v.as_object_mut().unwrap();
+            object.remove("evidence");
+            object["verdict"] = json!({});
+        });
+        assert_eq!(profile.definition().verdict, VerdictThresholds::default());
+        assert_eq!(profile.definition().evidence, EvidenceSettings::default());
+    }
+
+    #[test]
+    fn calibration_floor_is_between_zero_and_a_fifth() {
+        for floor in [0.0, 0.05, 0.2] {
+            let _ = v4_ok(|v| v["verdict"]["calibration_floor"] = json!(floor));
+        }
+        for floor in [-0.01, 0.21, 1.0] {
+            let error = v4_error(|v| v["verdict"]["calibration_floor"] = json!(floor));
+            assert_eq!(error.path, "verdict.calibration_floor");
+            assert_eq!(error.problem, ProfileProblem::InvalidCalibrationFloor);
+        }
+    }
+
+    #[test]
+    fn min_evidence_is_a_fraction() {
+        for value in [-0.1, 1.1] {
+            let error = v4_error(|v| v["verdict"]["min_evidence"] = json!(value));
+            assert_eq!(error.path, "verdict.min_evidence");
+            assert_eq!(error.problem, ProfileProblem::InvalidFraction);
+        }
+        let _ = v4_ok(|v| v["verdict"]["min_evidence"] = json!(1.0));
+    }
+
+    #[test]
+    fn evidence_influence_is_a_fraction() {
+        let error = v4_error(|v| v["evidence"]["influence"] = json!(1.5));
+        assert_eq!(error.path, "evidence.influence");
+        assert_eq!(error.problem, ProfileProblem::InvalidFraction);
+        let _ = v4_ok(|v| v["evidence"]["influence"] = json!(0.0));
+    }
+
+    #[test]
+    fn the_reference_score_is_at_least_one() {
+        let error = v4_error(|v| v["evidence"]["reference_score"] = json!(0.5));
+        assert_eq!(error.path, "evidence.reference_score");
+        assert_eq!(error.problem, ProfileProblem::InvalidReferenceScore);
+        let _ = v4_ok(|v| v["evidence"]["reference_score"] = json!(1.0));
+    }
+
+    #[test]
+    fn evidence_weights_are_zero_to_ten_with_one_above_zero() {
+        let error = v4_error(|v| v["evidence"]["weights"]["volume"] = json!(11));
+        assert_eq!(error.path, "evidence.weights.volume");
+        assert_eq!(error.problem, ProfileProblem::InvalidEvidenceWeight);
+        let error = v4_error(|v| {
+            v["evidence"]["weights"] =
+                json!({"volume": 0, "diversity": 0, "environment": 0, "strength": 0});
+        });
+        assert_eq!(error.path, "evidence.weights");
+        assert_eq!(error.problem, ProfileProblem::NoEvidenceWeight);
+        let _ = v4_ok(|v| {
+            v["evidence"]["weights"] =
+                json!({"volume": 0, "diversity": 0, "environment": 0, "strength": 3});
+        });
+    }
+
     #[test]
     fn qualification_agent_defaults() {
         let profile = v4_ok(|v| {
@@ -1391,21 +1547,23 @@ mod tests {
     fn version_four_documents_get_a_description_derived_from_the_name() {
         let mut value = v4();
         value["schema_version"] = json!(4);
+        value.as_object_mut().unwrap().remove("evidence");
         let agent = value["qualification_agents"][0].as_object_mut().unwrap();
         agent.remove("description");
         agent.insert("name".to_owned(), json!("Maturité technique"));
         let profile = ValidatedProfile::parse(value).unwrap();
         let agent = &profile.definition().qualification_agents[0];
-        assert_eq!(profile.definition().schema_version, 5);
+        assert_eq!(profile.definition().schema_version, 6);
         assert_eq!(agent.description, "Évalue : Maturité technique");
         assert_eq!(agent.name, "Maturité technique");
-        assert_eq!(profile.to_json()["schema_version"], 5);
+        assert_eq!(profile.to_json()["schema_version"], 6);
     }
 
     #[test]
     fn version_four_upgrade_keeps_the_description_within_the_limit() {
         let mut value = v4();
         value["schema_version"] = json!(4);
+        value.as_object_mut().unwrap().remove("evidence");
         let agent = value["qualification_agents"][0].as_object_mut().unwrap();
         agent.remove("description");
         agent.insert("name".to_owned(), json!("n".repeat(500)));

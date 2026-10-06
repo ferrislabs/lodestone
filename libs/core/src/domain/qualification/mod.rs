@@ -9,12 +9,18 @@ use crate::domain::{
     llm::provider::ProviderId,
     profile::{
         ProfileId, RevisionNumber,
-        definition::{AgentId, QualificationAgent, Question, VerdictThresholds},
+        definition::{AgentId, QualificationAgent, Question},
     },
 };
 
+pub mod confidence;
 pub mod ports;
 pub mod prompt;
+
+pub use confidence::{
+    AgentOpinion, EvidenceComponents, EvidenceStrength, Judgement, LeadScoring, SCORING_VERSION,
+    VerdictCap, calibrate, judge, verdict_for,
+};
 
 uuid_id!(ResultId);
 
@@ -279,9 +285,8 @@ pub fn validate_answers(
     }
 }
 
-pub fn question_score(question: &Question, answer: &Answer) -> f64 {
-    answer
-        .probabilities
+pub fn question_score(question: &Question, answer: &Answer, floor: f64) -> f64 {
+    calibrate(&answer.probabilities, floor)
         .iter()
         .map(|(value, probability)| {
             let score = question
@@ -294,7 +299,7 @@ pub fn question_score(question: &Question, answer: &Answer) -> f64 {
         .sum()
 }
 
-pub fn agent_score(agent: &QualificationAgent, answers: &ValidAnswers) -> f64 {
+pub fn agent_score(agent: &QualificationAgent, answers: &ValidAnswers, floor: f64) -> f64 {
     let mut weighted = 0.0;
     let mut total = 0.0;
     for question in &agent.questions {
@@ -306,22 +311,20 @@ pub fn agent_score(agent: &QualificationAgent, answers: &ValidAnswers) -> f64 {
             continue;
         };
         let weight = f64::from(question.weight);
-        weighted += weight * question_score(question, answer);
+        weighted += weight * question_score(question, answer, floor);
         total += weight;
     }
     if total <= 0.0 { 0.0 } else { weighted / total }
 }
 
-pub fn lead_confidence(results: &[(u8, f64)]) -> Option<f64> {
-    let total: f64 = results.iter().map(|(weight, _)| f64::from(*weight)).sum();
-    if total <= 0.0 {
-        return None;
-    }
-    let weighted: f64 = results
+pub fn stored_answers(agent: &QualificationAgent, answers: &Value) -> Option<ValidAnswers> {
+    let object = answers.as_object()?;
+    agent
+        .questions
         .iter()
-        .map(|(weight, score)| f64::from(*weight) * score)
-        .sum();
-    Some((weighted / total * 1000.0).round() / 10.0)
+        .map(|question| check_question(question, object.get(&question.id)?).ok())
+        .collect::<Option<Vec<_>>>()
+        .map(ValidAnswers)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -336,30 +339,6 @@ str_enum!(Verdict {
     ToCheck => "a_verifier",
     Discarded => "ecarte",
 });
-
-pub fn verdict_for(confidence: f64, thresholds: VerdictThresholds) -> Verdict {
-    if confidence >= f64::from(thresholds.reliable_from) {
-        Verdict::Reliable
-    } else if confidence < f64::from(thresholds.discard_below) {
-        Verdict::Discarded
-    } else {
-        Verdict::ToCheck
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Judgement {
-    pub confidence: Option<f64>,
-    pub verdict: Option<Verdict>,
-}
-
-pub fn judge(results: &[(u8, f64)], thresholds: VerdictThresholds) -> Judgement {
-    let confidence = lead_confidence(results);
-    Judgement {
-        confidence,
-        verdict: confidence.map(|value| verdict_for(value, thresholds)),
-    }
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ResultStatus {
@@ -423,7 +402,16 @@ pub struct Completion {
     pub profile_revision: RevisionNumber,
     pub sources: Vec<String>,
     pub judgement: Judgement,
+    pub scoring_version: i32,
     pub at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Rescoring {
+    pub lead_id: LeadId,
+    pub judgement: Judgement,
+    pub scoring_version: i32,
+    pub agent_scores: Vec<(ResultId, f64)>,
 }
 
 #[cfg(test)]
@@ -752,7 +740,7 @@ mod tests {
         let question = question("q", 5);
         let agent = agent(vec![question.clone()]);
         let answers = valid_answers(&agent, json!({"q": answer("forte", 0.9, 0.5, 0.3, 0.2)}));
-        assert!((question_score(&question, &answers.0[0]) - 0.65).abs() < 1e-12);
+        assert!((question_score(&question, &answers.0[0], 0.0) - 0.65).abs() < 1e-12);
     }
 
     #[test]
@@ -760,7 +748,17 @@ mod tests {
         let question = question("q", 5);
         let agent = agent(vec![question.clone()]);
         let answers = valid_answers(&agent, json!({"q": answer("forte", 0.9, 1.0, 0.0, 0.04)}));
-        assert!((question_score(&question, &answers.0[0]) - 1.0 / 1.04).abs() < 1e-12);
+        assert!((question_score(&question, &answers.0[0], 0.0) - 1.0 / 1.04).abs() < 1e-12);
+    }
+
+    #[test]
+    fn a_question_score_is_calibrated_before_scoring() {
+        let question = question("q", 5);
+        let agent = agent(vec![question.clone()]);
+        let answers = valid_answers(&agent, json!({"q": answer("forte", 1.0, 1.0, 0.0, 0.0)}));
+        let calibrated = question_score(&question, &answers.0[0], 0.05);
+        assert!((calibrated - (0.95 + 0.025) / 1.05).abs() < 1e-12);
+        assert!(calibrated < 1.0);
     }
 
     #[test]
@@ -773,47 +771,26 @@ mod tests {
                 "b": answer("faible", 0.9, 0.0, 0.0, 1.0)
             }),
         );
-        assert!((agent_score(&agent, &answers) - 0.75).abs() < 1e-12);
+        assert!((agent_score(&agent, &answers, 0.0) - 0.75).abs() < 1e-12);
     }
 
     #[test]
-    fn the_lead_confidence_weights_agents_and_rounds_to_one_decimal() {
-        assert_eq!(lead_confidence(&[(5, 0.8)]), Some(80.0));
-        assert_eq!(lead_confidence(&[(1, 1.0), (3, 0.0)]), Some(25.0));
-        assert_eq!(lead_confidence(&[(1, 1.0), (2, 0.0)]), Some(33.3));
-        assert_eq!(lead_confidence(&[(1, 0.0), (2, 1.0)]), Some(66.7));
-        assert_eq!(lead_confidence(&[(10, 0.62345)]), Some(62.3));
-    }
-
-    #[test]
-    fn no_valid_result_means_no_confidence_and_no_verdict() {
-        assert_eq!(lead_confidence(&[]), None);
-        let judgement = judge(&[], VerdictThresholds::default());
-        assert_eq!(judgement.confidence, None);
-        assert_eq!(judgement.verdict, None);
-    }
-
-    #[test]
-    fn thresholds_decide_the_verdict() {
-        let thresholds = VerdictThresholds {
-            reliable_from: 70,
-            discard_below: 30,
-        };
-        assert_eq!(verdict_for(70.0, thresholds), Verdict::Reliable);
-        assert_eq!(verdict_for(100.0, thresholds), Verdict::Reliable);
-        assert_eq!(verdict_for(69.9, thresholds), Verdict::ToCheck);
-        assert_eq!(verdict_for(30.0, thresholds), Verdict::ToCheck);
-        assert_eq!(verdict_for(29.9, thresholds), Verdict::Discarded);
-        assert_eq!(verdict_for(0.0, thresholds), Verdict::Discarded);
-        let custom = VerdictThresholds {
-            reliable_from: 90,
-            discard_below: 50,
-        };
-        assert_eq!(verdict_for(80.0, custom), Verdict::ToCheck);
-        assert_eq!(verdict_for(49.0, custom), Verdict::Discarded);
-        let judged = judge(&[(5, 0.9)], thresholds);
-        assert_eq!(judged.confidence, Some(90.0));
-        assert_eq!(judged.verdict, Some(Verdict::Reliable));
+    fn stored_answers_are_read_back_for_a_rescore() {
+        let agent = agent(vec![question("a", 3), question("b", 1)]);
+        let answers = valid_answers(
+            &agent,
+            json!({
+                "a": answer("forte", 0.9, 0.6, 0.3, 0.1),
+                "b": answer("faible", 0.9, 0.0, 0.0, 1.0)
+            }),
+        );
+        let read = stored_answers(&agent, &answers.to_json()).unwrap();
+        assert_eq!(read.0.len(), 2);
+        assert!(
+            (agent_score(&agent, &read, 0.05) - agent_score(&agent, &answers, 0.05)).abs() < 1e-9
+        );
+        assert!(stored_answers(&agent, &json!({})).is_none());
+        assert!(stored_answers(&agent, &json!(null)).is_none());
     }
 
     #[test]

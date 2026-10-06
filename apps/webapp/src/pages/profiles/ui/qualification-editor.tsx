@@ -3,6 +3,7 @@ import { PlusIcon } from 'lucide-react'
 import { FieldErrors } from '#/components/schema-form/field-frame'
 import type { JsonObject, JsonValue, Problem } from '#/lib/schema-form'
 import {
+	evidenceSettingsOf,
 	type ProviderOption,
 	verdictOf,
 } from '#/pages/profiles/lib/qualification'
@@ -102,6 +103,7 @@ export function QualificationEditor({
 			/>
 			<VerdictPanel
 				verdict={verdictOf(value)}
+				evidence={evidenceSettingsOf(value)}
 				problems={problems}
 				actions={actions}
 			/>

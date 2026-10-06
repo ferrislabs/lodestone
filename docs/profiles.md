@@ -8,7 +8,7 @@ Profiles live in Postgres. Each edit creates a new revision; earlier revisions a
 
 ## Schema
 
-The JSON Schema is `docs/schemas/profile.v5.schema.json`. It is generated from `ProfileDefinition` and must not be edited by hand. Regenerate it with:
+The JSON Schema is `docs/schemas/profile.v6.schema.json`. It is generated from `ProfileDefinition` and must not be edited by hand. Regenerate it with:
 
 ```
 UPDATE_SCHEMA=1 cargo test -p lodestone-core --test profile_examples
@@ -23,7 +23,7 @@ Without `UPDATE_SCHEMA=1` the same test fails if the committed file is stale. Th
 
 ## Sections
 
-- `schema_version`: must be 5. See [Older versions](#older-versions).
+- `schema_version`: must be 6. See [Older versions](#older-versions).
 - `identity`: the offer and the target customer, in free text.
 - `agents`: the detection agents; at least one is required. An agent searches one source with its own settings (see ADR 0005). Several agents of the same kind are allowed.
   - `id`: slug matching `^[a-z0-9][a-z0-9-]{0,62}$`, unique in the profile.
@@ -41,7 +41,8 @@ Without `UPDATE_SCHEMA=1` the same test fails if the committed file is stale. Th
   - `questions`: at least one. A question has an `id` (lowercase letters, digits, `-`, `_`, at most 63 characters, unique in the agent), a `wording`, a `weight` (1 to 10, default 5) and 2 to 10 `options`. An option has a `value` (same identifier rule, unique in the question), a `label` and a `score` from 0 to 1.
   - Validation paths include the indexes, for example `qualification_agents[1].questions[0].options[2].score`.
 - `aggregator`: `provider_id` (or `null` for the synthesis default) and a `system_prompt` (not empty, at most 8000 characters). Once every enabled qualification agent has a result for a lead, it writes the lead summary and a message draft (see "Qualification and summary").
-- `verdict`: `reliable_from` (0 to 100, default 70) and `discard_below` (0 to 100, default 30), with `reliable_from > discard_below`. Percentages of the lead confidence: reliable from the first, to check between the two, discarded below the second.
+- `verdict`: `reliable_from` (0 to 100, default 70) and `discard_below` (0 to 100, default 30), with `reliable_from > discard_below`. Percentages of the lead confidence: reliable from the first (and only when the two conditions below hold), to check between the two, discarded below the second. `calibration_floor` (0 to 0.2, default 0.05, 0 disables) clamps every answer probability to `[floor, 1 - floor]` before scoring, then renormalises. `min_evidence` (0 to 1, default 0.5) is the evidence strength a lead needs to be reliable.
+- `evidence`: how the strength of the evidence weighs on the confidence (ADR 0007, "Evidence and calibration"). `influence` (0 to 1, default 0.6), `reference_score` (at least 1, default 50) and `weights` (`volume`, `diversity`, `environment`, `strength`, integers from 0 to 10, default 1, at least one above 0). The whole section and each field are optional.
 
 ### Contract JSON
 
@@ -71,7 +72,7 @@ A qualification agent answers, and only answers, with one object per question:
 
 Qualification runs in the `qualification` listener (ADR 0006, ADR 0007), not in a recurring job: the former `llm.qualify` job is gone, its row is deleted by a migration and a stale one is rejected as a permanent failure.
 
-1. **Agents.** Every lead with a signal is evaluated by each enabled qualification agent. The step is repeated when the lead receives a signal from a source it had no signal from, and for every lead when the profile gets a new revision. The lead's confidence (0 to 100) and verdict come from the valid results only, computed in code: question score, agent score, then the weighted mean over agents, compared with `verdict.reliable_from` and `verdict.discard_below`. Verdicts: `fiable`, `a_verifier`, `ecarte`; a lead without any valid result has no verdict and is shown "En attente".
+1. **Agents.** Every lead with a signal is evaluated by each enabled qualification agent. The step is repeated when the lead receives a signal from a source it had no signal from, and for every lead when the profile gets a new revision. The lead's confidence (0 to 100) and verdict come from the valid results only, computed in code: calibrated question score, agent score, the weighted mean over agents (the agents' opinion), blended with the evidence strength, then compared with `verdict.reliable_from` and `verdict.discard_below`; a lead is reliable only with two independent angles and enough evidence (see ADR 0007, "Evidence and calibration"). Verdicts: `fiable`, `a_verifier`, `ecarte`; a lead without any valid result has no verdict and is shown "En attente".
 2. **Aggregator.** A lead is summarised when the agents' step has stored a result for every enabled agent (valid or invalid) and its summary is missing or older than the agents' results (the `summarised_at` mark of `lead_qualification_state` is reset each time the agents run again). A decided lead (validated, rejected, contacted) is not summarised again. The selection runs in the same listener loop, right after the agents' step, oldest first, within the same batch size and run budget.
 3. **Provider.** `aggregator.provider_id`, else the default provider "Synthèse (agrégateur par défaut)". Qualification agents without a provider use "Classification (agents de qualification par défaut)". The two defaults keep the former tier names in the database and the API (`triage` and `qualification`); the Fournisseurs LLM screen shows them under "Fournisseurs par défaut".
 4. **Prompt.** System: the aggregator's `system_prompt`, the market context (offer and target customer, neutralised), the answer language and the output rules. Documents (untrusted, numbered): one per signal first, then the lead overview, then one per enabled agent with its questions, the chosen option label, its confidence and its score (an invalid agent is listed as such and left out of the confidence). The instruction states the computed confidence and verdict as final facts.
@@ -82,7 +83,7 @@ Qualification runs in the `qualification` listener (ADR 0006, ADR 0007), not in 
 
 The assessment is stored in `assessments` (`prompt_version` is `aggregator@` plus a hash of the system prompt, `verdict_narrative`, `evidence_verified`).
 
-The leads list (`GET /api/v1/profiles/{profile_id}/leads`) accepts `verdict` (comma-separated `fiable`, `a_verifier`, `ecarte`, `en_attente`), `min_confidence` and `sort` (`confidence_desc`, the default, `confidence_asc`, `score_desc`, ...); each lead carries `confidence`, `verdict` and the latest `summary`. The Leads screen hides `ecarte` by default and sorts by confidence. The queue (`GET /api/v1/drafts`) is sorted by lead confidence and filtered by the same `verdict` parameter; the Brouillons screen also hides `ecarte` by default.
+The leads list (`GET /api/v1/profiles/{profile_id}/leads`) accepts `verdict` (comma-separated `fiable`, `a_verifier`, `ecarte`, `en_attente`), `min_confidence` and `sort` (`confidence_desc`, the default, `confidence_asc`, `score_desc`, ...); each lead carries `confidence`, `verdict`, `opinion` (agents' opinion in percent), `evidence` (strength in percent with its four components, signal count, signal score, `only_non_production`), `verdict_reason` (`single_angle`, `weak_evidence` or `non_production` when a confident lead was capped at `a_verifier`) and the latest `summary`. The Leads screen hides `ecarte` by default and sorts by confidence. The queue (`GET /api/v1/drafts`) is sorted by lead confidence and filtered by the same `verdict` parameter; the Brouillons screen also hides `ecarte` by default.
 
 ## How scoring works
 
@@ -147,7 +148,7 @@ A host or domain whose lookup, probe or crawl fails is marked checked like a suc
 
 ## Older versions
 
-Stored revisions are never rewritten. Versions 1, 2, 3 and 4 are accepted and upgraded when read; new revisions are written in version 5. Errors on an older document keep that document's paths.
+Stored revisions are never rewritten. Versions 1, 2, 3, 4 and 5 are accepted and upgraded when read; new revisions are written in version 6. Errors on an older document keep that document's paths.
 
 ### Version 1 to 2
 
@@ -175,3 +176,7 @@ Sourcing agents, scoring, contact ranking and `llm` are unchanged. A null `provi
 ### Version 4 to 5
 
 Qualification agents gain a required `description`. Parsing derives it from the name (`Évalue : <name>`, cut at 300 characters). The agent contract also changes (ADR 0007): the answer carries a required `summary` next to `answers`.
+
+### Version 5 to 6
+
+The upgrade adds the `evidence` section with its defaults and the `verdict.calibration_floor` (0.05) and `verdict.min_evidence` (0.5) defaults; thresholds and everything else are kept. Stored leads are rescored from their stored answers on the next qualification loop, without calling a model.

@@ -32,6 +32,13 @@ export const MAX_DESCRIPTION_CHARS = 300
 export const MAX_SUMMARY_CHARS = 600
 export const DEFAULT_RELIABLE_FROM = 70
 export const DEFAULT_DISCARD_BELOW = 30
+export const DEFAULT_CALIBRATION_FLOOR = 0.05
+export const MAX_CALIBRATION_FLOOR_PERCENT = 20
+export const DEFAULT_MIN_EVIDENCE = 0.5
+export const DEFAULT_INFLUENCE = 0.6
+export const DEFAULT_REFERENCE_SCORE = 50
+export const DEFAULT_EVIDENCE_WEIGHT = 1
+export const MAX_EVIDENCE_WEIGHT = 10
 
 const IDENTIFIER = /^[a-z0-9][a-z0-9_-]{0,62}$/
 const SLUG = /^[a-z0-9][a-z0-9-]{0,62}$/
@@ -125,6 +132,112 @@ export function verdictOf(value: JsonObject): Verdict {
 		reliableFrom: read('reliable_from', DEFAULT_RELIABLE_FROM),
 		discardBelow: read('discard_below', DEFAULT_DISCARD_BELOW),
 	}
+}
+
+export const EVIDENCE_WEIGHT_KEYS = [
+	'volume',
+	'diversity',
+	'environment',
+	'strength',
+] as const
+
+export type EvidenceWeightKey = (typeof EVIDENCE_WEIGHT_KEYS)[number]
+
+export interface EvidenceSettings {
+	calibrationFloor: number | null
+	minEvidence: number | null
+	influence: number | null
+	referenceScore: number | null
+	weights: Record<EvidenceWeightKey, number | null>
+}
+
+function percentOf(
+	source: JsonObject,
+	key: string,
+	fallback: number,
+): number | null {
+	if (!(key in source)) return Math.round(fallback * 100)
+	const value = numberField(source, key)
+	return value === null ? null : Math.round(value * 100)
+}
+
+export function evidenceSettingsOf(value: JsonObject): EvidenceSettings {
+	const verdict = isJsonObject(value.verdict) ? value.verdict : {}
+	const evidence = isJsonObject(value.evidence) ? value.evidence : {}
+	const weights = isJsonObject(evidence.weights) ? evidence.weights : {}
+	const weight = (key: EvidenceWeightKey) =>
+		key in weights ? numberField(weights, key) : DEFAULT_EVIDENCE_WEIGHT
+	return {
+		calibrationFloor: percentOf(
+			verdict,
+			'calibration_floor',
+			DEFAULT_CALIBRATION_FLOOR,
+		),
+		minEvidence: percentOf(verdict, 'min_evidence', DEFAULT_MIN_EVIDENCE),
+		influence: percentOf(evidence, 'influence', DEFAULT_INFLUENCE),
+		referenceScore:
+			'reference_score' in evidence
+				? numberField(evidence, 'reference_score')
+				: DEFAULT_REFERENCE_SCORE,
+		weights: {
+			volume: weight('volume'),
+			diversity: weight('diversity'),
+			environment: weight('environment'),
+			strength: weight('strength'),
+		},
+	}
+}
+
+export const FLOOR_ERROR = `Doit être un pourcentage entier de 0 à ${MAX_CALIBRATION_FLOOR_PERCENT}`
+export const REFERENCE_SCORE_ERROR = "Doit être un nombre d'au moins 1"
+export const WEIGHT_ERROR = `Doit être un entier de 0 à ${MAX_EVIDENCE_WEIGHT}`
+export const NO_WEIGHT_ERROR = 'Au moins un poids doit être supérieur à 0'
+
+function isWeight(value: number | null): value is number {
+	return (
+		value !== null &&
+		Number.isInteger(value) &&
+		value >= 0 &&
+		value <= MAX_EVIDENCE_WEIGHT
+	)
+}
+
+export function evidenceProblems(settings: EvidenceSettings): Problem[] {
+	const problems: Problem[] = []
+	const { calibrationFloor, minEvidence, influence, referenceScore } = settings
+	if (
+		!isPercent(calibrationFloor) ||
+		calibrationFloor > MAX_CALIBRATION_FLOOR_PERCENT
+	) {
+		problems.push({ path: 'verdict.calibration_floor', message: FLOOR_ERROR })
+	}
+	if (!isPercent(minEvidence)) {
+		problems.push({ path: 'verdict.min_evidence', message: PERCENT_ERROR })
+	}
+	if (!isPercent(influence)) {
+		problems.push({ path: 'evidence.influence', message: PERCENT_ERROR })
+	}
+	if (referenceScore === null || referenceScore < 1) {
+		problems.push({
+			path: 'evidence.reference_score',
+			message: REFERENCE_SCORE_ERROR,
+		})
+	}
+	for (const key of EVIDENCE_WEIGHT_KEYS) {
+		if (!isWeight(settings.weights[key])) {
+			problems.push({
+				path: `evidence.weights.${key}`,
+				message: WEIGHT_ERROR,
+			})
+		}
+	}
+	if (
+		problems.every((item) => !item.path.startsWith('evidence.weights')) &&
+		EVIDENCE_WEIGHT_KEYS.every((key) => settings.weights[key] === 0)
+	) {
+		problems.push({ path: 'evidence.weights', message: NO_WEIGHT_ERROR })
+	}
+	return problems
 }
 
 export function isPercent(value: number | null): value is number {
@@ -392,11 +505,33 @@ export function setAggregatorField(
 
 export function setVerdictField(
 	value: JsonObject,
-	key: 'reliable_from' | 'discard_below',
+	key: 'reliable_from' | 'discard_below' | 'calibration_floor' | 'min_evidence',
 	next: number | null,
 ): JsonObject {
 	const current = isJsonObject(value.verdict) ? value.verdict : {}
 	return { ...value, verdict: { ...current, [key]: next } }
+}
+
+export function setEvidenceField(
+	value: JsonObject,
+	key: 'influence' | 'reference_score',
+	next: number | null,
+): JsonObject {
+	const current = isJsonObject(value.evidence) ? value.evidence : {}
+	return { ...value, evidence: { ...current, [key]: next } }
+}
+
+export function setEvidenceWeight(
+	value: JsonObject,
+	key: EvidenceWeightKey,
+	next: number | null,
+): JsonObject {
+	const current = isJsonObject(value.evidence) ? value.evidence : {}
+	const weights = isJsonObject(current.weights) ? current.weights : {}
+	return {
+		...value,
+		evidence: { ...current, weights: { ...weights, [key]: next } },
+	}
 }
 
 export function providerName(
@@ -614,5 +749,6 @@ export function validateQualification(value: JsonObject): Problem[] {
 		)
 	}
 	problems.push(...verdictProblems(verdictOf(value)))
+	problems.push(...evidenceProblems(evidenceSettingsOf(value)))
 	return problems
 }

@@ -570,6 +570,60 @@ async fn the_lead_carries_its_confidence_and_verdict(pool: PgPool) {
     assert!(find("pending.com")["qualified_at"].is_null());
 }
 
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_lead_exposes_its_opinion_evidence_and_verdict_reason(pool: PgPool) {
+    let seed = Seed { pool: pool.clone() };
+    let profile = seed.profile("keycloak-ops").await;
+    let scored = seed.lead(&profile, "scored.com", "new", 12.1, 1).await;
+    seed.lead(&profile, "bare.com", "new", 5.0, 2).await;
+    sqlx::query("UPDATE leads SET confidence = 51.4, verdict = 'a_verifier', qualified_at = now() WHERE id = $1::uuid")
+        .bind(&scored)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO lead_qualification_state (lead_id, profile_revision, sources, completed_at, scoring_version, opinion, evidence, verdict_reason)
+         VALUES ($1::uuid, 2, ARRAY['dns_cname'], now(), 1, 0.9286, $2, 'non_production')",
+    )
+    .bind(&scored)
+    .bind(serde_json::json!({
+        "score": 0.2564,
+        "components": {"volume": 0.2835, "diversity": 0.5, "environment": 0.0, "strength": 0.242},
+        "signal_count": 1,
+        "signal_score": 12.1,
+        "only_non_production": true
+    }))
+    .execute(&pool)
+    .await
+    .unwrap();
+    let api = Api::new(pool).await;
+
+    let (status, body) = api.get(&format!("/api/v1/profiles/{profile}/leads")).await;
+
+    assert_eq!(status, StatusCode::OK);
+    let leads = body["data"].as_array().unwrap();
+    let find = |domain: &str| leads.iter().find(|lead| lead["domain"] == domain).unwrap();
+    let lead = find("scored.com");
+    assert_eq!(lead["opinion"], 92.9);
+    assert_eq!(lead["evidence"]["strength"], 25.6);
+    assert_eq!(lead["evidence"]["components"]["volume"], 28.4);
+    assert_eq!(lead["evidence"]["components"]["diversity"], 50.0);
+    assert_eq!(lead["evidence"]["components"]["environment"], 0.0);
+    assert_eq!(lead["evidence"]["components"]["strength"], 24.2);
+    assert_eq!(lead["evidence"]["signal_count"], 1);
+    assert_eq!(lead["evidence"]["only_non_production"], true);
+    assert_eq!(lead["verdict_reason"], "non_production");
+    assert!(find("bare.com")["opinion"].is_null());
+    assert!(find("bare.com")["evidence"].is_null());
+    assert!(find("bare.com")["verdict_reason"].is_null());
+
+    let (status, detail) = api.get(&format!("/api/v1/leads/{scored}")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(detail["data"]["lead"]["opinion"], 92.9);
+    assert_eq!(detail["data"]["lead"]["verdict_reason"], "non_production");
+    assert_eq!(detail["data"]["lead"]["evidence"]["strength"], 25.6);
+}
+
 async fn judged_fixture(pool: &PgPool) -> (Seed, String) {
     let seed = Seed { pool: pool.clone() };
     let profile = seed.profile("keycloak-ops").await;

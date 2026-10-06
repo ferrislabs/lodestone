@@ -4,7 +4,7 @@ use crate::domain::{
     facts::LeadFacts,
     lead::{Assessment, ContactEmail, Lead, LeadId, LeadStatus, Signal},
     profile::{Profile, ProfileId, ProfileName, RevisionNumber, definition::QualificationAgent},
-    qualification::{QualificationResult, SummaryState, Verdict},
+    qualification::{LeadScoring, QualificationResult, SummaryState, Verdict},
     values::SignalKind,
 };
 
@@ -111,6 +111,7 @@ pub struct LeadListing {
     pub profile: Profile,
     pub page: LeadPage,
     pub summaries: HashMap<LeadId, String>,
+    pub scorings: HashMap<LeadId, LeadScoring>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -124,6 +125,7 @@ pub struct LeadDetail {
     pub qualification_results: Vec<QualificationResult>,
     pub qualification_agents: Vec<QualificationAgent>,
     pub summary_state: Option<SummaryState>,
+    pub scoring: Option<LeadScoring>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -187,6 +187,19 @@ fn settings(budget_cents: u32, batch_size: u32) -> EvaluationSettings {
     }
 }
 
+fn question(id: &str) -> Value {
+    json!({
+        "id": id,
+        "wording": "Pertinent ?",
+        "weight": 5,
+        "options": [
+            {"value": "forte", "label": "Forte", "score": 1.0},
+            {"value": "moyenne", "label": "Moyenne", "score": 0.5},
+            {"value": "faible", "label": "Faible", "score": 0.0}
+        ]
+    })
+}
+
 fn agent(id: &str, weight: u8, provider: Option<ProviderId>) -> Value {
     json!({
         "id": id,
@@ -196,22 +209,16 @@ fn agent(id: &str, weight: u8, provider: Option<ProviderId>) -> Value {
         "provider_id": provider.map(|provider| provider.0.to_string()),
         "system_prompt": format!("PROMPT-OF-{id}"),
         "weight": weight,
-        "questions": [{
-            "id": "q",
-            "wording": "Pertinent ?",
-            "weight": 5,
-            "options": [
-                {"value": "forte", "label": "Forte", "score": 1.0},
-                {"value": "moyenne", "label": "Moyenne", "score": 0.5},
-                {"value": "faible", "label": "Faible", "score": 0.0}
-            ]
-        }]
+        "questions": [question("q"), question("q2")]
     })
 }
 
 fn definition(agents: Vec<Value>, aggregator_provider: Option<ProviderId>) -> Value {
     let mut definition: Value = serde_json::from_str(IAM).unwrap();
     definition["qualification_agents"] = Value::Array(agents);
+    definition["verdict"]["calibration_floor"] = json!(0.0);
+    definition["verdict"]["min_evidence"] = json!(0.0);
+    definition["evidence"]["influence"] = json!(0.0);
     definition["aggregator"]["system_prompt"] = json!("AGGREGATOR-PROMPT");
     definition["aggregator"]["provider_id"] =
         json!(aggregator_provider.map(|provider| provider.0.to_string()));

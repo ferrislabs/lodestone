@@ -139,5 +139,8 @@ async fn the_pertinence_agent_answers_the_contract_live() {
         "validated answers: {}",
         serde_json::to_string_pretty(&output.answers.to_json()).unwrap()
     );
-    println!("agent score: {:.4}", agent_score(agent, &output.answers));
+    println!(
+        "agent score: {:.4}",
+        agent_score(agent, &output.answers, 0.05)
+    );
 }

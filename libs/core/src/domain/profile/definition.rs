@@ -4,7 +4,7 @@ use uuid::Uuid;
 
 use crate::domain::values::SourceName;
 
-pub const PROFILE_SCHEMA_VERSION: u32 = 5;
+pub const PROFILE_SCHEMA_VERSION: u32 = 6;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -13,7 +13,7 @@ pub const PROFILE_SCHEMA_VERSION: u32 = 5;
     description = "Describes one market: what is sold, which agents scan which sources, which qualification agents judge a lead and how an aggregator sums it up, how leads are scored and which contacts to prefer."
 )]
 pub struct ProfileDefinition {
-    #[schemars(description = "Profile format version. Must be 5.")]
+    #[schemars(description = "Profile format version. Must be 6.")]
     pub schema_version: u32,
     pub identity: Identity,
     #[schemars(description = "Detection agents. At least one is required.")]
@@ -25,6 +25,8 @@ pub struct ProfileDefinition {
     pub aggregator: Aggregator,
     #[serde(default)]
     pub verdict: VerdictThresholds,
+    #[serde(default)]
+    pub evidence: EvidenceSettings,
     pub scoring: Scoring,
     pub contact_ranking: ContactRanking,
     pub llm: LlmSettings,
@@ -200,17 +202,17 @@ pub struct Aggregator {
     pub system_prompt: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[schemars(
     title = "Verdict thresholds",
-    description = "Percentages of the lead confidence that decide its verdict: reliable, to check or discarded."
+    description = "Rules that decide the verdict of a lead from its confidence: reliable, to check or discarded."
 )]
 pub struct VerdictThresholds {
     #[serde(default = "default_reliable_from")]
     #[schemars(
         range(min = 0, max = 100),
-        description = "A lead is reliable from this confidence percentage."
+        description = "A lead is reliable from this confidence percentage, provided it also has two independent angles and enough evidence."
     )]
     pub reliable_from: u8,
     #[serde(default = "default_discard_below")]
@@ -219,7 +221,21 @@ pub struct VerdictThresholds {
         description = "A lead is discarded below this confidence percentage. Must be lower than reliable_from."
     )]
     pub discard_below: u8,
+    #[serde(default = "default_calibration_floor")]
+    #[schemars(
+        range(min = 0.0, max = 0.2),
+        description = "Each answer probability is clamped to [floor, 1 - floor] then renormalised before scoring, so a small model cannot claim absolute certainty. 0 disables the calibration."
+    )]
+    pub calibration_floor: f64,
+    #[serde(default = "default_min_evidence")]
+    #[schemars(
+        range(min = 0.0, max = 1.0),
+        description = "A lead is reliable only when its evidence strength (0 to 1) reaches this value."
+    )]
+    pub min_evidence: f64,
 }
+
+pub const MAX_CALIBRATION_FLOOR: f64 = 0.2;
 
 fn default_reliable_from() -> u8 {
     70
@@ -229,11 +245,104 @@ fn default_discard_below() -> u8 {
     30
 }
 
+fn default_calibration_floor() -> f64 {
+    0.05
+}
+
+fn default_min_evidence() -> f64 {
+    0.5
+}
+
 impl Default for VerdictThresholds {
     fn default() -> Self {
         Self {
             reliable_from: default_reliable_from(),
             discard_below: default_discard_below(),
+            calibration_floor: default_calibration_floor(),
+            min_evidence: default_min_evidence(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(
+    title = "Evidence weights",
+    description = "Relative weight of each component of the evidence strength. A weight of 0 ignores the component."
+)]
+pub struct EvidenceWeights {
+    #[serde(default = "default_evidence_weight")]
+    #[schemars(range(min = 0, max = 10), description = "Number of signals.")]
+    pub volume: u8,
+    #[serde(default = "default_evidence_weight")]
+    #[schemars(range(min = 0, max = 10), description = "Number of distinct sources.")]
+    pub diversity: u8,
+    #[serde(default = "default_evidence_weight")]
+    #[schemars(
+        range(min = 0, max = 10),
+        description = "Share of production hosts among the hosts carrying signals."
+    )]
+    pub environment: u8,
+    #[serde(default = "default_evidence_weight")]
+    #[schemars(
+        range(min = 0, max = 10),
+        description = "Signal score of the lead against the reference score."
+    )]
+    pub strength: u8,
+}
+
+fn default_evidence_weight() -> u8 {
+    1
+}
+
+impl Default for EvidenceWeights {
+    fn default() -> Self {
+        Self {
+            volume: default_evidence_weight(),
+            diversity: default_evidence_weight(),
+            environment: default_evidence_weight(),
+            strength: default_evidence_weight(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(
+    title = "Evidence settings",
+    description = "How the strength of the evidence behind a lead (signals, sources, hosts) weighs on its confidence."
+)]
+pub struct EvidenceSettings {
+    #[serde(default = "default_influence")]
+    #[schemars(
+        range(min = 0.0, max = 1.0),
+        description = "Confidence = agents opinion x ((1 - influence) + influence x evidence strength). 0 ignores the evidence, 1 multiplies the opinion by it."
+    )]
+    pub influence: f64,
+    #[serde(default = "default_reference_score")]
+    #[schemars(
+        range(min = 1.0),
+        description = "Signal score at which the signal strength component reaches 1."
+    )]
+    pub reference_score: f64,
+    #[serde(default)]
+    pub weights: EvidenceWeights,
+}
+
+fn default_influence() -> f64 {
+    0.6
+}
+
+fn default_reference_score() -> f64 {
+    50.0
+}
+
+impl Default for EvidenceSettings {
+    fn default() -> Self {
+        Self {
+            influence: default_influence(),
+            reference_score: default_reference_score(),
+            weights: EvidenceWeights::default(),
         }
     }
 }

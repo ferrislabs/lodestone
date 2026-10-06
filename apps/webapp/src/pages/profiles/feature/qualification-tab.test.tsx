@@ -53,7 +53,7 @@ const PROVIDERS: ProviderOption[] = [
 
 function base(): JsonObject {
 	return {
-		schema_version: 5,
+		schema_version: 6,
 		identity: { offer: 'o', target_customer: 't' },
 		agents: [newAgent('ats', [])],
 		qualification_agents: [
@@ -623,6 +623,103 @@ describe('aggregator and thresholds', () => {
 			target: { value: '150' },
 		})
 		expect(screen.getByRole('alert').textContent).toContain('0 à 100')
+	})
+})
+
+describe('evidence settings panel', () => {
+	it('is titled verdicts and evidence and shows the defaults', () => {
+		render(<Harness />)
+		expect(
+			screen.getByRole('heading', { name: 'Verdicts et preuves' }),
+		).toBeTruthy()
+		expect(screen.getByLabelText('Preuves minimales')).toHaveProperty(
+			'value',
+			'50',
+		)
+		expect(screen.getByLabelText('Plancher de calibration')).toHaveProperty(
+			'value',
+			'5',
+		)
+		expect(screen.getByLabelText('Influence des preuves')).toHaveProperty(
+			'value',
+			'60',
+		)
+		expect(screen.getByLabelText('Score de référence')).toHaveProperty(
+			'value',
+			'50',
+		)
+		for (const label of [
+			'Poids : volume de signaux',
+			'Poids : diversité des sources',
+			'Poids : environnement',
+			'Poids : force des signaux',
+		]) {
+			expect(screen.getByLabelText(label)).toHaveProperty('value', '1')
+		}
+	})
+
+	it('writes percentages as fractions and keeps the thresholds', () => {
+		const seen = vi.fn()
+		render(<Harness onValue={seen} />)
+		fireEvent.change(screen.getByLabelText('Preuves minimales'), {
+			target: { value: '65' },
+		})
+		expect(lastValue(seen).verdict).toEqual({
+			reliable_from: 70,
+			discard_below: 30,
+			min_evidence: 0.65,
+		})
+		fireEvent.change(screen.getByLabelText('Plancher de calibration'), {
+			target: { value: '10' },
+		})
+		expect(lastValue(seen).verdict).toMatchObject({ calibration_floor: 0.1 })
+		fireEvent.change(screen.getByLabelText('Influence des preuves'), {
+			target: { value: '40' },
+		})
+		expect(lastValue(seen).evidence).toEqual({ influence: 0.4 })
+	})
+
+	it('edits the reference score and the weights', () => {
+		const seen = vi.fn()
+		render(<Harness onValue={seen} />)
+		fireEvent.change(screen.getByLabelText('Score de référence'), {
+			target: { value: '30' },
+		})
+		fireEvent.change(screen.getByLabelText('Poids : environnement'), {
+			target: { value: '3' },
+		})
+		expect(lastValue(seen).evidence).toEqual({
+			reference_score: 30,
+			weights: { environment: 3 },
+		})
+	})
+
+	it('rejects a calibration floor above 20 %', () => {
+		render(<Harness />)
+		fireEvent.change(screen.getByLabelText('Plancher de calibration'), {
+			target: { value: '25' },
+		})
+		expect(screen.getByRole('alert').textContent).toContain('0 à 20')
+		expect(
+			screen
+				.getByLabelText('Plancher de calibration')
+				.getAttribute('aria-invalid'),
+		).toBe('true')
+	})
+
+	it('rejects weights that are all zero', () => {
+		render(<Harness />)
+		for (const label of [
+			'Poids : volume de signaux',
+			'Poids : diversité des sources',
+			'Poids : environnement',
+			'Poids : force des signaux',
+		]) {
+			fireEvent.change(screen.getByLabelText(label), {
+				target: { value: '0' },
+			})
+		}
+		expect(screen.getByRole('alert').textContent).toContain('Au moins un poids')
 	})
 })
 

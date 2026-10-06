@@ -1,5 +1,5 @@
 export const NEW_PROFILE_TEMPLATE = `{
-  "schema_version": 5,
+  "schema_version": 6,
   "identity": {
     "offer": "",
     "target_customer": ""
@@ -12,7 +12,19 @@ export const NEW_PROFILE_TEMPLATE = `{
   },
   "verdict": {
     "reliable_from": 70,
-    "discard_below": 30
+    "discard_below": 30,
+    "calibration_floor": 0.05,
+    "min_evidence": 0.5
+  },
+  "evidence": {
+    "influence": 0.6,
+    "reference_score": 50,
+    "weights": {
+      "volume": 1,
+      "diversity": 1,
+      "environment": 1,
+      "strength": 1
+    }
   },
   "scoring": {
     "factors": []

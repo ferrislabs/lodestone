@@ -105,6 +105,36 @@ describe('LeadsList', () => {
 		expect(screen.getByText('—')).toBeTruthy()
 	})
 
+	it('shows the opinion and evidence breakdown under the confidence', () => {
+		const scored: Lead = {
+			...leads[0],
+			opinion: 100,
+			evidence: {
+				strength: 35,
+				components: {
+					volume: 28.4,
+					diversity: 50,
+					environment: 0,
+					strength: 24.2,
+				},
+				signal_count: 1,
+				signal_score: 12.1,
+				only_non_production: true,
+			},
+		}
+		const { container } = render(
+			<Harness data={[scored, leads[1]]} state="ready" />,
+		)
+		const breakdowns = container.querySelectorAll('[data-confidence-breakdown]')
+		expect(breakdowns).toHaveLength(1)
+		expect(breakdowns[0]?.textContent).toMatch(
+			/^Avis 100\s%\s·\sPreuves 35\s%$/,
+		)
+		expect(
+			container.querySelector('[title^="Avis"]')?.getAttribute('title'),
+		).toMatch(/Preuves 35/)
+	})
+
 	it('shows the confidence bar and the summary excerpt of each lead', () => {
 		const long = `${'Phrase de synthèse. '.repeat(20)}`
 		const { container } = render(

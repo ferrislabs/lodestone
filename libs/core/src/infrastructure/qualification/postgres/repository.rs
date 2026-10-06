@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use chrono::{DateTime, Utc};
 use common::CoreError;
 use lodestone_macros::repository;
@@ -5,13 +7,13 @@ use lodestone_macros::repository;
 use crate::{
     Lead, LeadId, ProfileId, RevisionNumber,
     domain::qualification::{
-        Completion, QualificationResult, SUMMARY_ERROR_MAX_CHARS, SummaryState,
-        ports::QualificationRepository, summary_retry_delay,
+        Completion, EvidenceStrength, LeadScoring, QualificationResult, Rescoring, SCORING_VERSION,
+        SUMMARY_ERROR_MAX_CHARS, SummaryState, ports::QualificationRepository, summary_retry_delay,
     },
     infrastructure::{
         lead::postgres::{model::LeadRow, repository::NOT_SUPPRESSED},
         postgres::{SharedTx, error::map_sqlx_error},
-        qualification::postgres::model::ResultRow,
+        qualification::postgres::model::{ResultRow, ScoringRow},
     },
 };
 
@@ -24,6 +26,10 @@ impl<'tx> PgQualificationRepository<'tx> {
     pub fn new(tx: &SharedTx<'tx>) -> Self {
         Self { tx: tx.clone() }
     }
+}
+
+fn evidence_json(evidence: &EvidenceStrength) -> Result<serde_json::Value, CoreError> {
+    serde_json::to_value(evidence).map_err(|error| CoreError::Internal(error.to_string()))
 }
 
 fn revision_number(revision: RevisionNumber) -> Result<i32, CoreError> {
@@ -53,6 +59,20 @@ const SUMMARY_DUE: &str = r#"
       AND state.profile_revision = $2
       AND state.summarised_at IS NULL
       AND leads.status IN ('new', 'qualified')
+"#;
+
+const STALE: &str = r#"
+    FROM leads
+    JOIN lead_qualification_state state ON state.lead_id = leads.id
+    WHERE leads.profile_id = $1
+      AND state.profile_revision = $2
+      AND (
+          state.scoring_version <> $3
+          OR state.evidence IS NULL
+          OR abs((state.evidence->>'signal_score')::float8 - leads.score) > 1e-9
+          OR (state.evidence->>'signal_count')::bigint
+              <> (SELECT COUNT(*) FROM signals WHERE signals.lead_id = leads.id)
+      )
 "#;
 
 const SUMMARY_READY: &str =
@@ -273,12 +293,19 @@ impl<'tx> QualificationRepository for PgQualificationRepository<'tx> {
         let mut tx = self.tx.lock().await;
         sqlx::query(
             r#"
-            INSERT INTO lead_qualification_state (lead_id, profile_revision, sources, completed_at)
-            VALUES ($1, $2, $3, $4)
+            INSERT INTO lead_qualification_state (
+                lead_id, profile_revision, sources, completed_at,
+                scoring_version, opinion, evidence, verdict_reason
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             ON CONFLICT (lead_id) DO UPDATE SET
                 profile_revision = EXCLUDED.profile_revision,
                 sources          = EXCLUDED.sources,
                 completed_at     = EXCLUDED.completed_at,
+                scoring_version  = EXCLUDED.scoring_version,
+                opinion          = EXCLUDED.opinion,
+                evidence         = EXCLUDED.evidence,
+                verdict_reason   = EXCLUDED.verdict_reason,
                 summarised_at    = NULL,
                 summary_attempts = 0,
                 summary_next_attempt_at = NULL,
@@ -289,6 +316,10 @@ impl<'tx> QualificationRepository for PgQualificationRepository<'tx> {
         .bind(revision)
         .bind(&completion.sources)
         .bind(completion.at)
+        .bind(completion.scoring_version)
+        .bind(completion.judgement.opinion)
+        .bind(evidence_json(&completion.judgement.evidence)?)
+        .bind(completion.judgement.cap.map(|cap| cap.as_str()))
         .execute(&mut ***tx)
         .await
         .map_err(map_sqlx_error)?;
@@ -328,6 +359,106 @@ impl<'tx> QualificationRepository for PgQualificationRepository<'tx> {
         .map_err(map_sqlx_error)?;
         rows.into_iter()
             .map(QualificationResult::try_from)
+            .collect()
+    }
+
+    #[tracing::instrument(skip(self), fields(db.system = "postgresql", db.operation = "select", db.table = "leads", profile.id = %profile_id), err)]
+    async fn stale_scorings(
+        &mut self,
+        profile_id: ProfileId,
+        revision: RevisionNumber,
+        limit: u32,
+    ) -> Result<Vec<Lead>, CoreError> {
+        let revision = revision_number(revision)?;
+        let query = format!(
+            "SELECT leads.id, leads.profile_id, leads.domain, leads.status, leads.score, leads.score_breakdown, leads.confidence, leads.verdict, leads.qualified_at, leads.first_seen_at, leads.last_seen_at, leads.updated_at {STALE}{NOT_SUPPRESSED} ORDER BY leads.first_seen_at ASC, leads.id ASC LIMIT $4"
+        );
+        let mut tx = self.tx.lock().await;
+        let rows = sqlx::query_as::<_, LeadRow>(&query)
+            .bind(profile_id.0)
+            .bind(revision)
+            .bind(SCORING_VERSION)
+            .bind(i64::from(limit))
+            .fetch_all(&mut ***tx)
+            .await
+            .map_err(map_sqlx_error)?;
+        rows.into_iter().map(Lead::try_from).collect()
+    }
+
+    #[tracing::instrument(skip(self), fields(db.system = "postgresql", db.operation = "select", db.table = "leads", profile.id = %profile_id), err)]
+    async fn count_stale_scorings(
+        &mut self,
+        profile_id: ProfileId,
+        revision: RevisionNumber,
+    ) -> Result<u64, CoreError> {
+        let revision = revision_number(revision)?;
+        let query = format!("SELECT COUNT(*) {STALE}{NOT_SUPPRESSED}");
+        let mut tx = self.tx.lock().await;
+        let count: i64 = sqlx::query_scalar(&query)
+            .bind(profile_id.0)
+            .bind(revision)
+            .bind(SCORING_VERSION)
+            .fetch_one(&mut ***tx)
+            .await
+            .map_err(map_sqlx_error)?;
+        Ok(u64::try_from(count).unwrap_or_default())
+    }
+
+    #[tracing::instrument(skip(self, rescoring), fields(db.system = "postgresql", db.operation = "update", db.table = "lead_qualification_state", lead.id = %rescoring.lead_id), err)]
+    async fn rescore(&mut self, rescoring: &Rescoring) -> Result<(), CoreError> {
+        let evidence = evidence_json(&rescoring.judgement.evidence)?;
+        let mut tx = self.tx.lock().await;
+        sqlx::query(
+            "UPDATE lead_qualification_state SET scoring_version = $2, opinion = $3, evidence = $4, verdict_reason = $5 WHERE lead_id = $1",
+        )
+        .bind(rescoring.lead_id.0)
+        .bind(rescoring.scoring_version)
+        .bind(rescoring.judgement.opinion)
+        .bind(evidence)
+        .bind(rescoring.judgement.cap.map(|cap| cap.as_str()))
+        .execute(&mut ***tx)
+        .await
+        .map_err(map_sqlx_error)?;
+        sqlx::query("UPDATE leads SET confidence = $2, verdict = $3 WHERE id = $1")
+            .bind(rescoring.lead_id.0)
+            .bind(rescoring.judgement.confidence)
+            .bind(rescoring.judgement.verdict.map(|verdict| verdict.as_str()))
+            .execute(&mut ***tx)
+            .await
+            .map_err(map_sqlx_error)?;
+        for (result_id, score) in &rescoring.agent_scores {
+            sqlx::query("UPDATE qualification_results SET agent_score = $2 WHERE id = $1")
+                .bind(result_id.0)
+                .bind(score)
+                .execute(&mut ***tx)
+                .await
+                .map_err(map_sqlx_error)?;
+        }
+        Ok(())
+    }
+
+    #[tracing::instrument(skip(self, lead_ids), fields(db.system = "postgresql", db.operation = "select", db.table = "lead_qualification_state"), err)]
+    async fn scorings(
+        &mut self,
+        lead_ids: &[LeadId],
+    ) -> Result<HashMap<LeadId, LeadScoring>, CoreError> {
+        if lead_ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let ids: Vec<uuid::Uuid> = lead_ids.iter().map(|id| id.0).collect();
+        let mut tx = self.tx.lock().await;
+        let rows = sqlx::query_as::<_, ScoringRow>(
+            "SELECT lead_id, opinion, evidence, verdict_reason FROM lead_qualification_state WHERE lead_id = ANY($1) AND evidence IS NOT NULL",
+        )
+        .bind(&ids)
+        .fetch_all(&mut ***tx)
+        .await
+        .map_err(map_sqlx_error)?;
+        rows.into_iter()
+            .map(|row| {
+                let id = LeadId(row.lead_id);
+                LeadScoring::try_from(row).map(|scoring| (id, scoring))
+            })
             .collect()
     }
 }

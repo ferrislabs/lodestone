@@ -12,6 +12,8 @@ import {
 	renameQualificationAgent,
 	setAgentField,
 	setAggregatorField,
+	setEvidenceField,
+	setEvidenceWeight,
 	setOptionField,
 	setQuestionField,
 	setQuestionWording,
@@ -19,6 +21,10 @@ import {
 	withQualification,
 } from '#/pages/profiles/lib/qualification'
 import type { QualificationActions } from '#/pages/profiles/lib/qualification-actions'
+
+function toFraction(percent: number | null): number | null {
+	return percent === null ? null : percent / 100
+}
 
 export function useQualificationUi(
 	value: JsonObject,
@@ -116,6 +122,18 @@ export function useQualificationUi(
 			onChange(setVerdictField(value, 'reliable_from', percent)),
 		setDiscardBelow: (percent) =>
 			onChange(setVerdictField(value, 'discard_below', percent)),
+		setCalibrationFloor: (percent) =>
+			onChange(
+				setVerdictField(value, 'calibration_floor', toFraction(percent)),
+			),
+		setMinEvidence: (percent) =>
+			onChange(setVerdictField(value, 'min_evidence', toFraction(percent))),
+		setInfluence: (percent) =>
+			onChange(setEvidenceField(value, 'influence', toFraction(percent))),
+		setReferenceScore: (score) =>
+			onChange(setEvidenceField(value, 'reference_score', score)),
+		setEvidenceWeight: (key, weight) =>
+			onChange(setEvidenceWeight(value, key, weight)),
 	}
 
 	return { agents, editing, confirmingRemove, picking, previewing, actions }

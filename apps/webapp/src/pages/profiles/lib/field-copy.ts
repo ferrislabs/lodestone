@@ -278,9 +278,9 @@ export const FIELD_COPY: Readonly<Record<string, FieldCopy>> = {
 		description: 'Consigne donnée au modèle, 8000 caractères au maximum.',
 	},
 	verdict: {
-		label: 'Verdicts',
+		label: 'Verdicts et preuves',
 		description:
-			'Seuils de la confiance du lead qui décident de son verdict : fiable, à vérifier ou écarté.',
+			'Seuils de la confiance du lead qui décident de son verdict : fiable, à vérifier ou écarté, et conditions pour être fiable.',
 	},
 	'verdict.reliable_from': {
 		label: 'Fiable à partir de',
@@ -290,6 +290,53 @@ export const FIELD_COPY: Readonly<Record<string, FieldCopy>> = {
 		label: 'Écarté sous',
 		description:
 			'Un lead est écarté sous ce pourcentage de confiance. Doit être inférieur au seuil fiable.',
+	},
+	'verdict.calibration_floor': {
+		label: 'Plancher de calibration',
+		description:
+			"Chaque probabilité d'une réponse est ramenée entre ce plancher et son complément à 1, puis renormalisée avant le calcul. Un petit modèle ne peut plus affirmer une certitude absolue. 0 désactive la calibration, 0,2 au maximum.",
+	},
+	'verdict.min_evidence': {
+		label: 'Preuves minimales pour être fiable',
+		description:
+			'Un lead ne peut être fiable que si la solidité de ses preuves atteint ce niveau. En dessous, il est plafonné à « À vérifier ».',
+	},
+	evidence: {
+		label: 'Preuves',
+		description:
+			"Solidité des preuves derrière un lead (nombre de signaux, diversité des sources, environnement des hôtes, force des signaux). Elle pondère l'avis des agents dans la confiance.",
+	},
+	'evidence.influence': {
+		label: 'Influence des preuves',
+		description:
+			"Confiance = avis des agents × ((1 − influence) + influence × solidité des preuves). 0 % ignore les preuves, 100 % multiplie l'avis par elles.",
+	},
+	'evidence.reference_score': {
+		label: 'Score de référence',
+		description:
+			'Score des signaux à partir duquel la force des signaux vaut 100 %. Au moins 1.',
+	},
+	'evidence.weights': {
+		label: 'Poids des composantes',
+		description:
+			'Poids relatif de chaque composante dans la solidité des preuves. Un poids à 0 ignore la composante, au moins un doit être supérieur à 0.',
+	},
+	'evidence.weights.volume': {
+		label: 'Volume de signaux',
+		description: 'Poids du nombre de signaux détectés, de 0 à 10.',
+	},
+	'evidence.weights.diversity': {
+		label: 'Diversité des sources',
+		description: 'Poids du nombre de sources distinctes, de 0 à 10.',
+	},
+	'evidence.weights.environment': {
+		label: 'Environnement',
+		description:
+			'Poids de la part des hôtes de production parmi les hôtes portant des signaux, de 0 à 10.',
+	},
+	'evidence.weights.strength': {
+		label: 'Force des signaux',
+		description: 'Poids du score des signaux du lead, de 0 à 10.',
 	},
 	scoring: {
 		label: 'Scoring',

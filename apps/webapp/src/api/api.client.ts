@@ -116,12 +116,23 @@ export namespace Schemas {
     source_count: number;
     sources: Array<string>;
   };
+  export type EvidenceComponentsDto = { diversity: number; environment: number; strength: number; volume: number };
+  export type EvidenceStrengthDto = {
+    components: EvidenceComponentsDto;
+    only_non_production: boolean;
+    signal_count: number;
+    signal_score: number;
+    strength: number;
+  };
+  export type VerdictReasonDto = "single_angle" | "weak_evidence" | "non_production";
   export type LeadDto = {
     confidence?: (number | null) | undefined;
     domain: string;
+    evidence?: (null | EvidenceStrengthDto) | undefined;
     first_seen_at: string;
     id: string;
     last_seen_at: string;
+    opinion?: (number | null) | undefined;
     profile: ProfileRefDto;
     qualified_at?: (string | null) | undefined;
     score: number;
@@ -129,6 +140,7 @@ export namespace Schemas {
     summary?: (string | null) | undefined;
     updated_at: string;
     verdict?: (null | VerdictDto) | undefined;
+    verdict_reason?: (null | VerdictReasonDto) | undefined;
   };
   export type ProbabilityDto = { label: string; probability: number; value: string };
   export type QualificationAnswerDto = {
@@ -195,9 +207,11 @@ export namespace Schemas {
     data: {
       confidence?: (number | null) | undefined;
       domain: string;
+      evidence?: (null | EvidenceStrengthDto) | undefined;
       first_seen_at: string;
       id: string;
       last_seen_at: string;
+      opinion?: (number | null) | undefined;
       profile: ProfileRefDto;
       qualified_at?: (string | null) | undefined;
       score: number;
@@ -205,6 +219,7 @@ export namespace Schemas {
       summary?: (string | null) | undefined;
       updated_at: string;
       verdict?: (null | VerdictDto) | undefined;
+      verdict_reason?: (null | VerdictReasonDto) | undefined;
     };
     pagination?: (null | PaginationMetadata) | undefined;
   };
@@ -319,9 +334,11 @@ export namespace Schemas {
     data: Array<{
       confidence?: (number | null) | undefined;
       domain: string;
+      evidence?: (null | EvidenceStrengthDto) | undefined;
       first_seen_at: string;
       id: string;
       last_seen_at: string;
+      opinion?: (number | null) | undefined;
       profile: ProfileRefDto;
       qualified_at?: (string | null) | undefined;
       score: number;
@@ -329,6 +346,7 @@ export namespace Schemas {
       summary?: (string | null) | undefined;
       updated_at: string;
       verdict?: (null | VerdictDto) | undefined;
+      verdict_reason?: (null | VerdictReasonDto) | undefined;
     }>;
     pagination?: (null | PaginationMetadata) | undefined;
   };

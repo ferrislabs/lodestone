@@ -78,9 +78,10 @@ pub use domain::{
     },
     prompt::{DraftMessage, EvidenceCheck, EvidenceQuote, check_evidence},
     qualification::{
-        Answer, Completion, Judgement, QualificationResult, ResultId, ResultStatus,
-        SUMMARY_FAILED_AFTER, SummaryState, ValidAnswers, ValidOutput, Verdict, Violation,
-        Violations, agent_score, judge, lead_confidence,
+        Answer, Completion, EvidenceComponents, EvidenceStrength, Judgement, LeadScoring,
+        QualificationResult, ResultId, ResultStatus, SCORING_VERSION, SUMMARY_FAILED_AFTER,
+        SummaryState, ValidAnswers, ValidOutput, Verdict, VerdictCap, Violation, Violations,
+        agent_score, calibrate, judge,
         ports::QualificationRepository,
         prompt::{AgentPrompt, build as agent_prompt, lead_document, with_violations},
         question_score, summary_retry_delay, validate_answers, verdict_for,

@@ -6,9 +6,10 @@ use axum::{
 };
 use lodestone_core::{
     Assessment, ContactEmail, DraftMessage, DraftReview, DraftStatus, Lead, LeadDetail, LeadFacts,
-    LeadId, LeadQuery, LeadSort, LeadStatus, LlmProviderRecord, Profile, ProfileId,
+    LeadId, LeadQuery, LeadScoring, LeadSort, LeadStatus, LlmProviderRecord, Profile, ProfileId,
     QualificationResult, ResultStatus, SUMMARY_FAILED_AFTER, ScoreContribution, Signal, SignalKind,
-    SummaryState, Verdict, VerdictFilter, definition::QualificationAgent, signal_sentence,
+    SummaryState, Verdict, VerdictCap, VerdictFilter, definition::QualificationAgent,
+    signal_sentence,
 };
 use pagination::{MAX_PAGE, MAX_PER_PAGE, Page, PaginationMetadata, PaginationParams};
 use serde::{Deserialize, Serialize};
@@ -78,6 +79,70 @@ impl From<Verdict> for VerdictDto {
     }
 }
 
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum VerdictReasonDto {
+    SingleAngle,
+    WeakEvidence,
+    NonProduction,
+}
+
+impl From<VerdictCap> for VerdictReasonDto {
+    fn from(cap: VerdictCap) -> Self {
+        match cap {
+            VerdictCap::SingleAngle => Self::SingleAngle,
+            VerdictCap::WeakEvidence => Self::WeakEvidence,
+            VerdictCap::NonProduction => Self::NonProduction,
+        }
+    }
+}
+
+fn percent(fraction: f64) -> f64 {
+    (fraction * 1000.0).round() / 10.0
+}
+
+/// Components of the evidence strength, each in percent from 0 to 100.
+#[derive(Debug, Serialize, PartialEq, ToSchema)]
+pub struct EvidenceComponentsDto {
+    /// Number of signals: 1 - exp(-signals / 3).
+    pub volume: f64,
+    /// Distinct sources: min(1, sources / 2).
+    pub diversity: f64,
+    /// Share of production hosts among the hosts carrying signals; 50 when no signal names a host.
+    pub environment: f64,
+    /// Signal score against the profile reference score, capped at 100.
+    pub strength: f64,
+}
+
+/// Strength of the evidence behind a lead, computed in code from its facts and signal score.
+#[derive(Debug, Serialize, PartialEq, ToSchema)]
+pub struct EvidenceStrengthDto {
+    /// Weighted mean of the components, in percent from 0 to 100.
+    pub strength: f64,
+    pub components: EvidenceComponentsDto,
+    pub signal_count: u32,
+    pub signal_score: f64,
+    pub only_non_production: bool,
+}
+
+impl From<&LeadScoring> for EvidenceStrengthDto {
+    fn from(scoring: &LeadScoring) -> Self {
+        let evidence = &scoring.evidence;
+        Self {
+            strength: percent(evidence.score),
+            components: EvidenceComponentsDto {
+                volume: percent(evidence.components.volume),
+                diversity: percent(evidence.components.diversity),
+                environment: percent(evidence.components.environment),
+                strength: percent(evidence.components.strength),
+            },
+            signal_count: count(evidence.signal_count),
+            signal_score: evidence.signal_score,
+            only_non_production: evidence.only_non_production,
+        }
+    }
+}
+
 #[derive(Debug, Serialize, PartialEq, ToSchema)]
 pub struct LeadDto {
     pub id: String,
@@ -89,6 +154,12 @@ pub struct LeadDto {
     pub confidence: Option<f64>,
     /// One of `fiable`, `a_verifier`, `ecarte`; absent while the verdict is pending.
     pub verdict: Option<VerdictDto>,
+    /// Opinion of the qualification agents in percent from 0 to 100, after calibration; absent until an agent answered validly.
+    pub opinion: Option<f64>,
+    /// Strength of the evidence behind the lead; absent until the lead has been scored.
+    pub evidence: Option<EvidenceStrengthDto>,
+    /// Rule that capped a confident lead at `a_verifier`: `single_angle`, `weak_evidence` or `non_production`; absent when no rule applied.
+    pub verdict_reason: Option<VerdictReasonDto>,
     /// Summary written by the aggregator; absent until the lead has been summarised.
     pub summary: Option<String>,
     #[schema(format = DateTime)]
@@ -102,7 +173,12 @@ pub struct LeadDto {
 }
 
 impl LeadDto {
-    fn new(lead: &Lead, profile: &Profile, summary: Option<&str>) -> Self {
+    fn new(
+        lead: &Lead,
+        profile: &Profile,
+        summary: Option<&str>,
+        scoring: Option<&LeadScoring>,
+    ) -> Self {
         Self {
             id: lead.id.to_string(),
             profile: ProfileRefDto::from(profile),
@@ -111,6 +187,11 @@ impl LeadDto {
             score: lead.score.get(),
             confidence: lead.confidence,
             verdict: lead.verdict.map(VerdictDto::from),
+            opinion: scoring.and_then(|scoring| scoring.opinion).map(percent),
+            evidence: scoring.map(EvidenceStrengthDto::from),
+            verdict_reason: scoring
+                .and_then(|scoring| scoring.cap)
+                .map(VerdictReasonDto::from),
             summary: summary.map(str::to_owned),
             qualified_at: lead.qualified_at.map(|at| at.to_rfc3339()),
             first_seen_at: lead.first_seen_at.to_rfc3339(),
@@ -587,6 +668,7 @@ impl LeadDetailDto {
                     .assessments
                     .first()
                     .map(|assessment| assessment.summary.as_str()),
+                detail.scoring.as_ref(),
             ),
             score_breakdown: detail
                 .lead
@@ -812,6 +894,7 @@ pub async fn list_leads(
                 lead,
                 &listing.profile,
                 listing.summaries.get(&lead.id).map(String::as_str),
+                listing.scorings.get(&lead.id),
             )
         })
         .collect();
@@ -887,7 +970,12 @@ pub async fn change_lead_status(
         .assessments
         .first()
         .map(|assessment| assessment.summary.as_str());
-    Ok(Response::OK(LeadDto::new(&lead, &detail.profile, summary)))
+    Ok(Response::OK(LeadDto::new(
+        &lead,
+        &detail.profile,
+        summary,
+        detail.scoring.as_ref(),
+    )))
 }
 
 #[utoipa::path(
@@ -922,5 +1010,10 @@ pub async fn retry_lead_summary(
         .assessments
         .first()
         .map(|assessment| assessment.summary.as_str());
-    Ok(Response::OK(LeadDto::new(&lead, &detail.profile, summary)))
+    Ok(Response::OK(LeadDto::new(
+        &lead,
+        &detail.profile,
+        summary,
+        detail.scoring.as_ref(),
+    )))
 }

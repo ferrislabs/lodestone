@@ -5,7 +5,9 @@ use uuid::Uuid;
 use crate::{
     LeadId, ProfileId, ProviderId, RevisionNumber,
     definition::AgentId,
-    domain::qualification::{QualificationResult, ResultId, ResultStatus},
+    domain::qualification::{
+        EvidenceStrength, LeadScoring, QualificationResult, ResultId, ResultStatus, VerdictCap,
+    },
 };
 
 #[derive(Debug, Clone, sqlx::FromRow)]
@@ -51,6 +53,42 @@ impl TryFrom<ResultRow> for QualificationResult {
             agent_score: row.agent_score,
             error: row.error,
             created_at: row.created_at,
+        })
+    }
+}
+
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct ScoringRow {
+    pub lead_id: Uuid,
+    pub opinion: Option<f64>,
+    pub evidence: Option<serde_json::Value>,
+    pub verdict_reason: Option<String>,
+}
+
+impl TryFrom<ScoringRow> for LeadScoring {
+    type Error = CoreError;
+
+    fn try_from(row: ScoringRow) -> Result<Self, Self::Error> {
+        let evidence: EvidenceStrength = row
+            .evidence
+            .ok_or_else(|| CoreError::Internal("stored evidence is missing".to_owned()))
+            .and_then(|value| {
+                serde_json::from_value(value)
+                    .map_err(|_| CoreError::Internal("stored evidence is invalid".to_owned()))
+            })?;
+        let cap = row
+            .verdict_reason
+            .as_deref()
+            .map(|raw| {
+                VerdictCap::parse(raw).ok_or_else(|| {
+                    CoreError::Internal("stored verdict reason is invalid".to_owned())
+                })
+            })
+            .transpose()?;
+        Ok(Self {
+            opinion: row.opinion,
+            evidence,
+            cap,
         })
     }
 }

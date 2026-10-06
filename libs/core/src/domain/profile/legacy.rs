@@ -3,9 +3,9 @@ use uuid::Uuid;
 
 use super::definition::{
     Agent, AgentId, AgentSource, Aggregator, CertificateTransparency, ContactRanking, DnsCname,
-    HttpProbe, Identity, KeywordSource, Language, LlmSettings, MAX_DESCRIPTION_CHARS,
-    MAX_PROMPT_CHARS, PROFILE_SCHEMA_VERSION, ProfileDefinition, QualificationAgent, Question,
-    QuestionOption, Scoring, ScoringFactor, VerdictThresholds,
+    EvidenceSettings, HttpProbe, Identity, KeywordSource, Language, LlmSettings,
+    MAX_DESCRIPTION_CHARS, MAX_PROMPT_CHARS, PROFILE_SCHEMA_VERSION, ProfileDefinition,
+    QualificationAgent, Question, QuestionOption, Scoring, ScoringFactor, VerdictThresholds,
 };
 use crate::domain::scoring::max_possible;
 
@@ -239,6 +239,40 @@ impl ProfileDefinitionV4 {
                 .collect(),
             aggregator: self.aggregator,
             verdict: self.verdict,
+            evidence: EvidenceSettings::default(),
+            scoring: self.scoring,
+            contact_ranking: self.contact_ranking,
+            llm: self.llm,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct ProfileDefinitionV5 {
+    #[serde(rename = "schema_version")]
+    _schema_version: u32,
+    identity: Identity,
+    agents: Vec<Agent>,
+    qualification_agents: Vec<QualificationAgent>,
+    aggregator: Aggregator,
+    #[serde(default)]
+    verdict: VerdictThresholds,
+    scoring: Scoring,
+    contact_ranking: ContactRanking,
+    llm: LlmSettings,
+}
+
+impl ProfileDefinitionV5 {
+    pub(super) fn upgrade(self) -> ProfileDefinition {
+        ProfileDefinition {
+            schema_version: PROFILE_SCHEMA_VERSION,
+            identity: self.identity,
+            agents: self.agents,
+            qualification_agents: self.qualification_agents,
+            aggregator: self.aggregator,
+            verdict: self.verdict,
+            evidence: EvidenceSettings::default(),
             scoring: self.scoring,
             contact_ranking: self.contact_ranking,
             llm: self.llm,
@@ -259,6 +293,7 @@ impl ProfileDefinitionV3 {
                 system_prompt: AGGREGATOR_PROMPT.to_owned(),
             },
             verdict: VerdictThresholds::default(),
+            evidence: EvidenceSettings::default(),
             scoring: self.scoring,
             contact_ranking: self.contact_ranking,
             llm: self.llm,

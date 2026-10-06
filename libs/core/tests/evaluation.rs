@@ -10,11 +10,11 @@ use std::{
 use chrono::{DateTime, Utc};
 use common::{EncryptionKey, Secret};
 use lodestone_core::{
-    ActiveProfile, Clock, CreateProfileCommand, Lead, LeadRepository, LlmError, LlmProvider,
-    LlmRequest, LlmResponse, LodestoneUseCase, Observation, ProfileId, ProfileName, Provenance,
-    ProviderDefinition, ProviderId, ProviderKind, QualificationResult, ResultStatus,
+    ActiveProfile, Clock, CreateProfileCommand, Lead, LeadRepository, LeadScoring, LlmError,
+    LlmProvider, LlmRequest, LlmResponse, LodestoneUseCase, Observation, ProfileId, ProfileName,
+    Provenance, ProviderDefinition, ProviderId, ProviderKind, QualificationResult, ResultStatus,
     ReviseProfileCommand, SignalKind, SourceName, SuppressionTarget, Tier, TokenPricing,
-    TokenUsage, UnitInterval, ValidatedProfile, Verdict,
+    TokenUsage, UnitInterval, ValidatedProfile, Verdict, VerdictCap,
     evaluation::{EvaluationReport, EvaluationSettings, ProviderBuilder},
     infrastructure::{
         crypto::AesGcmCipher, lead::postgres::PgLeadRepository, llm_cache::postgres::PgLlmCache,
@@ -185,6 +185,14 @@ fn agent(id: &str, weight: u8, provider: Option<ProviderId>, question: &str) -> 
 }
 
 fn definition(agents: Vec<Value>) -> Value {
+    let mut definition = default_definition(agents);
+    definition["verdict"]["calibration_floor"] = json!(0.0);
+    definition["verdict"]["min_evidence"] = json!(0.0);
+    definition["evidence"]["influence"] = json!(0.0);
+    definition
+}
+
+fn default_definition(agents: Vec<Value>) -> Value {
     let mut definition: Value = serde_json::from_str(IAM).unwrap();
     definition["qualification_agents"] = Value::Array(agents);
     definition
@@ -258,6 +266,38 @@ impl Harness {
         id
     }
 
+    async fn profile_tuned(
+        &self,
+        agents: Vec<Value>,
+        verdict: Value,
+        evidence: Value,
+    ) -> ProfileId {
+        let mut value = default_definition(agents);
+        for (key, patch) in [("verdict", verdict), ("evidence", evidence)] {
+            for (field, setting) in patch.as_object().unwrap() {
+                value[key][field] = setting.clone();
+            }
+        }
+        let id = self
+            .usecase
+            .create_profile(CreateProfileCommand {
+                name: ProfileName::parse("iam").unwrap(),
+                definition: ValidatedProfile::parse(value).unwrap(),
+                created_by: None,
+            })
+            .await
+            .unwrap()
+            .profile
+            .id;
+        self.usecase.set_profile_active(id, true).await.unwrap();
+        id
+    }
+
+    async fn scoring(&self, profile: ProfileId, host: &str) -> Option<LeadScoring> {
+        let lead = self.lead(profile, host).await;
+        self.usecase.lead_detail(lead.id).await.unwrap().scoring
+    }
+
     async fn revise(&self, profile: ProfileId, agents: Vec<Value>) {
         self.usecase
             .revise_profile(ReviseProfileCommand {
@@ -290,6 +330,16 @@ impl Harness {
     }
 
     async fn observe(&self, host: &str, source: SourceName, seconds: i64) {
+        self.observe_value(
+            host,
+            source,
+            &format!("keycloak-{}", source.as_str()),
+            seconds,
+        )
+        .await;
+    }
+
+    async fn observe_value(&self, host: &str, source: SourceName, value: &str, seconds: i64) {
         let active = self.active().await;
         self.usecase
             .record_observations(
@@ -298,10 +348,9 @@ impl Harness {
                 &[Observation {
                     domain: domain(host),
                     kind: SignalKind::parse("product_detected").unwrap(),
-                    value: Some(format!("keycloak-{}", source.as_str())),
+                    value: Some(value.to_owned()),
                     raw: json!({"version": "21.1"}),
-                    provenance: Provenance::parse(&format!("https://{host}/{}", source.as_str()))
-                        .unwrap(),
+                    provenance: Provenance::parse(&format!("https://{host}/{value}")).unwrap(),
                     strength: UnitInterval::new(0.9).unwrap(),
                     observed_at: at(seconds),
                     agent: None,
@@ -385,8 +434,11 @@ async fn valid_answers_are_stored_scored_and_judged(pool: PgPool) {
     assert!(stored.error.is_none());
     let lead = harness.lead(profile, "acme.com").await;
     assert_eq!(lead.confidence, Some(100.0));
-    assert_eq!(lead.verdict, Some(Verdict::Reliable));
+    assert_eq!(lead.verdict, Some(Verdict::ToCheck));
     assert_eq!(lead.qualified_at, Some(at(1_000)));
+    let scoring = harness.scoring(profile, "acme.com").await.unwrap();
+    assert_eq!(scoring.opinion, Some(1.0));
+    assert_eq!(scoring.cap, Some(VerdictCap::SingleAngle));
 }
 
 #[sqlx::test(migrations = "../../migrations")]
@@ -884,4 +936,200 @@ async fn a_disabled_agent_is_not_run(pool: PgPool) {
     let results = harness.results(profile, "acme.com").await;
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].agent_id.as_str(), "on");
+}
+
+fn two_axes_agent(id: &str, provider: ProviderId) -> Value {
+    let mut value = agent(id, 5, Some(provider), "q");
+    let second = value["questions"][0].clone();
+    let mut second = second;
+    second["id"] = json!("q2");
+    value["questions"].as_array_mut().unwrap().push(second);
+    value
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_single_dev_host_answered_with_certainty_is_calibrated_and_not_reliable(pool: PgPool) {
+    let harness = Harness::new(pool, 10);
+    let provider = harness.provider("model-a", 0).await;
+    let profile = harness
+        .profile_tuned(
+            vec![agent("pertinence", 5, Some(provider), "q")],
+            json!({}),
+            json!({}),
+        )
+        .await;
+    harness
+        .observe("login.dev.luzernrisk.com", SourceName::DnsCname, 10)
+        .await;
+
+    harness.step(settings(100, 10)).await;
+
+    let results = harness.results(profile, "luzernrisk.com").await;
+    let score = results[0].agent_score.unwrap();
+    assert!((score - (0.95 + 0.025) / 1.05).abs() < 1e-9, "{score}");
+    let lead = harness.lead(profile, "luzernrisk.com").await;
+    let scoring = harness.scoring(profile, "luzernrisk.com").await.unwrap();
+    assert!((scoring.opinion.unwrap() - score).abs() < 1e-9);
+    assert!(scoring.evidence.only_non_production);
+    assert_eq!(scoring.evidence.signal_count, 1);
+    assert_eq!(scoring.evidence.components.environment, 0.0);
+    assert_eq!(scoring.evidence.components.diversity, 0.5);
+    let expected = scoring.opinion.unwrap() * (0.4 + 0.6 * scoring.evidence.score);
+    assert!((lead.confidence.unwrap() - expected * 100.0).abs() < 0.06);
+    assert!(lead.confidence.unwrap() < 70.0);
+    assert_eq!(lead.verdict, Some(Verdict::ToCheck));
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_confident_lead_on_a_dev_host_names_the_cap(pool: PgPool) {
+    let harness = Harness::new(pool, 10);
+    let first = harness.provider("model-a", 0).await;
+    let second = harness.provider("model-b", 0).await;
+    let profile = harness
+        .profile_tuned(
+            vec![
+                agent("one", 5, Some(first), "q"),
+                agent("two", 5, Some(second), "q"),
+            ],
+            json!({"reliable_from": 40, "discard_below": 10}),
+            json!({}),
+        )
+        .await;
+    harness
+        .observe("login.dev.acme.com", SourceName::DnsCname, 10)
+        .await;
+
+    harness.step(settings(100, 10)).await;
+
+    let lead = harness.lead(profile, "acme.com").await;
+    assert!(lead.confidence.unwrap() >= 40.0);
+    assert_eq!(lead.verdict, Some(Verdict::ToCheck));
+    let scoring = harness.scoring(profile, "acme.com").await.unwrap();
+    assert_eq!(scoring.cap, Some(VerdictCap::NonProduction));
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn two_axes_and_enough_evidence_make_a_lead_reliable(pool: PgPool) {
+    let harness = Harness::new(pool, 10);
+    let provider = harness.provider("model-a", 0).await;
+    let profile = harness
+        .profile_tuned(
+            vec![two_axes_agent("solo", provider)],
+            json!({"min_evidence": 0.0}),
+            json!({"influence": 0.0}),
+        )
+        .await;
+    harness.observe("acme.com", SourceName::HttpProbe, 10).await;
+
+    harness.step(settings(100, 10)).await;
+
+    let lead = harness.lead(profile, "acme.com").await;
+    assert_eq!(lead.verdict, Some(Verdict::Reliable));
+    assert_eq!(
+        harness.scoring(profile, "acme.com").await.unwrap().cap,
+        None
+    );
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn weak_evidence_caps_an_otherwise_reliable_lead(pool: PgPool) {
+    let harness = Harness::new(pool, 10);
+    let provider = harness.provider("model-a", 0).await;
+    let profile = harness
+        .profile_tuned(
+            vec![two_axes_agent("solo", provider)],
+            json!({"min_evidence": 0.95}),
+            json!({"influence": 0.0}),
+        )
+        .await;
+    harness.observe("acme.com", SourceName::HttpProbe, 10).await;
+
+    harness.step(settings(100, 10)).await;
+
+    let lead = harness.lead(profile, "acme.com").await;
+    assert_eq!(lead.verdict, Some(Verdict::ToCheck));
+    assert_eq!(
+        harness.scoring(profile, "acme.com").await.unwrap().cap,
+        Some(VerdictCap::WeakEvidence)
+    );
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn leads_scored_before_the_evidence_rules_are_rescored_without_a_model_call(pool: PgPool) {
+    let harness = Harness::new(pool.clone(), 10);
+    let provider = harness.provider("model-a", 0).await;
+    let profile = harness
+        .profile_tuned(
+            vec![agent("solo", 5, Some(provider), "q")],
+            json!({}),
+            json!({}),
+        )
+        .await;
+    harness
+        .observe("login.dev.acme.com", SourceName::DnsCname, 10)
+        .await;
+    harness.step(settings(100, 10)).await;
+    let lead = harness.lead(profile, "acme.com").await;
+    sqlx::query("UPDATE lead_qualification_state SET scoring_version = 0, opinion = NULL, evidence = NULL, verdict_reason = NULL")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE leads SET confidence = 100, verdict = 'fiable'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE qualification_results SET agent_score = 1")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let calls = harness.calls();
+    assert!(harness.scoring(profile, "acme.com").await.is_none());
+
+    let report = harness.step(settings(100, 10)).await;
+
+    assert_eq!(report.rescored, 1);
+    assert_eq!(report.leads, 0);
+    assert_eq!(report.backlog, 0);
+    assert_eq!(harness.calls(), calls);
+    let rescored = harness.lead(profile, "acme.com").await;
+    assert_ne!(rescored.confidence, Some(100.0));
+    assert_eq!(rescored.verdict, Some(Verdict::ToCheck));
+    assert_eq!(rescored.qualified_at, lead.qualified_at);
+    let results = harness.results(profile, "acme.com").await;
+    assert!((results[0].agent_score.unwrap() - (0.95 + 0.025) / 1.05).abs() < 1e-9);
+    let scoring = harness.scoring(profile, "acme.com").await.unwrap();
+    assert!(scoring.evidence.only_non_production);
+    let again = harness.step(settings(100, 10)).await;
+    assert_eq!(again.rescored, 0);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_new_signal_from_a_known_source_refreshes_the_evidence_without_a_model_call(
+    pool: PgPool,
+) {
+    let harness = Harness::new(pool, 10);
+    let provider = harness.provider("model-a", 0).await;
+    let profile = harness
+        .profile_tuned(
+            vec![agent("solo", 5, Some(provider), "q")],
+            json!({}),
+            json!({}),
+        )
+        .await;
+    harness.observe("acme.com", SourceName::HttpProbe, 10).await;
+    harness.step(settings(100, 10)).await;
+    let calls = harness.calls();
+    let before = harness.scoring(profile, "acme.com").await.unwrap();
+    assert_eq!(before.evidence.signal_count, 1);
+    harness
+        .observe_value("acme.com", SourceName::HttpProbe, "another", 20)
+        .await;
+
+    let report = harness.step(settings(100, 10)).await;
+
+    assert_eq!(report.rescored, 1);
+    assert_eq!(harness.calls(), calls);
+    let after = harness.scoring(profile, "acme.com").await.unwrap();
+    assert_eq!(after.evidence.signal_count, 2);
+    assert!(after.evidence.components.volume > before.evidence.components.volume);
 }

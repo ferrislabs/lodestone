@@ -2,7 +2,7 @@ import { Button } from '#/components/ui/button'
 import { formatScore } from '#/pages/leads/lib/format'
 import { leadStatusLabel } from '#/pages/leads/lib/labels'
 import type { Lead, LeadStatus } from '#/pages/leads/lib/types'
-import { formatConfidence } from '#/pages/leads/lib/verdict'
+import { LeadConfidence } from './lead-confidence'
 import { LeadStatusBadge } from './lead-status-badge'
 import { VerdictBadge } from './verdict-badge'
 
@@ -34,13 +34,10 @@ export function LeadHeader({
 					<dd>{lead.profile.name}</dd>
 				</div>
 				<div>
-					<dt className="text-muted-foreground">Score</dt>
+					<dt className="text-muted-foreground">Score des signaux</dt>
 					<dd className="font-mono">{formatScore(lead.score)}</dd>
 				</div>
-				<div>
-					<dt className="text-muted-foreground">Confiance</dt>
-					<dd className="font-mono">{formatConfidence(lead.confidence)}</dd>
-				</div>
+				<LeadConfidence lead={lead} />
 			</dl>
 			<div className="flex flex-wrap items-center gap-2">
 				<span className="text-sm text-muted-foreground">Passer à</span>

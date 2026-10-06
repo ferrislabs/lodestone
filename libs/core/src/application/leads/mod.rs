@@ -21,7 +21,7 @@ use crate::{
 };
 
 impl LodestoneUseCase {
-    #[transactional(lead, profile, assessment)]
+    #[transactional(lead, profile, assessment, qualification)]
     pub async fn list_leads(
         &self,
         profile_id: ProfileId,
@@ -30,6 +30,7 @@ impl LodestoneUseCase {
         let mut leads = lead_repository;
         let mut profiles = profile_repository;
         let mut assessments = assessment_repository;
+        let mut qualification = qualification_repository;
         let profile = profiles
             .find(profile_id)
             .await?
@@ -37,10 +38,12 @@ impl LodestoneUseCase {
         let page = leads.list_page(profile_id, &query).await?;
         let ids: Vec<LeadId> = page.items.iter().map(|lead| lead.id).collect();
         let summaries = assessments.latest_summaries(&ids).await?;
+        let scorings = qualification.scorings(&ids).await?;
         Ok(LeadListing {
             profile,
             page,
             summaries,
+            scorings,
         })
     }
 
@@ -90,10 +93,12 @@ impl LodestoneUseCase {
             None => Vec::new(),
         };
         let summary_state = qualification.summary_state(lead_id).await?;
+        let scoring = qualification.scorings(&[lead_id]).await?.remove(&lead_id);
         let lead_signals = signals.list_for_lead(lead_id).await?;
         let hosts = known_hosts.list_for_domain(&lead.domain).await?;
         Ok(LeadDetail {
             summary_state,
+            scoring,
             qualification_results,
             qualification_agents,
             facts: LeadFacts::compute(&lead, &lead_signals, &hosts),

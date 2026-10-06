@@ -1,10 +1,12 @@
+use std::collections::HashMap;
+
 use chrono::{DateTime, Utc};
 use common::CoreError;
 
 use crate::domain::{
     lead::{Lead, LeadId},
     profile::{ProfileId, RevisionNumber},
-    qualification::{Completion, QualificationResult, SummaryState},
+    qualification::{Completion, LeadScoring, QualificationResult, Rescoring, SummaryState},
 };
 
 #[cfg_attr(test, mockall::automock)]
@@ -75,4 +77,27 @@ pub trait QualificationRepository: Send {
         &mut self,
         lead_id: LeadId,
     ) -> impl Future<Output = Result<Vec<QualificationResult>, CoreError>> + Send;
+
+    fn stale_scorings(
+        &mut self,
+        profile_id: ProfileId,
+        revision: RevisionNumber,
+        limit: u32,
+    ) -> impl Future<Output = Result<Vec<Lead>, CoreError>> + Send;
+
+    fn count_stale_scorings(
+        &mut self,
+        profile_id: ProfileId,
+        revision: RevisionNumber,
+    ) -> impl Future<Output = Result<u64, CoreError>> + Send;
+
+    fn rescore(
+        &mut self,
+        rescoring: &Rescoring,
+    ) -> impl Future<Output = Result<(), CoreError>> + Send;
+
+    fn scorings(
+        &mut self,
+        lead_ids: &[LeadId],
+    ) -> impl Future<Output = Result<HashMap<LeadId, LeadScoring>, CoreError>> + Send;
 }
