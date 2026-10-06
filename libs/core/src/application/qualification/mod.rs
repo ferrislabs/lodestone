@@ -179,6 +179,7 @@ where
             prompt: prompt.tag.clone(),
             domain: lead.domain.clone(),
             agent: None,
+            sample: 0,
         };
         let mut current = base.clone();
         let mut candidate: Option<Candidate> = None;
@@ -191,6 +192,7 @@ where
                     instruction: &current,
                     documents: &documents,
                     max_tokens: self.settings.max_tokens,
+                    temperature: None,
                 },
                 schema: &schema,
             };

@@ -2,6 +2,8 @@ import type { JsonObject } from '#/lib/schema-form'
 
 export const DEFAULT_WEIGHT = 5
 export const DEFAULT_EXCLUSION_THRESHOLD = 0.6
+export const DEFAULT_TEMPLATE_SAMPLES = 3
+export const DEFAULT_TEMPLATE_SAMPLING_TEMPERATURE = 0.7
 
 export type TemplateFlag = 'unknown' | 'excludes'
 
@@ -355,6 +357,8 @@ export function templateAgent(
 		system_prompt: template.prompt,
 		weight: template.weight ?? DEFAULT_WEIGHT,
 		exclusion_threshold: DEFAULT_EXCLUSION_THRESHOLD,
+		samples: DEFAULT_TEMPLATE_SAMPLES,
+		sampling_temperature: DEFAULT_TEMPLATE_SAMPLING_TEMPERATURE,
 		questions: template.axes.map((axis) => ({
 			id: axis.id,
 			wording: axis.wording,

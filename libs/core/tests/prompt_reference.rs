@@ -93,6 +93,7 @@ fn hostile_documents_cannot_break_out_of_their_block() {
         schema_name: "output",
         schema: &request_schema,
         max_tokens: 1024,
+        temperature: None,
     });
 
     assert_eq!(user.matches("</document>\n").count(), docs.len());

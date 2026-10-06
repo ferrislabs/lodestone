@@ -244,6 +244,7 @@ export namespace Schemas {
   };
   export type ProbabilityDto = { label: string; probability: number; value: string };
   export type QualificationAnswerDto = {
+    agreement?: (number | null) | undefined;
     choice: string;
     choice_label: string;
     confidence: number;
@@ -264,6 +265,7 @@ export namespace Schemas {
     answers: Array<QualificationAnswerDto>;
     created_at: string;
     error?: (string | null) | undefined;
+    escalated: boolean;
     model: string;
     provenance: ProvenanceDto;
     provider_id?: (string | null) | undefined;
@@ -421,6 +423,7 @@ export namespace Schemas {
   export type VersionPrecisionDto = {
     agent_id?: (string | null) | undefined;
     agent_name?: (string | null) | undefined;
+    escalated: boolean;
     model: string;
     n: number;
     precision?: (number | null) | undefined;

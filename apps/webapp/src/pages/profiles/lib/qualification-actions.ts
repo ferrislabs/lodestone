@@ -13,6 +13,8 @@ export interface QualificationActions {
 	setProvider: (index: number, providerId: string) => void
 	setWeight: (index: number, weight: number) => void
 	setExclusionThreshold: (index: number, percent: number | null) => void
+	setSamples: (index: number, samples: number | null) => void
+	setSamplingTemperature: (index: number, temperature: number | null) => void
 	setPrompt: (index: number, prompt: string) => void
 	requestRemove: (index: number) => void
 	confirmRemove: (index: number) => void
@@ -49,6 +51,9 @@ export interface QualificationActions {
 		option: number,
 		excludes: boolean,
 	) => void
+	setEscalationProvider: (providerId: string) => void
+	setBandLow: (percent: number | null) => void
+	setBandHigh: (percent: number | null) => void
 	setAggregatorProvider: (providerId: string) => void
 	setAggregatorPrompt: (prompt: string) => void
 	setReliableFrom: (percent: number | null) => void

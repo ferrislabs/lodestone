@@ -168,6 +168,7 @@ pub struct LlmRequest<'a> {
     pub schema_name: &'a str,
     pub schema: &'a serde_json::Value,
     pub max_tokens: u32,
+    pub temperature: Option<f64>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -257,6 +258,7 @@ mod tests {
             schema_name: "verdict",
             schema,
             max_tokens: 512,
+            temperature: None,
         }
     }
 

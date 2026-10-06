@@ -1024,6 +1024,7 @@ async fn run_test(record: &LlmProviderRecord, cipher: &impl SecretCipher) -> Tes
         schema_name: "connectivity_check",
         schema: &schema,
         max_tokens: TEST_MAX_TOKENS,
+        temperature: None,
     };
     let started = Instant::now();
     match provider.complete(&request).await {

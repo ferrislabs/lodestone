@@ -73,6 +73,7 @@ const FILLED: Quality = {
 			prompt_version: 'aggregator@f00',
 			validated: 7,
 			rejected: 3,
+			escalated: false,
 			n: 10,
 			precision: 0.7,
 		},
@@ -83,6 +84,7 @@ const FILLED: Quality = {
 			prompt_version: 'qualification-agent@abc123',
 			validated: 9,
 			rejected: 1,
+			escalated: false,
 			n: 10,
 			precision: 0.9,
 		},
@@ -93,6 +95,7 @@ const FILLED: Quality = {
 			prompt_version: 'qualification-agent@def456',
 			validated: 3,
 			rejected: 7,
+			escalated: false,
 			n: 10,
 			precision: 0.3,
 		},
@@ -261,6 +264,26 @@ describe('QualityPage', () => {
 		expect(within(aggregator).getByText('Agrégateur')).toBeTruthy()
 		expect(within(aggregator).getByText('gros-modele')).toBeTruthy()
 		expect(within(aggregator).getByText('70 %')).toBeTruthy()
+	})
+
+	it('counts escalated runs on their own row with a badge', () => {
+		const [aggregator, original] = FILLED.versions
+		renderPage({
+			quality: {
+				...FILLED,
+				versions: [
+					aggregator,
+					original,
+					{ ...original, escalated: true, validated: 1, rejected: 1, n: 2 },
+				],
+			},
+		})
+		const card = within(screen.getByLabelText('Précision par version'))
+		const rows = card.getAllByRole('row', { name: /abc123/ })
+		expect(rows).toHaveLength(2)
+		expect(within(rows[0]).queryByText('Escaladé')).toBeNull()
+		expect(within(rows[1]).getByText('Escaladé')).toBeTruthy()
+		expect(within(rows[1]).getByText('2')).toBeTruthy()
 	})
 
 	it('says so when no version was recorded', () => {

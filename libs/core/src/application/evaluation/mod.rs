@@ -14,7 +14,7 @@ use crate::{
     },
     domain::{
         company::PAGE_PROMPT_CHARS,
-        facts::signal_sentence,
+        facts::{LeadFacts, signal_sentence},
         job::ports::Clock,
         lead::{Lead, LeadId, Signal},
         llm::{
@@ -30,11 +30,11 @@ use crate::{
             definition::{ProfileDefinition, QualificationAgent},
         },
         qualification::{
-            AgentOpinion, Completion, EvidenceStrength, QualificationResult, ResultId,
+            AgentOpinion, Completion, EvidenceStrength, Judgement, QualificationResult, ResultId,
             ResultStatus, SCORING_VERSION, ValidOutput, Violations, agent_score, exclusions, judge,
             ports::QualificationRepository,
             prompt::{AgentPrompt, build, lead_document, with_ungrounded, with_violations},
-            validate_answers,
+            sample_record, validate_answers, vote,
         },
     },
 };
@@ -42,6 +42,9 @@ use crate::{
 pub const QUALIFICATION_LISTENER: &str = "qualification";
 const RESCORE_BATCH_SIZE: u32 = 500;
 const PROVIDER_UNAVAILABLE: &str = "fournisseur indisponible";
+const ESCALATION_TEMPERATURE: f64 = 0.0;
+const ESCALATION_TAG: &str = "+escalation";
+const ESCALATION_LABEL: &str = "escalation";
 
 pub trait ProviderBuilder: Send + Sync {
     type Provider: LlmProvider;
@@ -85,17 +88,35 @@ impl<P> Loaded<P> {
         prompt_version: String,
         default_max_tokens: u32,
     ) -> RunProvenance {
+        self.sampled_provenance(
+            model,
+            prompt_version,
+            default_max_tokens,
+            None,
+            DEFAULT_SAMPLES,
+        )
+    }
+
+    fn sampled_provenance(
+        &self,
+        model: &str,
+        prompt_version: String,
+        default_max_tokens: u32,
+        temperature: Option<f64>,
+        samples: u32,
+    ) -> RunProvenance {
+        let mut generation =
+            GenerationSnapshot::new(&self.generation, self.reasoning_effort, default_max_tokens);
+        if temperature.is_some() {
+            generation.temperature = temperature;
+        }
         RunProvenance {
             provider_id: Some(self.id),
             provider_name: self.name.clone(),
             model: model.to_owned(),
             prompt_version,
-            generation: GenerationSnapshot::new(
-                &self.generation,
-                self.reasoning_effort,
-                default_max_tokens,
-            ),
-            samples: DEFAULT_SAMPLES,
+            generation,
+            samples: samples.max(DEFAULT_SAMPLES),
         }
     }
 }
@@ -184,11 +205,59 @@ enum LeadOutcome {
     BudgetExhausted,
 }
 
+enum SampleOutcome {
+    Valid { output: ValidOutput, model: String },
+    Invalid { error: String },
+    BudgetExhausted,
+}
+
+struct Pass {
+    results: Vec<QualificationResult>,
+    opinions: Vec<Option<AgentOpinion>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct RunPlan {
+    provider: Option<ProviderId>,
+    samples: u32,
+    temperature: Option<f64>,
+    escalated: bool,
+}
+
+impl RunPlan {
+    fn primary(agent: &QualificationAgent) -> Self {
+        let samples = u32::from(agent.samples).max(1);
+        Self {
+            provider: agent.provider_id.map(ProviderId),
+            samples,
+            temperature: (samples > 1).then_some(agent.sampling_temperature),
+            escalated: false,
+        }
+    }
+
+    fn escalation(provider: ProviderId) -> Self {
+        Self {
+            provider: Some(provider),
+            samples: 1,
+            temperature: Some(ESCALATION_TEMPERATURE),
+            escalated: true,
+        }
+    }
+}
+
 struct Subject<'a> {
     active: &'a ActiveProfile,
     definition: &'a ProfileDefinition,
     lead: &'a Lead,
     documents: &'a [UntrustedDocument<'a>],
+    at: DateTime<Utc>,
+}
+
+struct AgentRun<'a, P> {
+    loaded: &'a Loaded<P>,
+    subject: &'a Subject<'a>,
+    agent: &'a QualificationAgent,
+    prompt: &'a AgentPrompt,
 }
 
 fn count(value: usize) -> u64 {
@@ -204,7 +273,7 @@ fn failed(
     agent: &QualificationAgent,
     provenance: RunProvenance,
     error: String,
-    at: DateTime<Utc>,
+    raw_samples: serde_json::Value,
 ) -> QualificationResult {
     QualificationResult {
         id: ResultId(generate_uuid_v7()),
@@ -218,7 +287,9 @@ fn failed(
         answers: serde_json::json!({}),
         agent_score: None,
         error: Some(error),
-        created_at: at,
+        escalated: false,
+        raw_samples,
+        created_at: subject.at,
     }
 }
 
@@ -227,7 +298,7 @@ fn succeeded(
     agent: &QualificationAgent,
     provenance: RunProvenance,
     output: &ValidOutput,
-    at: DateTime<Utc>,
+    stored: (bool, serde_json::Value),
 ) -> (QualificationResult, AgentOpinion) {
     let score = agent_score(
         agent,
@@ -246,7 +317,9 @@ fn succeeded(
         answers: output.answers.to_json(),
         agent_score: Some(score),
         error: None,
-        created_at: at,
+        escalated: stored.0,
+        raw_samples: stored.1,
+        created_at: subject.at,
     };
     let opinion = AgentOpinion {
         weight: agent.weight,
@@ -254,6 +327,20 @@ fn succeeded(
         axes: output.answers.0.len(),
     };
     (result, opinion)
+}
+
+fn judgement_of(
+    definition: &ProfileDefinition,
+    lead: &Lead,
+    facts: &LeadFacts,
+    opinions: &[AgentOpinion],
+) -> Judgement {
+    judge(
+        opinions,
+        EvidenceStrength::compute(facts, lead.score.get(), &definition.evidence),
+        definition.verdict,
+        &definition.evidence,
+    )
 }
 
 impl<B, S, C> Evaluator<'_, B, S, C>
@@ -265,10 +352,10 @@ where
     async fn load(
         &self,
         usecase: &LodestoneUseCase,
-        agent: &QualificationAgent,
+        wanted: Option<ProviderId>,
+        label: &str,
         providers: &mut Providers<B::Provider>,
     ) -> Result<Option<usize>, CoreError> {
-        let wanted = agent.provider_id.map(ProviderId);
         if let Some(index) = providers.position(wanted) {
             return Ok(providers.entries[index].1.is_some().then_some(index));
         }
@@ -278,7 +365,7 @@ where
             self.cipher,
             wanted,
             Tier::Triage,
-            agent.id.as_str(),
+            label,
         )
         .await?;
         let available = loaded.is_some();
@@ -288,20 +375,31 @@ where
 
     async fn ask(
         &self,
-        loaded: &Loaded<B::Provider>,
-        subject: &Subject<'_>,
-        agent: &QualificationAgent,
-        prompt: &AgentPrompt,
+        run: &AgentRun<'_, B::Provider>,
         instruction: &str,
+        call: (RunPlan, u32),
         budget: &mut RunBudget,
     ) -> Result<Structured<serde_json::Value>, LlmCallError> {
+        let AgentRun {
+            loaded,
+            subject,
+            agent,
+            prompt,
+        } = *run;
+        let (plan, sample) = call;
         let schema = contract_schema(agent);
+        let tag = if plan.escalated {
+            format!("qualification@{}{ESCALATION_TAG}", prompt.hash)
+        } else {
+            format!("qualification@{}", prompt.hash)
+        };
         let scope = CacheScope {
             profile_id: subject.active.profile.id,
             revision: subject.active.revision.number,
-            prompt: format!("qualification@{}", prompt.hash),
+            prompt: tag,
             domain: subject.lead.domain.clone(),
             agent: Some(agent.id.clone()),
+            sample,
         };
         let call = SchemaCall {
             scope: &scope,
@@ -310,6 +408,7 @@ where
                 instruction,
                 documents: subject.documents,
                 max_tokens: self.settings.max_tokens,
+                temperature: plan.temperature,
             },
             schema: &schema,
         };
@@ -328,66 +427,32 @@ where
         .await
     }
 
-    async fn evaluate_agent(
+    async fn run_sample(
         &self,
-        usecase: &LodestoneUseCase,
-        subject: &Subject<'_>,
-        agent: &QualificationAgent,
-        providers: &mut Providers<B::Provider>,
+        run: &AgentRun<'_, B::Provider>,
+        call: (RunPlan, u32),
         budget: &mut RunBudget,
-        at: DateTime<Utc>,
-    ) -> Result<AgentOutcome, CoreError> {
-        let schema = contract_schema(agent);
-        let prompt = build(subject.definition, agent, &schema);
-        let requested = agent.provider_id.map(ProviderId);
-        let version = agent_prompt_version(&prompt);
-        let Some(index) = self.load(usecase, agent, providers).await? else {
-            let result = failed(
-                subject,
-                agent,
-                RunProvenance::unresolved(requested, version),
-                PROVIDER_UNAVAILABLE.to_owned(),
-                at,
-            );
-            return Ok(AgentOutcome::Result(Box::new(result), None));
-        };
-        let Some(loaded) = providers.entries[index].1.as_ref() else {
-            return Err(CoreError::Internal(
-                "provider cache is inconsistent".to_owned(),
-            ));
-        };
-        let finish = |model: &str, output: &ValidOutput| {
-            let (result, opinion) = succeeded(
-                subject,
-                agent,
-                loaded.provenance(model, version.clone(), self.settings.max_tokens),
-                output,
-                at,
-            );
-            AgentOutcome::Result(Box::new(result), Some(opinion))
-        };
+    ) -> SampleOutcome {
+        let AgentRun {
+            subject,
+            agent,
+            prompt,
+            ..
+        } = *run;
         let mut instruction = prompt.instruction.clone();
         let mut last: Option<Violations> = None;
         let mut fallback: Option<(ValidOutput, String)> = None;
         for attempt in 0..2 {
-            let structured = match self
-                .ask(loaded, subject, agent, &prompt, &instruction, budget)
-                .await
-            {
+            let structured = match self.ask(run, &instruction, call, budget).await {
                 Ok(structured) => structured,
-                Err(LlmCallError::BudgetExhausted) => return Ok(AgentOutcome::BudgetExhausted),
+                Err(LlmCallError::BudgetExhausted) => return SampleOutcome::BudgetExhausted,
                 Err(error) => {
-                    if fallback.is_some() {
-                        break;
+                    if let Some((output, model)) = fallback {
+                        return SampleOutcome::Valid { output, model };
                     }
-                    let result = failed(
-                        subject,
-                        agent,
-                        loaded.provenance(&loaded.model, version, self.settings.max_tokens),
-                        format!("Échec de l'appel au modèle : {error}"),
-                        at,
-                    );
-                    return Ok(AgentOutcome::Result(Box::new(result), None));
+                    return SampleOutcome::Invalid {
+                        error: format!("Échec de l'appel au modèle : {error}"),
+                    };
                 }
             };
             match validate_answers(agent, &structured.value, subject.documents) {
@@ -403,7 +468,10 @@ where
                         fallback = Some((output, structured.model));
                         continue;
                     }
-                    return Ok(finish(&structured.model, &output));
+                    return SampleOutcome::Valid {
+                        output,
+                        model: structured.model,
+                    };
                 }
                 Err(violations) => {
                     warn!(agent = agent.id.as_str(), %violations, "qualification answer broke the contract");
@@ -412,18 +480,201 @@ where
                 }
             }
         }
-        if let Some((output, model)) = &fallback {
-            return Ok(finish(model, output));
+        if let Some((output, model)) = fallback {
+            return SampleOutcome::Valid { output, model };
         }
         let message = last.map_or_else(String::new, |violations| violations.to_string());
-        let result = failed(
+        SampleOutcome::Invalid {
+            error: format!("Réponse non conforme au contrat : {message}"),
+        }
+    }
+
+    async fn evaluate_agent(
+        &self,
+        usecase: &LodestoneUseCase,
+        subject: &Subject<'_>,
+        agent: &QualificationAgent,
+        plan: RunPlan,
+        providers: &mut Providers<B::Provider>,
+        budget: &mut RunBudget,
+    ) -> Result<AgentOutcome, CoreError> {
+        let schema = contract_schema(agent);
+        let prompt = build(subject.definition, agent, &schema);
+        let version = agent_prompt_version(&prompt);
+        let Some(index) = self
+            .load(usecase, plan.provider, agent.id.as_str(), providers)
+            .await?
+        else {
+            let result = failed(
+                subject,
+                agent,
+                RunProvenance::unresolved(plan.provider, version),
+                PROVIDER_UNAVAILABLE.to_owned(),
+                serde_json::json!([]),
+            );
+            return Ok(AgentOutcome::Result(Box::new(result), None));
+        };
+        let Some(loaded) = providers.entries[index].1.as_ref() else {
+            return Err(CoreError::Internal(
+                "provider cache is inconsistent".to_owned(),
+            ));
+        };
+        let run = AgentRun {
+            loaded,
             subject,
             agent,
-            loaded.provenance(&loaded.model, version, self.settings.max_tokens),
-            format!("Réponse non conforme au contrat : {message}"),
-            at,
+            prompt: &prompt,
+        };
+        let mut valid: Vec<ValidOutput> = Vec::new();
+        let mut records: Vec<serde_json::Value> = Vec::new();
+        let mut model: Option<String> = None;
+        let mut first_error: Option<String> = None;
+        for sample in 0..plan.samples {
+            match self.run_sample(&run, (plan, sample), budget).await {
+                SampleOutcome::BudgetExhausted => return Ok(AgentOutcome::BudgetExhausted),
+                SampleOutcome::Valid {
+                    output,
+                    model: answered,
+                } => {
+                    records.push(sample_record(sample, Ok(&output)));
+                    model.get_or_insert(answered);
+                    valid.push(output);
+                }
+                SampleOutcome::Invalid { error } => {
+                    warn!(
+                        agent = agent.id.as_str(),
+                        sample, "qualification sample dropped"
+                    );
+                    records.push(sample_record(sample, Err(&error)));
+                    first_error.get_or_insert(error);
+                }
+            }
+        }
+        let raw_samples = if plan.samples > 1 {
+            serde_json::Value::Array(records)
+        } else {
+            serde_json::json!([])
+        };
+        let voted = if plan.samples > 1 {
+            vote(agent, &valid)
+        } else {
+            valid.pop()
+        };
+        let valid_samples = u32::try_from(valid.len().max(1)).unwrap_or(plan.samples);
+        let Some(output) = voted else {
+            let result = failed(
+                subject,
+                agent,
+                loaded.sampled_provenance(
+                    &loaded.model,
+                    version,
+                    self.settings.max_tokens,
+                    plan.temperature,
+                    DEFAULT_SAMPLES,
+                ),
+                first_error.unwrap_or_default(),
+                raw_samples,
+            );
+            return Ok(AgentOutcome::Result(Box::new(result), None));
+        };
+        let samples = if plan.samples > 1 {
+            valid_samples
+        } else {
+            DEFAULT_SAMPLES
+        };
+        let (result, opinion) = succeeded(
+            subject,
+            agent,
+            loaded.sampled_provenance(
+                model.as_deref().unwrap_or(&loaded.model),
+                version,
+                self.settings.max_tokens,
+                plan.temperature,
+                samples,
+            ),
+            &output,
+            (plan.escalated, raw_samples),
         );
-        Ok(AgentOutcome::Result(Box::new(result), None))
+        Ok(AgentOutcome::Result(Box::new(result), Some(opinion)))
+    }
+
+    async fn run_agents(
+        &self,
+        usecase: &LodestoneUseCase,
+        subject: &Subject<'_>,
+        escalation: Option<ProviderId>,
+        providers: &mut Providers<B::Provider>,
+        budget: &mut RunBudget,
+    ) -> Result<Option<Pass>, CoreError> {
+        let mut pass = Pass {
+            results: Vec::new(),
+            opinions: Vec::new(),
+        };
+        for agent in subject
+            .definition
+            .qualification_agents
+            .iter()
+            .filter(|agent| agent.enabled)
+        {
+            let plan = escalation.map_or_else(|| RunPlan::primary(agent), RunPlan::escalation);
+            match self
+                .evaluate_agent(usecase, subject, agent, plan, providers, budget)
+                .await?
+            {
+                AgentOutcome::BudgetExhausted => return Ok(None),
+                AgentOutcome::Result(result, opinion) => {
+                    info!(
+                        monotonic_counter.qualification_results = 1u64,
+                        agent = agent.id.as_str(),
+                        status = result.status.as_str(),
+                        escalated = plan.escalated,
+                        "qualification result recorded"
+                    );
+                    pass.results.push(*result);
+                    pass.opinions.push(opinion);
+                }
+            }
+        }
+        Ok(Some(pass))
+    }
+
+    async fn escalate(
+        &self,
+        usecase: &LodestoneUseCase,
+        subject: &Subject<'_>,
+        provider: ProviderId,
+        pass: &mut Pass,
+        providers: &mut Providers<B::Provider>,
+        budget: &mut RunBudget,
+    ) -> Result<Option<bool>, CoreError> {
+        if self
+            .load(usecase, Some(provider), ESCALATION_LABEL, providers)
+            .await?
+            .is_none()
+        {
+            warn!(lead_id = %subject.lead.id, "escalation skipped, its provider is unavailable");
+            return Ok(Some(false));
+        }
+        let Some(escalated) = self
+            .run_agents(usecase, subject, Some(provider), providers, budget)
+            .await?
+        else {
+            return Ok(None);
+        };
+        let mut replaced = false;
+        for (index, (result, opinion)) in escalated
+            .results
+            .into_iter()
+            .zip(escalated.opinions)
+            .enumerate()
+        {
+            if opinion.is_some() {
+                pass.results[index] = result;
+                pass.opinions[index] = opinion;
+                replaced = true;
+            }
+        }
+        Ok(Some(replaced))
     }
 
     async fn evaluate_lead<K: Clock>(
@@ -463,37 +714,52 @@ where
             definition,
             lead,
             documents: &documents,
+            at: clock.now(),
         };
-        let at = clock.now();
-        let mut results = Vec::new();
-        let mut scored: Vec<AgentOpinion> = Vec::new();
-        for agent in definition
-            .qualification_agents
-            .iter()
-            .filter(|agent| agent.enabled)
+        let at = subject.at;
+        let Some(mut pass) = self
+            .run_agents(usecase, &subject, None, providers, budget)
+            .await?
+        else {
+            return Ok(LeadOutcome::BudgetExhausted);
+        };
+        let revision = active.revision.number;
+        let mut escalated_revision = None;
+        let scored = |pass: &Pass| -> Vec<AgentOpinion> {
+            pass.opinions.iter().flatten().copied().collect()
+        };
+        let mut judgement = judgement_of(definition, lead, &facts, &scored(&pass));
+        if escalated_revision.is_none()
+            && let (Some(provider), Some(confidence)) =
+                (definition.escalation.provider, judgement.confidence)
+            && definition.escalation.triggers(confidence)
         {
+            info!(lead_id = %lead.id, confidence, "grey-zone lead, escalating");
             match self
-                .evaluate_agent(usecase, &subject, agent, providers, budget, at)
+                .escalate(
+                    usecase,
+                    &subject,
+                    ProviderId(provider),
+                    &mut pass,
+                    providers,
+                    budget,
+                )
                 .await?
             {
-                AgentOutcome::BudgetExhausted => return Ok(LeadOutcome::BudgetExhausted),
-                AgentOutcome::Result(result, opinion) => {
-                    let status = result.status.as_str();
+                None => return Ok(LeadOutcome::BudgetExhausted),
+                Some(true) => {
+                    escalated_revision = Some(revision);
+                    judgement = judgement_of(definition, lead, &facts, &scored(&pass));
                     info!(
-                        monotonic_counter.qualification_results = 1u64,
-                        agent = agent.id.as_str(),
-                        status,
-                        "qualification result recorded"
+                        monotonic_counter.qualification_escalations = 1u64,
+                        "lead escalated"
                     );
-                    if let Some(opinion) = opinion {
-                        scored.push(opinion);
-                    }
-                    results.push(*result);
                 }
+                Some(false) => {}
             }
         }
-        let valid = count(scored.len());
-        let invalid = count(results.len()) - valid;
+        let valid = count(pass.opinions.iter().flatten().count());
+        let invalid = count(pass.results.len()) - valid;
         let mut sources: Vec<String> = signals
             .iter()
             .map(|signal| signal.source.as_str().to_owned())
@@ -502,20 +768,16 @@ where
         sources.dedup();
         let completion = Completion {
             lead_id: lead.id,
-            profile_revision: active.revision.number,
+            profile_revision: revision,
             sources,
-            judgement: judge(
-                &scored,
-                EvidenceStrength::compute(&facts, lead.score.get(), &definition.evidence),
-                definition.verdict,
-                &definition.evidence,
-            )
-            .excluding(exclusions(&results, &definition.qualification_agents)),
+            judgement: judgement
+                .excluding(exclusions(&pass.results, &definition.qualification_agents)),
             scoring_version: SCORING_VERSION,
             dossier_at: dossier.as_ref().and_then(|dossier| dossier.content_at),
+            escalated_revision,
             at,
         };
-        usecase.store_evaluation(&results, &completion).await?;
+        usecase.store_evaluation(&pass.results, &completion).await?;
         Ok(LeadOutcome::Done { valid, invalid })
     }
 }

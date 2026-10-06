@@ -174,11 +174,11 @@ async fn validating_a_lead_records_the_qualification_at_decision_time(pool: PgPo
     });
     assert_eq!(
         snapshot["agents"]["fit"],
-        json!({"status": "valid", "score": 0.9, "provenance": provenance})
+        json!({"status": "valid", "score": 0.9, "provenance": provenance, "escalated": false})
     );
     assert_eq!(
         snapshot["agents"]["market"],
-        json!({"status": "invalid", "score": null, "provenance": provenance})
+        json!({"status": "invalid", "score": null, "provenance": provenance, "escalated": false})
     );
     assert_eq!(snapshot["aggregator"]["model"], json!("big-model"));
     assert_eq!(

@@ -76,6 +76,7 @@ const detail: LeadDetailData = {
 				},
 			],
 			error: null,
+			escalated: false,
 			created_at: '2026-02-01T00:00:00Z',
 		},
 		{
@@ -91,6 +92,7 @@ const detail: LeadDetailData = {
 			agent_score: null,
 			answers: [],
 			error: 'fournisseur indisponible',
+			escalated: false,
 			created_at: '2026-02-01T00:00:00Z',
 		},
 	],
@@ -971,5 +973,55 @@ describe('LeadDetail', () => {
 		expect(
 			screen.getAllByText('Faits calculés par le système').length,
 		).toBeGreaterThan(0)
+	})
+
+	it('shows the agreement of the samples under each measure', () => {
+		const [first, second] = detail.qualification_results
+		const answer = first.answers[0]
+		const { container } = renderDetail({
+			detail: {
+				...detail,
+				qualification_results: [
+					{
+						...first,
+						provenance: { ...first.provenance, samples: 3 },
+						answers: [{ ...answer, agreement: 2 / 3 }],
+					},
+					second,
+				],
+			},
+		})
+		const measure = container.querySelector('[data-question="pertinence"]')
+		expect(measure?.querySelector('[data-part="agreement"]')?.textContent).toBe(
+			'Accord : 2/3',
+		)
+	})
+
+	it('shows no agreement for a single-sample answer', () => {
+		const { container } = renderDetail()
+		expect(container.querySelector('[data-part="agreement"]')).toBeNull()
+		expect(container.querySelector('[data-part="escalated"]')).toBeNull()
+	})
+
+	it('badges an escalated result with its provider', () => {
+		const [first, second] = detail.qualification_results
+		const { container } = renderDetail({
+			detail: {
+				...detail,
+				qualification_results: [
+					{ ...first, escalated: true, provider_name: 'Claude' },
+					second,
+				],
+			},
+		})
+		const card = container.querySelector('[data-agent="pertinence"]')
+		expect(card?.querySelector('[data-part="escalated"]')?.textContent).toBe(
+			'Escaladé vers Claude',
+		)
+		expect(
+			container
+				.querySelector('[data-agent="maturite"]')
+				?.querySelector('[data-part="escalated"]'),
+		).toBeNull()
 	})
 })

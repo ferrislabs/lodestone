@@ -3,10 +3,11 @@ use uuid::Uuid;
 
 use super::definition::{
     Agent, AgentId, AgentSource, Aggregator, CertificateTransparency, ContactRanking,
-    DEFAULT_EXCLUSION_THRESHOLD, DnsCname, EvidenceSettings, HttpProbe, Identity, KeywordSource,
-    Language, LlmSettings, MAX_DESCRIPTION_CHARS, MAX_PROMPT_CHARS, PROFILE_SCHEMA_VERSION,
-    ProfileDefinition, QualificationAgent, Question, QuestionOption, Scoring, ScoringFactor,
-    VerdictThresholds,
+    DEFAULT_EXCLUSION_THRESHOLD, DEFAULT_SAMPLES, DEFAULT_SAMPLING_TEMPERATURE, DnsCname,
+    Escalation, EvidenceSettings, HttpProbe, Identity, KeywordSource, Language, LlmSettings,
+    MAX_DESCRIPTION_CHARS, MAX_PROMPT_CHARS, PROFILE_SCHEMA_VERSION, ProfileDefinition,
+    QualificationAgent, Question, QuestionOption, Scoring, ScoringFactor, VerdictThresholds,
+    default_exclusion_threshold,
 };
 use crate::domain::scoring::max_possible;
 
@@ -159,6 +160,8 @@ fn pertinence_agent(identity: &Identity, llm: &LlmSettings) -> QualificationAgen
         system_prompt: pertinence_prompt(identity, llm),
         weight: 5,
         exclusion_threshold: DEFAULT_EXCLUSION_THRESHOLD,
+        samples: DEFAULT_SAMPLES,
+        sampling_temperature: DEFAULT_SAMPLING_TEMPERATURE,
         questions: vec![Question {
             id: "pertinence".to_owned(),
             wording: "Ce lead est-il pertinent pour l'offre ?".to_owned(),
@@ -273,6 +276,8 @@ impl QualificationAgentV6 {
             system_prompt: self.system_prompt,
             weight: self.weight,
             exclusion_threshold: DEFAULT_EXCLUSION_THRESHOLD,
+            samples: DEFAULT_SAMPLES,
+            sampling_temperature: DEFAULT_SAMPLING_TEMPERATURE,
             questions: self
                 .questions
                 .into_iter()
@@ -297,6 +302,8 @@ impl QualificationAgentV4 {
             system_prompt: self.system_prompt,
             weight: self.weight,
             exclusion_threshold: DEFAULT_EXCLUSION_THRESHOLD,
+            samples: DEFAULT_SAMPLES,
+            sampling_temperature: DEFAULT_SAMPLING_TEMPERATURE,
             questions: self
                 .questions
                 .into_iter()
@@ -334,6 +341,7 @@ impl ProfileDefinitionV4 {
                 .map(QualificationAgentV4::upgrade)
                 .collect(),
             aggregator: self.aggregator,
+            escalation: Escalation::default(),
             verdict: self.verdict,
             evidence: EvidenceSettings::default(),
             scoring: self.scoring,
@@ -371,6 +379,7 @@ impl ProfileDefinitionV5 {
                 .map(QualificationAgentV6::upgrade)
                 .collect(),
             aggregator: self.aggregator,
+            escalation: Escalation::default(),
             verdict: self.verdict,
             evidence: EvidenceSettings::default(),
             scoring: self.scoring,
@@ -410,6 +419,7 @@ impl ProfileDefinitionV6 {
                 .map(QualificationAgentV6::upgrade)
                 .collect(),
             aggregator: self.aggregator,
+            escalation: Escalation::default(),
             verdict: self.verdict,
             evidence: self.evidence,
             scoring: self.scoring,
@@ -487,6 +497,8 @@ impl QualificationAgentV7 {
             system_prompt: self.system_prompt,
             weight: self.weight,
             exclusion_threshold: DEFAULT_EXCLUSION_THRESHOLD,
+            samples: DEFAULT_SAMPLES,
+            sampling_temperature: DEFAULT_SAMPLING_TEMPERATURE,
             questions: self
                 .questions
                 .into_iter()
@@ -526,6 +538,83 @@ impl ProfileDefinitionV7 {
                 .map(QualificationAgentV7::upgrade)
                 .collect(),
             aggregator: self.aggregator,
+            escalation: Escalation::default(),
+            verdict: self.verdict,
+            evidence: self.evidence,
+            scoring: self.scoring,
+            contact_ranking: self.contact_ranking,
+            llm: self.llm,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct QualificationAgentV8 {
+    id: AgentId,
+    name: String,
+    description: String,
+    #[serde(default = "default_enabled")]
+    enabled: bool,
+    #[serde(default)]
+    provider_id: Option<Uuid>,
+    system_prompt: String,
+    #[serde(default = "default_weight")]
+    weight: u8,
+    #[serde(default = "default_exclusion_threshold")]
+    exclusion_threshold: f64,
+    questions: Vec<Question>,
+}
+
+impl QualificationAgentV8 {
+    fn upgrade(self) -> QualificationAgent {
+        QualificationAgent {
+            id: self.id,
+            name: self.name,
+            description: self.description,
+            enabled: self.enabled,
+            provider_id: self.provider_id,
+            system_prompt: self.system_prompt,
+            weight: self.weight,
+            exclusion_threshold: self.exclusion_threshold,
+            samples: DEFAULT_SAMPLES,
+            sampling_temperature: DEFAULT_SAMPLING_TEMPERATURE,
+            questions: self.questions,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct ProfileDefinitionV8 {
+    #[serde(rename = "schema_version")]
+    _schema_version: u32,
+    identity: Identity,
+    agents: Vec<Agent>,
+    qualification_agents: Vec<QualificationAgentV8>,
+    aggregator: Aggregator,
+    #[serde(default)]
+    verdict: VerdictThresholds,
+    #[serde(default)]
+    evidence: EvidenceSettings,
+    scoring: Scoring,
+    contact_ranking: ContactRanking,
+    llm: LlmSettings,
+}
+
+impl ProfileDefinitionV8 {
+    pub(super) fn upgrade(self) -> ProfileDefinition {
+        ProfileDefinition {
+            schema_version: PROFILE_SCHEMA_VERSION,
+            identity: self.identity,
+            agents: self.agents,
+            qualification_agents: self
+                .qualification_agents
+                .into_iter()
+                .map(QualificationAgentV8::upgrade)
+                .collect(),
+            aggregator: self.aggregator,
+            escalation: Escalation::default(),
             verdict: self.verdict,
             evidence: self.evidence,
             scoring: self.scoring,
@@ -547,6 +636,7 @@ impl ProfileDefinitionV3 {
                 provider_id: None,
                 system_prompt: AGGREGATOR_PROMPT.to_owned(),
             },
+            escalation: Escalation::default(),
             verdict: VerdictThresholds::default(),
             evidence: EvidenceSettings::default(),
             scoring: self.scoring,

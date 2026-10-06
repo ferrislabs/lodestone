@@ -86,6 +86,7 @@ async fn run_unlocked(
             schema_name: "verdict",
             schema: &schema,
             max_tokens: 256,
+            temperature: None,
         })
         .await
 }

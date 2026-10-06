@@ -151,7 +151,7 @@ impl OpenAiCompatibleProvider {
                 },
             },
             reasoning_effort: self.reasoning_effort,
-            temperature: self.generation.temperature,
+            temperature: request.temperature.or(self.generation.temperature),
             frequency_penalty: self.generation.frequency_penalty_for_openai(),
             presence_penalty: self.generation.presence_penalty,
         };

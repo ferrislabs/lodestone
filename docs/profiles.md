@@ -8,7 +8,7 @@ Profiles live in Postgres. Each edit creates a new revision; earlier revisions a
 
 ## Schema
 
-The JSON Schema is `docs/schemas/profile.v8.schema.json`. It is generated from `ProfileDefinition` and must not be edited by hand. Regenerate it with:
+The JSON Schema is `docs/schemas/profile.v9.schema.json`. It is generated from `ProfileDefinition` and must not be edited by hand. Regenerate it with:
 
 ```
 UPDATE_SCHEMA=1 cargo test -p lodestone-core --test profile_examples
@@ -23,7 +23,7 @@ Without `UPDATE_SCHEMA=1` the same test fails if the committed file is stale. Th
 
 ## Sections
 
-- `schema_version`: must be 8. See [Older versions](#older-versions).
+- `schema_version`: must be 9. See [Older versions](#older-versions).
 - `identity`: the offer and the target customer, in free text.
 - `agents`: the detection agents; at least one is required. An agent searches one source with its own settings (see ADR 0005). Several agents of the same kind are allowed.
   - `id`: slug matching `^[a-z0-9][a-z0-9-]{0,62}$`, unique in the profile.
@@ -39,6 +39,8 @@ Without `UPDATE_SCHEMA=1` the same test fails if the committed file is stale. Th
   - `system_prompt`: not empty, at most 8000 characters.
   - `weight`: integer from 1 to 10, default 5, the agent's weight in the lead confidence.
   - `exclusion_threshold`: from 0.5 to 1, default 0.6, the probability at which an excluding option excludes the lead (see "Exclusions").
+  - `samples`: integer from 1 to 5, default 3, the number of independent model calls per lead (see "Sampling and voting").
+  - `sampling_temperature`: from 0 to 1.5, default 0.7, the temperature of those calls when `samples` is above 1; it overrides the provider temperature for them.
   - `questions`: at least one. A question has an `id` (lowercase letters, digits, `-`, `_`, at most 63 characters, unique in the agent), a `wording`, a `weight` (1 to 10, default 5) and 2 to 11 `options`. An option has a `value` (same identifier rule, unique in the question), a `label`, a `score` from 0 to 1 `is_unknown` (default false) and `excludes` (default false, never together with `is_unknown`). Exactly one option per question is the unknown option (`is_unknown: true`, default value `inconnu`, label `Inconnu`, score 0.5): the model picks it when nothing in the documents supports an answer. Its score is editable, it cannot be removed, and the editor pins it last as `Option « inconnu »`. A question without exactly one unknown option is rejected (`UnknownOptionCount`, path `...options`).
   - Validation paths include the indexes, for example `qualification_agents[1].questions[0].options[2].score`.
   - Ready-made templates (editor, "Ajouter un agent de qualification"; French prompts and labels, higher score = better lead for the offer; the operator adjusts scores and weights):
@@ -52,6 +54,7 @@ Without `UPDATE_SCHEMA=1` the same test fails if the committed file is stale. Th
     - `Exclusions`: weight 1. Axes `editeur_integrateur`, `hebergeur_agence` (the signal concerns a customer of the company), `domaine_inactif` (`parque_ou_inactif`, `actif`, `inconnu`), `client_actuel` and `concurrent`; the other four have `oui` (excludes, score 0), `non` (score 1) and `inconnu` (score 0.5). The prompt holds three operator-editable lists in French, `Clients actuels :`, `Concurrents :` and `Éditeurs et intégrateurs du domaine :`, with short IAM-oriented defaults.
     - The IAM example (`docs/examples/profiles/iam-ferriskey.json`) enables all of them.
 - `aggregator`: `provider_id` (or `null` for the synthesis default) and a `system_prompt` (not empty, at most 8000 characters). Once every enabled qualification agent has a result for a lead, it writes the lead summary and a message draft (see "Qualification and summary").
+- `escalation`: `provider` (id of a declared LLM provider, `null` by default which disables escalation), `band_low` (0 to 100, default 40) and `band_high` (0 to 100, default 70) with `band_high > band_low` (see "Escalation"). The whole section and each field are optional.
 - `verdict`: `reliable_from` (0 to 100, default 70) and `discard_below` (0 to 100, default 30), with `reliable_from > discard_below`. Percentages of the lead confidence: reliable from the first (and only when the two conditions below hold), to check between the two, discarded below the second. `calibration_floor` (0 to 0.2, default 0.05, 0 disables) clamps every answer probability to `[floor, 1 - floor]` before scoring, then renormalises. `min_evidence` (0 to 1, default 0.5) is the evidence strength a lead needs to be reliable.
 - `evidence`: how the strength of the evidence weighs on the confidence (ADR 0007, "Evidence and calibration"). `influence` (0 to 1, default 0.6), `reference_score` (at least 1, default 50) and `weights` (`volume`, `diversity`, `environment`, `strength`, integers from 0 to 10, default 1, at least one above 0). The whole section and each field are optional.
 
@@ -65,6 +68,25 @@ An option with `excludes: true` marks a reason to drop the lead (publisher or in
 An `Exclusion` holds the agent id and name, the axis id, the option value and label, the probability, the quote and the document it was found in. Any exclusion sets the verdict to `ecarte` with `verdict_reason` `excluded`, whatever the confidence; the confidence is still computed and shown. Exclusions are stored with the lead qualification state (`lead_qualification_state.exclusions`, JSON), applied by evaluation and by rescoring (`SCORING_VERSION` 2 rescored every stored lead), exposed as `exclusions` on the lead, and counted per agent and option by `GET /api/v1/quality` (`exclusions`). The prompt marks excluding options in the option list: `exclusion: choose only with explicit evidence`.
 
 The quality report also lists the most recent leads rejected for `deja_client`, `concurrent`, `editeur_integrateur` or `hebergeur_agence` (`exclusion_candidates`); the Qualité page copies their legal name and domain so the operator can paste them into the lists of the Exclusions agent prompt. No profile is ever changed automatically.
+
+### Sampling and voting
+
+Each (lead, agent) pair runs `samples` independent contract calls. Every call has its own validation, retry and grounding (see "Contract JSON"), its own cache entry (the cache key includes the sample index, and the sampling temperature when one applies, so samples differ and a replay is served from the cache) and is charged to the run budget. With more than one sample, every call uses `sampling_temperature`; with one sample the provider temperature applies and nothing below happens. A sample that stays invalid after its retry is dropped; the result is invalid only when every sample is invalid, and then carries the first sample error. A budget exhausted in the middle of an agent leaves the lead due, as before.
+
+The voting is the pure function `vote(agent, samples)` in `libs/core/src/domain/qualification/voting.rs`, over a list of validated outputs (post-downgrade) so that other agents can reuse it. Per axis:
+
+- the final choice is the majority (the most voted option) of the valid samples; a tie goes to the option with the higher mean reported probability, then to the option declared first;
+- the probabilities are `0.5 × vote share + 0.5 × mean of the reported probabilities` per option, then renormalised (`VOTE_SHARE_WEIGHT` is 0.5): the vote share keeps a lone sure answer from dominating, the reported probabilities keep the nuance;
+- `agreement` is the share of valid samples that chose the final option, stored in the answer;
+- `confidence` is the mean confidence of the samples that chose the final option;
+- the evidence and its source are those of the first grounded sample that chose the final option (else the first sample that chose it); the answer is grounded when any sample that chose the final option was grounded, and a non grounded answer keeps the `original_choice` of that first sample;
+- the summary is the one of the first sample that agrees with the most final choices.
+
+A single valid sample (a one-sample agent, or only one left) is kept as it is; in the second case its agreement is 1. The result stores `provenance.samples` (the number of valid samples that voted), the generation settings with the effective temperature, and `raw_samples`, the JSON of every sample (its summary and answers, or its error) for audit; it is empty for a one-sample result. The lead page shows "Accord : 2/3" per axis. Exclusions (see below) and rescoring read the voted answers.
+
+### Escalation
+
+After a lead's confidence is computed, when `escalation.provider` is set and the confidence is in `[band_low, band_high)`, every enabled agent of the lead is run again with the escalation provider, one sample, temperature 0 (its own cache entries). The results that come back valid replace the originals (`escalated: true`, with the escalation provider in the provenance); an agent whose escalated call is invalid keeps its original result. The confidence and verdict are then computed again from the replaced results, then the aggregator runs as usual. A lead is escalated at most once per evaluation. Each time its agents re-run because it became due again (a signal from a new source, new dossier content, a new profile revision) the escalation is decided afresh, so a lead still in the grey band is escalated again. A replay of the same evaluation (a crash before the results are stored, a re-run on cached answers) hits the cache for both the agents and the escalation, so it makes no new call. `lead_qualification_state.escalated_revision` records the revision of the last evaluation that escalated the lead. An escalation that exhausts the run budget leaves the lead due and a replay reuses the cached calls. The lead page marks an escalated result "Escaladé vers <fournisseur>" and the Qualité page counts escalated runs on their own rows of the versions table.
 
 ### Contract JSON
 
@@ -173,7 +195,7 @@ A host or domain whose lookup, probe or crawl fails is marked checked like a suc
 
 ## Older versions
 
-Stored revisions are never rewritten. Versions 1, 2, 3, 4, 5, 6 and 7 are accepted and upgraded when read; new revisions are written in version 8. Errors on an older document keep that document's paths.
+Stored revisions are never rewritten. Versions 1, 2, 3, 4, 5, 6, 7 and 8 are accepted and upgraded when read; new revisions are written in version 9. Errors on an older document keep that document's paths.
 
 ### Version 1 to 2
 
@@ -213,3 +235,7 @@ Every question gains an unknown option (`is_unknown`). The upgrade marks the fir
 ### Version 7 to 8
 
 Every qualification agent gains `exclusion_threshold` (0.6) and every option gains `excludes` (false). Stored leads are rescored from their stored answers without a model call (`SCORING_VERSION` 2); no lead is excluded until an option is marked.
+
+### Version 8 to 9
+
+Every qualification agent gains `samples` (3) and `sampling_temperature` (0.7), and the profile gains `escalation` (`provider` null, `band_low` 40, `band_high` 70). An upgraded profile therefore runs three samples per agent, which triples the calls of a lead; set `samples` to 1 to keep the former cost. Escalation stays disabled until a provider is chosen.

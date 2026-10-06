@@ -530,6 +530,8 @@ pub struct QualificationAnswerDto {
     pub original_choice: Option<String>,
     pub original_choice_label: Option<String>,
     pub confidence: f64,
+    /// Share of the valid samples that chose the final option, from 0 to 1. Absent for a single-sample result.
+    pub agreement: Option<f64>,
     pub probabilities: Vec<ProbabilityDto>,
 }
 
@@ -551,6 +553,8 @@ pub struct QualificationResultDto {
     pub agent_score: Option<f64>,
     pub answers: Vec<QualificationAnswerDto>,
     pub error: Option<String>,
+    /// True when the result comes from the escalation provider and replaced the original one.
+    pub escalated: bool,
     #[schema(format = DateTime)]
     pub created_at: String,
 }
@@ -603,6 +607,7 @@ fn answers_of(
                     .get("confidence")
                     .and_then(serde_json::Value::as_f64)
                     .unwrap_or_default(),
+                agreement: answer.get("agreement").and_then(serde_json::Value::as_f64),
                 probabilities: question
                     .options
                     .iter()
@@ -652,6 +657,7 @@ impl QualificationResultDto {
             },
             answers: answers_of(result, agent),
             error: result.error.clone(),
+            escalated: result.escalated,
             created_at: result.created_at.to_rfc3339(),
         }
     }

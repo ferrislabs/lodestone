@@ -7,14 +7,15 @@ use thiserror::Error;
 use super::{
     definition::{
         Agent, AgentSource, Aggregator, CertificateTransparency, CnamePattern, ContactRanking,
-        DebtRule, DnsCname, EvidenceSettings, Fingerprint, HttpProbe, Identity, KeywordSource,
-        LlmSettings, MAX_CALIBRATION_FLOOR, MAX_DESCRIPTION_CHARS, MAX_OPTIONS, MAX_PROMPT_CHARS,
-        MIN_EXCLUSION_THRESHOLD, MIN_OPTIONS, Matcher, PROFILE_SCHEMA_VERSION, ProfileDefinition,
-        QualificationAgent, Question, Scoring, VerdictThresholds, VersionExtractor,
+        DebtRule, DnsCname, Escalation, EvidenceSettings, Fingerprint, HttpProbe, Identity,
+        KeywordSource, LlmSettings, MAX_CALIBRATION_FLOOR, MAX_DESCRIPTION_CHARS, MAX_OPTIONS,
+        MAX_PROMPT_CHARS, MAX_SAMPLES, MAX_SAMPLING_TEMPERATURE, MIN_EXCLUSION_THRESHOLD,
+        MIN_OPTIONS, Matcher, PROFILE_SCHEMA_VERSION, ProfileDefinition, QualificationAgent,
+        Question, Scoring, VerdictThresholds, VersionExtractor,
     },
     legacy::{
         ProfileDefinitionV1, ProfileDefinitionV2, ProfileDefinitionV3, ProfileDefinitionV4,
-        ProfileDefinitionV5, ProfileDefinitionV6, ProfileDefinitionV7,
+        ProfileDefinitionV5, ProfileDefinitionV6, ProfileDefinitionV7, ProfileDefinitionV8,
     },
 };
 
@@ -26,7 +27,7 @@ pub enum ProfileProblem {
     #[error("malformed: {0}")]
     Malformed(String),
     #[error(
-        "unsupported schema version {found}, expected 1, 2, 3, 4, 5, 6, 7 or {PROFILE_SCHEMA_VERSION}"
+        "unsupported schema version {found}, expected 1, 2, 3, 4, 5, 6, 7, 8 or {PROFILE_SCHEMA_VERSION}"
     )]
     UnsupportedSchemaVersion { found: u32 },
     #[error("must not be empty")]
@@ -49,6 +50,12 @@ pub enum ProfileProblem {
     InvalidScore,
     #[error("must be a number from 0.5 to 1")]
     InvalidExclusionThreshold,
+    #[error("must be an integer from 1 to {MAX_SAMPLES}")]
+    InvalidSamples,
+    #[error("must be a number from 0 to {MAX_SAMPLING_TEMPERATURE}")]
+    InvalidSamplingTemperature,
+    #[error("must be higher than `band_low`")]
+    BandOrder,
     #[error("the unknown option cannot exclude the lead")]
     UnknownCannotExclude,
     #[error("must be at most {MAX_PROMPT_CHARS} characters")]
@@ -126,6 +133,7 @@ impl ValidatedProfile {
             Some(5) => decode::<ProfileDefinitionV5>(value)?.upgrade(),
             Some(6) => decode::<ProfileDefinitionV6>(value)?.upgrade(),
             Some(7) => decode::<ProfileDefinitionV7>(value)?.upgrade(),
+            Some(8) => decode::<ProfileDefinitionV8>(value)?.upgrade(),
             Some(PROFILE_SCHEMA_VERSION) | None => decode::<ProfileDefinition>(value)?,
             Some(found) => {
                 return Err(Path::root()
@@ -217,6 +225,7 @@ fn validate(definition: &ProfileDefinition) -> Check {
         &root.field("qualification_agents"),
     )?;
     validate_aggregator(&definition.aggregator, &root.field("aggregator"))?;
+    validate_escalation(&definition.escalation, &root.field("escalation"))?;
     validate_verdict(&definition.verdict, &root.field("verdict"))?;
     validate_evidence(&definition.evidence, &root.field("evidence"))?;
     validate_scoring(&definition.scoring, &root.field("scoring"))?;
@@ -352,6 +361,14 @@ fn validate_qualification_agent(agent: &QualificationAgent, path: &Path) -> Chec
             .field("exclusion_threshold")
             .fail(ProfileProblem::InvalidExclusionThreshold));
     }
+    if !(1..=MAX_SAMPLES).contains(&agent.samples) {
+        return Err(path.field("samples").fail(ProfileProblem::InvalidSamples));
+    }
+    if !(0.0..=MAX_SAMPLING_TEMPERATURE).contains(&agent.sampling_temperature) {
+        return Err(path
+            .field("sampling_temperature")
+            .fail(ProfileProblem::InvalidSamplingTemperature));
+    }
     let questions = path.field("questions");
     non_empty_list(&agent.questions, &questions)?;
     for (index, question) in agent.questions.iter().enumerate() {
@@ -424,6 +441,21 @@ fn validate_question(question: &Question, path: &Path) -> Check {
 
 fn validate_aggregator(aggregator: &Aggregator, path: &Path) -> Check {
     bounded_prompt(&aggregator.system_prompt, &path.field("system_prompt"))
+}
+
+fn validate_escalation(escalation: &Escalation, path: &Path) -> Check {
+    for (name, value) in [
+        ("band_low", escalation.band_low),
+        ("band_high", escalation.band_high),
+    ] {
+        if value > 100 {
+            return Err(path.field(name).fail(ProfileProblem::InvalidThreshold));
+        }
+    }
+    if escalation.band_high <= escalation.band_low {
+        return Err(path.field("band_high").fail(ProfileProblem::BandOrder));
+    }
+    Ok(())
 }
 
 fn validate_verdict(verdict: &VerdictThresholds, path: &Path) -> Check {
@@ -839,10 +871,10 @@ mod tests {
             v["scoring"] = iam_scoring_v2();
             v["llm"]["qualification_threshold"] = json!(50);
         });
-        assert_eq!(profile.definition().schema_version, 8);
+        assert_eq!(profile.definition().schema_version, 9);
         assert_eq!(weights(&profile), [10, 5, 3, 8, 7, 2, 2]);
         assert_eq!(profile.definition().llm.qualification_threshold, 37);
-        assert_eq!(profile.to_json()["schema_version"], 8);
+        assert_eq!(profile.to_json()["schema_version"], 9);
     }
 
     #[test]
@@ -941,11 +973,11 @@ mod tests {
 
     #[test]
     fn unsupported_schema_version_is_rejected() {
-        let error = error_for(|v| v["schema_version"] = json!(9));
+        let error = error_for(|v| v["schema_version"] = json!(10));
         assert_eq!(error.path, "schema_version");
         assert_eq!(
             error.problem,
-            ProfileProblem::UnsupportedSchemaVersion { found: 9 }
+            ProfileProblem::UnsupportedSchemaVersion { found: 10 }
         );
         let error = error_for(|v| v["schema_version"] = json!(0));
         assert_eq!(
@@ -1271,7 +1303,7 @@ mod tests {
         value["sources"] = json!({"http_probe": source, "ats": {"keywords": ["sso"]}});
         let profile = ValidatedProfile::parse(value).unwrap();
         let definition = profile.definition();
-        assert_eq!(definition.schema_version, 8);
+        assert_eq!(definition.schema_version, 9);
         let summary: Vec<_> = definition
             .agents
             .iter()
@@ -1281,7 +1313,7 @@ mod tests {
             summary,
             [("http-probe", "HTTP probe", true), ("ats", "ATS", true)]
         );
-        assert_eq!(profile.to_json()["schema_version"], 8);
+        assert_eq!(profile.to_json()["schema_version"], 9);
         assert_eq!(profile.to_json()["agents"][0]["source"], agent);
     }
 
@@ -1347,8 +1379,20 @@ mod tests {
         ValidatedProfile::parse(value).unwrap()
     }
 
-    fn v7() -> Value {
+    fn v8() -> Value {
         let mut value = v4();
+        value["schema_version"] = json!(8);
+        value.as_object_mut().unwrap().remove("escalation");
+        for agent in value["qualification_agents"].as_array_mut().unwrap() {
+            let agent = agent.as_object_mut().unwrap();
+            agent.remove("samples");
+            agent.remove("sampling_temperature");
+        }
+        value
+    }
+
+    fn v7() -> Value {
+        let mut value = v8();
         value["schema_version"] = json!(7);
         for agent in value["qualification_agents"].as_array_mut().unwrap() {
             agent.as_object_mut().unwrap().remove("exclusion_threshold");
@@ -1382,7 +1426,7 @@ mod tests {
     fn version_three_is_upgraded_with_a_default_qualification_agent() {
         let profile = ValidatedProfile::parse(minimal()).unwrap();
         let definition = profile.definition();
-        assert_eq!(definition.schema_version, 8);
+        assert_eq!(definition.schema_version, 9);
         assert_eq!(definition.qualification_agents.len(), 1);
         let agent = &definition.qualification_agents[0];
         assert_eq!(agent.id.as_str(), "pertinence");
@@ -1484,7 +1528,7 @@ mod tests {
     fn version_five_is_upgraded_with_default_evidence_settings() {
         let profile = ValidatedProfile::parse(v5()).unwrap();
         let definition = profile.definition();
-        assert_eq!(definition.schema_version, 8);
+        assert_eq!(definition.schema_version, 9);
         assert_eq!(definition.verdict.reliable_from, 80);
         assert_eq!(definition.verdict.discard_below, 20);
         assert_eq!(definition.verdict.calibration_floor, 0.05);
@@ -1492,7 +1536,7 @@ mod tests {
         assert_eq!(definition.evidence, EvidenceSettings::default());
         assert_eq!(definition.evidence.influence, 0.6);
         assert_eq!(definition.evidence.reference_score, 50.0);
-        assert_eq!(profile.to_json()["schema_version"], 8);
+        assert_eq!(profile.to_json()["schema_version"], 9);
     }
 
     #[test]
@@ -1624,10 +1668,10 @@ mod tests {
         agent.insert("name".to_owned(), json!("Maturité technique"));
         let profile = ValidatedProfile::parse(value).unwrap();
         let agent = &profile.definition().qualification_agents[0];
-        assert_eq!(profile.definition().schema_version, 8);
+        assert_eq!(profile.definition().schema_version, 9);
         assert_eq!(agent.description, "Évalue : Maturité technique");
         assert_eq!(agent.name, "Maturité technique");
-        assert_eq!(profile.to_json()["schema_version"], 8);
+        assert_eq!(profile.to_json()["schema_version"], 9);
     }
 
     #[test]
@@ -1854,7 +1898,7 @@ mod tests {
                     json!({"value": value, "label": "Je ne sais pas", "score": 0.4}),
                 );
             let profile = ValidatedProfile::parse(document).unwrap();
-            assert_eq!(profile.definition().schema_version, 8);
+            assert_eq!(profile.definition().schema_version, 9);
             assert_eq!(
                 options_of(&profile),
                 [
@@ -1883,7 +1927,7 @@ mod tests {
         );
         let appended = &profile.definition().qualification_agents[0].questions[0].options[3];
         assert_eq!(appended.label, "Inconnu");
-        assert_eq!(profile.to_json()["schema_version"], 8);
+        assert_eq!(profile.to_json()["schema_version"], 9);
     }
 
     #[test]
@@ -1920,7 +1964,7 @@ mod tests {
     fn version_seven_is_upgraded_with_exclusion_defaults() {
         let profile = ValidatedProfile::parse(v7()).unwrap();
         let definition = profile.definition();
-        assert_eq!(definition.schema_version, 8);
+        assert_eq!(definition.schema_version, 9);
         for agent in &definition.qualification_agents {
             assert_eq!(agent.exclusion_threshold, 0.6);
             assert!(
@@ -1931,7 +1975,7 @@ mod tests {
                     .all(|option| !option.excludes)
             );
         }
-        assert_eq!(profile.to_json()["schema_version"], 8);
+        assert_eq!(profile.to_json()["schema_version"], 9);
         assert_eq!(profile, ValidatedProfile::parse(v4()).unwrap());
     }
 
@@ -1945,6 +1989,113 @@ mod tests {
         document["qualification_agents"][0]["exclusion_threshold"] = json!(0.7);
         let error = ValidatedProfile::parse(document).unwrap_err();
         assert_eq!(error.path, "qualification_agents[0].exclusion_threshold");
+    }
+
+    #[test]
+    fn version_eight_is_upgraded_with_sampling_and_escalation_defaults() {
+        let profile = ValidatedProfile::parse(v8()).unwrap();
+        let definition = profile.definition();
+        assert_eq!(definition.schema_version, 9);
+        assert_eq!(definition.escalation, Escalation::default());
+        assert_eq!(definition.escalation.provider, None);
+        assert_eq!(
+            (
+                definition.escalation.band_low,
+                definition.escalation.band_high
+            ),
+            (40, 70)
+        );
+        for agent in &definition.qualification_agents {
+            assert_eq!(agent.samples, 3);
+            assert_eq!(agent.sampling_temperature, 0.7);
+        }
+        assert_eq!(profile.to_json()["schema_version"], 9);
+        assert_eq!(profile, ValidatedProfile::parse(v4()).unwrap());
+    }
+
+    #[test]
+    fn version_eight_rejects_the_sampling_and_escalation_fields() {
+        let mut document = v8();
+        document["qualification_agents"][0]["samples"] = json!(2);
+        let error = ValidatedProfile::parse(document).unwrap_err();
+        assert_eq!(error.path, "qualification_agents[0].samples");
+        let mut document = v8();
+        document["escalation"] = json!({});
+        let error = ValidatedProfile::parse(document).unwrap_err();
+        assert_eq!(error.path, "escalation");
+    }
+
+    #[test]
+    fn sampling_defaults_apply_when_the_fields_are_missing() {
+        let profile = v4_ok(|v| {
+            let agent = v["qualification_agents"][0].as_object_mut().unwrap();
+            agent.remove("samples");
+            agent.remove("sampling_temperature");
+            v.as_object_mut().unwrap().remove("escalation");
+        });
+        let agent = &profile.definition().qualification_agents[0];
+        assert_eq!((agent.samples, agent.sampling_temperature), (3, 0.7));
+        assert_eq!(profile.definition().escalation, Escalation::default());
+    }
+
+    #[test]
+    fn samples_are_between_one_and_five() {
+        for bad in [json!(0), json!(6), json!(255)] {
+            let error = v4_error(|v| v["qualification_agents"][0]["samples"] = bad);
+            assert_eq!(error.path, "qualification_agents[0].samples");
+            assert_eq!(error.problem, ProfileProblem::InvalidSamples);
+        }
+        for good in [1, 3, 5] {
+            let profile = v4_ok(|v| v["qualification_agents"][0]["samples"] = json!(good));
+            assert_eq!(profile.definition().qualification_agents[0].samples, good);
+        }
+    }
+
+    #[test]
+    fn the_sampling_temperature_is_between_zero_and_one_and_a_half() {
+        for bad in [json!(-0.1), json!(1.51), json!(2)] {
+            let error = v4_error(|v| v["qualification_agents"][0]["sampling_temperature"] = bad);
+            assert_eq!(error.path, "qualification_agents[0].sampling_temperature");
+            assert_eq!(error.problem, ProfileProblem::InvalidSamplingTemperature);
+        }
+        for good in [json!(0), json!(0.7), json!(1.5)] {
+            let profile = v4_ok(|v| v["qualification_agents"][0]["sampling_temperature"] = good);
+            assert!(profile.definition().qualification_agents[0].sampling_temperature <= 1.5);
+        }
+    }
+
+    #[test]
+    fn the_grey_band_must_be_ordered_and_a_percentage() {
+        for (low, high) in [(70, 70), (80, 40), (0, 0)] {
+            let error = v4_error(|v| {
+                v["escalation"]["band_low"] = json!(low);
+                v["escalation"]["band_high"] = json!(high);
+            });
+            assert_eq!(error.path, "escalation.band_high");
+            assert_eq!(error.problem, ProfileProblem::BandOrder);
+        }
+        let error = v4_error(|v| v["escalation"]["band_high"] = json!(101));
+        assert_eq!(error.path, "escalation.band_high");
+        assert_eq!(error.problem, ProfileProblem::InvalidThreshold);
+        let profile = v4_ok(|v| {
+            v["escalation"]["band_low"] = json!(0);
+            v["escalation"]["band_high"] = json!(100);
+            v["escalation"]["provider"] = json!("0192f0f0-0000-7000-8000-000000000001");
+        });
+        assert!(profile.definition().escalation.provider.is_some());
+    }
+
+    #[test]
+    fn escalation_triggers_only_inside_the_band_with_a_provider() {
+        let enabled = Escalation {
+            provider: Some(uuid::Uuid::nil()),
+            ..Escalation::default()
+        };
+        assert!(!enabled.triggers(39.9));
+        assert!(enabled.triggers(40.0));
+        assert!(enabled.triggers(69.9));
+        assert!(!enabled.triggers(70.0));
+        assert!(!Escalation::default().triggers(55.0));
     }
 
     #[test]

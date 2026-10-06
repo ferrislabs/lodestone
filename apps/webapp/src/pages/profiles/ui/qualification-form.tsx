@@ -16,9 +16,14 @@ import {
 	exclusionThresholdOf,
 	MAX_DESCRIPTION_CHARS,
 	MAX_PROMPT_CHARS,
+	MAX_SAMPLES,
+	MAX_SAMPLING_TEMPERATURE,
 	MIN_EXCLUSION_PERCENT,
+	MIN_SAMPLES,
 	type ProviderOption,
 	questionsOf,
+	samplesOf,
+	samplingTemperatureOf,
 } from '#/pages/profiles/lib/qualification'
 import type { QualificationActions } from '#/pages/profiles/lib/qualification-actions'
 import { AxisCard } from '#/pages/profiles/ui/axis-card'
@@ -82,6 +87,10 @@ export function QualificationForm({
 	const weightProblems = at(problems, `${base}.weight`)
 	const exclusionProblems = at(problems, `${base}.exclusion_threshold`)
 	const exclusionThreshold = exclusionThresholdOf(agent)
+	const samplesProblems = at(problems, `${base}.samples`)
+	const temperatureProblems = at(problems, `${base}.sampling_temperature`)
+	const samples = samplesOf(agent)
+	const samplingTemperature = samplingTemperatureOf(agent)
 	const promptProblems = at(problems, `${base}.system_prompt`)
 	const questionsProblems = at(problems, `${base}.questions`)
 	const PreviewIcon = previewing ? ChevronDownIcon : ChevronRightIcon
@@ -213,6 +222,70 @@ export function QualificationForm({
 						pour l'écarter.
 					</p>
 					<FieldErrors id={`${key}-exclusion`} problems={exclusionProblems} />
+				</div>
+				<div className="flex flex-wrap gap-4">
+					<div className="flex max-w-56 flex-col gap-1.5">
+						<Label htmlFor={`${key}-samples`}>Échantillons</Label>
+						<Input
+							id={`${key}-samples`}
+							type="number"
+							min={MIN_SAMPLES}
+							max={MAX_SAMPLES}
+							step={1}
+							inputMode="numeric"
+							className="max-w-40"
+							aria-invalid={samplesProblems.length > 0}
+							aria-describedby={`${key}-samples-help`}
+							value={samples ?? ''}
+							onChange={(event) => {
+								const parsed = event.currentTarget.valueAsNumber
+								actions.setSamples(index, Number.isNaN(parsed) ? null : parsed)
+							}}
+						/>
+						<p
+							id={`${key}-samples-help`}
+							className="text-xs text-muted-foreground"
+						>
+							Nombre d'appels indépendants par lead, de 1 à 5. La réponse de
+							chaque axe est le choix majoritaire.
+						</p>
+						<FieldErrors id={`${key}-samples`} problems={samplesProblems} />
+					</div>
+					<div className="flex max-w-56 flex-col gap-1.5">
+						<Label htmlFor={`${key}-sampling-temperature`}>
+							Température d'échantillonnage
+						</Label>
+						<Input
+							id={`${key}-sampling-temperature`}
+							type="number"
+							min={0}
+							max={MAX_SAMPLING_TEMPERATURE}
+							step={0.1}
+							inputMode="decimal"
+							className="max-w-40"
+							aria-invalid={temperatureProblems.length > 0}
+							aria-describedby={`${key}-sampling-temperature-help`}
+							value={samplingTemperature ?? ''}
+							onChange={(event) => {
+								const parsed = event.currentTarget.valueAsNumber
+								actions.setSamplingTemperature(
+									index,
+									Number.isNaN(parsed) ? null : parsed,
+								)
+							}}
+						/>
+						<p
+							id={`${key}-sampling-temperature-help`}
+							className="text-xs text-muted-foreground"
+						>
+							De 0 à 1,5. Remplace la température du fournisseur quand il y a
+							plus d'un échantillon.
+						</p>
+						<FieldErrors
+							id={`${key}-sampling-temperature`}
+							problems={temperatureProblems}
+						/>
+					</div>
 				</div>
 			</FormSection>
 			<FormSection

@@ -114,7 +114,7 @@ impl AnthropicProvider {
                     schema: request.schema,
                 },
             },
-            temperature: self.generation.temperature,
+            temperature: request.temperature.or(self.generation.temperature),
         };
         let response = self
             .client

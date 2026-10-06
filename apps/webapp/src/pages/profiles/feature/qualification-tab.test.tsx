@@ -421,6 +421,115 @@ describe('qualification tab', () => {
 		).toBe('true')
 	})
 
+	it('edits the samples and the sampling temperature of an agent', () => {
+		const seen = vi.fn()
+		render(<Harness onValue={seen} />)
+		fireEvent.click(screen.getByRole('button', { name: 'Modifier Pertinence' }))
+		const samples = sheet().getByLabelText('Échantillons') as HTMLInputElement
+		expect(samples.value).toBe('3')
+		expect(samples.min).toBe('1')
+		expect(samples.max).toBe('5')
+		fireEvent.change(samples, { target: { value: '5' } })
+		expect(qualificationList(lastValue(seen))[0]).toMatchObject({ samples: 5 })
+		fireEvent.change(samples, { target: { value: '' } })
+		expect(qualificationList(lastValue(seen))[0]).toMatchObject({
+			samples: null,
+		})
+		const temperature = sheet().getByLabelText(
+			"Température d'échantillonnage",
+		) as HTMLInputElement
+		expect(temperature.value).toBe('0.7')
+		expect(temperature.max).toBe('1.5')
+		fireEvent.change(temperature, { target: { value: '1.2' } })
+		expect(qualificationList(lastValue(seen))[0]).toMatchObject({
+			sampling_temperature: 1.2,
+		})
+	})
+
+	it('shows the problems of the sampling fields', () => {
+		render(
+			<Harness
+				problems={[
+					{
+						path: 'qualification_agents[0].samples',
+						message: 'Doit être un entier de 1 à 5',
+					},
+					{
+						path: 'qualification_agents[0].sampling_temperature',
+						message: 'Doit être un nombre de 0 à 1.5',
+					},
+				]}
+			/>,
+		)
+		fireEvent.click(screen.getByRole('button', { name: 'Modifier Pertinence' }))
+		expect(sheet().getByText('Doit être un entier de 1 à 5')).toBeTruthy()
+		expect(sheet().getByText('Doit être un nombre de 0 à 1.5')).toBeTruthy()
+		expect(
+			sheet().getByLabelText('Échantillons').getAttribute('aria-invalid'),
+		).toBe('true')
+	})
+
+	it('shows the escalation panel disabled by default with the default band', () => {
+		render(<Harness />)
+		const panel = within(screen.getByLabelText('Escalade'))
+		const provider = panel.getByLabelText(
+			"Fournisseur d'escalade",
+		) as HTMLSelectElement
+		expect(provider.value).toBe('')
+		expect(
+			within(provider)
+				.getAllByRole('option')
+				.map((option) => option.textContent),
+		).toEqual(['Désactivée', 'Laya local', 'Jev local (désactivé)'])
+		expect(
+			(panel.getByLabelText('À partir de') as HTMLInputElement).value,
+		).toBe('40')
+		expect(
+			(panel.getByLabelText("Jusqu'à (exclu)") as HTMLInputElement).value,
+		).toBe('70')
+		expect(panel.getByText(/L'escalade est désactivée/)).toBeTruthy()
+	})
+
+	it('edits the escalation provider and the grey band', () => {
+		const seen = vi.fn()
+		render(<Harness onValue={seen} />)
+		const panel = within(screen.getByLabelText('Escalade'))
+		fireEvent.change(panel.getByLabelText("Fournisseur d'escalade"), {
+			target: { value: 'p-laya' },
+		})
+		expect(lastValue(seen).escalation).toMatchObject({ provider: 'p-laya' })
+		fireEvent.change(panel.getByLabelText('À partir de'), {
+			target: { value: '30' },
+		})
+		expect(lastValue(seen).escalation).toMatchObject({ band_low: 30 })
+		fireEvent.change(panel.getByLabelText("Jusqu'à (exclu)"), {
+			target: { value: '' },
+		})
+		expect(lastValue(seen).escalation).toMatchObject({ band_high: null })
+		fireEvent.change(panel.getByLabelText("Fournisseur d'escalade"), {
+			target: { value: '' },
+		})
+		expect(lastValue(seen).escalation).toMatchObject({ provider: null })
+	})
+
+	it('flags an unordered grey band', () => {
+		const initial = {
+			...base(),
+			escalation: { provider: 'p-laya', band_low: 70, band_high: 40 },
+		}
+		render(<Harness initial={initial} />)
+		const panel = within(screen.getByLabelText('Escalade'))
+		expect(
+			panel.getByText("« Jusqu'à » doit être supérieur à « À partir de »"),
+		).toBeTruthy()
+		expect(
+			panel.getByLabelText("Jusqu'à (exclu)").getAttribute('aria-invalid'),
+		).toBe('true')
+		expect(
+			panel.getByText(/Escalade des leads dont la confiance est de 70 %/),
+		).toBeTruthy()
+	})
+
 	it('shows the axis identifier next to its intitulé and edits it', () => {
 		const seen = vi.fn()
 		render(<Harness onValue={seen} />)

@@ -1113,6 +1113,61 @@ async fn detail_flags_a_downgraded_answer_and_keeps_old_answers_readable(pool: P
 }
 
 #[sqlx::test(migrations = "../../migrations")]
+async fn detail_exposes_the_agreement_per_axis_and_the_escalation_mark(pool: PgPool) {
+    let seed = Seed { pool: pool.clone() };
+    let profile = seed.qualified_profile("keycloak-ops").await;
+    let lead = seed.lead(&profile, "voted.com", "new", 8.0, 1).await;
+    seed.result(
+        &lead,
+        SeededResult {
+            agent: "pertinence",
+            provider: None,
+            status: "valid",
+            summary: Some("Résumé."),
+            answers: json!({"pertinence": {"type": "choice", "choice": "forte", "confidence": 0.8,
+                "evidence": "expose Keycloak 18", "grounded": true, "agreement": 0.6666666666666666,
+                "probabilities": {"forte": 0.7, "moyenne": 0.2, "faible": 0.1, "inconnu": 0.0}}}),
+            score: Some(0.8),
+            error: None,
+        },
+    )
+    .await;
+    seed.result(
+        &lead,
+        SeededResult {
+            agent: "maturite",
+            provider: None,
+            status: "valid",
+            summary: Some("Résumé."),
+            answers: json!({"maturite": {"type": "choice", "choice": "oui", "confidence": 0.8,
+                "probabilities": {"oui": 1.0, "non": 0.0, "inconnu": 0.0}}}),
+            score: Some(1.0),
+            error: None,
+        },
+    )
+    .await;
+    sqlx::query("UPDATE qualification_results SET samples = 3 WHERE agent_id = 'pertinence'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE qualification_results SET escalated = true WHERE agent_id = 'maturite'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let api = Api::new(pool).await;
+
+    let (status, body) = api.get(&format!("/api/v1/leads/{lead}")).await;
+
+    assert_eq!(status, StatusCode::OK);
+    let results = body["data"]["qualification_results"].as_array().unwrap();
+    assert_eq!(results[0]["escalated"], false);
+    assert_eq!(results[0]["provenance"]["samples"], 3);
+    assert_eq!(results[0]["answers"][0]["agreement"], 0.6666666666666666);
+    assert_eq!(results[1]["escalated"], true);
+    assert!(results[1]["answers"][0]["agreement"].is_null());
+}
+
+#[sqlx::test(migrations = "../../migrations")]
 async fn the_detail_exposes_the_facts_and_the_signal_sentences(pool: PgPool) {
     let (seed, profile) = listing_fixture(&pool).await;
     let lead = seed.lead(&profile, "luzernrisk.com", "new", 1.0, 1).await;

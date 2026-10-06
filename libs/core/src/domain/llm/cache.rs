@@ -13,6 +13,7 @@ pub struct CacheScope {
     pub prompt: String,
     pub domain: NormalizedDomain,
     pub agent: Option<AgentId>,
+    pub sample: u32,
 }
 
 #[derive(Debug, Clone, PartialEq)]
