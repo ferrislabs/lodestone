@@ -1,6 +1,10 @@
 import type { ColumnDef } from '@tanstack/react-table'
 
-import { confidenceBreakdown } from '#/pages/leads/lib/confidence'
+import {
+	confidenceBreakdown,
+	exclusionSummary,
+	exclusionTitle,
+} from '#/pages/leads/lib/confidence'
 import { formatDateTime } from '#/pages/leads/lib/format'
 import type { Lead } from '#/pages/leads/lib/types'
 import { summaryExcerpt } from '#/pages/leads/lib/verdict'
@@ -30,7 +34,26 @@ export function buildLeadColumns(
 		{
 			id: 'verdict',
 			header: 'Verdict',
-			cell: ({ row }) => <VerdictBadge verdict={row.original.verdict} />,
+			cell: ({ row }) => {
+				const exclusions = row.original.exclusions
+				const summary = exclusionSummary(exclusions)
+				return (
+					<div
+						className="flex flex-col items-start gap-1"
+						title={exclusions.map(exclusionTitle).join('\n') || undefined}
+					>
+						<VerdictBadge verdict={row.original.verdict} />
+						{summary ? (
+							<span
+								className="text-xs text-muted-foreground"
+								data-part="exclusion"
+							>
+								{summary}
+							</span>
+						) : null}
+					</div>
+				)
+			},
 		},
 		{
 			id: 'confidence',

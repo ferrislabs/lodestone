@@ -4,6 +4,7 @@ import { FieldErrors } from '#/components/schema-form/field-frame'
 import { Button } from '#/components/ui/button'
 import { Input } from '#/components/ui/input'
 import { Label } from '#/components/ui/label'
+import { Switch } from '#/components/ui/switch'
 import {
 	Table,
 	TableBody,
@@ -16,6 +17,7 @@ import type { JsonValue, Problem } from '#/lib/schema-form'
 import { agentField } from '#/pages/profiles/lib/agents'
 import {
 	displayOrder,
+	isExcludingOption,
 	isUnknownOption,
 	MAX_OPTIONS,
 	MIN_OPTIONS,
@@ -124,7 +126,9 @@ export function AxisCard({
 				<p className="text-xs text-muted-foreground">
 					Le modèle cite une phrase des documents pour justifier son choix. Sans
 					citation vérifiée, ou quand rien ne permet de répondre, la réponse
-					devient l'option « inconnu », dont le score reste modifiable.
+					devient l'option « inconnu », dont le score reste modifiable. Une
+					option qui exclut le lead écarte le lead quand l'agent la choisit avec
+					une probabilité d'au moins le seuil d'exclusion de l'agent.
 				</p>
 				<Table data-testid={`${key}-options`}>
 					<TableHeader>
@@ -132,6 +136,7 @@ export function AxisCard({
 							<TableHead className="h-8 px-1 text-xs">Valeur</TableHead>
 							<TableHead className="h-8 px-1 text-xs">Libellé</TableHead>
 							<TableHead className="h-8 w-24 px-1 text-xs">Score</TableHead>
+							<TableHead className="h-8 w-28 px-1 text-xs">Exclusion</TableHead>
 							<TableHead className="h-8 w-10 px-1">
 								<span className="sr-only">Actions</span>
 							</TableHead>
@@ -231,6 +236,39 @@ export function AxisCard({
 										<FieldErrors
 											id={`${slot}-score`}
 											problems={scoreProblems}
+										/>
+									</TableCell>
+									<TableCell className="px-1 py-1">
+										<div className="flex h-9 items-center gap-2">
+											<Switch
+												id={`${slot}-excludes`}
+												aria-label={`Exclut le lead : option ${position + 1}`}
+												checked={isExcludingOption(option)}
+												disabled={unknown}
+												title={
+													unknown
+														? "L'option « inconnu » ne peut pas exclure le lead"
+														: undefined
+												}
+												onCheckedChange={(excludes) =>
+													actions.setOptionExcludes(
+														agentIndex,
+														index,
+														position,
+														excludes,
+													)
+												}
+											/>
+											<Label
+												htmlFor={`${slot}-excludes`}
+												className="text-xs font-normal"
+											>
+												Exclut le lead
+											</Label>
+										</div>
+										<FieldErrors
+											id={`${slot}-excludes`}
+											problems={at(problems, `${optionBase}.excludes`)}
 										/>
 									</TableCell>
 									<TableCell className="px-1 py-1">

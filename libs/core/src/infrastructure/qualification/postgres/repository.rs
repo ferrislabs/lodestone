@@ -7,8 +7,9 @@ use lodestone_macros::repository;
 use crate::{
     Lead, LeadId, ProfileId, RevisionNumber,
     domain::qualification::{
-        Completion, EvidenceStrength, LeadScoring, QualificationResult, Rescoring, SCORING_VERSION,
-        SUMMARY_ERROR_MAX_CHARS, SummaryState, ports::QualificationRepository, summary_retry_delay,
+        Completion, EvidenceStrength, Exclusion, Judgement, LeadScoring, QualificationResult,
+        Rescoring, SCORING_VERSION, SUMMARY_ERROR_MAX_CHARS, SummaryState, VerdictReason,
+        ports::QualificationRepository, summary_retry_delay,
     },
     infrastructure::{
         lead::postgres::{model::LeadRow, repository::NOT_SUPPRESSED},
@@ -30,6 +31,14 @@ impl<'tx> PgQualificationRepository<'tx> {
 
 fn evidence_json(evidence: &EvidenceStrength) -> Result<serde_json::Value, CoreError> {
     serde_json::to_value(evidence).map_err(|error| CoreError::Internal(error.to_string()))
+}
+
+fn exclusions_json(exclusions: &[Exclusion]) -> Result<serde_json::Value, CoreError> {
+    serde_json::to_value(exclusions).map_err(|error| CoreError::Internal(error.to_string()))
+}
+
+fn reason_text(judgement: &Judgement) -> Option<&'static str> {
+    judgement.reason().map(VerdictReason::as_str)
 }
 
 fn revision_number(revision: RevisionNumber) -> Result<i32, CoreError> {
@@ -324,9 +333,9 @@ impl<'tx> QualificationRepository for PgQualificationRepository<'tx> {
             r#"
             INSERT INTO lead_qualification_state (
                 lead_id, profile_revision, sources, completed_at,
-                scoring_version, opinion, evidence, verdict_reason, dossier_at
+                scoring_version, opinion, evidence, verdict_reason, dossier_at, exclusions
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             ON CONFLICT (lead_id) DO UPDATE SET
                 profile_revision = EXCLUDED.profile_revision,
                 sources          = EXCLUDED.sources,
@@ -336,6 +345,7 @@ impl<'tx> QualificationRepository for PgQualificationRepository<'tx> {
                 evidence         = EXCLUDED.evidence,
                 verdict_reason   = EXCLUDED.verdict_reason,
                 dossier_at       = EXCLUDED.dossier_at,
+                exclusions       = EXCLUDED.exclusions,
                 summarised_at    = NULL,
                 summary_attempts = 0,
                 summary_next_attempt_at = NULL,
@@ -349,8 +359,9 @@ impl<'tx> QualificationRepository for PgQualificationRepository<'tx> {
         .bind(completion.scoring_version)
         .bind(completion.judgement.opinion)
         .bind(evidence_json(&completion.judgement.evidence)?)
-        .bind(completion.judgement.cap.map(|cap| cap.as_str()))
+        .bind(reason_text(&completion.judgement))
         .bind(completion.dossier_at)
+        .bind(exclusions_json(&completion.judgement.exclusions)?)
         .execute(&mut ***tx)
         .await
         .map_err(map_sqlx_error)?;
@@ -439,15 +450,17 @@ impl<'tx> QualificationRepository for PgQualificationRepository<'tx> {
     #[tracing::instrument(skip(self, rescoring), fields(db.system = "postgresql", db.operation = "update", db.table = "lead_qualification_state", lead.id = %rescoring.lead_id), err)]
     async fn rescore(&mut self, rescoring: &Rescoring) -> Result<(), CoreError> {
         let evidence = evidence_json(&rescoring.judgement.evidence)?;
+        let exclusions = exclusions_json(&rescoring.judgement.exclusions)?;
         let mut tx = self.tx.lock().await;
         sqlx::query(
-            "UPDATE lead_qualification_state SET scoring_version = $2, opinion = $3, evidence = $4, verdict_reason = $5 WHERE lead_id = $1",
+            "UPDATE lead_qualification_state SET scoring_version = $2, opinion = $3, evidence = $4, verdict_reason = $5, exclusions = $6 WHERE lead_id = $1",
         )
         .bind(rescoring.lead_id.0)
         .bind(rescoring.scoring_version)
         .bind(rescoring.judgement.opinion)
         .bind(evidence)
-        .bind(rescoring.judgement.cap.map(|cap| cap.as_str()))
+        .bind(reason_text(&rescoring.judgement))
+        .bind(exclusions)
         .execute(&mut ***tx)
         .await
         .map_err(map_sqlx_error)?;
@@ -488,7 +501,7 @@ impl<'tx> QualificationRepository for PgQualificationRepository<'tx> {
         let ids: Vec<uuid::Uuid> = lead_ids.iter().map(|id| id.0).collect();
         let mut tx = self.tx.lock().await;
         let rows = sqlx::query_as::<_, ScoringRow>(
-            "SELECT lead_id, opinion, evidence, verdict_reason FROM lead_qualification_state WHERE lead_id = ANY($1) AND evidence IS NOT NULL",
+            "SELECT lead_id, opinion, evidence, verdict_reason, exclusions FROM lead_qualification_state WHERE lead_id = ANY($1) AND evidence IS NOT NULL",
         )
         .bind(&ids)
         .fetch_all(&mut ***tx)

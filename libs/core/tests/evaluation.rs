@@ -15,7 +15,7 @@ use lodestone_core::{
     ProfileId, ProfileName, Provenance, ProviderDefinition, ProviderId, ProviderKind,
     QualificationResult, ReasoningEffort, ResultId, ResultStatus, ReviseProfileCommand,
     RevisionNumber, SignalKind, SourceName, SuppressionTarget, Tier, TokenPricing, TokenUsage,
-    UnitInterval, ValidatedProfile, Verdict, VerdictCap,
+    UnitInterval, ValidatedProfile, Verdict, VerdictCap, VerdictReason,
     evaluation::{EvaluationReport, EvaluationSettings, ProviderBuilder},
     infrastructure::{
         crypto::AesGcmCipher, lead::postgres::PgLeadRepository, llm_cache::postgres::PgLlmCache,
@@ -1413,4 +1413,188 @@ fn the_aggregator_document_carries_the_quote_and_the_ungrounded_marker() {
     result.answers["q"]["original_choice"] = json!("forte");
     let ungrounded = lodestone_core::render_agent(agent, Some(&result));
     assert!(ungrounded.contains("ungrounded: the agent first chose `forte`"));
+}
+
+fn excluding_agent(id: &str, provider: ProviderId, threshold: f64) -> Value {
+    json!({
+        "id": id,
+        "name": "Exclusions",
+        "description": "Raisons d'écarter le lead.",
+        "enabled": true,
+        "provider_id": provider.0.to_string(),
+        "system_prompt": format!("PROMPT-OF-{id}"),
+        "weight": 1,
+        "exclusion_threshold": threshold,
+        "questions": [{
+            "id": "client_actuel",
+            "wording": "Déjà client ?",
+            "weight": 5,
+            "options": [
+                {"value": "oui", "label": "Client actuel", "score": 0.0, "excludes": true},
+                {"value": "non", "label": "Non", "score": 1.0},
+                {"value": "inconnu", "label": "Inconnu", "score": 0.5, "is_unknown": true}
+            ]
+        }]
+    })
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_grounded_exclusion_discards_a_confident_lead_and_keeps_the_confidence(pool: PgPool) {
+    let harness = Harness::new(pool, 10);
+    let provider = harness.provider("model-a", 0).await;
+    let profile = harness
+        .profile(vec![
+            agent("solo", 5, Some(provider), "q"),
+            agent("second", 5, Some(provider), "q"),
+            excluding_agent("exclusions", provider, 0.6),
+        ])
+        .await;
+    harness.observe("acme.com", SourceName::HttpProbe, 10).await;
+
+    harness.step(settings(100, 10)).await;
+
+    let lead = harness.lead(profile, "acme.com").await;
+    assert_eq!(lead.verdict, Some(Verdict::Discarded));
+    assert!(lead.confidence.unwrap() > 70.0);
+    let scoring = harness.scoring(profile, "acme.com").await.unwrap();
+    assert_eq!(scoring.reason(), Some(VerdictReason::Excluded));
+    assert_eq!(scoring.exclusions.len(), 1);
+    let exclusion = &scoring.exclusions[0];
+    assert_eq!(exclusion.agent_id.as_str(), "exclusions");
+    assert_eq!(exclusion.agent_name, "Exclusions");
+    assert_eq!(exclusion.question_id, "client_actuel");
+    assert_eq!(exclusion.option, "oui");
+    assert_eq!(exclusion.label, "Client actuel");
+    assert_eq!(exclusion.probability, 1.0);
+    assert_eq!(exclusion.evidence, "lead: acme.com");
+    assert_eq!(exclusion.evidence_source.as_deref(), Some("lead"));
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn an_answer_that_does_not_pick_the_excluding_option_leaves_the_verdict(pool: PgPool) {
+    let harness = Harness::new(pool, 10);
+    let provider = harness.provider("model-a", 0).await;
+    harness.script("model-a", vec![Reply::Best, Reply::Best, Reply::Worst]);
+    let profile = harness
+        .profile(vec![
+            agent("solo", 5, Some(provider), "q"),
+            agent("second", 5, Some(provider), "q"),
+            excluding_agent("exclusions", provider, 0.6),
+        ])
+        .await;
+    harness.observe("acme.com", SourceName::HttpProbe, 10).await;
+
+    harness.step(settings(100, 10)).await;
+
+    let lead = harness.lead(profile, "acme.com").await;
+    assert_eq!(lead.verdict, Some(Verdict::Reliable));
+    let scoring = harness.scoring(profile, "acme.com").await.unwrap();
+    assert!(scoring.exclusions.is_empty());
+    assert_eq!(scoring.reason(), None);
+}
+
+fn ungrounded_exclusion() -> Value {
+    json!({
+        "summary": "Observations de l'agent sur le lead.",
+        "answers": {"client_actuel": {
+            "type": "choice",
+            "choice": "oui",
+            "evidence": "une phrase inventée par le modèle",
+            "confidence": 0.9,
+            "probabilities": {"oui": 1.0, "non": 0.0, "inconnu": 0.0}
+        }}
+    })
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_downgraded_exclusion_does_not_exclude(pool: PgPool) {
+    let harness = Harness::new(pool, 10);
+    let provider = harness.provider("model-a", 0).await;
+    harness.script(
+        "model-a",
+        vec![
+            Reply::Raw(ungrounded_exclusion()),
+            Reply::Raw(ungrounded_exclusion()),
+        ],
+    );
+    let profile = harness
+        .profile(vec![excluding_agent("exclusions", provider, 0.6)])
+        .await;
+    harness.observe("acme.com", SourceName::HttpProbe, 10).await;
+
+    harness.step(settings(100, 10)).await;
+
+    let results = harness.results(profile, "acme.com").await;
+    assert_eq!(results[0].answers["client_actuel"]["grounded"], false);
+    let lead = harness.lead(profile, "acme.com").await;
+    assert_ne!(lead.verdict, Some(Verdict::Discarded));
+    let scoring = harness.scoring(profile, "acme.com").await.unwrap();
+    assert!(scoring.exclusions.is_empty());
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn rescoring_applies_exclusions_to_stored_leads_without_a_model_call(pool: PgPool) {
+    let harness = Harness::new(pool.clone(), 10);
+    let provider = harness.provider("model-a", 0).await;
+    let profile = harness
+        .profile(vec![
+            agent("solo", 5, Some(provider), "q"),
+            excluding_agent("exclusions", provider, 0.6),
+        ])
+        .await;
+    harness.observe("acme.com", SourceName::HttpProbe, 10).await;
+    harness.step(settings(100, 10)).await;
+    sqlx::query("UPDATE lead_qualification_state SET scoring_version = 0, opinion = NULL, evidence = NULL, verdict_reason = NULL, exclusions = '[]'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE leads SET confidence = 100, verdict = 'fiable'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let calls = harness.calls();
+    assert!(harness.scoring(profile, "acme.com").await.is_none());
+
+    let report = harness.step(settings(100, 10)).await;
+
+    assert_eq!(report.rescored, 1);
+    assert_eq!(harness.calls(), calls);
+    let lead = harness.lead(profile, "acme.com").await;
+    assert_eq!(lead.verdict, Some(Verdict::Discarded));
+    assert_ne!(lead.confidence, Some(100.0));
+    assert!(lead.confidence.is_some());
+    let scoring = harness.scoring(profile, "acme.com").await.unwrap();
+    assert_eq!(scoring.exclusions.len(), 1);
+    assert_eq!(scoring.exclusions[0].option, "oui");
+    let stored: String = sqlx::query_scalar("SELECT verdict_reason FROM lead_qualification_state")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(stored, "excluded");
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_threshold_above_the_probability_keeps_the_lead(pool: PgPool) {
+    let harness = Harness::new(pool, 10);
+    let provider = harness.provider("model-a", 0).await;
+    let soft = json!({
+        "summary": "Observations de l'agent sur le lead.",
+        "answers": {"client_actuel": {
+            "type": "choice",
+            "choice": "oui",
+            "evidence": "lead: acme.com",
+            "confidence": 0.9,
+            "probabilities": {"oui": 0.7, "non": 0.2, "inconnu": 0.1}
+        }}
+    });
+    harness.script("model-a", vec![Reply::Raw(soft)]);
+    let profile = harness
+        .profile(vec![excluding_agent("exclusions", provider, 0.8)])
+        .await;
+    harness.observe("acme.com", SourceName::HttpProbe, 10).await;
+
+    harness.step(settings(100, 10)).await;
+
+    let scoring = harness.scoring(profile, "acme.com").await.unwrap();
+    assert!(scoring.exclusions.is_empty());
 }

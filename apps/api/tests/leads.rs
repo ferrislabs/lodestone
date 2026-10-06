@@ -628,6 +628,77 @@ async fn the_lead_exposes_its_opinion_evidence_and_verdict_reason(pool: PgPool) 
     assert_eq!(detail["data"]["lead"]["evidence"]["strength"], 25.6);
 }
 
+#[sqlx::test(migrations = "../../migrations")]
+async fn an_excluded_lead_exposes_its_exclusions_and_the_excluded_reason(pool: PgPool) {
+    let seed = Seed { pool: pool.clone() };
+    let profile = seed.profile("keycloak-ops").await;
+    let excluded = seed.lead(&profile, "rival.com", "new", 12.1, 1).await;
+    seed.lead(&profile, "plain.com", "new", 5.0, 2).await;
+    sqlx::query("UPDATE leads SET confidence = 88.0, verdict = 'ecarte', qualified_at = now() WHERE id = $1::uuid")
+        .bind(&excluded)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO lead_qualification_state (lead_id, profile_revision, sources, completed_at, scoring_version, opinion, evidence, verdict_reason, exclusions)
+         VALUES ($1::uuid, 2, ARRAY['dns_cname'], now(), 2, 0.9, $2, 'excluded', $3)",
+    )
+    .bind(&excluded)
+    .bind(serde_json::json!({
+        "score": 0.8,
+        "components": {"volume": 0.8, "diversity": 1.0, "environment": 1.0, "strength": 0.4},
+        "signal_count": 3,
+        "signal_score": 12.1,
+        "only_non_production": false
+    }))
+    .bind(serde_json::json!([{
+        "agent_id": "exclusions",
+        "agent_name": "Exclusions",
+        "question_id": "concurrent",
+        "option": "oui",
+        "label": "Concurrent",
+        "probability": 0.85,
+        "evidence": "Nous sommes un concurrent direct.",
+        "evidence_source": "https://rival.com/about"
+    }]))
+    .execute(&pool)
+    .await
+    .unwrap();
+    let api = Api::new(pool).await;
+
+    let (status, body) = api.get(&format!("/api/v1/profiles/{profile}/leads")).await;
+
+    assert_eq!(status, StatusCode::OK);
+    let leads = body["data"].as_array().unwrap();
+    let find = |domain: &str| leads.iter().find(|lead| lead["domain"] == domain).unwrap();
+    let lead = find("rival.com");
+    assert_eq!(lead["verdict"], "ecarte");
+    assert_eq!(lead["verdict_reason"], "excluded");
+    assert_eq!(lead["confidence"], 88.0);
+    assert_eq!(
+        lead["exclusions"],
+        serde_json::json!([{
+            "agent_id": "exclusions",
+            "agent_name": "Exclusions",
+            "question_id": "concurrent",
+            "option": "oui",
+            "label": "Concurrent",
+            "probability": 85.0,
+            "evidence": "Nous sommes un concurrent direct.",
+            "evidence_source": "https://rival.com/about"
+        }])
+    );
+    assert_eq!(find("plain.com")["exclusions"], serde_json::json!([]));
+
+    let (status, detail) = api.get(&format!("/api/v1/leads/{excluded}")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(detail["data"]["lead"]["verdict_reason"], "excluded");
+    assert_eq!(
+        detail["data"]["lead"]["exclusions"][0]["label"],
+        "Concurrent"
+    );
+}
+
 async fn judged_fixture(pool: &PgPool) -> (Seed, String) {
     let seed = Seed { pool: pool.clone() };
     let profile = seed.profile("keycloak-ops").await;

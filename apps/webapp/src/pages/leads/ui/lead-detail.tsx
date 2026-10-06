@@ -7,6 +7,7 @@ import type { LeadDetailData, LeadStatus } from '#/pages/leads/lib/types'
 import { AssessmentsList } from './assessments-list'
 import { CompanyCard } from './company-card'
 import { ContactsList } from './contacts-list'
+import { ExclusionNotice } from './exclusion-notice'
 import { LeadFacts } from './lead-facts'
 import { LeadHeader } from './lead-header'
 import { LeadSummary } from './lead-summary'
@@ -80,6 +81,7 @@ export function LeadDetail({
 						changing={changing}
 						changeError={changeError}
 					/>
+					<ExclusionNotice exclusions={detail.lead.exclusions} />
 					<CompanyCard
 						company={detail.company ?? null}
 						refreshing={refreshingCompany}

@@ -117,7 +117,7 @@ fn parse_value(value: serde_json::Value) -> ValidatedProfile {
 fn version_one_iam_fixture_is_upgraded_to_the_current_example() {
     let upgraded = parse(IAM_V1);
     let current = parse(IAM);
-    assert_eq!(upgraded.definition().schema_version, 7);
+    assert_eq!(upgraded.definition().schema_version, 8);
     assert_eq!(
         agent_ids(&upgraded),
         [
@@ -195,7 +195,7 @@ fn iam_weights(profile: &ValidatedProfile) -> Vec<(&str, u8)> {
 fn version_two_iam_fixture_is_upgraded_to_version_six() {
     let upgraded = parse(IAM_V2);
     let definition = upgraded.definition();
-    assert_eq!(definition.schema_version, 7);
+    assert_eq!(definition.schema_version, 8);
     assert_eq!(
         iam_weights(&upgraded),
         [
@@ -210,7 +210,7 @@ fn version_two_iam_fixture_is_upgraded_to_version_six() {
     );
     assert_eq!(definition.llm.qualification_threshold, 37);
     assert_eq!(definition.max_score(), 47.0);
-    assert_eq!(upgraded.to_json()["schema_version"], 7);
+    assert_eq!(upgraded.to_json()["schema_version"], 8);
     assert_eq!(parse(IAM_V1).definition().scoring, definition.scoring);
 }
 
@@ -229,7 +229,7 @@ fn qualification_agent(profile: &ValidatedProfile, id: &str) -> Vec<(String, f64
 }
 
 #[test]
-fn iam_example_has_seven_qualification_agents() {
+fn iam_example_has_eight_qualification_agents() {
     let profile = parse(IAM);
     let definition = profile.definition();
     let names: Vec<_> = definition
@@ -250,6 +250,7 @@ fn iam_example_has_seven_qualification_agents() {
             ("marche", "Marché"),
             ("opportunite", "Opportunité"),
             ("recherche-entreprise", "Recherche entreprise"),
+            ("exclusions", "Exclusions"),
         ]
     );
     assert!(
@@ -328,12 +329,35 @@ fn the_current_example_upgrades_from_its_version_three_form() {
         value.as_object_mut().expect("object").remove(key);
     }
     let upgraded = parse(&value.to_string());
-    assert_eq!(upgraded.definition().schema_version, 7);
+    assert_eq!(upgraded.definition().schema_version, 8);
     assert_eq!(upgraded.definition().agents, parse(IAM).definition().agents);
     assert_eq!(upgraded.definition().qualification_agents.len(), 1);
 }
 
+fn without_exclusions_agent(value: &mut serde_json::Value) {
+    value["qualification_agents"]
+        .as_array_mut()
+        .expect("array")
+        .retain(|agent| agent["id"] != "exclusions");
+}
+
+fn without_exclusion_fields(value: &mut serde_json::Value) {
+    without_exclusions_agent(value);
+    for agent in value["qualification_agents"].as_array_mut().expect("array") {
+        agent
+            .as_object_mut()
+            .expect("object")
+            .remove("exclusion_threshold");
+        for question in agent["questions"].as_array_mut().expect("array") {
+            for option in question["options"].as_array_mut().expect("array") {
+                option.as_object_mut().expect("object").remove("excludes");
+            }
+        }
+    }
+}
+
 fn without_unknown_flags(value: &mut serde_json::Value) {
+    without_exclusion_fields(value);
     for agent in value["qualification_agents"].as_array_mut().expect("array") {
         for question in agent["questions"].as_array_mut().expect("array") {
             for option in question["options"].as_array_mut().expect("array") {
@@ -343,13 +367,87 @@ fn without_unknown_flags(value: &mut serde_json::Value) {
     }
 }
 
+fn current_without_exclusions_agent() -> ValidatedProfile {
+    let mut value: serde_json::Value = serde_json::from_str(IAM).expect("json");
+    without_exclusions_agent(&mut value);
+    parse(&value.to_string())
+}
+
+#[test]
+fn the_current_example_upgrades_from_its_version_seven_form() {
+    let mut value: serde_json::Value = serde_json::from_str(IAM).expect("json");
+    value["schema_version"] = 7.into();
+    without_exclusion_fields(&mut value);
+    let upgraded = parse(&value.to_string());
+    assert_eq!(upgraded, current_without_exclusions_agent());
+    for agent in &upgraded.definition().qualification_agents {
+        assert_eq!(agent.exclusion_threshold, 0.6);
+        assert!(
+            agent
+                .questions
+                .iter()
+                .flat_map(|question| &question.options)
+                .all(|option| !option.excludes)
+        );
+    }
+}
+
+#[test]
+fn the_iam_example_has_an_enabled_exclusions_agent() {
+    let profile = parse(IAM);
+    let agent = profile
+        .definition()
+        .qualification_agents
+        .iter()
+        .find(|agent| agent.id.as_str() == "exclusions")
+        .expect("exclusions agent");
+    assert!(agent.enabled);
+    assert_eq!(agent.weight, 1);
+    assert_eq!(agent.exclusion_threshold, 0.6);
+    assert_eq!(
+        agent
+            .questions
+            .iter()
+            .map(|question| question.id.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "editeur_integrateur",
+            "hebergeur_agence",
+            "domaine_inactif",
+            "client_actuel",
+            "concurrent"
+        ]
+    );
+    for question in &agent.questions {
+        let excluding: Vec<_> = question
+            .options
+            .iter()
+            .filter(|option| option.excludes)
+            .collect();
+        assert_eq!(excluding.len(), 1, "{}", question.id);
+        assert_eq!(excluding[0].score, 0.0);
+        assert!(
+            question
+                .unknown_option()
+                .is_some_and(|unknown| !unknown.excludes)
+        );
+    }
+    for list in [
+        "Clients actuels :",
+        "Concurrents :",
+        "Éditeurs et intégrateurs du domaine :",
+    ] {
+        assert!(agent.system_prompt.contains(list), "{list}");
+    }
+}
+
 #[test]
 fn the_current_example_upgrades_from_its_version_six_form() {
     let mut value: serde_json::Value = serde_json::from_str(IAM).expect("json");
     value["schema_version"] = 6.into();
     without_unknown_flags(&mut value);
     let upgraded = parse(&value.to_string());
-    assert_eq!(upgraded, parse(IAM));
+    assert_eq!(upgraded, current_without_exclusions_agent());
     for agent in &upgraded.definition().qualification_agents {
         for question in &agent.questions {
             assert_eq!(
@@ -374,8 +472,8 @@ fn the_current_example_upgrades_from_its_version_four_form() {
         agent.as_object_mut().expect("object").remove("description");
     }
     let upgraded = parse(&value.to_string());
-    let current = parse(IAM);
-    assert_eq!(upgraded.definition().schema_version, 7);
+    let current = current_without_exclusions_agent();
+    assert_eq!(upgraded.definition().schema_version, 8);
     for (old, new) in upgraded
         .definition()
         .qualification_agents
@@ -397,8 +495,8 @@ fn the_current_example_upgrades_from_its_version_five_form() {
     value.as_object_mut().expect("object").remove("evidence");
     value["verdict"] = serde_json::json!({"reliable_from": 70, "discard_below": 30});
     let upgraded = parse(&value.to_string());
-    let current = parse(IAM);
-    assert_eq!(upgraded.definition().schema_version, 7);
+    let current = current_without_exclusions_agent();
+    assert_eq!(upgraded.definition().schema_version, 8);
     assert_eq!(upgraded, current);
 }
 
@@ -427,7 +525,7 @@ fn committed_schema_matches_definition() {
         serde_json::to_string_pretty(&schema_for!(ProfileDefinition)).expect("schema serializes");
     generated.push('\n');
     let path =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../docs/schemas/profile.v7.schema.json");
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../docs/schemas/profile.v8.schema.json");
     if std::env::var("UPDATE_SCHEMA").as_deref() == Ok("1") {
         fs::write(&path, &generated).expect("schema file is writable");
         return;
@@ -436,6 +534,6 @@ fn committed_schema_matches_definition() {
         fs::read_to_string(&path).expect("schema file exists, regenerate with UPDATE_SCHEMA=1");
     assert!(
         committed == generated,
-        "docs/schemas/profile.v7.schema.json is stale, regenerate with UPDATE_SCHEMA=1"
+        "docs/schemas/profile.v8.schema.json is stale, regenerate with UPDATE_SCHEMA=1"
     );
 }

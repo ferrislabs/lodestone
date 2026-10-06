@@ -213,11 +213,22 @@ export namespace Schemas {
     signal_score: number;
     strength: number;
   };
-  export type VerdictReasonDto = "single_angle" | "weak_evidence" | "non_production";
+  export type ExclusionDto = {
+    agent_id: string;
+    agent_name: string;
+    evidence: string;
+    evidence_source?: (string | null) | undefined;
+    label: string;
+    option: string;
+    probability: number;
+    question_id: string;
+  };
+  export type VerdictReasonDto = "single_angle" | "weak_evidence" | "non_production" | "excluded";
   export type LeadDto = {
     confidence?: (number | null) | undefined;
     domain: string;
     evidence?: (null | EvidenceStrengthDto) | undefined;
+    exclusions: Array<ExclusionDto>;
     first_seen_at: string;
     id: string;
     last_seen_at: string;
@@ -304,6 +315,7 @@ export namespace Schemas {
       confidence?: (number | null) | undefined;
       domain: string;
       evidence?: (null | EvidenceStrengthDto) | undefined;
+      exclusions: Array<ExclusionDto>;
       first_seen_at: string;
       id: string;
       last_seen_at: string;
@@ -365,6 +377,21 @@ export namespace Schemas {
     validated: number;
   };
   export type DiscardedShareDto = { discarded: number; share?: (number | null) | undefined; total: number };
+  export type ExclusionCandidateDto = {
+    decided_at: string;
+    domain: string;
+    lead_id: string;
+    legal_name?: (string | null) | undefined;
+    reason: RejectionReasonDto;
+  };
+  export type ExclusionCountDto = {
+    agent_id: string;
+    agent_name: string;
+    count: number;
+    label: string;
+    option: string;
+    question_id: string;
+  };
   export type ThresholdsDto = { discard_below: number; reliable_from: number };
   export type ReasonCountDto = { count: number; reason: RejectionReasonDto };
   export type SuggestionDto = {
@@ -407,6 +434,8 @@ export namespace Schemas {
       confidence: Array<ConfidenceBucketDto>;
       decisions: DecisionCountsDto;
       discarded: DiscardedShareDto;
+      exclusion_candidates: Array<ExclusionCandidateDto>;
+      exclusions: Array<ExclusionCountDto>;
       profiles: Array<ProfileQualityDto>;
       verdicts: Array<VerdictPrecisionDto>;
       versions: Array<VersionPrecisionDto>;
@@ -491,6 +520,7 @@ export namespace Schemas {
       confidence?: (number | null) | undefined;
       domain: string;
       evidence?: (null | EvidenceStrengthDto) | undefined;
+      exclusions: Array<ExclusionDto>;
       first_seen_at: string;
       id: string;
       last_seen_at: string;
@@ -653,6 +683,8 @@ export namespace Schemas {
     confidence: Array<ConfidenceBucketDto>;
     decisions: DecisionCountsDto;
     discarded: DiscardedShareDto;
+    exclusion_candidates: Array<ExclusionCandidateDto>;
+    exclusions: Array<ExclusionCountDto>;
     profiles: Array<ProfileQualityDto>;
     verdicts: Array<VerdictPrecisionDto>;
     versions: Array<VersionPrecisionDto>;

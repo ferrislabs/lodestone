@@ -2,10 +2,11 @@ use serde::Deserialize;
 use uuid::Uuid;
 
 use super::definition::{
-    Agent, AgentId, AgentSource, Aggregator, CertificateTransparency, ContactRanking, DnsCname,
-    EvidenceSettings, HttpProbe, Identity, KeywordSource, Language, LlmSettings,
-    MAX_DESCRIPTION_CHARS, MAX_PROMPT_CHARS, PROFILE_SCHEMA_VERSION, ProfileDefinition,
-    QualificationAgent, Question, QuestionOption, Scoring, ScoringFactor, VerdictThresholds,
+    Agent, AgentId, AgentSource, Aggregator, CertificateTransparency, ContactRanking,
+    DEFAULT_EXCLUSION_THRESHOLD, DnsCname, EvidenceSettings, HttpProbe, Identity, KeywordSource,
+    Language, LlmSettings, MAX_DESCRIPTION_CHARS, MAX_PROMPT_CHARS, PROFILE_SCHEMA_VERSION,
+    ProfileDefinition, QualificationAgent, Question, QuestionOption, Scoring, ScoringFactor,
+    VerdictThresholds,
 };
 use crate::domain::scoring::max_possible;
 
@@ -144,6 +145,7 @@ fn option(value: &str, label: &str, score: f64) -> QuestionOption {
         label: label.to_owned(),
         score,
         is_unknown: false,
+        excludes: false,
     }
 }
 
@@ -156,6 +158,7 @@ fn pertinence_agent(identity: &Identity, llm: &LlmSettings) -> QualificationAgen
         provider_id: None,
         system_prompt: pertinence_prompt(identity, llm),
         weight: 5,
+        exclusion_threshold: DEFAULT_EXCLUSION_THRESHOLD,
         questions: vec![Question {
             id: "pertinence".to_owned(),
             wording: "Ce lead est-il pertinent pour l'offre ?".to_owned(),
@@ -228,6 +231,7 @@ impl QuestionV6 {
                 label: option.label,
                 score: option.score,
                 is_unknown: marked == Some(index),
+                excludes: false,
             })
             .collect();
         if marked.is_none() {
@@ -268,6 +272,7 @@ impl QualificationAgentV6 {
             provider_id: self.provider_id,
             system_prompt: self.system_prompt,
             weight: self.weight,
+            exclusion_threshold: DEFAULT_EXCLUSION_THRESHOLD,
             questions: self
                 .questions
                 .into_iter()
@@ -291,6 +296,7 @@ impl QualificationAgentV4 {
             provider_id: self.provider_id,
             system_prompt: self.system_prompt,
             weight: self.weight,
+            exclusion_threshold: DEFAULT_EXCLUSION_THRESHOLD,
             questions: self
                 .questions
                 .into_iter()
@@ -402,6 +408,122 @@ impl ProfileDefinitionV6 {
                 .qualification_agents
                 .into_iter()
                 .map(QualificationAgentV6::upgrade)
+                .collect(),
+            aggregator: self.aggregator,
+            verdict: self.verdict,
+            evidence: self.evidence,
+            scoring: self.scoring,
+            contact_ranking: self.contact_ranking,
+            llm: self.llm,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct QuestionOptionV7 {
+    value: String,
+    label: String,
+    score: f64,
+    #[serde(default)]
+    is_unknown: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct QuestionV7 {
+    id: String,
+    wording: String,
+    #[serde(default = "default_weight")]
+    weight: u8,
+    options: Vec<QuestionOptionV7>,
+}
+
+impl QuestionV7 {
+    fn upgrade(self) -> Question {
+        Question {
+            id: self.id,
+            wording: self.wording,
+            weight: self.weight,
+            options: self
+                .options
+                .into_iter()
+                .map(|option| QuestionOption {
+                    value: option.value,
+                    label: option.label,
+                    score: option.score,
+                    is_unknown: option.is_unknown,
+                    excludes: false,
+                })
+                .collect(),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct QualificationAgentV7 {
+    id: AgentId,
+    name: String,
+    description: String,
+    #[serde(default = "default_enabled")]
+    enabled: bool,
+    #[serde(default)]
+    provider_id: Option<Uuid>,
+    system_prompt: String,
+    #[serde(default = "default_weight")]
+    weight: u8,
+    questions: Vec<QuestionV7>,
+}
+
+impl QualificationAgentV7 {
+    fn upgrade(self) -> QualificationAgent {
+        QualificationAgent {
+            id: self.id,
+            name: self.name,
+            description: self.description,
+            enabled: self.enabled,
+            provider_id: self.provider_id,
+            system_prompt: self.system_prompt,
+            weight: self.weight,
+            exclusion_threshold: DEFAULT_EXCLUSION_THRESHOLD,
+            questions: self
+                .questions
+                .into_iter()
+                .map(QuestionV7::upgrade)
+                .collect(),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct ProfileDefinitionV7 {
+    #[serde(rename = "schema_version")]
+    _schema_version: u32,
+    identity: Identity,
+    agents: Vec<Agent>,
+    qualification_agents: Vec<QualificationAgentV7>,
+    aggregator: Aggregator,
+    #[serde(default)]
+    verdict: VerdictThresholds,
+    #[serde(default)]
+    evidence: EvidenceSettings,
+    scoring: Scoring,
+    contact_ranking: ContactRanking,
+    llm: LlmSettings,
+}
+
+impl ProfileDefinitionV7 {
+    pub(super) fn upgrade(self) -> ProfileDefinition {
+        ProfileDefinition {
+            schema_version: PROFILE_SCHEMA_VERSION,
+            identity: self.identity,
+            agents: self.agents,
+            qualification_agents: self
+                .qualification_agents
+                .into_iter()
+                .map(QualificationAgentV7::upgrade)
                 .collect(),
             aggregator: self.aggregator,
             verdict: self.verdict,

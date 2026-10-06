@@ -8,7 +8,7 @@ Profiles live in Postgres. Each edit creates a new revision; earlier revisions a
 
 ## Schema
 
-The JSON Schema is `docs/schemas/profile.v7.schema.json`. It is generated from `ProfileDefinition` and must not be edited by hand. Regenerate it with:
+The JSON Schema is `docs/schemas/profile.v8.schema.json`. It is generated from `ProfileDefinition` and must not be edited by hand. Regenerate it with:
 
 ```
 UPDATE_SCHEMA=1 cargo test -p lodestone-core --test profile_examples
@@ -23,7 +23,7 @@ Without `UPDATE_SCHEMA=1` the same test fails if the committed file is stale. Th
 
 ## Sections
 
-- `schema_version`: must be 7. See [Older versions](#older-versions).
+- `schema_version`: must be 8. See [Older versions](#older-versions).
 - `identity`: the offer and the target customer, in free text.
 - `agents`: the detection agents; at least one is required. An agent searches one source with its own settings (see ADR 0005). Several agents of the same kind are allowed.
   - `id`: slug matching `^[a-z0-9][a-z0-9-]{0,62}$`, unique in the profile.
@@ -38,7 +38,8 @@ Without `UPDATE_SCHEMA=1` the same test fails if the committed file is stale. Th
   - `provider_id`: id of a declared LLM provider (`GET /api/v1/llm/providers`), or `null` for the default provider. The reference is not checked by profile validation: the runtime resolves it and treats a missing or disabled provider as an error.
   - `system_prompt`: not empty, at most 8000 characters.
   - `weight`: integer from 1 to 10, default 5, the agent's weight in the lead confidence.
-  - `questions`: at least one. A question has an `id` (lowercase letters, digits, `-`, `_`, at most 63 characters, unique in the agent), a `wording`, a `weight` (1 to 10, default 5) and 2 to 11 `options`. An option has a `value` (same identifier rule, unique in the question), a `label`, a `score` from 0 to 1 and `is_unknown` (default false). Exactly one option per question is the unknown option (`is_unknown: true`, default value `inconnu`, label `Inconnu`, score 0.5): the model picks it when nothing in the documents supports an answer. Its score is editable, it cannot be removed, and the editor pins it last as `Option « inconnu »`. A question without exactly one unknown option is rejected (`UnknownOptionCount`, path `...options`).
+  - `exclusion_threshold`: from 0.5 to 1, default 0.6, the probability at which an excluding option excludes the lead (see "Exclusions").
+  - `questions`: at least one. A question has an `id` (lowercase letters, digits, `-`, `_`, at most 63 characters, unique in the agent), a `wording`, a `weight` (1 to 10, default 5) and 2 to 11 `options`. An option has a `value` (same identifier rule, unique in the question), a `label`, a `score` from 0 to 1 `is_unknown` (default false) and `excludes` (default false, never together with `is_unknown`). Exactly one option per question is the unknown option (`is_unknown: true`, default value `inconnu`, label `Inconnu`, score 0.5): the model picks it when nothing in the documents supports an answer. Its score is editable, it cannot be removed, and the editor pins it last as `Option « inconnu »`. A question without exactly one unknown option is rejected (`UnknownOptionCount`, path `...options`).
   - Validation paths include the indexes, for example `qualification_agents[1].questions[0].options[2].score`.
   - Ready-made templates (editor, "Ajouter un agent de qualification"; French prompts and labels, higher score = better lead for the offer; the operator adjusts scores and weights):
     - `Pertinence`: axis `pertinence` (`forte`, `moyenne`, `faible`).
@@ -47,10 +48,23 @@ Without `UPDATE_SCHEMA=1` the same test fails if the committed file is stale. Th
     - `Type et taille d'organisation`: axes `type` (`secteur_public`, `grand_compte`, `eti`, `pme`, `startup`, `inconnu`) and `taille` (`grande`, `moyenne`, `petite`, `inconnue`). Scores are generic.
     - `Marché`: the prompt starts with an editable sentence, `Zone visée : France et Europe francophone.`. Axes `zone` (`dans_la_zone`, `proche`, `hors_zone`, `inconnu`) and `langue` (`francais`, `autre`, `inconnu`). Reads the country by ccTLD from the "Faits" block.
     - `Opportunité`: migration, technical debt, cost or limits of the current SaaS, hiring. Axes `migration` (`en_cours`, `probable`, `improbable`, `inconnu`) and `declencheur` (`fort`, `moyen`, `aucun`).
-    - The IAM example (`docs/examples/profiles/iam-ferriskey.json`) enables `Pertinence`, `Maturité technique` and the four last templates.
+    - `Recherche entreprise`: what the company does and its size, from its dossier.
+    - `Exclusions`: weight 1. Axes `editeur_integrateur`, `hebergeur_agence` (the signal concerns a customer of the company), `domaine_inactif` (`parque_ou_inactif`, `actif`, `inconnu`), `client_actuel` and `concurrent`; the other four have `oui` (excludes, score 0), `non` (score 1) and `inconnu` (score 0.5). The prompt holds three operator-editable lists in French, `Clients actuels :`, `Concurrents :` and `Éditeurs et intégrateurs du domaine :`, with short IAM-oriented defaults.
+    - The IAM example (`docs/examples/profiles/iam-ferriskey.json`) enables all of them.
 - `aggregator`: `provider_id` (or `null` for the synthesis default) and a `system_prompt` (not empty, at most 8000 characters). Once every enabled qualification agent has a result for a lead, it writes the lead summary and a message draft (see "Qualification and summary").
 - `verdict`: `reliable_from` (0 to 100, default 70) and `discard_below` (0 to 100, default 30), with `reliable_from > discard_below`. Percentages of the lead confidence: reliable from the first (and only when the two conditions below hold), to check between the two, discarded below the second. `calibration_floor` (0 to 0.2, default 0.05, 0 disables) clamps every answer probability to `[floor, 1 - floor]` before scoring, then renormalises. `min_evidence` (0 to 1, default 0.5) is the evidence strength a lead needs to be reliable.
 - `evidence`: how the strength of the evidence weighs on the confidence (ADR 0007, "Evidence and calibration"). `influence` (0 to 1, default 0.6), `reference_score` (at least 1, default 50) and `weights` (`volume`, `diversity`, `environment`, `strength`, integers from 0 to 10, default 1, at least one above 0). The whole section and each field are optional.
+
+### Exclusions
+
+An option with `excludes: true` marks a reason to drop the lead (publisher or integrator of the domain, current customer, competitor, parked domain). The rule is `exclusions(&[QualificationResult], &[QualificationAgent])` in `libs/core/src/domain/qualification/exclusion.rs`, a standalone function so that a later scoring agent can leave it as a hard rule over its own verdict. For every enabled agent with a valid result, each axis produces an `Exclusion` when:
+
+- the answer is grounded (a verified quote; a downgraded answer is not grounded) and its quote is not empty, and
+- the raw stored probability of an excluding option is at least the agent's `exclusion_threshold`. The raw probability is used, not the calibrated one: calibration clamps probabilities away from 0 and 1 to temper overconfidence in scores, but an exclusion is a hard decision that needs an explicit answer and the calibration would only move a probability a few points. When several excluding options of an axis reach the threshold the most probable one is kept.
+
+An `Exclusion` holds the agent id and name, the axis id, the option value and label, the probability, the quote and the document it was found in. Any exclusion sets the verdict to `ecarte` with `verdict_reason` `excluded`, whatever the confidence; the confidence is still computed and shown. Exclusions are stored with the lead qualification state (`lead_qualification_state.exclusions`, JSON), applied by evaluation and by rescoring (`SCORING_VERSION` 2 rescored every stored lead), exposed as `exclusions` on the lead, and counted per agent and option by `GET /api/v1/quality` (`exclusions`). The prompt marks excluding options in the option list: `exclusion: choose only with explicit evidence`.
+
+The quality report also lists the most recent leads rejected for `deja_client`, `concurrent`, `editeur_integrateur` or `hebergeur_agence` (`exclusion_candidates`); the Qualité page copies their legal name and domain so the operator can paste them into the lists of the Exclusions agent prompt. No profile is ever changed automatically.
 
 ### Contract JSON
 
@@ -159,7 +173,7 @@ A host or domain whose lookup, probe or crawl fails is marked checked like a suc
 
 ## Older versions
 
-Stored revisions are never rewritten. Versions 1, 2, 3, 4, 5 and 6 are accepted and upgraded when read; new revisions are written in version 7. Errors on an older document keep that document's paths.
+Stored revisions are never rewritten. Versions 1, 2, 3, 4, 5, 6 and 7 are accepted and upgraded when read; new revisions are written in version 8. Errors on an older document keep that document's paths.
 
 ### Version 1 to 2
 
@@ -195,3 +209,7 @@ The upgrade adds the `evidence` section with its defaults and the `verdict.calib
 ### Version 6 to 7
 
 Every question gains an unknown option (`is_unknown`). The upgrade marks the first option whose value is `inconnu`, `inconnue` or `unknown`; when there is none it appends `{ "value": "inconnu", "label": "Inconnu", "score": 0.5, "is_unknown": true }`, so a question with 10 options upgrades to 11, the new maximum. The contract becomes v3 (answers carry `evidence`). Stored answers without `evidence` stay readable and are rescored unchanged.
+
+### Version 7 to 8
+
+Every qualification agent gains `exclusion_threshold` (0.6) and every option gains `excludes` (false). Stored leads are rescored from their stored answers without a model call (`SCORING_VERSION` 2); no lead is excluded until an option is marked.

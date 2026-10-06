@@ -1,6 +1,9 @@
 use std::collections::{BTreeMap, HashMap};
 
+use chrono::{DateTime, Utc};
+
 use crate::domain::{
+    lead::LeadId,
     profile::{ProfileId, definition::VerdictThresholds},
     qualification::Verdict,
     quality::{DecisionKind, DecisionLabel, RejectionReason},
@@ -150,6 +153,61 @@ pub struct ProfileQuality {
     pub reasons: Vec<ReasonCount>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExclusionCount {
+    pub agent_id: String,
+    pub agent_name: String,
+    pub question_id: String,
+    pub option: String,
+    pub label: String,
+    pub count: u64,
+}
+
+pub const EXCLUSION_REASONS: [RejectionReason; 4] = [
+    RejectionReason::AlreadyCustomer,
+    RejectionReason::Competitor,
+    RejectionReason::VendorOrIntegrator,
+    RejectionReason::HostOrAgency,
+];
+
+pub const MAX_EXCLUSION_CANDIDATES: usize = 30;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExclusionTarget {
+    pub lead_id: LeadId,
+    pub reason: RejectionReason,
+    pub decided_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExclusionCandidate {
+    pub lead_id: LeadId,
+    pub domain: String,
+    pub legal_name: Option<String>,
+    pub reason: RejectionReason,
+    pub decided_at: DateTime<Utc>,
+}
+
+pub fn exclusion_targets(labels: &[DecisionLabel]) -> Vec<ExclusionTarget> {
+    let mut targets: Vec<ExclusionTarget> = latest_lead_decisions(labels)
+        .into_iter()
+        .filter(|label| !is_validated(label))
+        .filter_map(|label| {
+            let reason = label.rejection.as_ref()?.reason();
+            EXCLUSION_REASONS
+                .contains(&reason)
+                .then_some(ExclusionTarget {
+                    lead_id: label.lead_id,
+                    reason,
+                    decided_at: label.decided_at,
+                })
+        })
+        .collect();
+    targets.sort_by_key(|target| std::cmp::Reverse(target.decided_at));
+    targets.truncate(MAX_EXCLUSION_CANDIDATES);
+    targets
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct QualityReport {
     pub decisions: DecisionCounts,
@@ -159,6 +217,8 @@ pub struct QualityReport {
     pub agents: Vec<AgentSeparation>,
     pub versions: Vec<VersionPrecision>,
     pub profiles: Vec<ProfileQuality>,
+    pub exclusions: Vec<ExclusionCount>,
+    pub exclusion_candidates: Vec<ExclusionCandidate>,
 }
 
 fn latest_lead_decisions(labels: &[DecisionLabel]) -> Vec<&DecisionLabel> {
@@ -513,6 +573,8 @@ impl QualityReport {
                 .iter()
                 .filter_map(|info| profile_quality(info, &decisions, selected))
                 .collect(),
+            exclusions: Vec::new(),
+            exclusion_candidates: Vec::new(),
         }
     }
 }
@@ -1017,6 +1079,52 @@ mod tests {
                 .done(),
         ];
         assert!(report(&labels).versions.is_empty());
+    }
+
+    #[test]
+    fn only_rejections_for_an_exclusion_reason_are_candidates_for_the_lists() {
+        let revised = LeadId(Uuid::now_v7());
+        let labels = vec![
+            rejected(30.0, "a_verifier")
+                .because(RejectionReason::Competitor)
+                .done(),
+            rejected(30.0, "a_verifier")
+                .because(RejectionReason::OffTarget)
+                .done(),
+            rejected(30.0, "a_verifier").done(),
+            rejected(30.0, "a_verifier")
+                .because(RejectionReason::AlreadyCustomer)
+                .lead(revised, 10)
+                .done(),
+            validated(80.0, "fiable").lead(revised, 20).done(),
+            rejected(30.0, "a_verifier")
+                .because(RejectionReason::HostOrAgency)
+                .done(),
+        ];
+        let reasons: Vec<RejectionReason> = exclusion_targets(&labels)
+            .iter()
+            .map(|target| target.reason)
+            .collect();
+        assert_eq!(reasons.len(), 2);
+        assert!(reasons.contains(&RejectionReason::Competitor));
+        assert!(reasons.contains(&RejectionReason::HostOrAgency));
+        assert!(!reasons.contains(&RejectionReason::AlreadyCustomer));
+    }
+
+    #[test]
+    fn the_candidates_are_the_most_recent_and_bounded() {
+        let labels: Vec<DecisionLabel> = (0..40)
+            .map(|index| {
+                rejected(30.0, "a_verifier")
+                    .because(RejectionReason::Competitor)
+                    .lead(LeadId(Uuid::now_v7()), index)
+                    .done()
+            })
+            .collect();
+        let targets = exclusion_targets(&labels);
+        assert_eq!(targets.len(), MAX_EXCLUSION_CANDIDATES);
+        assert!(targets[0].decided_at > targets[1].decided_at);
+        assert_eq!(targets[0].decided_at, at(39));
     }
 
     #[test]

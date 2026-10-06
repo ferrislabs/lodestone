@@ -21,6 +21,7 @@ const detail: LeadDetailData = {
 		profile: { id: 'p1', name: 'Fintech' },
 		domain: 'acme.test',
 		status: 'qualified',
+		exclusions: [],
 		score: 42.5,
 		first_seen_at: '2026-01-01T00:00:00Z',
 		last_seen_at: '2026-02-01T00:00:00Z',
@@ -892,5 +893,83 @@ describe('LeadDetail', () => {
 	it('shows the error state', () => {
 		renderDetail({ state: 'error', detail: null, errorMessage: 'not found' })
 		expect(screen.getByRole('alert').textContent).toContain('not found')
+	})
+
+	it('shows no exclusion block for a lead nobody excluded', () => {
+		const { container } = renderDetail()
+		expect(container.querySelector('[data-section="exclusion"]')).toBeNull()
+	})
+
+	it('shows a prominent exclusion block with the option, the probability and the quote', () => {
+		const { container } = renderDetail({
+			detail: {
+				...detail,
+				lead: {
+					...detail.lead,
+					verdict: 'ecarte',
+					verdict_reason: 'excluded',
+					exclusions: [
+						{
+							agent_id: 'exclusions',
+							agent_name: 'Exclusions',
+							question_id: 'concurrent',
+							option: 'oui',
+							label: 'Concurrent',
+							probability: 85,
+							evidence: 'Nous sommes un éditeur de solutions IAM.',
+							evidence_source: 'https://acme.test/about',
+						},
+					],
+				},
+			},
+		})
+		const block = container.querySelector('[data-section="exclusion"]')
+		expect(block?.textContent).toContain(
+			"Exclu par l'agent « Exclusions » : Concurrent (85 %)",
+		)
+		expect(
+			block?.querySelector('[data-part="exclusion-quote"]')?.textContent,
+		).toBe('« Nous sommes un éditeur de solutions IAM. »')
+		expect(block?.querySelector('a')?.getAttribute('href')).toBe(
+			'https://acme.test/about',
+		)
+		expect(
+			container.querySelector('[data-verdict-reason="excluded"]')?.textContent,
+		).toBe('Écarté : un agent de qualification a exclu le lead')
+	})
+
+	it('lists every exclusion of the lead', () => {
+		const exclusion = {
+			agent_id: 'exclusions',
+			agent_name: 'Exclusions',
+			question_id: 'concurrent',
+			option: 'oui',
+			label: 'Concurrent',
+			probability: 85,
+			evidence: 'Nous sommes un concurrent.',
+			evidence_source: 'lead',
+		}
+		const { container } = renderDetail({
+			detail: {
+				...detail,
+				lead: {
+					...detail.lead,
+					exclusions: [
+						exclusion,
+						{
+							...exclusion,
+							question_id: 'client_actuel',
+							label: 'Client actuel',
+						},
+					],
+				},
+			},
+		})
+		expect(
+			container.querySelectorAll('[data-section="exclusion"] [data-exclusion]'),
+		).toHaveLength(2)
+		expect(
+			screen.getAllByText('Faits calculés par le système').length,
+		).toBeGreaterThan(0)
 	})
 })

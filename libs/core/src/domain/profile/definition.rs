@@ -4,7 +4,7 @@ use uuid::Uuid;
 
 use crate::domain::values::SourceName;
 
-pub const PROFILE_SCHEMA_VERSION: u32 = 7;
+pub const PROFILE_SCHEMA_VERSION: u32 = 8;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -13,7 +13,7 @@ pub const PROFILE_SCHEMA_VERSION: u32 = 7;
     description = "Describes one market: what is sold, which agents scan which sources, which qualification agents judge a lead and how an aggregator sums it up, how leads are scored and which contacts to prefer."
 )]
 pub struct ProfileDefinition {
-    #[schemars(description = "Profile format version. Must be 7.")]
+    #[schemars(description = "Profile format version. Must be 8.")]
     pub schema_version: u32,
     pub identity: Identity,
     #[schemars(description = "Detection agents. At least one is required.")]
@@ -116,6 +116,12 @@ pub struct QualificationAgent {
         description = "Integer weight from 1 to 10 of this agent in the lead confidence."
     )]
     pub weight: u8,
+    #[serde(default = "default_exclusion_threshold")]
+    #[schemars(
+        range(min = 0.5, max = 1.0),
+        description = "Probability from 0.5 to 1 at which a grounded answer for an option that excludes the lead excludes it. Default 0.6."
+    )]
+    pub exclusion_threshold: f64,
     #[schemars(
         length(min = 1),
         description = "Questions the agent answers. At least one is required."
@@ -132,8 +138,15 @@ pub const UNKNOWN_LABEL: &str = "Inconnu";
 pub const UNKNOWN_SCORE: f64 = 0.5;
 pub const EVIDENCE_MAX_CHARS: usize = 300;
 
+pub const DEFAULT_EXCLUSION_THRESHOLD: f64 = 0.6;
+pub const MIN_EXCLUSION_THRESHOLD: f64 = 0.5;
+
 fn default_weight() -> u8 {
     5
+}
+
+pub fn default_exclusion_threshold() -> f64 {
+    DEFAULT_EXCLUSION_THRESHOLD
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -195,6 +208,11 @@ pub struct QuestionOption {
         description = "Marks the unknown option, chosen when nothing in the documents supports an answer. Exactly one option per question carries it."
     )]
     pub is_unknown: bool,
+    #[serde(default)]
+    #[schemars(
+        description = "When true, a grounded answer for this option at or above the agent's exclusion threshold excludes the lead. Never set on the unknown option."
+    )]
+    pub excludes: bool,
 }
 
 impl QuestionOption {
@@ -204,6 +222,7 @@ impl QuestionOption {
             label: UNKNOWN_LABEL.to_owned(),
             score: UNKNOWN_SCORE,
             is_unknown: true,
+            excludes: false,
         }
     }
 }

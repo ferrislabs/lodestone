@@ -9,12 +9,12 @@ use super::{
         Agent, AgentSource, Aggregator, CertificateTransparency, CnamePattern, ContactRanking,
         DebtRule, DnsCname, EvidenceSettings, Fingerprint, HttpProbe, Identity, KeywordSource,
         LlmSettings, MAX_CALIBRATION_FLOOR, MAX_DESCRIPTION_CHARS, MAX_OPTIONS, MAX_PROMPT_CHARS,
-        MIN_OPTIONS, Matcher, PROFILE_SCHEMA_VERSION, ProfileDefinition, QualificationAgent,
-        Question, Scoring, VerdictThresholds, VersionExtractor,
+        MIN_EXCLUSION_THRESHOLD, MIN_OPTIONS, Matcher, PROFILE_SCHEMA_VERSION, ProfileDefinition,
+        QualificationAgent, Question, Scoring, VerdictThresholds, VersionExtractor,
     },
     legacy::{
         ProfileDefinitionV1, ProfileDefinitionV2, ProfileDefinitionV3, ProfileDefinitionV4,
-        ProfileDefinitionV5, ProfileDefinitionV6,
+        ProfileDefinitionV5, ProfileDefinitionV6, ProfileDefinitionV7,
     },
 };
 
@@ -26,7 +26,7 @@ pub enum ProfileProblem {
     #[error("malformed: {0}")]
     Malformed(String),
     #[error(
-        "unsupported schema version {found}, expected 1, 2, 3, 4, 5, 6 or {PROFILE_SCHEMA_VERSION}"
+        "unsupported schema version {found}, expected 1, 2, 3, 4, 5, 6, 7 or {PROFILE_SCHEMA_VERSION}"
     )]
     UnsupportedSchemaVersion { found: u32 },
     #[error("must not be empty")]
@@ -47,6 +47,10 @@ pub enum ProfileProblem {
     UnknownOptionCount,
     #[error("must be a number from 0 to 1")]
     InvalidScore,
+    #[error("must be a number from 0.5 to 1")]
+    InvalidExclusionThreshold,
+    #[error("the unknown option cannot exclude the lead")]
+    UnknownCannotExclude,
     #[error("must be at most {MAX_PROMPT_CHARS} characters")]
     TooLong,
     #[error("must be at most {MAX_DESCRIPTION_CHARS} characters")]
@@ -121,6 +125,7 @@ impl ValidatedProfile {
             Some(4) => decode::<ProfileDefinitionV4>(value)?.upgrade(),
             Some(5) => decode::<ProfileDefinitionV5>(value)?.upgrade(),
             Some(6) => decode::<ProfileDefinitionV6>(value)?.upgrade(),
+            Some(7) => decode::<ProfileDefinitionV7>(value)?.upgrade(),
             Some(PROFILE_SCHEMA_VERSION) | None => decode::<ProfileDefinition>(value)?,
             Some(found) => {
                 return Err(Path::root()
@@ -342,6 +347,11 @@ fn validate_qualification_agent(agent: &QualificationAgent, path: &Path) -> Chec
     }
     bounded_prompt(&agent.system_prompt, &path.field("system_prompt"))?;
     valid_weight(agent.weight, &path.field("weight"))?;
+    if !(MIN_EXCLUSION_THRESHOLD..=1.0).contains(&agent.exclusion_threshold) {
+        return Err(path
+            .field("exclusion_threshold")
+            .fail(ProfileProblem::InvalidExclusionThreshold));
+    }
     let questions = path.field("questions");
     non_empty_list(&agent.questions, &questions)?;
     for (index, question) in agent.questions.iter().enumerate() {
@@ -381,6 +391,11 @@ fn validate_question(question: &Question, path: &Path) -> Check {
                 .fail(ProfileProblem::InvalidIdentifier));
         }
         non_empty(&option.label, &option_path.field("label"))?;
+        if option.excludes && option.is_unknown {
+            return Err(option_path
+                .field("excludes")
+                .fail(ProfileProblem::UnknownCannotExclude));
+        }
         if !(0.0..=1.0).contains(&option.score) {
             return Err(option_path
                 .field("score")
@@ -824,10 +839,10 @@ mod tests {
             v["scoring"] = iam_scoring_v2();
             v["llm"]["qualification_threshold"] = json!(50);
         });
-        assert_eq!(profile.definition().schema_version, 7);
+        assert_eq!(profile.definition().schema_version, 8);
         assert_eq!(weights(&profile), [10, 5, 3, 8, 7, 2, 2]);
         assert_eq!(profile.definition().llm.qualification_threshold, 37);
-        assert_eq!(profile.to_json()["schema_version"], 7);
+        assert_eq!(profile.to_json()["schema_version"], 8);
     }
 
     #[test]
@@ -926,11 +941,11 @@ mod tests {
 
     #[test]
     fn unsupported_schema_version_is_rejected() {
-        let error = error_for(|v| v["schema_version"] = json!(8));
+        let error = error_for(|v| v["schema_version"] = json!(9));
         assert_eq!(error.path, "schema_version");
         assert_eq!(
             error.problem,
-            ProfileProblem::UnsupportedSchemaVersion { found: 8 }
+            ProfileProblem::UnsupportedSchemaVersion { found: 9 }
         );
         let error = error_for(|v| v["schema_version"] = json!(0));
         assert_eq!(
@@ -1256,7 +1271,7 @@ mod tests {
         value["sources"] = json!({"http_probe": source, "ats": {"keywords": ["sso"]}});
         let profile = ValidatedProfile::parse(value).unwrap();
         let definition = profile.definition();
-        assert_eq!(definition.schema_version, 7);
+        assert_eq!(definition.schema_version, 8);
         let summary: Vec<_> = definition
             .agents
             .iter()
@@ -1266,7 +1281,7 @@ mod tests {
             summary,
             [("http-probe", "HTTP probe", true), ("ats", "ATS", true)]
         );
-        assert_eq!(profile.to_json()["schema_version"], 7);
+        assert_eq!(profile.to_json()["schema_version"], 8);
         assert_eq!(profile.to_json()["agents"][0]["source"], agent);
     }
 
@@ -1332,8 +1347,22 @@ mod tests {
         ValidatedProfile::parse(value).unwrap()
     }
 
-    fn v6() -> Value {
+    fn v7() -> Value {
         let mut value = v4();
+        value["schema_version"] = json!(7);
+        for agent in value["qualification_agents"].as_array_mut().unwrap() {
+            agent.as_object_mut().unwrap().remove("exclusion_threshold");
+            for question in agent["questions"].as_array_mut().unwrap() {
+                for option in question["options"].as_array_mut().unwrap() {
+                    option.as_object_mut().unwrap().remove("excludes");
+                }
+            }
+        }
+        value
+    }
+
+    fn v6() -> Value {
+        let mut value = v7();
         value["schema_version"] = json!(6);
         for agent in value["qualification_agents"].as_array_mut().unwrap() {
             for question in agent["questions"].as_array_mut().unwrap() {
@@ -1353,7 +1382,7 @@ mod tests {
     fn version_three_is_upgraded_with_a_default_qualification_agent() {
         let profile = ValidatedProfile::parse(minimal()).unwrap();
         let definition = profile.definition();
-        assert_eq!(definition.schema_version, 7);
+        assert_eq!(definition.schema_version, 8);
         assert_eq!(definition.qualification_agents.len(), 1);
         let agent = &definition.qualification_agents[0];
         assert_eq!(agent.id.as_str(), "pertinence");
@@ -1455,7 +1484,7 @@ mod tests {
     fn version_five_is_upgraded_with_default_evidence_settings() {
         let profile = ValidatedProfile::parse(v5()).unwrap();
         let definition = profile.definition();
-        assert_eq!(definition.schema_version, 7);
+        assert_eq!(definition.schema_version, 8);
         assert_eq!(definition.verdict.reliable_from, 80);
         assert_eq!(definition.verdict.discard_below, 20);
         assert_eq!(definition.verdict.calibration_floor, 0.05);
@@ -1463,7 +1492,7 @@ mod tests {
         assert_eq!(definition.evidence, EvidenceSettings::default());
         assert_eq!(definition.evidence.influence, 0.6);
         assert_eq!(definition.evidence.reference_score, 50.0);
-        assert_eq!(profile.to_json()["schema_version"], 7);
+        assert_eq!(profile.to_json()["schema_version"], 8);
     }
 
     #[test]
@@ -1595,10 +1624,10 @@ mod tests {
         agent.insert("name".to_owned(), json!("Maturité technique"));
         let profile = ValidatedProfile::parse(value).unwrap();
         let agent = &profile.definition().qualification_agents[0];
-        assert_eq!(profile.definition().schema_version, 7);
+        assert_eq!(profile.definition().schema_version, 8);
         assert_eq!(agent.description, "Évalue : Maturité technique");
         assert_eq!(agent.name, "Maturité technique");
-        assert_eq!(profile.to_json()["schema_version"], 7);
+        assert_eq!(profile.to_json()["schema_version"], 8);
     }
 
     #[test]
@@ -1825,7 +1854,7 @@ mod tests {
                     json!({"value": value, "label": "Je ne sais pas", "score": 0.4}),
                 );
             let profile = ValidatedProfile::parse(document).unwrap();
-            assert_eq!(profile.definition().schema_version, 7);
+            assert_eq!(profile.definition().schema_version, 8);
             assert_eq!(
                 options_of(&profile),
                 [
@@ -1854,7 +1883,7 @@ mod tests {
         );
         let appended = &profile.definition().qualification_agents[0].questions[0].options[3];
         assert_eq!(appended.label, "Inconnu");
-        assert_eq!(profile.to_json()["schema_version"], 7);
+        assert_eq!(profile.to_json()["schema_version"], 8);
     }
 
     #[test]
@@ -1885,6 +1914,80 @@ mod tests {
             let profile = ValidatedProfile::parse(document).unwrap();
             assert!(options_of(&profile)[3].2);
         }
+    }
+
+    #[test]
+    fn version_seven_is_upgraded_with_exclusion_defaults() {
+        let profile = ValidatedProfile::parse(v7()).unwrap();
+        let definition = profile.definition();
+        assert_eq!(definition.schema_version, 8);
+        for agent in &definition.qualification_agents {
+            assert_eq!(agent.exclusion_threshold, 0.6);
+            assert!(
+                agent
+                    .questions
+                    .iter()
+                    .flat_map(|question| &question.options)
+                    .all(|option| !option.excludes)
+            );
+        }
+        assert_eq!(profile.to_json()["schema_version"], 8);
+        assert_eq!(profile, ValidatedProfile::parse(v4()).unwrap());
+    }
+
+    #[test]
+    fn version_seven_rejects_the_exclusion_fields() {
+        let mut document = v7();
+        document["qualification_agents"][0]["questions"][0]["options"][0]["excludes"] = json!(true);
+        let error = ValidatedProfile::parse(document).unwrap_err();
+        assert_eq!(error.path, format!("{OPTION0}.excludes"));
+        let mut document = v7();
+        document["qualification_agents"][0]["exclusion_threshold"] = json!(0.7);
+        let error = ValidatedProfile::parse(document).unwrap_err();
+        assert_eq!(error.path, "qualification_agents[0].exclusion_threshold");
+    }
+
+    #[test]
+    fn the_exclusion_threshold_defaults_to_sixty_percent() {
+        let profile = v4_ok(|v| {
+            v["qualification_agents"][0]
+                .as_object_mut()
+                .unwrap()
+                .remove("exclusion_threshold");
+        });
+        assert_eq!(
+            profile.definition().qualification_agents[0].exclusion_threshold,
+            0.6
+        );
+    }
+
+    #[test]
+    fn the_exclusion_threshold_is_between_half_and_one() {
+        for bad in [json!(0.49), json!(1.01), json!(0.0), json!(-1)] {
+            let error = v4_error(|v| v["qualification_agents"][0]["exclusion_threshold"] = bad);
+            assert_eq!(error.path, "qualification_agents[0].exclusion_threshold");
+            assert_eq!(error.problem, ProfileProblem::InvalidExclusionThreshold);
+        }
+        for good in [json!(0.5), json!(0.75), json!(1.0)] {
+            let profile = v4_ok(|v| v["qualification_agents"][0]["exclusion_threshold"] = good);
+            assert!(profile.definition().qualification_agents[0].exclusion_threshold >= 0.5);
+        }
+    }
+
+    #[test]
+    fn an_option_can_exclude_but_not_the_unknown_one() {
+        let profile = v4_ok(|v| {
+            v["qualification_agents"][0]["questions"][0]["options"][0]["excludes"] = json!(true)
+        });
+        assert!(profile.definition().qualification_agents[0].questions[0].options[0].excludes);
+        let error = v4_error(|v| {
+            v["qualification_agents"][0]["questions"][0]["options"][3]["excludes"] = json!(true)
+        });
+        assert_eq!(
+            error.path,
+            "qualification_agents[0].questions[0].options[3].excludes"
+        );
+        assert_eq!(error.problem, ProfileProblem::UnknownCannotExclude);
     }
 
     #[test]

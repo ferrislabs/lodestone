@@ -2,11 +2,16 @@ import { Label } from '#/components/ui/label'
 import { Skeleton } from '#/components/ui/skeleton'
 import { hasDecisions } from '#/pages/quality/lib/format'
 import { PERIOD_LABELS, PERIODS, type Period } from '#/pages/quality/lib/period'
-import type { ProfileSummary, Quality } from '#/pages/quality/lib/types'
+import type {
+	ExclusionCandidate,
+	ProfileSummary,
+	Quality,
+} from '#/pages/quality/lib/types'
 import { AgentsCard } from '#/pages/quality/ui/agents-card'
 import { ConfidenceHistogram } from '#/pages/quality/ui/confidence-histogram'
 import { DecisionsCard } from '#/pages/quality/ui/decisions-card'
 import { DiscardedCard } from '#/pages/quality/ui/discarded-card'
+import { ExclusionsCard } from '#/pages/quality/ui/exclusions-card'
 import { RejectionReasonsCard } from '#/pages/quality/ui/rejection-reasons-card'
 import { SuggestionsCard } from '#/pages/quality/ui/suggestions-card'
 import { VerdictPrecisionCard } from '#/pages/quality/ui/verdict-precision-card'
@@ -27,6 +32,9 @@ interface QualityPageProps {
 	period: Period
 	onPeriodChange: (period: Period) => void
 	onOpenProfile: (profileId: string) => void
+	copiedLeadId: string | null
+	copyFailed: boolean
+	onCopyExclusion: (candidate: ExclusionCandidate) => void
 }
 
 export function QualityPage({
@@ -39,7 +47,23 @@ export function QualityPage({
 	period,
 	onPeriodChange,
 	onOpenProfile,
+	copiedLeadId,
+	copyFailed,
+	onCopyExclusion,
 }: QualityPageProps) {
+	const exclusionsCard =
+		quality !== null &&
+		(hasDecisions(quality) ||
+			quality.exclusions.length > 0 ||
+			quality.exclusion_candidates.length > 0) ? (
+			<ExclusionsCard
+				exclusions={quality.exclusions}
+				candidates={quality.exclusion_candidates}
+				copiedLeadId={copiedLeadId}
+				copyFailed={copyFailed}
+				onCopy={onCopyExclusion}
+			/>
+		) : null
 	return (
 		<div className="flex flex-col gap-6 p-4 md:p-8">
 			<div className="flex flex-col gap-1">
@@ -107,6 +131,9 @@ export function QualityPage({
 					sera mesurée ici.
 				</output>
 			) : null}
+			{state === 'ready' && quality !== null && !hasDecisions(quality)
+				? exclusionsCard
+				: null}
 			{state === 'ready' && quality !== null && hasDecisions(quality) ? (
 				<>
 					<DecisionsCard decisions={quality.decisions} />
@@ -118,6 +145,7 @@ export function QualityPage({
 					<AgentsCard agents={quality.agents} />
 					<VersionsCard versions={quality.versions} />
 					<RejectionReasonsCard profiles={quality.profiles} />
+					{exclusionsCard}
 					<SuggestionsCard
 						profiles={quality.profiles}
 						onOpenProfile={onOpenProfile}

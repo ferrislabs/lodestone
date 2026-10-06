@@ -9,7 +9,7 @@ use crate::{
         profile::ActiveProfile,
         qualification::{
             AgentOpinion, EvidenceStrength, Rescoring, ResultStatus, SCORING_VERSION, agent_score,
-            judge, ports::QualificationRepository, stored_answers,
+            exclusions, judge, ports::QualificationRepository, stored_answers,
         },
     },
 };
@@ -84,7 +84,8 @@ impl LodestoneUseCase {
                 evidence,
                 definition.verdict,
                 &definition.evidence,
-            ),
+            )
+            .excluding(exclusions(&results, &definition.qualification_agents)),
             scoring_version: SCORING_VERSION,
             agent_scores,
         };

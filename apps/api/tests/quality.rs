@@ -155,6 +155,174 @@ async fn an_empty_database_yields_an_empty_report(pool: PgPool) {
     assert_eq!(data["discarded"]["share"], Value::Null);
     assert_eq!(data["agents"], json!([]));
     assert_eq!(data["profiles"], json!([]));
+    assert_eq!(data["exclusions"], json!([]));
+    assert_eq!(data["exclusion_candidates"], json!([]));
+}
+
+async fn excluded(
+    pool: &PgPool,
+    profile: &str,
+    domain: &str,
+    options: &[(&str, &str, &str)],
+) -> String {
+    let id = lead(pool, profile, domain, "new").await;
+    sqlx::query("UPDATE leads SET confidence = 80, verdict = 'ecarte', qualified_at = now() WHERE id = $1::uuid")
+        .bind(&id)
+        .execute(pool)
+        .await
+        .expect("verdict");
+    let items: Vec<Value> = options
+        .iter()
+        .map(|(question, option, label)| {
+            json!({
+                "agent_id": "exclusions",
+                "agent_name": "Exclusions",
+                "question_id": question,
+                "option": option,
+                "label": label,
+                "probability": 0.9,
+                "evidence": "preuve",
+                "evidence_source": "lead"
+            })
+        })
+        .collect();
+    sqlx::query(
+        "INSERT INTO lead_qualification_state (lead_id, profile_revision, sources, completed_at, scoring_version, evidence, verdict_reason, exclusions)
+         VALUES ($1::uuid, 1, ARRAY['dns_cname'], now(), 2, $2, 'excluded', $3)",
+    )
+    .bind(&id)
+    .bind(json!({
+        "score": 0.5,
+        "components": {"volume": 0.5, "diversity": 0.5, "environment": 0.5, "strength": 0.5},
+        "signal_count": 1,
+        "signal_score": 1.0,
+        "only_non_production": false
+    }))
+    .bind(Value::Array(items))
+    .execute(pool)
+    .await
+    .expect("state");
+    id
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_report_counts_exclusions_per_agent_and_option(pool: PgPool) {
+    let alpha = profile(&pool, "alpha").await;
+    let beta = profile(&pool, "beta").await;
+    excluded(
+        &pool,
+        &alpha,
+        "a.com",
+        &[("concurrent", "oui", "Concurrent")],
+    )
+    .await;
+    excluded(
+        &pool,
+        &alpha,
+        "b.com",
+        &[("concurrent", "oui", "Concurrent")],
+    )
+    .await;
+    excluded(
+        &pool,
+        &alpha,
+        "c.com",
+        &[
+            ("concurrent", "oui", "Concurrent"),
+            ("client_actuel", "oui", "Client actuel"),
+        ],
+    )
+    .await;
+    excluded(
+        &pool,
+        &beta,
+        "d.com",
+        &[("client_actuel", "oui", "Client actuel")],
+    )
+    .await;
+    let plain = lead(&pool, &alpha, "plain.com", "new").await;
+    sqlx::query("UPDATE leads SET verdict = 'fiable', qualified_at = now() WHERE id = $1::uuid")
+        .bind(&plain)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let api = Api::new(pool).await;
+
+    let (status, body) = api.get("/api/v1/quality").await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        body["data"]["exclusions"],
+        json!([
+            {"agent_id": "exclusions", "agent_name": "Exclusions", "question_id": "concurrent", "option": "oui", "label": "Concurrent", "count": 3},
+            {"agent_id": "exclusions", "agent_name": "Exclusions", "question_id": "client_actuel", "option": "oui", "label": "Client actuel", "count": 2},
+        ])
+    );
+
+    let (_, filtered) = api.get(&format!("/api/v1/quality?profile_id={beta}")).await;
+    assert_eq!(
+        filtered["data"]["exclusions"],
+        json!([
+            {"agent_id": "exclusions", "agent_name": "Exclusions", "question_id": "client_actuel", "option": "oui", "label": "Client actuel", "count": 1},
+        ])
+    );
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn rejected_leads_with_an_exclusion_reason_become_candidates_for_the_lists(pool: PgPool) {
+    let alpha = profile(&pool, "alpha").await;
+    let rival = lead(&pool, &alpha, "rival.com", "rejected").await;
+    versioned_label(
+        &pool,
+        &rival,
+        &alpha,
+        "lead_rejected",
+        "m",
+        "p@1",
+        Some("concurrent"),
+    )
+    .await;
+    let off_target = lead(&pool, &alpha, "far.com", "rejected").await;
+    versioned_label(
+        &pool,
+        &off_target,
+        &alpha,
+        "lead_rejected",
+        "m",
+        "p@1",
+        Some("hors_cible"),
+    )
+    .await;
+    let validated = lead(&pool, &alpha, "kept.com", "validated").await;
+    versioned_label(
+        &pool,
+        &validated,
+        &alpha,
+        "lead_validated",
+        "m",
+        "p@1",
+        None,
+    )
+    .await;
+    sqlx::query(
+        "INSERT INTO company_dossiers (domain, state, siren, official, pages, built_at, attempts, next_attempt_at)
+         VALUES ('rival.com', 'complete', '552081317', $1, '[]'::jsonb, now(), 0, now())",
+    )
+    .bind(json!({"siren": "552081317", "legal_name": "RIVAL SAS"}))
+    .execute(&pool)
+    .await
+    .expect("dossier");
+    let api = Api::new(pool).await;
+
+    let (status, body) = api.get("/api/v1/quality").await;
+
+    assert_eq!(status, StatusCode::OK);
+    let candidates = body["data"]["exclusion_candidates"].as_array().unwrap();
+    assert_eq!(candidates.len(), 1);
+    assert_eq!(candidates[0]["domain"], "rival.com");
+    assert_eq!(candidates[0]["legal_name"], "RIVAL SAS");
+    assert_eq!(candidates[0]["reason"], "concurrent");
+    assert_eq!(candidates[0]["lead_id"], rival);
 }
 
 #[sqlx::test(migrations = "../../migrations")]

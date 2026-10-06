@@ -72,6 +72,10 @@ export function useQualificationUi(
 			),
 		setWeight: (index, weight) =>
 			onChange(setAgentField(value, index, 'weight', weight)),
+		setExclusionThreshold: (index, percent) =>
+			onChange(
+				setAgentField(value, index, 'exclusion_threshold', toFraction(percent)),
+			),
 		setPrompt: (index, prompt) =>
 			onChange(setAgentField(value, index, 'system_prompt', prompt)),
 		requestRemove: setConfirmingRemove,
@@ -108,6 +112,10 @@ export function useQualificationUi(
 			onChange(setOptionField(value, index, question, option, 'label', text)),
 		setOptionScore: (index, question, option, score) =>
 			onChange(setOptionField(value, index, question, option, 'score', score)),
+		setOptionExcludes: (index, question, option, excludes) =>
+			onChange(
+				setOptionField(value, index, question, option, 'excludes', excludes),
+			),
 		setAggregatorProvider: (providerId) =>
 			onChange(
 				setAggregatorField(

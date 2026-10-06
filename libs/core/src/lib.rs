@@ -90,10 +90,10 @@ pub use domain::{
     },
     prompt::{DraftMessage, EvidenceCheck, EvidenceQuote, check_evidence},
     qualification::{
-        Answer, Completion, EvidenceComponents, EvidenceStrength, Judgement, LeadScoring,
-        QualificationResult, ResultId, ResultStatus, SCORING_VERSION, SUMMARY_FAILED_AFTER,
-        SummaryState, ValidAnswers, ValidOutput, Verdict, VerdictCap, Violation, Violations,
-        agent_score, calibrate, judge,
+        Answer, Completion, EvidenceComponents, EvidenceStrength, Exclusion, Judgement,
+        LeadScoring, QualificationResult, ResultId, ResultStatus, SCORING_VERSION,
+        SUMMARY_FAILED_AFTER, SummaryState, ValidAnswers, ValidOutput, Verdict, VerdictCap,
+        VerdictReason, Violation, Violations, agent_score, calibrate, exclusions, judge,
         ports::QualificationRepository,
         prompt::{
             AgentPrompt, build as agent_prompt, lead_document, with_ungrounded, with_violations,
@@ -102,10 +102,11 @@ pub use domain::{
     },
     quality::{
         AgentSeparation, AgentSnapshot, ConfidenceBucket, DecisionCounts, DecisionKind,
-        DecisionLabel, DecisionSnapshot, DiscardedShare, LabelFilter, MAX_NOTE_CHARS,
+        DecisionLabel, DecisionSnapshot, DiscardedShare, EXCLUSION_REASONS, ExclusionCandidate,
+        ExclusionCount, ExclusionTarget, LabelFilter, MAX_EXCLUSION_CANDIDATES, MAX_NOTE_CHARS,
         MIN_LABELLED_LEADS, ProfileInfo, ProfileQuality, QualityReport, ReasonCount, Rejection,
         RejectionProblem, RejectionReason, Suggestion, VerdictCounts, VerdictPrecision,
-        VersionPrecision, ports::DecisionRepository,
+        VersionPrecision, exclusion_targets, ports::DecisionRepository,
     },
     run::{Run, RunId, RunOutcome, RunStatus, ports::RunRepository},
     scoring::{DISTINCT_SIGNALS_FACTOR, ScoreBreakdown, ScoreContribution, score},

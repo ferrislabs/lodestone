@@ -94,6 +94,31 @@ pub struct ReasonCountDto {
 }
 
 #[derive(Debug, Serialize, PartialEq, ToSchema)]
+pub struct ExclusionCountDto {
+    pub agent_id: String,
+    pub agent_name: String,
+    pub question_id: String,
+    /// Value of the excluding option.
+    pub option: String,
+    pub label: String,
+    /// Currently discarded leads in the period excluded by this option.
+    pub count: u64,
+}
+
+#[derive(Debug, Serialize, PartialEq, ToSchema)]
+pub struct ExclusionCandidateDto {
+    pub lead_id: String,
+    pub domain: String,
+    /// Legal name from the company dossier; absent when unknown.
+    pub legal_name: Option<String>,
+    /// One of `deja_client`, `concurrent`, `editeur_integrateur`, `hebergeur_agence`.
+    #[schema(value_type = RejectionReasonDto)]
+    pub reason: String,
+    #[schema(format = DateTime)]
+    pub decided_at: String,
+}
+
+#[derive(Debug, Serialize, PartialEq, ToSchema)]
 pub struct ThresholdsDto {
     pub reliable_from: u8,
     pub discard_below: u8,
@@ -136,6 +161,10 @@ pub struct QualityDto {
     /// Precision per agent, model and prompt version, then per aggregator model and prompt version.
     pub versions: Vec<VersionPrecisionDto>,
     pub profiles: Vec<ProfileQualityDto>,
+    /// Discarded leads of the period per excluding option, most frequent first.
+    pub exclusions: Vec<ExclusionCountDto>,
+    /// Most recent leads rejected for a reason that can feed the Exclusions agent lists; the lists are never changed automatically.
+    pub exclusion_candidates: Vec<ExclusionCandidateDto>,
 }
 
 impl From<&Suggestion> for SuggestionDto {
@@ -256,6 +285,29 @@ impl From<&QualityReport> for QualityDto {
                 .profiles
                 .iter()
                 .map(ProfileQualityDto::from)
+                .collect(),
+            exclusions: report
+                .exclusions
+                .iter()
+                .map(|row| ExclusionCountDto {
+                    agent_id: row.agent_id.clone(),
+                    agent_name: row.agent_name.clone(),
+                    question_id: row.question_id.clone(),
+                    option: row.option.clone(),
+                    label: row.label.clone(),
+                    count: row.count,
+                })
+                .collect(),
+            exclusion_candidates: report
+                .exclusion_candidates
+                .iter()
+                .map(|row| ExclusionCandidateDto {
+                    lead_id: row.lead_id.to_string(),
+                    domain: row.domain.clone(),
+                    legal_name: row.legal_name.clone(),
+                    reason: row.reason.as_str().to_owned(),
+                    decided_at: row.decided_at.to_rfc3339(),
+                })
                 .collect(),
         }
     }
