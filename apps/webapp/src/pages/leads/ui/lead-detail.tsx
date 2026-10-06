@@ -70,7 +70,7 @@ export function LeadDetail({
 						changing={changing}
 						changeError={changeError}
 					/>
-					<LeadFacts facts={detail.facts} />
+					{detail.facts ? <LeadFacts facts={detail.facts} /> : null}
 					<QualificationResults results={detail.qualification_results} />
 					<LeadSummary
 						assessment={detail.assessments[0] ?? null}

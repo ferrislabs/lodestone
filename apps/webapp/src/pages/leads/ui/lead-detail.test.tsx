@@ -221,6 +221,21 @@ describe('LeadDetail', () => {
 		expect(container.querySelector('[data-warning]')).toBeNull()
 	})
 
+	it('renders without facts or signal sentences from an older API', () => {
+		const legacy = {
+			...detail,
+			facts: undefined,
+			signals: detail.signals.map((signal) => ({
+				...signal,
+				sentence: undefined,
+			})),
+		} as unknown as LeadDetailData
+		const { container } = renderDetail({ detail: legacy })
+		expect(container.querySelector('[data-section="facts"]')).toBeNull()
+		const first = detail.signals[0]
+		expect(container.textContent).toContain(`${first.kind} : ${first.value}`)
+	})
+
 	it('lists the signals as readable sentences', () => {
 		renderDetail()
 		expect(
