@@ -267,11 +267,13 @@ mod tests {
             lead_id: LeadId(Uuid::from_u128(1)),
             profile_revision: RevisionNumber::new(3).unwrap(),
             summary: "Runs Keycloak".to_owned(),
+            verdict_narrative: "Reliable".to_owned(),
             approach_angle: "Managed IAM".to_owned(),
             evidence: vec![Evidence {
                 quote: "Powered by Keycloak".to_owned(),
                 provenance: Provenance::parse("https://acme.com/about").unwrap(),
             }],
+            evidence_verified: true,
             model: "m".to_owned(),
             prompt_version: "qualification@1".to_owned(),
             draft: Some(DraftMessage {

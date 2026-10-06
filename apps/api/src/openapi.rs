@@ -39,6 +39,7 @@ impl Modify for SecurityAddon {
         handlers::exports::export_leads,
         handlers::leads::lead_detail,
         handlers::leads::change_lead_status,
+        handlers::leads::retry_lead_summary,
         handlers::drafts::list_drafts,
         handlers::drafts::get_draft,
         handlers::drafts::edit_draft,

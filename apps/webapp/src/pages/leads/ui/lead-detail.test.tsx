@@ -97,10 +97,12 @@ const detail: LeadDetailData = {
 			id: 'a1',
 			profile_revision: 3,
 			summary: 'Growing team',
+			verdict_narrative: 'Both agents agree the lead is relevant.',
 			approach_angle: 'Offer tooling',
 			evidence: [
 				{ quote: 'We are hiring', provenance: 'https://acme.test/careers' },
 			],
+			evidence_verified: true,
 			model: 'model-x',
 			prompt_version: 'v2',
 			draft: { subject: 'Hello', body: 'Body text', status: 'pending' },
@@ -120,6 +122,10 @@ function renderDetail(
 			nextStatuses={['validated', 'rejected', 'new']}
 			onBack={() => {}}
 			onChangeStatus={() => {}}
+			onOpenDraft={() => {}}
+			onRetrySummary={() => {}}
+			retryingSummary={false}
+			retrySummaryError={null}
 			changing={false}
 			changeError={null}
 			{...overrides}
@@ -151,6 +157,146 @@ describe('LeadDetail', () => {
 		expect(badge?.textContent).toBe('Fiable')
 		expect(screen.getByText('Confiance')).toBeTruthy()
 		expect(screen.getByText(/^72,5\s%$/)).toBeTruthy()
+	})
+
+	it('puts the summary on top with verdict narrative, angle and evidence', () => {
+		const { container } = renderDetail()
+		const summary = container.querySelector('[data-section="summary"]')
+		expect(summary?.textContent).toContain('Synthèse')
+		expect(summary?.textContent).toContain('Growing team')
+		expect(summary?.textContent).toContain(
+			'Verdict : Both agents agree the lead is relevant.',
+		)
+		expect(summary?.textContent).toContain("Angle d'approche : Offer tooling")
+		expect(summary?.textContent).toContain('We are hiring')
+		expect(summary?.querySelector('a')?.getAttribute('href')).toBe(
+			'https://acme.test/careers',
+		)
+		expect(screen.queryByText(/Preuves non vérifiées/)).toBeNull()
+		const sections = Array.from(
+			container.querySelectorAll('[data-slot="card"]'),
+		)
+		const position = (node: Element | null) =>
+			node
+				? sections.indexOf(node.closest('[data-slot="card"]') as Element)
+				: -1
+		expect(position(summary)).toBeLessThan(
+			position(container.querySelector('article[data-agent]')),
+		)
+	})
+
+	it('warns when the evidence could not be verified', () => {
+		const first = detail.assessments[0]
+		if (!first) throw new Error('fixture without assessment')
+		renderDetail({
+			detail: {
+				...detail,
+				assessments: [{ ...first, evidence_verified: false, evidence: [] }],
+			},
+		})
+		expect(screen.getByRole('status').textContent).toContain(
+			'Preuves non vérifiées',
+		)
+		expect(screen.getByText('Growing team')).toBeTruthy()
+	})
+
+	it('links the summary to its draft in the validation queue', () => {
+		const onOpenDraft = vi.fn()
+		renderDetail({ onOpenDraft })
+		fireEvent.click(
+			screen.getByRole('button', { name: 'Ouvrir dans la file de validation' }),
+		)
+		expect(onOpenDraft).toHaveBeenCalledWith('a1')
+	})
+
+	it('shows a failed summary with its reason and a retry button', () => {
+		const onRetrySummary = vi.fn()
+		const { container } = renderDetail({
+			onRetrySummary,
+			detail: {
+				...detail,
+				assessments: [],
+				summary_state: {
+					attempts: 5,
+					failed: true,
+					error: "échec de l'appel au modèle",
+					next_attempt_at: '2026-02-01T06:00:00Z',
+				},
+			},
+		})
+		expect(
+			container.querySelector('[data-summary-failed="true"]')?.textContent,
+		).toContain("Bilan en échec : échec de l'appel au modèle")
+		fireEvent.click(screen.getByRole('button', { name: 'Réessayer' }))
+		expect(onRetrySummary).toHaveBeenCalled()
+	})
+
+	it('shows an ongoing backoff without the failed wording', () => {
+		const { container } = renderDetail({
+			detail: {
+				...detail,
+				summary_state: {
+					attempts: 2,
+					failed: false,
+					error: 'réponse non conforme au contrat',
+					next_attempt_at: '2026-02-01T00:05:00Z',
+				},
+			},
+		})
+		const box = container.querySelector('[data-summary-failed="false"]')
+		expect(box?.textContent).toContain('Le bilan a échoué 2 fois')
+		expect(box?.textContent).not.toContain('Bilan en échec')
+	})
+
+	it('disables the retry while it runs and shows its error', () => {
+		renderDetail({
+			retryingSummary: true,
+			retrySummaryError: 'refusé',
+			detail: {
+				...detail,
+				summary_state: {
+					attempts: 5,
+					failed: true,
+					error: 'x',
+					next_attempt_at: null,
+				},
+			},
+		})
+		expect(
+			(screen.getByRole('button', { name: 'Réessayer' }) as HTMLButtonElement)
+				.disabled,
+		).toBe(true)
+		expect(screen.getByRole('alert').textContent).toBe('refusé')
+	})
+
+	it('shows no failure box for a healthy lead', () => {
+		const { container } = renderDetail()
+		expect(container.querySelector('[data-summary-failed]')).toBeNull()
+	})
+
+	it('says so when the lead has no summary yet', () => {
+		renderDetail({ detail: { ...detail, assessments: [] } })
+		expect(
+			screen.getByText(/Pas encore de synthèse : elle est rédigée/),
+		).toBeTruthy()
+		expect(screen.queryByText(/Synthèses précédentes/)).toBeNull()
+	})
+
+	it('keeps older summaries in a history below', () => {
+		const first = detail.assessments[0]
+		if (!first) throw new Error('fixture without assessment')
+		renderDetail({
+			detail: {
+				...detail,
+				assessments: [
+					first,
+					{ ...first, id: 'a0', summary: 'Older summary', draft: null },
+				],
+			},
+		})
+		expect(screen.getByText('Synthèses précédentes (1)')).toBeTruthy()
+		expect(screen.getByText('Older summary')).toBeTruthy()
+		expect(screen.getAllByText('Growing team')).toHaveLength(1)
 	})
 
 	it('renders one qualification card per agent with answers and bars', () => {

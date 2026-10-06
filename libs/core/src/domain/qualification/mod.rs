@@ -352,6 +352,33 @@ pub struct QualificationResult {
     pub created_at: DateTime<Utc>,
 }
 
+pub const SUMMARY_FAILED_AFTER: u32 = 5;
+pub const SUMMARY_ERROR_MAX_CHARS: usize = 200;
+
+pub fn summary_retry_delay(attempts: u32) -> chrono::Duration {
+    match attempts {
+        0 => chrono::Duration::zero(),
+        1 => chrono::Duration::minutes(1),
+        2 => chrono::Duration::minutes(5),
+        3 => chrono::Duration::minutes(30),
+        4 => chrono::Duration::hours(2),
+        _ => chrono::Duration::hours(6),
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SummaryState {
+    pub attempts: u32,
+    pub error: Option<String>,
+    pub next_attempt_at: Option<DateTime<Utc>>,
+}
+
+impl SummaryState {
+    pub fn is_failed(&self) -> bool {
+        self.attempts >= SUMMARY_FAILED_AFTER
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Completion {
     pub lead_id: LeadId,
@@ -414,6 +441,23 @@ mod tests {
 
     fn violations(agent: &QualificationAgent, value: Value) -> Vec<Violation> {
         validate_answers(agent, &value).unwrap_err().0
+    }
+
+    #[test]
+    fn the_summary_retry_delay_follows_the_schedule() {
+        let minutes = |attempts| summary_retry_delay(attempts).num_minutes();
+        assert_eq!(minutes(0), 0);
+        assert_eq!(
+            [1, 2, 3, 4, 5, 6, 50].map(minutes),
+            [1, 5, 30, 120, 360, 360, 360]
+        );
+        let state = |attempts| SummaryState {
+            attempts,
+            error: None,
+            next_attempt_at: None,
+        };
+        assert!(!state(SUMMARY_FAILED_AFTER - 1).is_failed());
+        assert!(state(SUMMARY_FAILED_AFTER).is_failed());
     }
 
     #[test]

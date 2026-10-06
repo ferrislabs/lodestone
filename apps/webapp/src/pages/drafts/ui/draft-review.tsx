@@ -7,6 +7,7 @@ import { isEdited } from '#/pages/drafts/lib/edit'
 import { draftStatusLabel } from '#/pages/drafts/lib/labels'
 import type { DraftEntry } from '#/pages/drafts/lib/types'
 import { DraftContext } from './draft-context'
+import { DraftSuggestion } from './draft-suggestion'
 import { OriginalDraft } from './original-draft'
 
 interface DraftReviewProps {
@@ -23,6 +24,7 @@ interface DraftReviewProps {
 	onOpenLead: (leadId: string) => void
 	onApprove: () => void
 	onStartReject: () => void
+	onCopy: (text: string) => void
 }
 
 export function DraftReview({
@@ -39,6 +41,7 @@ export function DraftReview({
 	onOpenLead,
 	onApprove,
 	onStartReject,
+	onCopy,
 }: DraftReviewProps) {
 	const pending = entry?.draft.status === 'pending'
 	return (
@@ -67,6 +70,7 @@ export function DraftReview({
 					{isEdited(entry.draft) ? <OriginalDraft draft={entry.draft} /> : null}
 					{pending ? (
 						<>
+							<DraftSuggestion draft={entry.draft} onCopy={onCopy} />
 							<section className="flex flex-col gap-3">
 								<h2 className="text-lg font-semibold">Brouillon</h2>
 								{editor}

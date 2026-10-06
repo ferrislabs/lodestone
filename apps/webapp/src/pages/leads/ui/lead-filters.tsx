@@ -9,8 +9,11 @@ import {
 } from '#/pages/leads/lib/search'
 import { LEAD_STATUSES } from '#/pages/leads/lib/transitions'
 import type { ProfileSummary } from '#/pages/leads/lib/types'
+import { VERDICT_KEYS, verdictKeyLabel } from '#/pages/leads/lib/verdict'
 
 const SORT_LABELS: Record<(typeof LEAD_SORTS)[number], string> = {
+	confidence_desc: 'Confiance décroissante',
+	confidence_asc: 'Confiance croissante',
 	score_desc: 'Score décroissant',
 	score_asc: 'Score croissant',
 	last_seen_desc: 'Dernière détection, la plus récente',
@@ -58,7 +61,7 @@ export function LeadFiltersForm({
 			</div>
 			<form
 				key={JSON.stringify(filters)}
-				className="grid gap-3 md:grid-cols-3 lg:grid-cols-6"
+				className="grid gap-3 md:grid-cols-3 lg:grid-cols-4"
 				onSubmit={(event) => {
 					event.preventDefault()
 					onApply(filtersFromForm(new FormData(event.currentTarget)))
@@ -79,6 +82,34 @@ export function LeadFiltersForm({
 							</option>
 						))}
 					</select>
+				</div>
+				<fieldset className="flex flex-col gap-1.5">
+					<legend className="text-sm font-medium">Verdict</legend>
+					<div className="flex flex-wrap gap-x-4 gap-y-1">
+						{VERDICT_KEYS.map((key) => (
+							<label key={key} className="flex items-center gap-1.5 text-sm">
+								<input
+									type="checkbox"
+									name="verdict"
+									value={key}
+									defaultChecked={filters.verdicts.includes(key)}
+								/>
+								{verdictKeyLabel(key)}
+							</label>
+						))}
+					</div>
+				</fieldset>
+				<div className="flex flex-col gap-1.5">
+					<Label htmlFor="min_confidence">Confiance minimale (%)</Label>
+					<Input
+						id="min_confidence"
+						name="min_confidence"
+						type="number"
+						min={0}
+						max={100}
+						step="any"
+						defaultValue={filters.minConfidence}
+					/>
 				</div>
 				<div className="flex flex-col gap-1.5">
 					<Label htmlFor="min_score">Score minimum</Label>

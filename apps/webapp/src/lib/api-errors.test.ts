@@ -121,7 +121,7 @@ describe('translateApiMessage', () => {
 			'Doit être un nombre de 0 à 1',
 		)
 		expect(translateApiMessage('provider is assigned to the triage tier')).toBe(
-			'Le fournisseur est affecté au niveau « Tri »',
+			'Le fournisseur est le fournisseur par défaut « Classification »',
 		)
 		expect(translateApiMessage('The provider answered with status 502.')).toBe(
 			'Le fournisseur a répondu avec le statut 502.',

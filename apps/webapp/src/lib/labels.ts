@@ -21,8 +21,7 @@ const SOURCE_LABELS: Readonly<Record<string, string>> = {
 	ted: 'TED',
 	france_travail: 'France Travail',
 	ats: 'ATS',
-	llm_qualification: 'Qualification LLM',
-	qualification: 'Qualification des leads',
+	qualification: 'Qualification et synthèse des leads',
 }
 
 const CONTACT_METHOD_LABELS: Readonly<Record<string, string>> = {

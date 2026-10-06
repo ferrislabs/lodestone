@@ -64,7 +64,7 @@ impl JobSchedule for PgJobSchedule {
                 dedup_key AS "dedup_key!", kind, status, run_at, attempts,
                 lease_until, last_error, updated_at
             FROM jobs
-            WHERE kind IN ('source.run', 'llm.qualify') AND dedup_key IS NOT NULL
+            WHERE kind = 'source.run' AND dedup_key IS NOT NULL
             ORDER BY dedup_key, (status IN ('pending', 'running')) DESC, updated_at DESC
             "#,
         )
@@ -82,7 +82,7 @@ impl JobSchedule for PgJobSchedule {
             SELECT dedup_key AS "dedup_key!", kind, status, run_at, attempts,
                 lease_until, last_error, updated_at
             FROM jobs
-            WHERE dedup_key = $1 AND kind IN ('source.run', 'llm.qualify')
+            WHERE dedup_key = $1 AND kind = 'source.run'
             ORDER BY (status IN ('pending', 'running')) DESC, updated_at DESC
             LIMIT 1
             "#,
@@ -105,7 +105,7 @@ impl JobSchedule for PgJobSchedule {
             r#"
             UPDATE jobs
             SET run_at = LEAST(run_at, $2), updated_at = $2
-            WHERE dedup_key = $1 AND status = 'pending' AND kind IN ('source.run', 'llm.qualify')
+            WHERE dedup_key = $1 AND status = 'pending' AND kind = 'source.run'
             RETURNING dedup_key AS "dedup_key!", kind, status, run_at, attempts,
                 lease_until, last_error, updated_at
             "#,

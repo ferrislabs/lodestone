@@ -13,12 +13,12 @@ export function AssessmentsList({ assessments }: AssessmentsListProps) {
 	return (
 		<Card>
 			<CardHeader>
-				<CardTitle>Évaluations ({assessments.length})</CardTitle>
+				<CardTitle>Synthèses précédentes ({assessments.length})</CardTitle>
 			</CardHeader>
 			<CardContent className="flex flex-col gap-6">
 				{assessments.length === 0 ? (
 					<p className="text-sm text-muted-foreground">
-						Aucune évaluation pour le moment.
+						Aucune synthèse précédente.
 					</p>
 				) : null}
 				{assessments.map((assessment) => (
@@ -30,6 +30,12 @@ export function AssessmentsList({ assessments }: AssessmentsListProps) {
 							<span>{formatDateTime(assessment.created_at)}</span>
 						</div>
 						<p>{assessment.summary}</p>
+						{assessment.verdict_narrative ? (
+							<p className="text-sm">
+								<span className="font-medium">Verdict : </span>
+								{assessment.verdict_narrative}
+							</p>
+						) : null}
 						<p className="text-sm">
 							<span className="font-medium">Angle d'approche : </span>
 							{assessment.approach_angle}

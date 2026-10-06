@@ -3,27 +3,15 @@ use std::{fs, num::NonZeroU32, path::PathBuf, time::Duration};
 use common::Secret;
 use llm::{anthropic::AnthropicProvider, openai::OpenAiCompatibleProvider};
 use lodestone_core::{
-    LlmProvider, PromptTemplate, ProviderDefinition, ProviderKind, QUALIFICATION_V1,
-    QualificationOutput, TRIAGE_V1, TokenPricing, TriageVerdict, UntrustedDocument,
-    ValidatedProfile,
+    AggregatorOutput, Facts, LlmProvider, ProviderDefinition, ProviderKind, TokenPricing,
+    UntrustedDocument, ValidatedProfile, Verdict, aggregation_instruction, aggregation_prompt,
+    check_evidence,
     llm::gateway::{CallSettings, Prompt, RunBudget, call_structured},
 };
 use serde_json::Value;
 
 fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../core")
-}
-
-fn cases() -> Vec<Value> {
-    let mut entries: Vec<_> = fs::read_dir(root().join("tests/fixtures/prompts"))
-        .unwrap()
-        .map(|entry| entry.unwrap().path())
-        .collect();
-    entries.sort();
-    entries
-        .iter()
-        .map(|path| serde_json::from_str(&fs::read_to_string(path).unwrap()).unwrap())
-        .collect()
 }
 
 fn definition_from_env() -> Option<ProviderDefinition> {
@@ -47,23 +35,17 @@ fn definition_from_env() -> Option<ProviderDefinition> {
     })
 }
 
-async fn run_case<P: LlmProvider>(provider: &P, case: &Value) -> Result<(), String> {
-    let name = case["name"].as_str().unwrap();
+async fn run_case<P: LlmProvider>(provider: &P) -> Result<(), String> {
+    let case: Value = serde_json::from_str(
+        &fs::read_to_string(
+            root().join("tests/fixtures/prompts/qualification_legacy_keycloak.json"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
     let raw =
         fs::read_to_string(root().join("../../docs/examples/profiles/iam-ferriskey.json")).unwrap();
-    let mut profile: Value = serde_json::from_str(&raw).unwrap();
-    if let Some(criteria) = case.get("profile_relevance_criteria") {
-        profile["llm"]["relevance_criteria"] = criteria.clone();
-    }
-    let definition = ValidatedProfile::parse(profile)
-        .unwrap()
-        .definition()
-        .clone();
-    let template: PromptTemplate = if case["template"] == "triage" {
-        TRIAGE_V1
-    } else {
-        QUALIFICATION_V1
-    };
+    let profile = ValidatedProfile::parse(serde_json::from_str(&raw).unwrap()).unwrap();
     let docs: Vec<(String, String)> = case["documents"]
         .as_array()
         .unwrap()
@@ -79,10 +61,22 @@ async fn run_case<P: LlmProvider>(provider: &P, case: &Value) -> Result<(), Stri
         .iter()
         .map(|(source, content)| UntrustedDocument { source, content })
         .collect();
-    let system = template.system(&definition);
+    let schema = AggregatorOutput::schema().unwrap();
+    let built = aggregation_prompt(
+        profile.definition(),
+        &profile.definition().aggregator,
+        &schema,
+    );
+    let instruction = aggregation_instruction(
+        Facts {
+            confidence: Some(88.0),
+            verdict: Some(Verdict::Reliable),
+        },
+        docs.len(),
+    );
     let prompt = Prompt {
-        system: &system,
-        instruction: template.instruction(),
+        system: &built.system,
+        instruction: &instruction,
         documents: &untrusted,
         max_tokens: 4096,
     };
@@ -95,71 +89,31 @@ async fn run_case<P: LlmProvider>(provider: &P, case: &Value) -> Result<(), Stri
         base_delay: Duration::from_secs(2),
     };
     let mut budget = RunBudget::new(NonZeroU32::new(100).unwrap());
-    if template.id == "triage" {
-        let verdict = call_structured::<TriageVerdict, _>(provider, prompt, settings, &mut budget)
+    let structured =
+        call_structured::<AggregatorOutput, _>(provider, prompt, settings, &mut budget)
             .await
-            .map_err(|e| format!("{name}: {e}"))?
-            .value;
-        let accepted = verdict.is_supported_relevance(&untrusted);
-        println!(
-            "{name}: model_relevant={} accepted_relevant={accepted} evidence={} email={:?}",
-            verdict.relevant,
-            verdict.evidence.len(),
-            verdict.contact_email
-        );
-        if Some(accepted) != case["expect"]["relevant"].as_bool() {
-            return Err(format!("{name}: unexpected accepted verdict {accepted}"));
-        }
-        if verdict
-            .contact_email
-            .as_deref()
-            .is_some_and(|email| email.contains("evil"))
-        {
-            return Err(format!("{name}: injected address returned"));
-        }
-    } else {
-        let output =
-            call_structured::<QualificationOutput, _>(provider, prompt, settings, &mut budget)
-                .await
-                .map_err(|e| format!("{name}: {e}"))?
-                .value;
-        let verbatim = output
-            .evidence
-            .iter()
-            .filter(|q| {
-                docs.get(q.document_index as usize)
-                    .is_some_and(|d| d.1.contains(&q.quote))
-            })
-            .count();
-        println!(
-            "{name}: evidence={} verbatim={verbatim}",
-            output.evidence.len()
-        );
-    }
+            .map_err(|error| error.to_string())?;
+    let check = check_evidence(&structured.value.evidence, &untrusted);
+    println!(
+        "evidence={} verbatim={} rejected={}",
+        structured.value.evidence.len(),
+        check.verified.len(),
+        check.rejected
+    );
     Ok(())
 }
 
 #[tokio::test]
-async fn reference_cases_against_a_real_provider() {
+async fn the_aggregator_follows_the_contract_on_a_real_provider() {
     let Some(definition) = definition_from_env() else {
-        println!(
-            "skipped: set LODESTONE_LLM_LIVE=1 (and LODESTONE_LLM_KIND, LODESTONE_LLM_BASE_URL, LODESTONE_LLM_MODEL, LODESTONE_LLM_API_KEY)"
-        );
+        println!("skipped: set LODESTONE_LLM_LIVE=1");
         return;
     };
-    let mut failures = Vec::new();
-    for case in cases() {
-        let result = match definition.kind {
-            ProviderKind::Anthropic => {
-                run_case(&AnthropicProvider::new(definition.clone()).unwrap(), &case).await
-            }
-            ProviderKind::Mistral | ProviderKind::OpenAiCompatible => {
-                run_case(&OpenAiCompatibleProvider::new(&definition).unwrap(), &case).await
-            }
-        };
-        if let Err(failure) = result {
-            failures.push(failure);
+    let result = match definition.kind {
+        ProviderKind::Anthropic => {
+            run_case(&AnthropicProvider::new(definition.clone()).unwrap()).await
         }
-    }
-    assert!(failures.is_empty(), "{failures:#?}");
+        _ => run_case(&OpenAiCompatibleProvider::new(&definition).unwrap()).await,
+    };
+    result.unwrap();
 }

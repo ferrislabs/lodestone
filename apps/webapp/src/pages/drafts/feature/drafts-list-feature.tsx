@@ -6,6 +6,8 @@ import {
 	queryFromSearch,
 	searchForPage,
 	searchForProfile,
+	searchForVerdicts,
+	verdictsFromSearch,
 } from '#/pages/drafts/lib/search'
 import type { DraftEntry } from '#/pages/drafts/lib/types'
 import { DraftsList } from '#/pages/drafts/ui/drafts-list'
@@ -37,7 +39,17 @@ export function DraftsListFeature() {
 			profiles={profilesQuery.data?.data ?? []}
 			profileId={search.profile ?? ''}
 			onProfileChange={(profile) =>
-				void navigate({ to: '/drafts', search: searchForProfile(profile) })
+				void navigate({
+					to: '/drafts',
+					search: searchForProfile(profile, search),
+				})
+			}
+			verdicts={verdictsFromSearch(search)}
+			onVerdictsChange={(verdicts) =>
+				void navigate({
+					to: '/drafts',
+					search: searchForVerdicts(search, verdicts),
+				})
 			}
 			pagination={draftsQuery.data?.pagination ?? null}
 			onPageChange={(page) =>

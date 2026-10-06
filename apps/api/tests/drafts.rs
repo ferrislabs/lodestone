@@ -206,6 +206,8 @@ async fn the_queue_lists_only_latest_pending_drafts_of_qualified_visible_leads(p
     assert_eq!(first["draft"]["subject"], "Hello");
     assert_eq!(first["draft"]["status"], "pending");
     assert_eq!(first["draft"]["original_subject"], Value::Null);
+    assert_eq!(first["draft"]["suggested_subject"], Value::Null);
+    assert_eq!(first["draft"]["outdated_at"], Value::Null);
     assert_eq!(first["summary"], "Runs Keycloak");
     assert_eq!(first["approach_angle"], "Offer managed IAM");
     assert_eq!(first["evidence"][0]["quote"], "Powered by Keycloak");
@@ -244,6 +246,77 @@ async fn the_queue_filters_by_profile_and_paginates(pool: PgPool) {
 }
 
 #[sqlx::test(migrations = "../../migrations")]
+async fn the_queue_is_sorted_by_confidence_and_filtered_by_verdict(pool: PgPool) {
+    let seed = Seed { pool: pool.clone() };
+    let profile = seed.profile("keycloak-ops").await;
+    for (domain, score, judgement) in [
+        ("waiting.com", 99.0, None),
+        ("maybe.com", 1.0, Some((55.0, "a_verifier"))),
+        ("sure.com", 1.0, Some((91.0, "fiable"))),
+        ("out.com", 1.0, Some((5.0, "ecarte"))),
+    ] {
+        let lead = seed.lead(&profile, domain, "qualified", score).await;
+        if let Some((confidence, verdict)) = judgement {
+            sqlx::query("UPDATE leads SET confidence = $2, verdict = $3 WHERE id = $1::uuid")
+                .bind(&lead)
+                .bind(confidence)
+                .bind(verdict)
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+        seed.draft(&lead, 10, true).await;
+    }
+    sqlx::query("UPDATE assessments SET verdict_narrative = 'Les agents concordent.', evidence_verified = false")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let api = Api::new(pool).await;
+
+    let (_, all) = api.get("/api/v1/drafts").await;
+    assert_eq!(
+        domains(&all),
+        ["sure.com", "maybe.com", "out.com", "waiting.com"]
+    );
+    let first = &all["data"][0];
+    assert_eq!(first["lead"]["confidence"], 91.0);
+    assert_eq!(first["lead"]["verdict"], "fiable");
+    assert_eq!(first["verdict_narrative"], "Les agents concordent.");
+    assert_eq!(first["evidence_verified"], false);
+    assert!(all["data"][3]["lead"]["verdict"].is_null());
+
+    let (_, visible) = api
+        .get("/api/v1/drafts?verdict=fiable,a_verifier,en_attente")
+        .await;
+    assert_eq!(domains(&visible), ["sure.com", "maybe.com", "waiting.com"]);
+    assert_eq!(visible["pagination"]["total"], 3);
+
+    let (_, discarded) = api.get("/api/v1/drafts?verdict=ecarte").await;
+    assert_eq!(domains(&discarded), ["out.com"]);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_kept_draft_exposes_the_newer_suggestion(pool: PgPool) {
+    let seed = Seed { pool: pool.clone() };
+    let profile = seed.profile("keycloak-ops").await;
+    let lead = seed.lead(&profile, "acme.com", "qualified", 5.0).await;
+    let draft = seed.draft(&lead, 10, true).await;
+    sqlx::query("UPDATE assessments SET draft_edited_at = now(), draft_suggested_subject = 'Nouvel objet', draft_suggested_body = 'Nouveau corps', draft_outdated_at = now() WHERE id = $1::uuid")
+        .bind(&draft)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let api = Api::new(pool).await;
+
+    let (status, body) = api.get(&format!("/api/v1/drafts/{draft}")).await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["data"]["draft"]["suggested_subject"], "Nouvel objet");
+    assert_eq!(body["data"]["draft"]["suggested_body"], "Nouveau corps");
+    assert!(body["data"]["draft"]["outdated_at"].is_string());
+}
+
+#[sqlx::test(migrations = "../../migrations")]
 async fn queue_parameters_are_validated(pool: PgPool) {
     let api = Api::new(pool).await;
 
@@ -252,6 +325,8 @@ async fn queue_parameters_are_validated(pool: PgPool) {
         "/api/v1/drafts?page=0",
         "/api/v1/drafts?per_page=101",
         "/api/v1/drafts?page=abc",
+        "/api/v1/drafts?verdict=maybe",
+        "/api/v1/drafts?verdict=fiable%27%3B--",
     ] {
         assert_eq!(api.get(uri).await.0, StatusCode::BAD_REQUEST, "{uri}");
     }

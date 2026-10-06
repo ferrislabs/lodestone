@@ -1,11 +1,17 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+	confidenceWidth,
+	DEFAULT_VERDICTS,
 	formatAgentScore,
 	formatConfidence,
 	formatProbability,
+	isDefaultVerdicts,
+	orderedVerdicts,
 	probabilityWidth,
+	summaryExcerpt,
 	verdictKey,
+	verdictKeyLabel,
 	verdictLabel,
 } from './verdict'
 
@@ -42,5 +48,46 @@ describe('number formats', () => {
 		expect(probabilityWidth(0.255)).toBe(26)
 		expect(probabilityWidth(-1)).toBe(0)
 		expect(probabilityWidth(3)).toBe(100)
+	})
+})
+
+describe('summary excerpt', () => {
+	it('keeps a short summary and collapses its whitespace', () => {
+		expect(summaryExcerpt('Un  résumé\ncourt ')).toBe('Un résumé court')
+		expect(summaryExcerpt(null)).toBe('')
+		expect(summaryExcerpt(undefined)).toBe('')
+	})
+
+	it('cuts a long summary near 140 characters with an ellipsis', () => {
+		const excerpt = summaryExcerpt('mot '.repeat(80))
+		expect(excerpt.length).toBeLessThanOrEqual(140)
+		expect(excerpt.endsWith('…')).toBe(true)
+	})
+})
+
+describe('confidence bar', () => {
+	it('keeps the width within 0 and 100', () => {
+		expect(confidenceWidth(72.4)).toBe(72)
+		expect(confidenceWidth(-5)).toBe(0)
+		expect(confidenceWidth(250)).toBe(100)
+		expect(confidenceWidth(null)).toBe(0)
+	})
+})
+
+describe('verdict filters', () => {
+	it('hides discarded leads by default', () => {
+		expect(DEFAULT_VERDICTS).not.toContain('ecarte')
+		expect(isDefaultVerdicts(['en_attente', 'fiable', 'a_verifier'])).toBe(true)
+		expect(isDefaultVerdicts(['fiable'])).toBe(false)
+		expect(isDefaultVerdicts(['fiable', 'a_verifier', 'ecarte'])).toBe(false)
+	})
+
+	it('orders verdicts like the badges and names each key', () => {
+		expect(orderedVerdicts(['en_attente', 'ecarte', 'fiable'])).toEqual([
+			'fiable',
+			'ecarte',
+			'en_attente',
+		])
+		expect(verdictKeyLabel('en_attente')).toBe('En attente')
 	})
 })

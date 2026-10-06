@@ -2,7 +2,8 @@ import type { ColumnDef } from '@tanstack/react-table'
 
 import { formatDateTime } from '#/pages/leads/lib/format'
 import type { Lead } from '#/pages/leads/lib/types'
-import { formatConfidence } from '#/pages/leads/lib/verdict'
+import { summaryExcerpt } from '#/pages/leads/lib/verdict'
+import { ConfidenceBar } from './confidence-bar'
 import { LeadStatusBadge } from './lead-status-badge'
 import { ScoreBar } from './score-bar'
 import { VerdictBadge } from './verdict-badge'
@@ -26,21 +27,36 @@ export function buildLeadColumns(
 			),
 		},
 		{
+			id: 'verdict',
+			header: 'Verdict',
+			cell: ({ row }) => <VerdictBadge verdict={row.original.verdict} />,
+		},
+		{
+			id: 'confidence',
+			header: 'Confiance',
+			cell: ({ row }) => <ConfidenceBar confidence={row.original.confidence} />,
+		},
+		{
+			id: 'summary',
+			header: 'Synthèse',
+			cell: ({ row }) => {
+				const excerpt = summaryExcerpt(row.original.summary)
+				return excerpt === '' ? (
+					<span className="text-muted-foreground">Pas encore de synthèse</span>
+				) : (
+					<span
+						className="block max-w-md text-sm"
+						title={row.original.summary ?? undefined}
+					>
+						{excerpt}
+					</span>
+				)
+			},
+		},
+		{
 			id: 'score',
 			header: 'Score',
 			cell: ({ row }) => <ScoreBar score={row.original.score} max={maxScore} />,
-		},
-		{
-			id: 'verdict',
-			header: 'Verdict',
-			cell: ({ row }) => (
-				<div className="flex items-center gap-2">
-					<VerdictBadge verdict={row.original.verdict} />
-					<span className="font-mono text-xs tabular-nums text-muted-foreground">
-						{formatConfidence(row.original.confidence)}
-					</span>
-				</div>
-			),
 		},
 		{
 			id: 'status',

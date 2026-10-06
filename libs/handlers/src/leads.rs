@@ -7,7 +7,8 @@ use axum::{
 use lodestone_core::{
     Assessment, ContactEmail, DraftMessage, DraftReview, DraftStatus, Lead, LeadDetail, LeadId,
     LeadQuery, LeadSort, LeadStatus, LlmProviderRecord, Profile, ProfileId, QualificationResult,
-    ResultStatus, ScoreContribution, Signal, SignalKind, Verdict, definition::QualificationAgent,
+    ResultStatus, SUMMARY_FAILED_AFTER, ScoreContribution, Signal, SignalKind, SummaryState,
+    Verdict, VerdictFilter, definition::QualificationAgent,
 };
 use pagination::{MAX_PAGE, MAX_PER_PAGE, Page, PaginationMetadata, PaginationParams};
 use serde::{Deserialize, Serialize};
@@ -88,6 +89,8 @@ pub struct LeadDto {
     pub confidence: Option<f64>,
     /// One of `fiable`, `a_verifier`, `ecarte`; absent while the verdict is pending.
     pub verdict: Option<VerdictDto>,
+    /// Summary written by the aggregator; absent until the lead has been summarised.
+    pub summary: Option<String>,
     #[schema(format = DateTime)]
     pub qualified_at: Option<String>,
     #[schema(format = DateTime)]
@@ -99,7 +102,7 @@ pub struct LeadDto {
 }
 
 impl LeadDto {
-    fn new(lead: &Lead, profile: &Profile) -> Self {
+    fn new(lead: &Lead, profile: &Profile, summary: Option<&str>) -> Self {
         Self {
             id: lead.id.to_string(),
             profile: ProfileRefDto::from(profile),
@@ -108,6 +111,7 @@ impl LeadDto {
             score: lead.score.get(),
             confidence: lead.confidence,
             verdict: lead.verdict.map(VerdictDto::from),
+            summary: summary.map(str::to_owned),
             qualified_at: lead.qualified_at.map(|at| at.to_rfc3339()),
             first_seen_at: lead.first_seen_at.to_rfc3339(),
             last_seen_at: lead.last_seen_at.to_rfc3339(),
@@ -211,6 +215,12 @@ pub struct DraftDto {
     #[schema(format = DateTime)]
     pub reviewed_at: Option<String>,
     pub rejection_reason: Option<String>,
+    /// Subject the aggregator proposed after the draft was edited; the edited draft is kept.
+    pub suggested_subject: Option<String>,
+    pub suggested_body: Option<String>,
+    /// Set when the summary was rewritten after a human edit, so the suggestion is newer than the draft.
+    #[schema(format = DateTime)]
+    pub outdated_at: Option<String>,
 }
 
 impl DraftDto {
@@ -233,6 +243,15 @@ impl DraftDto {
             reviewed_by: review.reviewed_by.map(|user| user.to_string()),
             reviewed_at: review.reviewed_at.map(|at| at.to_rfc3339()),
             rejection_reason: review.rejection_reason.clone(),
+            suggested_subject: review
+                .suggestion
+                .as_ref()
+                .map(|suggestion| suggestion.subject.clone()),
+            suggested_body: review
+                .suggestion
+                .as_ref()
+                .map(|suggestion| suggestion.body.clone()),
+            outdated_at: review.outdated_at.map(|at| at.to_rfc3339()),
         }
     }
 }
@@ -242,8 +261,12 @@ pub struct AssessmentDto {
     pub id: String,
     pub profile_revision: u32,
     pub summary: String,
+    /// Why the verdict holds, written by the aggregator; empty on assessments of the former qualification job.
+    pub verdict_narrative: String,
     pub approach_angle: String,
     pub evidence: Vec<EvidenceDto>,
+    /// False when at least one quote could not be checked verbatim against the signals, or none was given.
+    pub evidence_verified: bool,
     pub model: String,
     pub prompt_version: String,
     pub draft: Option<DraftDto>,
@@ -257,6 +280,7 @@ impl From<&Assessment> for AssessmentDto {
             id: assessment.id.to_string(),
             profile_revision: assessment.profile_revision.get(),
             summary: assessment.summary.clone(),
+            verdict_narrative: assessment.verdict_narrative.clone(),
             approach_angle: assessment.approach_angle.clone(),
             evidence: assessment
                 .evidence
@@ -266,6 +290,7 @@ impl From<&Assessment> for AssessmentDto {
                     provenance: evidence.provenance.as_str().to_owned(),
                 })
                 .collect(),
+            evidence_verified: assessment.evidence_verified,
             model: assessment.model.clone(),
             prompt_version: assessment.prompt_version.clone(),
             draft: assessment
@@ -408,6 +433,29 @@ impl QualificationResultDto {
 }
 
 #[derive(Debug, Serialize, PartialEq, ToSchema)]
+pub struct SummaryStateDto {
+    /// Consecutive failed attempts of the aggregator on this lead.
+    pub attempts: u32,
+    /// True from 5 consecutive failures; the aggregator then retries every 6 hours.
+    pub failed: bool,
+    /// Short reason of the last failure, in French.
+    pub error: Option<String>,
+    #[schema(format = DateTime)]
+    pub next_attempt_at: Option<String>,
+}
+
+impl SummaryStateDto {
+    fn new(state: &SummaryState) -> Option<Self> {
+        (state.attempts > 0).then(|| Self {
+            attempts: state.attempts,
+            failed: state.attempts >= SUMMARY_FAILED_AFTER,
+            error: state.error.clone(),
+            next_attempt_at: state.next_attempt_at.map(|at| at.to_rfc3339()),
+        })
+    }
+}
+
+#[derive(Debug, Serialize, PartialEq, ToSchema)]
 pub struct LeadDetailDto {
     pub lead: LeadDto,
     pub score_breakdown: Vec<ScoreContributionDto>,
@@ -416,6 +464,8 @@ pub struct LeadDetailDto {
     pub assessments: Vec<AssessmentDto>,
     /// Latest result of every qualification agent of the revision last used, in profile order.
     pub qualification_results: Vec<QualificationResultDto>,
+    /// Present while the summary of the lead failed at least once since the agents last answered.
+    pub summary_state: Option<SummaryStateDto>,
 }
 
 fn ordered_results(
@@ -440,8 +490,16 @@ fn ordered_results(
 impl LeadDetailDto {
     pub fn new(detail: &LeadDetail, providers: &[LlmProviderRecord]) -> Self {
         Self {
+            summary_state: detail.summary_state.as_ref().and_then(SummaryStateDto::new),
             qualification_results: ordered_results(detail, providers),
-            lead: LeadDto::new(&detail.lead, &detail.profile),
+            lead: LeadDto::new(
+                &detail.lead,
+                &detail.profile,
+                detail
+                    .assessments
+                    .first()
+                    .map(|assessment| assessment.summary.as_str()),
+            ),
             score_breakdown: detail
                 .lead
                 .score_breakdown
@@ -461,6 +519,11 @@ pub struct ListLeadsParams {
     /// One of new, qualified, validated, rejected, contacted, uncertain.
     #[param(value_type = Option<LeadStatusDto>)]
     pub(crate) status: Option<String>,
+    /// Comma-separated verdicts to keep: fiable, a_verifier, ecarte, en_attente. All leads when absent.
+    pub(crate) verdict: Option<String>,
+    /// Minimum confidence in percent, inclusive. Leads without a confidence are left out.
+    #[param(value_type = Option<f64>, minimum = 0, maximum = 100)]
+    pub(crate) min_confidence: Option<String>,
     /// Minimum score, inclusive. Must be a non-negative number.
     #[param(value_type = Option<f64>, minimum = 0)]
     pub(crate) min_score: Option<String>,
@@ -468,7 +531,7 @@ pub struct ListLeadsParams {
     pub(crate) domain: Option<String>,
     /// Only leads having at least one signal of this kind.
     pub(crate) signal: Option<String>,
-    /// One of score_desc (default), score_asc, last_seen_desc, first_seen_desc, domain_asc.
+    /// One of confidence_desc (default), confidence_asc, score_desc, score_asc, last_seen_desc, first_seen_desc, domain_asc.
     pub(crate) sort: Option<String>,
     /// Page number, starting at 1.
     #[param(value_type = Option<u64>, minimum = 1)]
@@ -486,6 +549,25 @@ pub(crate) fn parse_number<T: FromStr>(field: &str, raw: &str) -> Result<T, ApiE
     raw.trim()
         .parse()
         .map_err(|_| invalid(field, "must be a number"))
+}
+
+pub(crate) fn parse_verdicts(raw: Option<&str>) -> Result<Vec<VerdictFilter>, ApiError> {
+    let mut verdicts = Vec::new();
+    for part in raw.unwrap_or_default().split(',').map(str::trim) {
+        if part.is_empty() {
+            continue;
+        }
+        let filter = VerdictFilter::parse(part).ok_or_else(|| {
+            invalid(
+                "verdict",
+                "must be a comma-separated list of fiable, a_verifier, ecarte, en_attente",
+            )
+        })?;
+        if !verdicts.contains(&filter) {
+            verdicts.push(filter);
+        }
+    }
+    Ok(verdicts)
 }
 
 pub(crate) fn parse_pagination(
@@ -519,6 +601,21 @@ impl ListLeadsParams {
                         "must be one of new, qualified, validated, rejected, contacted, uncertain",
                     )
                 })
+            })
+            .transpose()?;
+
+        let verdicts = parse_verdicts(self.verdict.as_deref())?;
+
+        let min_confidence = self
+            .min_confidence
+            .as_deref()
+            .map(|raw| {
+                let value = parse_number::<f64>("min_confidence", raw)?;
+                if value.is_finite() && (0.0..=100.0).contains(&value) {
+                    Ok(value)
+                } else {
+                    Err(invalid("min_confidence", "must be between 0 and 100"))
+                }
             })
             .transpose()?;
 
@@ -557,7 +654,7 @@ impl ListLeadsParams {
             Some(raw) => LeadSort::parse(raw).ok_or_else(|| {
                 invalid(
                     "sort",
-                    "must be one of score_desc, score_asc, last_seen_desc, first_seen_desc, domain_asc",
+                    "must be one of confidence_desc, confidence_asc, score_desc, score_asc, last_seen_desc, first_seen_desc, domain_asc",
                 )
             })?,
         };
@@ -566,6 +663,8 @@ impl ListLeadsParams {
 
         Ok(LeadQuery {
             status,
+            verdicts,
+            min_confidence,
             min_score,
             domain_contains,
             signal_kind,
@@ -619,7 +718,13 @@ pub async fn list_leads(
         .page
         .items
         .iter()
-        .map(|lead| LeadDto::new(lead, &listing.profile))
+        .map(|lead| {
+            LeadDto::new(
+                lead,
+                &listing.profile,
+                listing.summaries.get(&lead.id).map(String::as_str),
+            )
+        })
         .collect();
     let meta = PaginationMetadata::new(
         per_page,
@@ -689,5 +794,44 @@ pub async fn change_lead_status(
         .change_lead_status(id, request.status.into(), actor)
         .await?;
     let detail = state.usecase.lead_detail(lead.id).await?;
-    Ok(Response::OK(LeadDto::new(&lead, &detail.profile)))
+    let summary = detail
+        .assessments
+        .first()
+        .map(|assessment| assessment.summary.as_str());
+    Ok(Response::OK(LeadDto::new(&lead, &detail.profile, summary)))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/leads/{lead_id}/summary/retry",
+    tag = "leads",
+    security(("bearer_auth" = [])),
+    params(("lead_id" = String, Path, description = "Lead identifier (UUID)")),
+    responses(
+        (status = 200, description = "The failure counter is reset; the aggregator tries again on its next loop", body = crate::response::DataEnvelope<LeadDto>),
+        (status = 400, description = "Malformed lead identifier"),
+        (status = 401, description = "Missing, malformed, invalid or expired bearer token"),
+        (status = 403, description = "The caller is not a user"),
+        (status = 404, description = "Unknown lead, or its domain is suppressed"),
+        (status = 409, description = "The lead has not been qualified yet"),
+    )
+)]
+pub async fn retry_lead_summary(
+    State(state): State<AppState>,
+    user: Option<Extension<AuthenticatedUser>>,
+    Path(lead_id_raw): Path<String>,
+) -> Result<Response<LeadDto>, ApiError> {
+    if user.is_none() {
+        return Err(ApiError::Forbidden);
+    }
+    let lead = state
+        .usecase
+        .retry_lead_summary(lead_id(&lead_id_raw)?)
+        .await?;
+    let detail = state.usecase.lead_detail(lead.id).await?;
+    let summary = detail
+        .assessments
+        .first()
+        .map(|assessment| assessment.summary.as_str());
+    Ok(Response::OK(LeadDto::new(&lead, &detail.profile, summary)))
 }

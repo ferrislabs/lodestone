@@ -12,7 +12,7 @@ use utoipa::{IntoParams, ToSchema};
 use crate::{
     auth::AuthenticatedUser,
     errors::{ApiError, ErrorDetail},
-    leads::{DraftDto, EvidenceDto, invalid, parse_pagination},
+    leads::{DraftDto, EvidenceDto, VerdictDto, invalid, parse_pagination, parse_verdicts},
     profiles::ProfileRefDto,
     response::{DataEnvelope, Response},
     state::AppState,
@@ -23,6 +23,10 @@ pub struct DraftLeadDto {
     pub id: String,
     pub domain: String,
     pub score: f64,
+    /// Weighted confidence in percent; absent until a qualification agent answered validly.
+    pub confidence: Option<f64>,
+    /// One of `fiable`, `a_verifier`, `ecarte`; absent while the verdict is pending.
+    pub verdict: Option<VerdictDto>,
     pub profile: ProfileRefDto,
 }
 
@@ -49,8 +53,10 @@ pub struct DraftEntryDto {
     pub lead: DraftLeadDto,
     pub draft: DraftDto,
     pub summary: String,
+    pub verdict_narrative: String,
     pub approach_angle: String,
     pub evidence: Vec<EvidenceDto>,
+    pub evidence_verified: bool,
     pub contact: Option<DraftContactDto>,
     #[schema(format = DateTime)]
     pub created_at: String,
@@ -69,6 +75,8 @@ impl TryFrom<&DraftEntry> for DraftEntryDto {
                 id: record.lead.id.to_string(),
                 domain: record.lead.domain.as_str().to_owned(),
                 score: record.lead.score.get(),
+                confidence: record.lead.confidence,
+                verdict: record.lead.verdict.map(VerdictDto::from),
                 profile: ProfileRefDto {
                     id: record.profile_id.to_string(),
                     name: record.profile_name.as_str().to_owned(),
@@ -76,6 +84,7 @@ impl TryFrom<&DraftEntry> for DraftEntryDto {
             },
             draft: DraftDto::new(draft, assessment.draft_review.as_ref()),
             summary: assessment.summary.clone(),
+            verdict_narrative: assessment.verdict_narrative.clone(),
             approach_angle: assessment.approach_angle.clone(),
             evidence: assessment
                 .evidence
@@ -85,6 +94,7 @@ impl TryFrom<&DraftEntry> for DraftEntryDto {
                     provenance: evidence.provenance.as_str().to_owned(),
                 })
                 .collect(),
+            evidence_verified: assessment.evidence_verified,
             contact: entry.contact.as_ref().map(DraftContactDto::from),
             created_at: assessment.created_at.to_rfc3339(),
         })
@@ -96,6 +106,8 @@ impl TryFrom<&DraftEntry> for DraftEntryDto {
 pub struct ListDraftsParams {
     /// Only drafts of this profile.
     profile_id: Option<String>,
+    /// Comma-separated verdicts to keep: fiable, a_verifier, ecarte, en_attente. All drafts when absent.
+    verdict: Option<String>,
     /// Page number, starting at 1.
     #[param(value_type = Option<u64>, minimum = 1)]
     page: Option<String>,
@@ -149,7 +161,7 @@ fn actor(user: Option<Extension<AuthenticatedUser>>) -> Result<lodestone_core::U
     security(("bearer_auth" = [])),
     params(ListDraftsParams),
     responses(
-        (status = 200, description = "Pending drafts of qualified, non-suppressed leads, highest lead score first", body = DataEnvelope<Vec<DraftEntryDto>>),
+        (status = 200, description = "Pending drafts of qualified, non-suppressed leads, highest lead confidence first", body = DataEnvelope<Vec<DraftEntryDto>>),
         (status = 400, description = "A filter or pagination parameter is invalid"),
         (status = 401, description = "Missing, malformed, invalid or expired bearer token"),
         (status = 404, description = "Unknown profile"),
@@ -167,6 +179,7 @@ pub async fn list_drafts(
                 .map_err(|_| invalid("profile_id", "must be a UUID"))
         })
         .transpose()?;
+    let verdicts = parse_verdicts(params.verdict.as_deref())?;
     let pagination = parse_pagination(params.page.as_deref(), params.per_page.as_deref())?;
     let per_page = pagination.per_page();
     let current_page = pagination.offset() / per_page + 1;
@@ -175,6 +188,7 @@ pub async fn list_drafts(
         .usecase
         .list_pending_drafts(
             profile_id,
+            &verdicts,
             u32::try_from(per_page).unwrap_or(u32::MAX),
             pagination.offset(),
         )

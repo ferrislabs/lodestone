@@ -34,6 +34,15 @@ export function LeadDetailFeature() {
 		},
 	})
 
+	const retrySummary = useMutation({
+		...lodestoneApi().mutation('post', '/api/v1/leads/{lead_id}/summary/retry')
+			.mutationOptions,
+		onSuccess: () =>
+			queryClient.invalidateQueries({
+				queryKey: [{ _id: '/api/v1/leads/{lead_id}' }],
+			}),
+	})
+
 	const detail = detailQuery.data?.data ?? null
 
 	return (
@@ -61,6 +70,17 @@ export function LeadDetailFeature() {
 					path: { lead_id: leadId },
 					body: { status },
 				})
+			}
+			onOpenDraft={(assessmentId) => {
+				void navigate({
+					to: '/drafts/$assessmentId',
+					params: { assessmentId },
+				})
+			}}
+			onRetrySummary={() => retrySummary.mutate({ path: { lead_id: leadId } })}
+			retryingSummary={retrySummary.isPending}
+			retrySummaryError={
+				retrySummary.isError ? errorMessage(retrySummary.error) : null
 			}
 			changing={changeStatus.isPending}
 			changeError={

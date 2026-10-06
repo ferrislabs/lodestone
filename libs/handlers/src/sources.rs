@@ -19,7 +19,6 @@ use crate::{
 
 const MAX_SOURCE_NAME_LEN: usize = 64;
 const SOURCE_JOB_KIND: &str = "source.run";
-const QUALIFICATION_JOB_KIND: &str = "llm.qualify";
 const QUALIFICATION_LISTENER_KIND: &str = "listener.qualification";
 
 #[derive(Debug, Serialize, PartialEq, Eq, ToSchema)]
@@ -65,7 +64,7 @@ pub struct ListenerDto {
     pub last_error: Option<String>,
     pub items_total: u64,
     pub signals_total: u64,
-    /// Work waiting: lag in tiles (certificate transparency), due hosts, due contact targets or leads to qualify.
+    /// Work waiting: lag in tiles (certificate transparency), due hosts, due contact targets, leads to qualify or leads to summarise.
     pub backlog: Option<u64>,
     /// Last time the holder reported in; a listener silent for too long is `stale`.
     #[schema(format = DateTime)]
@@ -106,7 +105,7 @@ pub struct SourceDto {
     pub mode: String,
     /// Listener state of a continuous source; absent for scheduled sources.
     pub listener: Option<ListenerDto>,
-    /// Job kind: `source.run`, `llm.qualify` or `listener.qualification`.
+    /// Job kind: `source.run` or `listener.qualification`.
     pub kind: String,
     /// Translation key of the source label.
     pub label_key: String,
@@ -126,13 +125,6 @@ pub struct SourceDto {
     pub last_error: Option<String>,
     /// Latest runs of the source across profiles, newest first.
     pub last_runs: Vec<SourceRunDto>,
-}
-
-fn kind_of(source: SourceName) -> &'static str {
-    match source {
-        SourceName::LlmQualification => QUALIFICATION_JOB_KIND,
-        _ => SOURCE_JOB_KIND,
-    }
 }
 
 fn label_key(source: SourceName) -> String {
@@ -192,7 +184,7 @@ impl SourceDto {
             source: source.as_str().to_owned(),
             mode: "scheduled".to_owned(),
             listener: None,
-            kind: kind_of(source).to_owned(),
+            kind: SOURCE_JOB_KIND.to_owned(),
             label_key: label_key(source),
             status: "unavailable".to_owned(),
             unavailable_reason: Some(reason.to_owned()),
@@ -248,7 +240,7 @@ pub async fn list_sources(
                 let status = listeners
                     .iter()
                     .find(|listener| listener.name == source.as_str());
-                return SourceDto::continuous(source.as_str(), kind_of(source), status, &runs);
+                return SourceDto::continuous(source.as_str(), SOURCE_JOB_KIND, status, &runs);
             }
             match schedule
                 .jobs
@@ -276,7 +268,7 @@ pub async fn list_sources(
     path = "/api/v1/sources/{source}/run",
     tag = "sources",
     security(("bearer_auth" = [])),
-    params(("source" = String, Path, description = "Source name, for example `boamp` or `llm_qualification`")),
+    params(("source" = String, Path, description = "Source name, for example `boamp` or `decp`")),
     responses(
         (status = 202, description = "The job is due now; the worker picks it up within its poll interval", body = DataEnvelope<SourceDto>),
         (status = 400, description = "Malformed source name"),

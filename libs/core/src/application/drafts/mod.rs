@@ -13,6 +13,7 @@ use crate::{
                 InvalidDraftTransition,
             },
             ports::{AssessmentRepository, ContactRepository, LeadRepository},
+            query::VerdictFilter,
         },
         profile::{ProfileId, ports::ProfileRepository},
         suppression::ports::SuppressionRepository,
@@ -103,6 +104,7 @@ impl LodestoneUseCase {
     pub async fn list_pending_drafts(
         &self,
         profile_id: Option<ProfileId>,
+        verdicts: &[VerdictFilter],
         limit: u32,
         offset: u64,
     ) -> Result<DraftQueue, CoreError> {
@@ -117,7 +119,7 @@ impl LodestoneUseCase {
             return Err(CoreError::NotFound);
         }
         let page = assessments
-            .list_pending_drafts(profile_id, limit, offset)
+            .list_pending_drafts(profile_id, verdicts, limit, offset)
             .await?;
         let mut items = Vec::with_capacity(page.items.len());
         for record in page.items {

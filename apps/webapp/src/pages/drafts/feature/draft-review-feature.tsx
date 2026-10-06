@@ -41,6 +41,7 @@ export function DraftReviewFeature() {
 			onOpenLead={() => {}}
 			onApprove={() => {}}
 			onStartReject={() => {}}
+			onCopy={() => {}}
 		/>
 	)
 }
@@ -191,6 +192,9 @@ function DraftReviewForms({ entry }: DraftReviewFormsProps) {
 				approve.mutate({ path: { assessment_id: assessmentId } })
 			}}
 			onStartReject={() => setRejectOpen(true)}
+			onCopy={(text) => {
+				void navigator.clipboard?.writeText(text)
+			}}
 		/>
 	)
 }

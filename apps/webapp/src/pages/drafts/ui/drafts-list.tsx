@@ -18,10 +18,17 @@ import type {
 	ProfileSummary,
 } from '#/pages/drafts/lib/types'
 import { formatDateTime } from '#/pages/leads/lib/format'
+import {
+	VERDICT_KEYS,
+	type VerdictKey,
+	verdictKeyLabel,
+} from '#/pages/leads/lib/verdict'
+import { ConfidenceBar } from '#/pages/leads/ui/confidence-bar'
 import { ScoreBar } from '#/pages/leads/ui/score-bar'
+import { VerdictBadge } from '#/pages/leads/ui/verdict-badge'
 
 const SKELETON_ROWS = ['a', 'b', 'c', 'd', 'e']
-const COLUMNS = 6
+const COLUMNS = 8
 
 const SELECT_CLASS =
 	'h-9 w-full rounded-md border bg-transparent px-3 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50'
@@ -33,6 +40,8 @@ interface DraftsListProps {
 	profiles: readonly ProfileSummary[]
 	profileId: string
 	onProfileChange: (profileId: string) => void
+	verdicts: readonly VerdictKey[]
+	onVerdictsChange: (verdicts: VerdictKey[]) => void
 	pagination: PaginationMeta | null
 	onPageChange: (page: number) => void
 	onOpen: (assessmentId: string) => void
@@ -45,6 +54,8 @@ export function DraftsList({
 	profiles,
 	profileId,
 	onProfileChange,
+	verdicts,
+	onVerdictsChange,
 	pagination,
 	onPageChange,
 	onOpen,
@@ -63,21 +74,46 @@ export function DraftsList({
 					prêt.
 				</p>
 			</div>
-			<div className="flex max-w-sm flex-col gap-1.5">
-				<Label htmlFor="draft-profile">Profil</Label>
-				<select
-					id="draft-profile"
-					className={SELECT_CLASS}
-					value={profileId}
-					onChange={(event) => onProfileChange(event.target.value)}
-				>
-					<option value="">Tous les profils</option>
-					{profiles.map((profile) => (
-						<option key={profile.id} value={profile.id}>
-							{profile.name}
-						</option>
-					))}
-				</select>
+			<div className="flex flex-wrap items-end gap-x-8 gap-y-3">
+				<div className="flex w-full max-w-sm flex-col gap-1.5">
+					<Label htmlFor="draft-profile">Profil</Label>
+					<select
+						id="draft-profile"
+						className={SELECT_CLASS}
+						value={profileId}
+						onChange={(event) => onProfileChange(event.target.value)}
+					>
+						<option value="">Tous les profils</option>
+						{profiles.map((profile) => (
+							<option key={profile.id} value={profile.id}>
+								{profile.name}
+							</option>
+						))}
+					</select>
+				</div>
+				<fieldset className="flex flex-col gap-1.5">
+					<legend className="text-sm font-medium">Verdict</legend>
+					<div className="flex flex-wrap gap-x-4 gap-y-1">
+						{VERDICT_KEYS.map((key) => (
+							<label key={key} className="flex items-center gap-1.5 text-sm">
+								<input
+									type="checkbox"
+									name="verdict"
+									value={key}
+									checked={verdicts.includes(key)}
+									onChange={(event) =>
+										onVerdictsChange(
+											event.target.checked
+												? [...verdicts, key]
+												: verdicts.filter((current) => current !== key),
+										)
+									}
+								/>
+								{verdictKeyLabel(key)}
+							</label>
+						))}
+					</div>
+				</fieldset>
 			</div>
 			<div className="rounded-xl border bg-card">
 				<Table>
@@ -85,6 +121,8 @@ export function DraftsList({
 						<TableRow>
 							<TableHead>Lead</TableHead>
 							<TableHead>Profil</TableHead>
+							<TableHead>Verdict</TableHead>
+							<TableHead>Confiance</TableHead>
 							<TableHead>Score</TableHead>
 							<TableHead>Objet</TableHead>
 							<TableHead>Contact</TableHead>
@@ -138,6 +176,12 @@ export function DraftsList({
 											<Badge variant="secondary">
 												{entry.lead.profile.name}
 											</Badge>
+										</TableCell>
+										<TableCell>
+											<VerdictBadge verdict={entry.lead.verdict} />
+										</TableCell>
+										<TableCell>
+											<ConfidenceBar confidence={entry.lead.confidence} />
 										</TableCell>
 										<TableCell>
 											<ScoreBar score={entry.lead.score} max={maxScore} />

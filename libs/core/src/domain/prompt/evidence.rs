@@ -1,31 +1,29 @@
-use thiserror::Error;
-
-use super::{EvidenceQuote, QualificationOutput};
+use super::EvidenceQuote;
 use crate::domain::llm::UntrustedDocument;
 
-#[derive(Debug, Error, PartialEq, Eq)]
-pub enum EvidenceProblem {
-    #[error("assessment cites no evidence")]
-    Missing,
-    #[error("evidence quote {quote_index} does not appear verbatim in the documents")]
-    Unverified { quote_index: usize },
+#[derive(Debug, PartialEq, Eq)]
+pub struct EvidenceCheck<'a> {
+    pub verified: Vec<&'a EvidenceQuote>,
+    pub rejected: usize,
 }
 
-pub fn verified_evidence<'a>(
-    output: &'a QualificationOutput,
+impl EvidenceCheck<'_> {
+    pub fn is_sound(&self) -> bool {
+        self.rejected == 0 && !self.verified.is_empty()
+    }
+}
+
+pub fn check_evidence<'a>(
+    quotes: &'a [EvidenceQuote],
     documents: &[UntrustedDocument<'_>],
-) -> Result<Vec<&'a EvidenceQuote>, EvidenceProblem> {
-    if output.evidence.is_empty() {
-        return Err(EvidenceProblem::Missing);
-    }
-    if let Some(quote_index) = output
-        .evidence
+) -> EvidenceCheck<'a> {
+    let (verified, rejected): (Vec<&EvidenceQuote>, Vec<&EvidenceQuote>) = quotes
         .iter()
-        .position(|quote| !quote.is_verbatim_in(documents))
-    {
-        return Err(EvidenceProblem::Unverified { quote_index });
+        .partition(|quote| quote.is_verbatim_in(documents));
+    EvidenceCheck {
+        verified,
+        rejected: rejected.len(),
     }
-    Ok(output.evidence.iter().collect())
 }
 
 #[cfg(test)]
@@ -33,24 +31,15 @@ mod tests {
     use proptest::prelude::*;
 
     use super::*;
-    use crate::domain::prompt::DraftMessage;
 
-    fn output(evidence: Vec<(u32, &str)>) -> QualificationOutput {
-        QualificationOutput {
-            summary: String::new(),
-            approach_angle: String::new(),
-            evidence: evidence
-                .into_iter()
-                .map(|(document_index, quote)| EvidenceQuote {
-                    document_index,
-                    quote: quote.to_owned(),
-                })
-                .collect(),
-            draft_message: DraftMessage {
-                subject: String::new(),
-                body: String::new(),
-            },
-        }
+    fn quotes(evidence: Vec<(u32, &str)>) -> Vec<EvidenceQuote> {
+        evidence
+            .into_iter()
+            .map(|(document_index, quote)| EvidenceQuote {
+                document_index,
+                quote: quote.to_owned(),
+            })
+            .collect()
     }
 
     fn docs<'a>(contents: &'a [&'a str]) -> Vec<UntrustedDocument<'a>> {
@@ -64,55 +53,53 @@ mod tests {
     }
 
     #[test]
-    fn empty_evidence_is_missing() {
+    fn no_quote_is_not_sound() {
         let documents = docs(&["alpha"]);
-        assert_eq!(
-            verified_evidence(&output(vec![]), &documents),
-            Err(EvidenceProblem::Missing)
-        );
+        let given = quotes(vec![]);
+        let check = check_evidence(&given, &documents);
+        assert!(check.verified.is_empty());
+        assert!(!check.is_sound());
     }
 
     #[test]
-    fn verbatim_quotes_pass() {
+    fn verbatim_quotes_are_sound() {
         let documents = docs(&["alpha beta", "gamma"]);
-        let out = output(vec![(0, "beta"), (1, "gamma")]);
-        assert_eq!(verified_evidence(&out, &documents).unwrap().len(), 2);
+        let given = quotes(vec![(0, "beta"), (1, "gamma")]);
+        let check = check_evidence(&given, &documents);
+        assert_eq!(check.verified.len(), 2);
+        assert!(check.is_sound());
     }
 
     #[test]
-    fn one_fabricated_quote_rejects_everything() {
+    fn a_fabricated_quote_is_dropped_and_makes_the_check_unsound() {
         let documents = docs(&["alpha beta"]);
-        let out = output(vec![(0, "alpha"), (0, "delta")]);
-        assert_eq!(
-            verified_evidence(&out, &documents),
-            Err(EvidenceProblem::Unverified { quote_index: 1 })
-        );
+        let given = quotes(vec![(0, "alpha"), (0, "delta")]);
+        let check = check_evidence(&given, &documents);
+        assert_eq!(check.verified.len(), 1);
+        assert_eq!(check.verified[0].quote, "alpha");
+        assert_eq!(check.rejected, 1);
+        assert!(!check.is_sound());
     }
 
     #[test]
-    fn a_quote_from_the_wrong_document_is_unverified() {
+    fn a_quote_from_the_wrong_or_missing_document_is_rejected() {
         let documents = docs(&["alpha", "beta"]);
-        assert_eq!(
-            verified_evidence(&output(vec![(1, "alpha")]), &documents),
-            Err(EvidenceProblem::Unverified { quote_index: 0 })
-        );
-    }
-
-    #[test]
-    fn out_of_range_index_is_unverified() {
-        let documents = docs(&["alpha"]);
-        assert_eq!(
-            verified_evidence(&output(vec![(7, "alpha")]), &documents),
-            Err(EvidenceProblem::Unverified { quote_index: 0 })
-        );
+        let given = quotes(vec![(1, "alpha"), (7, "alpha")]);
+        let check = check_evidence(&given, &documents);
+        assert!(check.verified.is_empty());
+        assert_eq!(check.rejected, 2);
     }
 
     #[test]
     fn typography_is_normalised_but_words_stay_strict() {
         let documents = docs(&["alpha  beta mise en oeuvre"]);
-        assert!(verified_evidence(&output(vec![(0, "alpha beta")]), &documents).is_ok());
-        assert!(verified_evidence(&output(vec![(0, "en œuvre")]), &documents).is_ok());
-        assert!(verified_evidence(&output(vec![(0, "alpha gamma")]), &documents).is_err());
+        let sound = |quote: &str| {
+            let given = quotes(vec![(0, quote)]);
+            check_evidence(&given, &documents).is_sound()
+        };
+        assert!(sound("alpha beta"));
+        assert!(sound("en œuvre"));
+        assert!(!sound("alpha gamma"));
     }
 
     proptest! {
@@ -128,8 +115,8 @@ mod tests {
             prop_assume!(!quote.trim().is_empty());
             let contents = [content.as_str()];
             let documents = docs(&contents);
-            let out = output(vec![(0, quote)]);
-            prop_assert!(verified_evidence(&out, &documents).is_ok());
+            let given = quotes(vec![(0, quote)]);
+            prop_assert!(check_evidence(&given, &documents).is_sound());
         }
 
         #[test]
@@ -140,11 +127,9 @@ mod tests {
             let quote = format!("{prefix}z");
             let contents = [content.as_str()];
             let documents = docs(&contents);
-            let out = output(vec![(0, quote.as_str())]);
-            prop_assert_eq!(
-                verified_evidence(&out, &documents),
-                Err(EvidenceProblem::Unverified { quote_index: 0 })
-            );
+            let given = quotes(vec![(0, quote.as_str())]);
+            let check = check_evidence(&given, &documents);
+            prop_assert_eq!(check.rejected, 1);
         }
     }
 }

@@ -15,7 +15,7 @@ import {
 	reasoningLabel,
 	testErrorHint,
 	testErrorLabel,
-	tierLabel,
+	tierShortLabel,
 } from '#/pages/llm/lib/labels'
 import { keyLabel } from '#/pages/llm/lib/tiers'
 import type { Provider, TestResult } from '#/pages/llm/lib/types'
@@ -81,7 +81,7 @@ export function ProvidersTable({
 							<TableHead>URL de base</TableHead>
 							<TableHead>Statut</TableHead>
 							<TableHead>Clé API</TableHead>
-							<TableHead>Niveaux</TableHead>
+							<TableHead>Par défaut pour</TableHead>
 							<TableHead className="text-right">Actions</TableHead>
 						</TableRow>
 					</TableHeader>
@@ -159,7 +159,7 @@ export function ProvidersTable({
 											<div className="flex flex-wrap gap-1">
 												{provider.tiers.map((tier) => (
 													<Badge key={tier} variant="secondary">
-														{tierLabel(tier)}
+														{tierShortLabel(tier)}
 													</Badge>
 												))}
 											</div>

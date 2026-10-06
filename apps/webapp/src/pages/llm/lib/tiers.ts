@@ -1,4 +1,4 @@
-import { tierLabel } from '#/pages/llm/lib/labels'
+import { tierShortLabel } from '#/pages/llm/lib/labels'
 import {
 	TIERS,
 	type TierAction,
@@ -48,8 +48,8 @@ export function deleteConflictMessage(tiers: readonly string[]): string {
 	if (tiers.length === 0) {
 		return 'Suppression impossible : le fournisseur est utilisé'
 	}
-	const names = tiers.map(tierLabel).join(' et ')
-	return `Suppression impossible : affecté ${tiers.length > 1 ? 'aux niveaux' : 'au niveau'} ${names}`
+	const names = tiers.map(tierShortLabel).join(' et ')
+	return `Suppression impossible : fournisseur par défaut pour ${names}`
 }
 
 export function keyLabel(hasApiKey: boolean): string {

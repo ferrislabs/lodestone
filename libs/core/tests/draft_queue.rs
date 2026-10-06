@@ -3,6 +3,7 @@ mod support;
 use common::CoreError;
 use lodestone_core::{
     AssessmentId, DraftEdit, DraftStatus, LeadId, LeadStatus, LodestoneUseCase, ProfileId, UserId,
+    VerdictFilter,
 };
 use sqlx::PgPool;
 use support::{create_profile, seen_lead};
@@ -59,7 +60,7 @@ async fn queue(
     offset: u64,
 ) -> (Vec<String>, u64) {
     let queue = LodestoneUseCase::new(pool.clone())
-        .list_pending_drafts(profile, limit, offset)
+        .list_pending_drafts(profile, &[], limit, offset)
         .await
         .unwrap();
     (
@@ -161,10 +162,124 @@ async fn queue_holds_the_latest_pending_drafts_of_qualified_visible_leads(pool: 
     assert_eq!(total, 4);
 }
 
+async fn judged(
+    pool: &PgPool,
+    profile: ProfileId,
+    host: &str,
+    score: f64,
+    judgement: Option<(f64, &str)>,
+) {
+    let lead = lead(pool, profile, host, "qualified", score).await;
+    sqlx::query("UPDATE leads SET confidence = $2, verdict = $3 WHERE id = $1")
+        .bind(lead.0)
+        .bind(judgement.map(|(confidence, _)| confidence))
+        .bind(judgement.map(|(_, verdict)| verdict))
+        .execute(pool)
+        .await
+        .unwrap();
+    assessment(pool, lead, 0, true).await;
+}
+
+async fn filtered_queue(pool: &PgPool, verdicts: &[VerdictFilter]) -> Vec<String> {
+    LodestoneUseCase::new(pool.clone())
+        .list_pending_drafts(None, verdicts, 20, 0)
+        .await
+        .unwrap()
+        .items
+        .iter()
+        .map(|entry| entry.record.lead.domain.as_str().to_owned())
+        .collect()
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_queue_lists_the_most_confident_leads_first_pending_ones_last(pool: PgPool) {
+    let profile = create_profile(&pool, "alpha").await;
+    judged(&pool, profile, "pending.com", 99.0, None).await;
+    judged(
+        &pool,
+        profile,
+        "unsure.com",
+        1.0,
+        Some((55.0, "a_verifier")),
+    )
+    .await;
+    judged(&pool, profile, "sure.com", 1.0, Some((91.0, "fiable"))).await;
+    judged(
+        &pool,
+        profile,
+        "tie-low.com",
+        1.0,
+        Some((55.0, "a_verifier")),
+    )
+    .await;
+    judged(
+        &pool,
+        profile,
+        "tie-high.com",
+        7.0,
+        Some((55.0, "a_verifier")),
+    )
+    .await;
+
+    let order = filtered_queue(&pool, &[]).await;
+
+    assert_eq!(
+        order,
+        [
+            "sure.com",
+            "tie-high.com",
+            "unsure.com",
+            "tie-low.com",
+            "pending.com"
+        ]
+    );
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_queue_filters_by_verdict_including_pending(pool: PgPool) {
+    let profile = create_profile(&pool, "alpha").await;
+    judged(&pool, profile, "pending.com", 1.0, None).await;
+    judged(
+        &pool,
+        profile,
+        "unsure.com",
+        1.0,
+        Some((55.0, "a_verifier")),
+    )
+    .await;
+    judged(&pool, profile, "sure.com", 1.0, Some((91.0, "fiable"))).await;
+    judged(&pool, profile, "out.com", 1.0, Some((5.0, "ecarte"))).await;
+
+    assert_eq!(
+        filtered_queue(&pool, &[VerdictFilter::Reliable]).await,
+        ["sure.com"]
+    );
+    assert_eq!(
+        filtered_queue(&pool, &[VerdictFilter::Reliable, VerdictFilter::Pending]).await,
+        ["sure.com", "pending.com"]
+    );
+    assert_eq!(
+        filtered_queue(
+            &pool,
+            &[
+                VerdictFilter::Reliable,
+                VerdictFilter::ToCheck,
+                VerdictFilter::Pending
+            ]
+        )
+        .await,
+        ["sure.com", "unsure.com", "pending.com"]
+    );
+    assert_eq!(
+        filtered_queue(&pool, &[VerdictFilter::Discarded]).await,
+        ["out.com"]
+    );
+}
+
 #[sqlx::test(migrations = "../../migrations")]
 async fn an_unknown_profile_filter_is_not_found(pool: PgPool) {
     let result = LodestoneUseCase::new(pool)
-        .list_pending_drafts(Some(ProfileId(Uuid::now_v7())), 20, 0)
+        .list_pending_drafts(Some(ProfileId(Uuid::now_v7())), &[], 20, 0)
         .await;
     assert!(matches!(result, Err(CoreError::NotFound)));
 }

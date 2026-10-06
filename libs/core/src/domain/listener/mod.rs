@@ -210,6 +210,5 @@ mod tests {
         assert!(is_continuous(SourceName::CertificateTransparency));
         assert!(is_continuous(SourceName::RoleGuess));
         assert!(!is_continuous(SourceName::Boamp));
-        assert!(!is_continuous(SourceName::LlmQualification));
     }
 }

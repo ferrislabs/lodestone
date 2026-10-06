@@ -3,7 +3,7 @@ use std::{error::Error, net::SocketAddr, num::NonZeroU32, sync::Arc, time::Durat
 use api::{
     fetchers::ct_fetch_settings,
     internal_router::internal_router,
-    jobs::{Intervals, JobRouter, LlmRuntime, WiredSources, schedule_wired_sources},
+    jobs::{Intervals, JobRouter, WiredSources, schedule_wired_sources},
     listeners::{ContactStep, CtStep, HostStep, QualificationStep},
     logger::init_tracing_and_logging,
     router::router,
@@ -75,11 +75,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let app_state = state(Arc::clone(&args)).await?;
     let outbound_config = OutboundConfig::try_from(args.outbound.clone())?;
     let pool = app_state.usecase.pool().clone();
-    let llm_runtime = LlmRuntime {
-        cipher: AesGcmCipher::new(&llm_config.encryption_key)?,
-        cache: PgLlmCache::new(pool.clone()),
-        budget_cents: llm_config.run_budget_cents,
-    };
     let queue = Arc::new(PgJobQueue::new(pool.clone()));
     let resolver = Arc::new(HickoryResolver::from_system(DnsSettings::default())?);
     let dns_cname = DnsCnameSource::new(
@@ -246,7 +241,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
             other_sources: jobs_config.source_interval,
             decp: args.decp.interval(),
         },
-        llm_runtime,
     )
     .with_webhook(webhook);
     schedule_wired_sources(&queue, args.france_travail.credentials().is_some()).await?;
@@ -358,6 +352,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             cipher: AesGcmCipher::new(&llm_config.encryption_key)?,
             cache: PgLlmCache::new(pool.clone()),
             budget_cents: llm_config.run_budget_cents,
+            cooldowns: Default::default(),
         },
         pool,
         instance,

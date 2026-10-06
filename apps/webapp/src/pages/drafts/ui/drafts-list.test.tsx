@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { DraftEntry, PaginationMeta } from '#/pages/drafts/lib/types'
+import type { VerdictKey } from '#/pages/leads/lib/verdict'
 import { DraftsList } from './drafts-list'
 
 afterEach(cleanup)
@@ -12,12 +13,16 @@ const entry: DraftEntry = {
 		id: 'l1',
 		domain: 'acme.test',
 		score: 42,
+		confidence: 81.5,
+		verdict: 'fiable',
 		profile: { id: 'p1', name: 'Fintech' },
 	},
 	draft: { subject: 'Hello Acme', body: 'Body', status: 'pending' },
 	summary: 's',
+	verdict_narrative: 'v',
 	approach_angle: 'angle',
 	evidence: [],
+	evidence_verified: true,
 	contact: { address: 'cto@acme.test', method: 'scraped', confidence: 0.9 },
 	created_at: '2026-02-01T00:00:00Z',
 }
@@ -41,6 +46,8 @@ function renderList(overrides: Partial<Parameters<typeof DraftsList>[0]> = {}) {
 		profiles: [{ id: 'p1', name: 'Fintech', lead_count: 3, active: true }],
 		profileId: '',
 		onProfileChange: vi.fn(),
+		verdicts: ['fiable', 'a_verifier', 'en_attente'] as VerdictKey[],
+		onVerdictsChange: vi.fn(),
 		pagination,
 		onPageChange: vi.fn(),
 		onOpen: vi.fn(),
@@ -58,6 +65,60 @@ describe('DraftsList', () => {
 		expect(screen.getByText('Hello Acme')).toBeTruthy()
 		expect(screen.getByText('cto@acme.test')).toBeTruthy()
 		expect(screen.getByText('Page 1 sur 2 - 30 brouillons')).toBeTruthy()
+	})
+
+	it('shows the verdict badge and the confidence of each draft', () => {
+		renderList({
+			entries: [
+				entry,
+				{
+					...entry,
+					assessment_id: 'a2',
+					lead: {
+						...entry.lead,
+						id: 'l2',
+						domain: 'globex.test',
+						confidence: null,
+						verdict: null,
+					},
+				},
+			],
+		})
+		const badges = Array.from(document.body.querySelectorAll('[data-verdict]'))
+		expect(badges.map((badge) => badge.getAttribute('data-verdict'))).toEqual([
+			'fiable',
+			'en_attente',
+		])
+		expect(screen.getByText(/^81,5\s%$/)).toBeTruthy()
+		expect(screen.getByText('—')).toBeTruthy()
+		expect(screen.getByRole('columnheader', { name: 'Verdict' })).toBeTruthy()
+		expect(screen.getByRole('columnheader', { name: 'Confiance' })).toBeTruthy()
+	})
+
+	it('offers the verdict filter with discarded leads left out by default', () => {
+		renderList()
+		const box = (name: string) =>
+			(screen.getByLabelText(name) as HTMLInputElement).checked
+		expect(box('Fiable')).toBe(true)
+		expect(box('À vérifier')).toBe(true)
+		expect(box('En attente')).toBe(true)
+		expect(box('Écarté')).toBe(false)
+	})
+
+	it('reports the verdicts when one is ticked or cleared', () => {
+		const props = renderList()
+		fireEvent.click(screen.getByLabelText('Écarté'))
+		expect(props.onVerdictsChange).toHaveBeenLastCalledWith([
+			'fiable',
+			'a_verifier',
+			'en_attente',
+			'ecarte',
+		])
+		fireEvent.click(screen.getByLabelText('Fiable'))
+		expect(props.onVerdictsChange).toHaveBeenLastCalledWith([
+			'a_verifier',
+			'en_attente',
+		])
 	})
 
 	it('opens a draft from its domain', () => {

@@ -6,6 +6,8 @@ import {
 	queryFromSearch,
 	searchForPage,
 	searchForProfile,
+	searchForVerdicts,
+	verdictsFromSearch,
 } from './search'
 
 describe('drafts search params', () => {
@@ -37,11 +39,59 @@ describe('drafts search params', () => {
 	})
 
 	it('builds the api query', () => {
-		expect(queryFromSearch({})).toEqual({ page: 1, per_page: DRAFTS_PER_PAGE })
+		expect(queryFromSearch({})).toEqual({
+			verdict: 'fiable,a_verifier,en_attente',
+			page: 1,
+			per_page: DRAFTS_PER_PAGE,
+		})
 		expect(queryFromSearch({ profile: 'p1', page: 2 })).toEqual({
 			profile_id: 'p1',
+			verdict: 'fiable,a_verifier,en_attente',
 			page: 2,
 			per_page: DRAFTS_PER_PAGE,
 		})
+		expect(queryFromSearch({ verdict: ['ecarte', 'fiable'] }).verdict).toBe(
+			'fiable,ecarte',
+		)
+	})
+
+	it('keeps the verdicts when the profile or page changes', () => {
+		const search = { profile: 'p1', verdict: ['ecarte' as const] }
+		expect(searchForProfile('p2', search)).toEqual({
+			profile: 'p2',
+			verdict: ['ecarte'],
+		})
+		expect(searchForPage(search, 2)).toEqual({
+			profile: 'p1',
+			verdict: ['ecarte'],
+			page: 2,
+		})
+	})
+
+	it('omits the verdicts when they are the default ones and resets the page', () => {
+		expect(
+			searchForVerdicts({ profile: 'p1', page: 3 }, [
+				'en_attente',
+				'fiable',
+				'a_verifier',
+			]),
+		).toEqual({ profile: 'p1' })
+		expect(searchForVerdicts({ page: 3 }, ['ecarte'])).toEqual({
+			verdict: ['ecarte'],
+		})
+		expect(verdictsFromSearch({})).toEqual([
+			'fiable',
+			'a_verifier',
+			'en_attente',
+		])
+	})
+
+	it('validates the verdict search param', () => {
+		expect(draftsSearchSchema.safeParse({ verdict: ['nope'] }).success).toBe(
+			false,
+		)
+		expect(draftsSearchSchema.safeParse({ verdict: ['fiable'] }).success).toBe(
+			true,
+		)
 	})
 })

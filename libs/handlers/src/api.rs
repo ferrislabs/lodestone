@@ -97,7 +97,11 @@ pub fn router(state: AppState) -> Router<AppState> {
         )
         .route("/drafts/{assessment_id}/reject", post(drafts::reject_draft))
         .route("/leads/{lead_id}", get(leads::lead_detail))
-        .route("/leads/{lead_id}/status", patch(leads::change_lead_status));
+        .route("/leads/{lead_id}/status", patch(leads::change_lead_status))
+        .route(
+            "/leads/{lead_id}/summary/retry",
+            post(leads::retry_lead_summary),
+        );
 
     Router::new()
         .nest(API_PREFIX, routes)

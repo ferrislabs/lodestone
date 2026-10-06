@@ -14,6 +14,7 @@
   "expect": {},
   "recorded_output": {
     "summary": "Example Retail exposes a Keycloak realm under the legacy /auth path and is hiring an engineer to maintain a self-hosted Keycloak 18 and prepare its migration.",
+    "verdict_narrative": "Both agents rate the lead as relevant: a legacy Keycloak realm and a migration project.",
     "approach_angle": "A planned Keycloak migration is the moment to evaluate a maintained IAM such as FerrisKey or a managed Autharie instance.",
     "evidence": [
       {

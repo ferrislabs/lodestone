@@ -2,8 +2,10 @@ import { Card, CardContent, CardHeader, CardTitle } from '#/components/ui/card'
 import { contactMethodLabel } from '#/lib/labels'
 import type { DraftEntry } from '#/pages/drafts/lib/types'
 import { formatDateTime, formatRatio } from '#/pages/leads/lib/format'
+import { ConfidenceBar } from '#/pages/leads/ui/confidence-bar'
 import { ProvenanceLink } from '#/pages/leads/ui/provenance-link'
 import { ScoreBar } from '#/pages/leads/ui/score-bar'
+import { VerdictBadge } from '#/pages/leads/ui/verdict-badge'
 
 interface DraftContextProps {
 	entry: DraftEntry
@@ -28,11 +30,21 @@ export function DraftContext({ entry, onOpenLead }: DraftContextProps) {
 				</CardTitle>
 			</CardHeader>
 			<CardContent className="flex flex-col gap-4">
-				<ScoreBar
-					score={entry.lead.score}
-					max={Math.max(entry.lead.score, 1)}
-				/>
+				<div className="flex flex-wrap items-center gap-4">
+					<VerdictBadge verdict={entry.lead.verdict} />
+					<ConfidenceBar confidence={entry.lead.confidence} />
+					<ScoreBar
+						score={entry.lead.score}
+						max={Math.max(entry.lead.score, 1)}
+					/>
+				</div>
 				<p>{entry.summary}</p>
+				{entry.verdict_narrative ? (
+					<p className="text-sm">
+						<span className="font-medium">Verdict : </span>
+						{entry.verdict_narrative}
+					</p>
+				) : null}
 				<p className="text-sm">
 					<span className="font-medium">Angle d'approche : </span>
 					{entry.approach_angle}
@@ -43,6 +55,12 @@ export function DraftContext({ entry, onOpenLead }: DraftContextProps) {
 						? `${entry.contact.address} (${contactMethodLabel(entry.contact.method)}, confiance ${formatRatio(entry.contact.confidence)})`
 						: 'Aucun contact trouvé'}
 				</p>
+				{entry.evidence_verified ? null : (
+					<output className="block rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+						Preuves non vérifiées : au moins une citation n'a pas pu être
+						retrouvée mot pour mot dans les signaux.
+					</output>
+				)}
 				<div className="flex flex-col gap-3">
 					<span className="text-sm font-medium">
 						Preuves ({entry.evidence.length})
