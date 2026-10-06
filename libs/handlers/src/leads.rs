@@ -5,10 +5,10 @@ use axum::{
     extract::{Path, Query, State, rejection::JsonRejection},
 };
 use lodestone_core::{
-    Assessment, ContactEmail, DraftMessage, DraftReview, DraftStatus, Lead, LeadDetail, LeadId,
-    LeadQuery, LeadSort, LeadStatus, LlmProviderRecord, Profile, ProfileId, QualificationResult,
-    ResultStatus, SUMMARY_FAILED_AFTER, ScoreContribution, Signal, SignalKind, SummaryState,
-    Verdict, VerdictFilter, definition::QualificationAgent,
+    Assessment, ContactEmail, DraftMessage, DraftReview, DraftStatus, Lead, LeadDetail, LeadFacts,
+    LeadId, LeadQuery, LeadSort, LeadStatus, LlmProviderRecord, Profile, ProfileId,
+    QualificationResult, ResultStatus, SUMMARY_FAILED_AFTER, ScoreContribution, Signal, SignalKind,
+    SummaryState, Verdict, VerdictFilter, definition::QualificationAgent, signal_sentence,
 };
 use pagination::{MAX_PAGE, MAX_PER_PAGE, Page, PaginationMetadata, PaginationParams};
 use serde::{Deserialize, Serialize};
@@ -125,6 +125,8 @@ pub struct SignalDto {
     pub id: String,
     pub kind: String,
     pub value: Option<String>,
+    /// The signal as a readable French sentence.
+    pub sentence: String,
     pub source: String,
     pub provenance: String,
     pub strength: f64,
@@ -141,6 +143,7 @@ impl From<&Signal> for SignalDto {
             id: signal.id.to_string(),
             kind: signal.kind.as_str().to_owned(),
             value: signal.value.clone(),
+            sentence: signal_sentence(signal),
             source: signal.source.as_str().to_owned(),
             provenance: signal.provenance.as_str().to_owned(),
             strength: signal.strength.get(),
@@ -462,8 +465,87 @@ impl SummaryStateDto {
 }
 
 #[derive(Debug, Serialize, PartialEq, ToSchema)]
+pub struct HostFactDto {
+    pub host: String,
+    /// One of production, development, staging, test, preproduction, demo.
+    pub environment: String,
+    pub signals: u32,
+}
+
+#[derive(Debug, Serialize, PartialEq, ToSchema)]
+pub struct CountryDto {
+    /// ISO 3166-1 alpha-2 code.
+    pub code: String,
+    /// English name; the interface localises it from the code.
+    pub name: String,
+}
+
+/// Facts computed on read from the lead, its signals and the hosts already known, with no external call.
+#[derive(Debug, Serialize, PartialEq, ToSchema)]
+pub struct LeadFactsDto {
+    /// Hosts carrying at least one signal, with their environment.
+    pub hosts: Vec<HostFactDto>,
+    pub distinct_hosts: u32,
+    pub production_hosts: u32,
+    /// Share of production hosts among the hosts carrying signals, from 0 to 1; null when no signal names a host.
+    pub production_share: Option<f64>,
+    /// True when hosts carry signals and none is a production host.
+    pub only_non_production: bool,
+    /// Distinct subdomains seen for the domain, from signals and candidate hosts, apex excluded.
+    pub distinct_subdomains: u32,
+    pub signal_count: u32,
+    pub source_count: u32,
+    pub sources: Vec<String>,
+    #[schema(format = DateTime)]
+    pub first_seen_at: String,
+    #[schema(format = DateTime)]
+    pub last_seen_at: String,
+    /// Deduced from the domain extension only; null for a generic extension.
+    pub probable_country: Option<CountryDto>,
+}
+
+fn count(value: usize) -> u32 {
+    u32::try_from(value).unwrap_or(u32::MAX)
+}
+
+impl From<&LeadFacts> for LeadFactsDto {
+    fn from(facts: &LeadFacts) -> Self {
+        Self {
+            hosts: facts
+                .hosts
+                .iter()
+                .map(|fact| HostFactDto {
+                    host: fact.host.to_string(),
+                    environment: fact.environment.as_str().to_owned(),
+                    signals: count(fact.signals),
+                })
+                .collect(),
+            distinct_hosts: count(facts.distinct_hosts()),
+            production_hosts: count(facts.production_hosts()),
+            production_share: facts.production_share(),
+            only_non_production: facts.only_non_production(),
+            distinct_subdomains: count(facts.distinct_subdomains),
+            signal_count: count(facts.signal_count),
+            source_count: count(facts.sources.len()),
+            sources: facts
+                .sources
+                .iter()
+                .map(|source| source.as_str().to_owned())
+                .collect(),
+            first_seen_at: facts.first_seen_at.to_rfc3339(),
+            last_seen_at: facts.last_seen_at.to_rfc3339(),
+            probable_country: facts.probable_country.map(|country| CountryDto {
+                code: country.code.to_owned(),
+                name: country.name.to_owned(),
+            }),
+        }
+    }
+}
+
+#[derive(Debug, Serialize, PartialEq, ToSchema)]
 pub struct LeadDetailDto {
     pub lead: LeadDto,
+    pub facts: LeadFactsDto,
     pub score_breakdown: Vec<ScoreContributionDto>,
     pub signals: Vec<SignalDto>,
     pub contacts: Vec<ContactDto>,
@@ -512,6 +594,7 @@ impl LeadDetailDto {
                 .iter()
                 .map(ScoreContributionDto::from)
                 .collect(),
+            facts: LeadFactsDto::from(&detail.facts),
             signals: detail.signals.iter().map(SignalDto::from).collect(),
             contacts: detail.contacts.iter().map(ContactDto::from).collect(),
             assessments: detail.assessments.iter().map(AssessmentDto::from).collect(),

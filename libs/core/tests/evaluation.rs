@@ -412,13 +412,56 @@ async fn the_prompt_carries_the_agent_the_profile_context_the_contract_and_the_l
     assert!(call.instruction.contains("Question `pertinence`"));
     assert_eq!(call.documents.len(), 2);
     assert!(call.documents[0].starts_with("lead: acme.com"));
-    assert!(call.documents[1].contains("signal: product_detected"));
+    assert!(
+        call.documents[1]
+            .starts_with("acme.com expose Keycloak-http_probe (sonde HTTP, version 21.1)")
+    );
+    assert!(call.documents[0].contains("- hosts carrying signals: 1 (acme.com (production))"));
+    assert!(call.documents[0].contains("- production hosts: 1 of 1"));
+    assert!(!call.documents[0].contains("warning"));
+    assert!(
+        call.system
+            .contains("computed by the system from stored data")
+    );
     let active = harness.active().await;
     let expected = lodestone_core::contract_schema(
         &active.revision.definition.definition().qualification_agents[0],
     );
     assert_eq!(call.schema, expected);
     assert!(harness.lead(profile, "acme.com").await.verdict.is_some());
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_lead_seen_only_on_a_development_host_is_documented_as_such(pool: PgPool) {
+    let harness = Harness::new(pool.clone(), 10);
+    harness.default_provider("model-default").await;
+    harness
+        .profile(vec![agent("pertinence", 5, None, "pertinence")])
+        .await;
+    lodestone_core::CandidateHosts::upsert(
+        &lodestone_core::infrastructure::candidate_host::PgCandidateHosts::new(pool),
+        &[lodestone_core::CandidateHost::discovered(
+            lodestone_core::Hostname::parse("www.acme.com").unwrap(),
+            lodestone_core::HostOrigin::CertificateTransparency,
+            at(0),
+        )
+        .unwrap()],
+    )
+    .await
+    .unwrap();
+    harness
+        .observe("login.dev.acme.com", SourceName::HttpProbe, 10)
+        .await;
+
+    harness.step(settings(100, 10)).await;
+
+    let seen = harness.seen();
+    let overview = &seen[0].documents[0];
+    assert!(overview.contains("- hosts carrying signals: 1 (login.dev.acme.com (development))"));
+    assert!(overview.contains("- production hosts: 0 of 1"));
+    assert!(overview.contains("- warning: every host carrying a signal is a non-production"));
+    assert!(overview.contains("- distinct subdomains seen for the domain: 2"));
+    assert!(seen[0].documents[1].starts_with("login.dev.acme.com expose Keycloak-http_probe"));
 }
 
 #[sqlx::test(migrations = "../../migrations")]

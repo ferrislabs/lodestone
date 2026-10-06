@@ -6,8 +6,10 @@ use crate::{
     UserId,
     application::{LodestoneUseCase, output::schedule_webhook},
     domain::{
+        facts::LeadFacts,
+        host::ports::KnownHostRepository,
         lead::{
-            Lead, LeadId, LeadStatus,
+            Lead, LeadId, LeadStatus, Signal,
             ports::{AssessmentRepository, ContactRepository, LeadRepository, SignalRepository},
             query::{LeadDetail, LeadListing, LeadQuery, ProfileSummary},
         },
@@ -42,12 +44,22 @@ impl LodestoneUseCase {
         })
     }
 
-    #[transactional(lead, profile, suppression, signal, contact, assessment, qualification)]
+    #[transactional(
+        lead,
+        profile,
+        suppression,
+        signal,
+        known_host,
+        contact,
+        assessment,
+        qualification
+    )]
     pub async fn lead_detail(&self, lead_id: LeadId) -> Result<LeadDetail, CoreError> {
         let mut leads = lead_repository;
         let mut profiles = profile_repository;
         let mut suppression = suppression_repository;
         let mut signals = signal_repository;
+        let mut known_hosts = known_host_repository;
         let mut contacts = contact_repository;
         let mut assessments = assessment_repository;
         let mut qualification = qualification_repository;
@@ -78,16 +90,32 @@ impl LodestoneUseCase {
             None => Vec::new(),
         };
         let summary_state = qualification.summary_state(lead_id).await?;
+        let lead_signals = signals.list_for_lead(lead_id).await?;
+        let hosts = known_hosts.list_for_domain(&lead.domain).await?;
         Ok(LeadDetail {
             summary_state,
             qualification_results,
             qualification_agents,
-            signals: signals.list_for_lead(lead_id).await?,
+            facts: LeadFacts::compute(&lead, &lead_signals, &hosts),
+            signals: lead_signals,
             contacts: contacts.list_for_lead(lead_id).await?,
             assessments: assessments.list_for_lead(lead_id).await?,
             lead,
             profile,
         })
+    }
+
+    #[transactional(signal, known_host)]
+    pub(crate) async fn signals_with_facts(
+        &self,
+        lead: &Lead,
+    ) -> Result<(Vec<Signal>, LeadFacts), CoreError> {
+        let mut signals = signal_repository;
+        let mut known_hosts = known_host_repository;
+        let found = signals.list_for_lead(lead.id).await?;
+        let hosts = known_hosts.list_for_domain(&lead.domain).await?;
+        let facts = LeadFacts::compute(lead, &found, &hosts);
+        Ok((found, facts))
     }
 
     #[transactional(lead, suppression)]

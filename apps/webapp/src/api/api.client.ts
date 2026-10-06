@@ -50,6 +50,7 @@ export namespace Schemas {
     provenance: string;
   };
   export type ContactRecord = { address: string; confidence: number; method: string; provenance: string };
+  export type CountryDto = { code: string; name: string };
   export type CreateProfileRequest = { definition: Record<string, unknown>; name?: (string | null) | undefined };
   export type PricingRequest = Partial<{ input_cents_per_mtok: number | null; output_cents_per_mtok: number | null }>;
   export type ReasoningEffort = "none" | "low" | "medium" | "high";
@@ -99,6 +100,21 @@ export namespace Schemas {
       verdict_narrative: string;
     };
     pagination?: (null | PaginationMetadata) | undefined;
+  };
+  export type HostFactDto = { environment: string; host: string; signals: number };
+  export type LeadFactsDto = {
+    distinct_hosts: number;
+    distinct_subdomains: number;
+    first_seen_at: string;
+    hosts: Array<HostFactDto>;
+    last_seen_at: string;
+    only_non_production: boolean;
+    probable_country?: (null | CountryDto) | undefined;
+    production_hosts: number;
+    production_share?: (number | null) | undefined;
+    signal_count: number;
+    source_count: number;
+    sources: Array<string>;
   };
   export type LeadDto = {
     confidence?: (number | null) | undefined;
@@ -151,6 +167,7 @@ export namespace Schemas {
     observed_at: string;
     provenance: string;
     raw: Record<string, unknown>;
+    sentence: string;
     source: string;
     strength: number;
     value?: (string | null) | undefined;
@@ -165,6 +182,7 @@ export namespace Schemas {
     data: {
       assessments: Array<AssessmentDto>;
       contacts: Array<ContactDto>;
+      facts: LeadFactsDto;
       lead: LeadDto;
       qualification_results: Array<QualificationResultDto>;
       score_breakdown: Array<ScoreContributionDto>;
@@ -392,6 +410,7 @@ export namespace Schemas {
   export type LeadDetailDto = {
     assessments: Array<AssessmentDto>;
     contacts: Array<ContactDto>;
+    facts: LeadFactsDto;
     lead: LeadDto;
     qualification_results: Array<QualificationResultDto>;
     score_breakdown: Array<ScoreContributionDto>;

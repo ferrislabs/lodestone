@@ -79,3 +79,9 @@ Each qualification agent and the aggregator pick their provider. The global tria
 - Profile schema version 5: a qualification agent has a `description` (1 to 300 characters, what it evaluates). Version 4 documents are upgraded on read with `Évalue : <name>`; the default Pertinence agent gets a fixed sentence.
 - `qualification_results.summary` stores the agent summary (null for results written before the contract v2). The lead detail API returns the agent description and summary; the lead page shows one report card per agent, in profile order, before the aggregator synthesis.
 - Each agent block given to the aggregator starts with the agent name, description and summary, then its measurements. In the interface, questions are called "axes d'analyse".
+
+## Implementation notes (#154)
+
+- Lead facts are computed on read by a pure function (`LeadFacts::compute(lead, signals, candidate_hosts)`), never stored: hosts carrying signals with their environment (production, development, staging, test, preproduction, demo, from whole labels or dash-separated tokens of the subdomain such as `dev`, `stg`, `qa`, `pre-prod`; the registrable domain is never inspected), production share, distinct subdomains seen (signals and `candidate_hosts`), signal count, distinct sources, first and last seen, and a probable country from the ccTLD (generic extensions give none).
+- The lead detail API exposes `facts` and a French `sentence` per signal. The lead page shows a compact "Faits" block with a warning when every host is non-production.
+- The lead overview document given to qualification agents and to the aggregator starts with the facts; the system prompts document the block. Signals are given to the models as French sentences (then source and date) instead of key/value lines and raw JSON; evidence quotes are checked against that same text.

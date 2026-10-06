@@ -1,14 +1,16 @@
 use aws_lc_rs::digest::{SHA256, digest};
-use chrono::{DateTime, SecondsFormat, Utc};
 use serde_json::Value;
 
 use crate::domain::{
+    facts::LeadFacts,
     profile::definition::{ProfileDefinition, QualificationAgent},
     prompt::neutralize,
     qualification::Violations,
 };
 
 const CONTEXT_TAG: &str = "market_context";
+
+pub(crate) const FACTS_NOTE: &str = "The lead document holds facts computed by the system from stored data: the hosts carrying signals with their environment, the subdomains seen, the signals and their sources, the dates and the probable country from the domain extension. They are reliable. Use them to weigh the signals: a signal found only on development, staging, test or demo hosts says little about the company's production stack, and a single signal from a single source is thin evidence.";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentPrompt {
@@ -68,7 +70,7 @@ pub fn build(
     schema: &Value,
 ) -> AgentPrompt {
     let system = format!(
-        "{}\n\n{}\n\n{}\n\n{}",
+        "{}\n\n{}\n\n{}\n\n{FACTS_NOTE}\n\n{}",
         agent.system_prompt.trim(),
         identity_context(definition),
         language_line(definition),
@@ -93,21 +95,22 @@ pub fn with_violations(instruction: &str, violations: &Violations) -> String {
     )
 }
 
-pub fn lead_document(domain: &str, first_seen_at: DateTime<Utc>) -> String {
-    format!(
-        "lead: {domain}\nfirst seen: {}",
-        first_seen_at.to_rfc3339_opts(SecondsFormat::Secs, true)
-    )
+pub fn lead_document(domain: &str, facts: &LeadFacts) -> String {
+    format!("lead: {domain}\n{}", facts.render())
 }
 
 #[cfg(test)]
 mod tests {
+    use chrono::DateTime;
     use serde_json::json;
 
     use super::*;
     use crate::domain::{
+        facts::{Environment, HostFact},
+        host::Hostname,
         profile::{ValidatedProfile, contract::contract_schema},
         qualification::Violation,
+        values::SourceName,
     };
 
     fn definition(language: &str) -> ProfileDefinition {
@@ -191,11 +194,62 @@ mod tests {
     }
 
     #[test]
-    fn the_lead_document_names_the_domain() {
-        let at = DateTime::from_timestamp(1_800_000_000, 0).unwrap();
-        assert_eq!(
-            lead_document("acme.com", at),
-            "lead: acme.com\nfirst seen: 2027-01-15T08:00:00Z"
+    fn the_system_part_documents_the_facts_block() {
+        let (_, prompt) = built("fr");
+        assert!(prompt.system.contains(FACTS_NOTE));
+        assert!(
+            prompt
+                .system
+                .contains("computed by the system from stored data")
         );
+        assert!(
+            prompt
+                .system
+                .contains("development, staging, test or demo hosts")
+        );
+    }
+
+    #[test]
+    fn the_lead_document_names_the_domain_and_holds_the_facts() {
+        let at = DateTime::from_timestamp(1_800_000_000, 0).unwrap();
+        let facts = LeadFacts {
+            hosts: vec![HostFact {
+                host: Hostname::parse("login.dev.acme.com").unwrap(),
+                environment: Environment::Development,
+                signals: 1,
+            }],
+            distinct_subdomains: 3,
+            signal_count: 1,
+            sources: vec![SourceName::DnsCname],
+            first_seen_at: at,
+            last_seen_at: at,
+            probable_country: None,
+        };
+        let document = lead_document("acme.com", &facts);
+        assert!(document.starts_with("lead: acme.com\nFacts computed by the system"));
+        assert!(
+            document.contains("- hosts carrying signals: 1 (login.dev.acme.com (development))")
+        );
+        assert!(document.contains("- production hosts: 0 of 1"));
+        assert!(document.contains("- warning: every host carrying a signal is a non-production"));
+        assert!(document.contains("- distinct subdomains seen for the domain: 3"));
+        assert!(document.contains("- first seen: 2027-01-15T08:00:00Z"));
+    }
+
+    #[test]
+    fn the_facts_change_the_cache_visible_document() {
+        let at = DateTime::from_timestamp(1_800_000_000, 0).unwrap();
+        let mut facts = LeadFacts {
+            hosts: Vec::new(),
+            distinct_subdomains: 0,
+            signal_count: 0,
+            sources: Vec::new(),
+            first_seen_at: at,
+            last_seen_at: at,
+            probable_country: None,
+        };
+        let before = lead_document("acme.com", &facts);
+        facts.signal_count = 2;
+        assert_ne!(before, lead_document("acme.com", &facts));
     }
 }

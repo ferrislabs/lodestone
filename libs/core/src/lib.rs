@@ -18,13 +18,14 @@ pub use domain::{
         recipient::{NotARecipient, Recipient},
         select_for_profile,
     },
+    facts::{Country, Environment, HostFact, LeadFacts, environment_of, signal_sentence},
     fetch::{
         FetchError, FetchPurpose, FetchRequest, FetchResponse,
         ports::{Fetcher, HostVisitRepository},
     },
     host::{
         CandidateHost, HostOrigin, Hostname, InvalidHostname, TRANSIENT_RETRY,
-        ports::{CandidateHosts, CtCursors, DnsError, DnsResolver, MxLookup},
+        ports::{CandidateHosts, CtCursors, DnsError, DnsResolver, KnownHostRepository, MxLookup},
         transient_checked_at,
     },
     job::{
