@@ -1,7 +1,11 @@
 use chrono::{DateTime, Utc};
 use common::CoreError;
 
-use crate::domain::{NormalizedDomain, company::CompanyDossier};
+use crate::domain::{
+    NormalizedDomain,
+    company::{CompanyDossier, CompanyEntity, SiblingLead},
+    lead::LeadId,
+};
 
 #[cfg_attr(test, mockall::automock)]
 pub trait CompanyRepository: Send {
@@ -31,4 +35,14 @@ pub trait CompanyRepository: Send {
         domain: &NormalizedDomain,
         now: DateTime<Utc>,
     ) -> impl Future<Output = Result<(), CoreError>> + Send;
+
+    fn entity_of(
+        &mut self,
+        domain: &NormalizedDomain,
+    ) -> impl Future<Output = Result<Option<CompanyEntity>, CoreError>> + Send;
+
+    fn siblings(
+        &mut self,
+        lead_id: LeadId,
+    ) -> impl Future<Output = Result<Vec<SiblingLead>, CoreError>> + Send;
 }

@@ -3,10 +3,10 @@ use common::CoreError;
 use lodestone_macros::repository;
 
 use crate::{
-    NormalizedDomain,
-    domain::company::{CompanyDossier, ports::CompanyRepository},
+    LeadId, NormalizedDomain,
+    domain::company::{CompanyDossier, CompanyEntity, SiblingLead, ports::CompanyRepository},
     infrastructure::{
-        company::postgres::model::DossierRow,
+        company::postgres::model::{DossierRow, EntityRow, SiblingRow},
         lead::postgres::repository::NOT_SUPPRESSED,
         postgres::{SharedTx, error::map_sqlx_error},
     },
@@ -101,14 +101,34 @@ impl<'tx> CompanyRepository for PgCompanyRepository<'tx> {
         let pages = serde_json::to_value(&dossier.pages)
             .map_err(|error| CoreError::Internal(error.to_string()))?;
         let attempts = i32::try_from(dossier.attempts).unwrap_or(i32::MAX);
+        let company = dossier
+            .official
+            .as_ref()
+            .map(|official| (official.siren.as_str(), official.legal_name.as_str()));
         let mut tx = self.tx.lock().await;
+        if let Some((siren, legal_name)) = company {
+            sqlx::query(
+                r#"
+                INSERT INTO companies (siren, legal_name)
+                VALUES ($1, $2)
+                ON CONFLICT (siren) DO UPDATE SET
+                    legal_name = EXCLUDED.legal_name,
+                    updated_at = now()
+                "#,
+            )
+            .bind(siren)
+            .bind(legal_name)
+            .execute(&mut ***tx)
+            .await
+            .map_err(map_sqlx_error)?;
+        }
         sqlx::query(
             r#"
             INSERT INTO company_dossiers (
                 domain, state, siren, official, pages, content_hash, content_at,
-                built_at, attempts, next_attempt_at, error
+                built_at, attempts, next_attempt_at, error, company_siren
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
             ON CONFLICT (domain) DO UPDATE SET
                 state           = EXCLUDED.state,
                 siren           = EXCLUDED.siren,
@@ -119,7 +139,8 @@ impl<'tx> CompanyRepository for PgCompanyRepository<'tx> {
                 built_at        = EXCLUDED.built_at,
                 attempts        = EXCLUDED.attempts,
                 next_attempt_at = EXCLUDED.next_attempt_at,
-                error           = EXCLUDED.error
+                error           = EXCLUDED.error,
+                company_siren   = EXCLUDED.company_siren
             "#,
         )
         .bind(dossier.domain.as_str())
@@ -133,6 +154,7 @@ impl<'tx> CompanyRepository for PgCompanyRepository<'tx> {
         .bind(attempts)
         .bind(dossier.next_attempt_at)
         .bind(dossier.error.as_deref())
+        .bind(company.map(|(siren, _)| siren))
         .execute(&mut ***tx)
         .await
         .map_err(map_sqlx_error)?;
@@ -161,5 +183,42 @@ impl<'tx> CompanyRepository for PgCompanyRepository<'tx> {
         .await
         .map_err(map_sqlx_error)?;
         Ok(())
+    }
+
+    #[tracing::instrument(skip(self), fields(db.system = "postgresql", db.operation = "select", db.table = "companies", domain = %domain.as_str()), err)]
+    async fn entity_of(
+        &mut self,
+        domain: &NormalizedDomain,
+    ) -> Result<Option<CompanyEntity>, CoreError> {
+        let mut tx = self.tx.lock().await;
+        let row = sqlx::query_as::<_, EntityRow>(
+            "SELECT companies.siren, companies.legal_name FROM company_dossiers d JOIN companies ON companies.siren = d.company_siren WHERE d.domain = $1",
+        )
+        .bind(domain.as_str())
+        .fetch_optional(&mut ***tx)
+        .await
+        .map_err(map_sqlx_error)?;
+        row.map(CompanyEntity::try_from).transpose()
+    }
+
+    #[tracing::instrument(skip(self), fields(db.system = "postgresql", db.operation = "select", db.table = "leads", lead.id = %lead_id), err)]
+    async fn siblings(&mut self, lead_id: LeadId) -> Result<Vec<SiblingLead>, CoreError> {
+        let query = format!(
+            "SELECT leads.id, leads.domain, leads.profile_id, profiles.name AS profile_name, leads.verdict, leads.confidence \
+             FROM leads origin \
+             JOIN company_dossiers origin_dossier ON origin_dossier.domain = origin.domain \
+             JOIN company_dossiers sibling_dossier ON sibling_dossier.company_siren = origin_dossier.company_siren \
+             JOIN leads ON leads.domain = sibling_dossier.domain AND leads.id <> origin.id \
+             JOIN profiles ON profiles.id = leads.profile_id \
+             WHERE origin.id = $1 AND origin_dossier.company_siren IS NOT NULL{NOT_SUPPRESSED} \
+             ORDER BY (leads.profile_id = origin.profile_id) DESC, leads.confidence DESC NULLS LAST, leads.domain ASC, leads.id ASC"
+        );
+        let mut tx = self.tx.lock().await;
+        let rows = sqlx::query_as::<_, SiblingRow>(&query)
+            .bind(lead_id.0)
+            .fetch_all(&mut ***tx)
+            .await
+            .map_err(map_sqlx_error)?;
+        rows.into_iter().map(SiblingLead::try_from).collect()
     }
 }

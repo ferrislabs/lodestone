@@ -334,10 +334,11 @@ fn judgement_of(
     lead: &Lead,
     facts: &LeadFacts,
     opinions: &[AgentOpinion],
+    at: DateTime<Utc>,
 ) -> Judgement {
     judge(
         opinions,
-        EvidenceStrength::compute(facts, lead.score.get(), &definition.evidence),
+        EvidenceStrength::compute(facts, lead.score.get(), &definition.evidence, at),
         definition.verdict,
         &definition.evidence,
     )
@@ -728,7 +729,7 @@ where
         let scored = |pass: &Pass| -> Vec<AgentOpinion> {
             pass.opinions.iter().flatten().copied().collect()
         };
-        let mut judgement = judgement_of(definition, lead, &facts, &scored(&pass));
+        let mut judgement = judgement_of(definition, lead, &facts, &scored(&pass), at);
         if escalated_revision.is_none()
             && let (Some(provider), Some(confidence)) =
                 (definition.escalation.provider, judgement.confidence)
@@ -749,7 +750,7 @@ where
                 None => return Ok(LeadOutcome::BudgetExhausted),
                 Some(true) => {
                     escalated_revision = Some(revision);
-                    judgement = judgement_of(definition, lead, &facts, &scored(&pass));
+                    judgement = judgement_of(definition, lead, &facts, &scored(&pass), at);
                     info!(
                         monotonic_counter.qualification_escalations = 1u64,
                         "lead escalated"
@@ -834,7 +835,9 @@ impl LodestoneUseCase {
         let mut providers = Providers::new();
         let mut remaining = settings.batch_size;
         let gate = self.dossier_gate(clock.now());
-        let rescoring = self.rescore_stale_leads(RESCORE_BATCH_SIZE).await?;
+        let rescoring = self
+            .rescore_stale_leads(RESCORE_BATCH_SIZE, clock.now())
+            .await?;
         report.rescored = rescoring.leads;
         'profiles: for active in &profiles {
             if remaining == 0 {

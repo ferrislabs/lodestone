@@ -90,6 +90,9 @@ export function LeadDetailFeature() {
 					search: detail ? { profile: detail.lead.profile.id } : {},
 				})
 			}}
+			onOpenLead={(siblingId) => {
+				void navigate({ to: '/leads/$leadId', params: { leadId: siblingId } })
+			}}
 			onChangeStatus={(status) => {
 				if (status === 'rejected') {
 					changeStatus.reset()

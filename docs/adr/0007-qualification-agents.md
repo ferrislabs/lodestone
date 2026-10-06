@@ -3,6 +3,8 @@
 Status: accepted
 Date: 2026-10-06
 
+Note (2026-10-07): ADR 0009 adds scoring agents that decide the score and the verdict. Once issue 172 lands, the verdict part of this ADR (confidence blend, thresholds and caps, "Evidence and calibration") is superseded; exclusions, the qualification contract, the aggregator and the company dossier stay. Evidence indicators now count independent signals, decay with age and aggregate the sibling domains of a company (issue 170, ADR 0009).
+
 ## Context
 
 A profile holds sourcing agents (ADR 0005): each one acts on one source (an HTTP API, the certificate transparency stream, DNS resolution…) and extracts leads, good or bad. After extraction, two fixed LLM steps existed: triage of ambiguous keyword candidates (triage tier) and qualification of a lead (qualification tier: assessment and draft). Both used one global provider per tier, a fixed prompt and a fixed output shape. An operator could not decide which model judges which aspect of a lead, nor what it is asked.

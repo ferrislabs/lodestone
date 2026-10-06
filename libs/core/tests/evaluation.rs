@@ -10,16 +10,17 @@ use std::{
 use chrono::{DateTime, Utc};
 use common::{EncryptionKey, Secret};
 use lodestone_core::{
-    ActiveProfile, Clock, CreateProfileCommand, GenerationParams, Lead, LeadId, LeadRepository,
-    LeadScoring, LlmError, LlmProvider, LlmRequest, LlmResponse, LodestoneUseCase, Observation,
-    ProfileId, ProfileName, Provenance, ProviderDefinition, ProviderId, ProviderKind,
-    QualificationResult, ReasoningEffort, ResultId, ResultStatus, ReviseProfileCommand,
-    RevisionNumber, SignalKind, SourceName, SuppressionTarget, Tier, TokenPricing, TokenUsage,
-    UnitInterval, ValidatedProfile, Verdict, VerdictCap, VerdictReason,
+    ActiveProfile, Clock, CompanyDossier, CompanyRepository, CreateProfileCommand, DossierState,
+    GenerationParams, Lead, LeadId, LeadRepository, LeadScoring, LlmError, LlmProvider, LlmRequest,
+    LlmResponse, LodestoneUseCase, Observation, OfficialData, ProfileId, ProfileName, Provenance,
+    ProviderDefinition, ProviderId, ProviderKind, QualificationResult, ReasoningEffort, ResultId,
+    ResultStatus, ReviseProfileCommand, RevisionNumber, SCORING_VERSION, SignalKind, Siren,
+    SourceName, SuppressionTarget, Tier, TokenPricing, TokenUsage, UnitInterval, ValidatedProfile,
+    Verdict, VerdictCap, VerdictReason,
     evaluation::{EvaluationReport, EvaluationSettings, ProviderBuilder},
     infrastructure::{
-        crypto::AesGcmCipher, lead::postgres::PgLeadRepository, llm_cache::postgres::PgLlmCache,
-        postgres::with_tx,
+        company::postgres::PgCompanyRepository, crypto::AesGcmCipher,
+        lead::postgres::PgLeadRepository, llm_cache::postgres::PgLlmCache, postgres::with_tx,
     },
     llm::CreateLlmProvider,
 };
@@ -426,6 +427,30 @@ impl Harness {
             )
             .await
             .unwrap();
+    }
+
+    async fn link_company(&self, host: &str, siren: &str) {
+        let mut dossier = CompanyDossier::pending(domain(host), at(0));
+        dossier.state = DossierState::Complete;
+        dossier.siren = Some(Siren::parse(siren).unwrap());
+        dossier.official = Some(OfficialData {
+            siren: Siren::parse(siren).unwrap(),
+            legal_name: "ACME SAS".to_owned(),
+            naf_code: None,
+            naf_label: None,
+            headcount_code: None,
+            headcount_range: None,
+            head_office_city: None,
+            head_office_postcode: None,
+            head_office_country: None,
+            head_office_country_code: None,
+            created_on: None,
+        });
+        with_tx(&self.pool, async |shared| {
+            PgCompanyRepository::new(&shared).save(&dossier).await
+        })
+        .await
+        .unwrap();
     }
 
     async fn step(&self, settings: EvaluationSettings) -> EvaluationReport {
@@ -1243,6 +1268,120 @@ async fn leads_scored_before_the_evidence_rules_are_rescored_without_a_model_cal
     assert!(scoring.evidence.only_non_production);
     let again = harness.step(settings(100, 10)).await;
     assert_eq!(again.rescored, 0);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_scoring_from_an_older_version_is_rescored_without_a_model_call(pool: PgPool) {
+    let harness = Harness::new(pool.clone(), 10);
+    let provider = harness.provider("model-a", 0).await;
+    let profile = harness
+        .profile_tuned(
+            vec![agent("solo", 5, Some(provider), "q")],
+            json!({}),
+            json!({}),
+        )
+        .await;
+    harness.observe("acme.com", SourceName::HttpProbe, 10).await;
+    harness.step(settings(100, 10)).await;
+    let calls = harness.calls();
+    let stored: i32 = sqlx::query_scalar("SELECT scoring_version FROM lead_qualification_state")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(stored, SCORING_VERSION);
+    sqlx::query("UPDATE lead_qualification_state SET scoring_version = $1")
+        .bind(SCORING_VERSION - 1)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let report = harness.step(settings(100, 10)).await;
+
+    assert_eq!(report.rescored, 1);
+    assert_eq!(report.leads, 0);
+    assert_eq!(harness.calls(), calls);
+    let rescored: i32 = sqlx::query_scalar("SELECT scoring_version FROM lead_qualification_state")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(rescored, SCORING_VERSION);
+    assert!(harness.scoring(profile, "acme.com").await.is_some());
+    assert_eq!(harness.step(settings(100, 10)).await.rescored, 0);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_scoring_older_than_a_day_is_refreshed_and_the_old_signals_weigh_less(pool: PgPool) {
+    let harness = Harness::new(pool.clone(), 10);
+    let provider = harness.provider("model-a", 0).await;
+    let profile = harness
+        .profile_tuned(
+            vec![agent("solo", 5, Some(provider), "q")],
+            json!({}),
+            json!({}),
+        )
+        .await;
+    harness.observe("acme.com", SourceName::HttpProbe, 10).await;
+    harness.step(settings(100, 10)).await;
+    let calls = harness.calls();
+    let before = harness.scoring(profile, "acme.com").await.unwrap();
+    assert_eq!(harness.step(settings(100, 10)).await.rescored, 0);
+    sqlx::query("UPDATE lead_qualification_state SET scored_at = scored_at - interval '25 hours'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE signals SET observed_at = observed_at - interval '365 days'")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let report = harness.step(settings(100, 10)).await;
+
+    assert_eq!(report.rescored, 1);
+    assert_eq!(harness.calls(), calls);
+    let after = harness.scoring(profile, "acme.com").await.unwrap();
+    assert!((before.evidence.decayed_signals - 1.0).abs() < 1e-3);
+    assert!((after.evidence.decayed_signals - 0.5).abs() < 1e-3);
+    assert!(after.evidence.components.volume < before.evidence.components.volume);
+    assert!(after.evidence.components.strength < before.evidence.components.strength);
+    assert_eq!(harness.step(settings(100, 10)).await.rescored, 0);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_new_signal_on_a_sibling_domain_rescores_the_other_leads_without_a_model_call(
+    pool: PgPool,
+) {
+    let harness = Harness::new(pool, 10);
+    let provider = harness.provider("model-a", 0).await;
+    let profile = harness
+        .profile_tuned(
+            vec![agent("solo", 5, Some(provider), "q")],
+            json!({}),
+            json!({}),
+        )
+        .await;
+    harness.link_company("acme.com", "552081317").await;
+    harness.link_company("acme.fr", "552081317").await;
+    harness.observe("acme.com", SourceName::HttpProbe, 10).await;
+    harness.observe("acme.fr", SourceName::HttpProbe, 10).await;
+    harness.step(settings(100, 10)).await;
+    let calls = harness.calls();
+    let before = harness.scoring(profile, "acme.com").await.unwrap();
+    assert_eq!(before.evidence.signal_count, 2);
+    assert_eq!(harness.step(settings(100, 10)).await.rescored, 0);
+    harness
+        .observe_value("acme.fr", SourceName::HttpProbe, "another", 20)
+        .await;
+
+    let report = harness.step(settings(100, 10)).await;
+
+    assert_eq!(report.rescored, 2);
+    assert_eq!(harness.calls(), calls);
+    let after = harness.scoring(profile, "acme.com").await.unwrap();
+    assert_eq!(after.evidence.signal_count, 3);
+    assert_eq!(before.evidence.independent_signals, 1);
+    assert_eq!(after.evidence.independent_signals, 2);
+    assert!(after.evidence.components.volume > before.evidence.components.volume);
+    assert_eq!(harness.step(settings(100, 10)).await.rescored, 0);
 }
 
 #[sqlx::test(migrations = "../../migrations")]

@@ -511,8 +511,11 @@ pub struct Rescoring {
     pub lead_id: LeadId,
     pub judgement: Judgement,
     pub scoring_version: i32,
+    pub scored_at: DateTime<Utc>,
     pub agent_scores: Vec<(ResultId, f64)>,
 }
+
+pub const SCORING_MAX_AGE_HOURS: i32 = 24;
 
 #[cfg(test)]
 mod tests {

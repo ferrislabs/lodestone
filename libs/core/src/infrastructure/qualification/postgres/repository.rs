@@ -8,8 +8,8 @@ use crate::{
     Lead, LeadId, ProfileId, RevisionNumber,
     domain::qualification::{
         Completion, EvidenceStrength, Exclusion, Judgement, LeadScoring, QualificationResult,
-        Rescoring, SCORING_VERSION, SUMMARY_ERROR_MAX_CHARS, SummaryState, VerdictReason,
-        ports::QualificationRepository, summary_retry_delay,
+        Rescoring, SCORING_MAX_AGE_HOURS, SCORING_VERSION, SUMMARY_ERROR_MAX_CHARS, SummaryState,
+        VerdictReason, ports::QualificationRepository, summary_retry_delay,
     },
     infrastructure::{
         lead::postgres::{model::LeadRow, repository::NOT_SUPPRESSED},
@@ -91,10 +91,18 @@ const STALE: &str = r#"
       AND state.profile_revision = $2
       AND (
           state.scoring_version <> $3
+          OR state.scored_at IS NULL
+          OR state.scored_at < $4 - make_interval(hours => $5)
           OR state.evidence IS NULL
           OR abs((state.evidence->>'signal_score')::float8 - leads.score) > 1e-9
           OR (state.evidence->>'signal_count')::bigint
-              <> (SELECT COUNT(*) FROM signals WHERE signals.lead_id = leads.id)
+              <> (
+                  SELECT COUNT(*) FROM signals
+                  WHERE signals.lead_id = leads.id
+                     OR signals.lead_id IN (
+                         SELECT sibling_id FROM lead_siblings WHERE lead_siblings.lead_id = leads.id
+                     )
+              )
       )
 "#;
 
@@ -342,13 +350,14 @@ impl<'tx> QualificationRepository for PgQualificationRepository<'tx> {
             INSERT INTO lead_qualification_state (
                 lead_id, profile_revision, sources, completed_at,
                 scoring_version, opinion, evidence, verdict_reason, dossier_at, exclusions,
-                escalated_revision
+                escalated_revision, scored_at
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $4)
             ON CONFLICT (lead_id) DO UPDATE SET
                 profile_revision = EXCLUDED.profile_revision,
                 sources          = EXCLUDED.sources,
                 completed_at     = EXCLUDED.completed_at,
+                scored_at        = EXCLUDED.scored_at,
                 scoring_version  = EXCLUDED.scoring_version,
                 opinion          = EXCLUDED.opinion,
                 evidence         = EXCLUDED.evidence,
@@ -423,16 +432,19 @@ impl<'tx> QualificationRepository for PgQualificationRepository<'tx> {
         profile_id: ProfileId,
         revision: RevisionNumber,
         limit: u32,
+        now: DateTime<Utc>,
     ) -> Result<Vec<Lead>, CoreError> {
         let revision = revision_number(revision)?;
         let query = format!(
-            "SELECT leads.id, leads.profile_id, leads.domain, leads.status, leads.score, leads.score_breakdown, leads.confidence, leads.verdict, leads.qualified_at, leads.first_seen_at, leads.last_seen_at, leads.updated_at {STALE}{NOT_SUPPRESSED} ORDER BY leads.first_seen_at ASC, leads.id ASC LIMIT $4"
+            "SELECT leads.id, leads.profile_id, leads.domain, leads.status, leads.score, leads.score_breakdown, leads.confidence, leads.verdict, leads.qualified_at, leads.first_seen_at, leads.last_seen_at, leads.updated_at {STALE}{NOT_SUPPRESSED} ORDER BY state.scored_at ASC NULLS FIRST, leads.first_seen_at ASC, leads.id ASC LIMIT $6"
         );
         let mut tx = self.tx.lock().await;
         let rows = sqlx::query_as::<_, LeadRow>(&query)
             .bind(profile_id.0)
             .bind(revision)
             .bind(SCORING_VERSION)
+            .bind(now)
+            .bind(SCORING_MAX_AGE_HOURS)
             .bind(i64::from(limit))
             .fetch_all(&mut ***tx)
             .await
@@ -445,6 +457,7 @@ impl<'tx> QualificationRepository for PgQualificationRepository<'tx> {
         &mut self,
         profile_id: ProfileId,
         revision: RevisionNumber,
+        now: DateTime<Utc>,
     ) -> Result<u64, CoreError> {
         let revision = revision_number(revision)?;
         let query = format!("SELECT COUNT(*) {STALE}{NOT_SUPPRESSED}");
@@ -453,6 +466,8 @@ impl<'tx> QualificationRepository for PgQualificationRepository<'tx> {
             .bind(profile_id.0)
             .bind(revision)
             .bind(SCORING_VERSION)
+            .bind(now)
+            .bind(SCORING_MAX_AGE_HOURS)
             .fetch_one(&mut ***tx)
             .await
             .map_err(map_sqlx_error)?;
@@ -465,7 +480,7 @@ impl<'tx> QualificationRepository for PgQualificationRepository<'tx> {
         let exclusions = exclusions_json(&rescoring.judgement.exclusions)?;
         let mut tx = self.tx.lock().await;
         sqlx::query(
-            "UPDATE lead_qualification_state SET scoring_version = $2, opinion = $3, evidence = $4, verdict_reason = $5, exclusions = $6 WHERE lead_id = $1",
+            "UPDATE lead_qualification_state SET scoring_version = $2, opinion = $3, evidence = $4, verdict_reason = $5, exclusions = $6, scored_at = $7 WHERE lead_id = $1",
         )
         .bind(rescoring.lead_id.0)
         .bind(rescoring.scoring_version)
@@ -473,6 +488,7 @@ impl<'tx> QualificationRepository for PgQualificationRepository<'tx> {
         .bind(evidence)
         .bind(reason_text(&rescoring.judgement))
         .bind(exclusions)
+        .bind(rescoring.scored_at)
         .execute(&mut ***tx)
         .await
         .map_err(map_sqlx_error)?;

@@ -19,3 +19,5 @@ export type QualificationResult = Schemas.QualificationResultDto
 export type QualificationAnswer = Schemas.QualificationAnswerDto
 export type Company = NonNullable<LeadDetailData['company']>
 export type CompanyOfficial = NonNullable<Company['official']>
+export type SiblingLead = Company['siblings'][number]
+export type GroupedLead = Lead['grouped_leads'][number]

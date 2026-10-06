@@ -17,6 +17,7 @@ const leads: Lead[] = [
 		domain: 'acme.test',
 		status: 'qualified',
 		exclusions: [],
+		grouped_leads: [],
 		score: 42,
 		confidence: 72.5,
 		verdict: 'fiable',
@@ -32,6 +33,7 @@ const leads: Lead[] = [
 		domain: 'globex.test',
 		status: 'new',
 		exclusions: [],
+		grouped_leads: [],
 		score: 10,
 		first_seen_at: '2026-01-01T00:00:00Z',
 		last_seen_at: '2026-02-02T00:00:00Z',
@@ -63,6 +65,7 @@ function Harness({ data, state, onOpen, onExport }: HarnessProps) {
 		data,
 		columns,
 		getCoreRowModel: getCoreRowModel(),
+		getRowCanExpand: (row) => row.original.grouped_leads.length > 0,
 	})
 	return (
 		<LeadsList
@@ -76,6 +79,7 @@ function Harness({ data, state, onOpen, onExport }: HarnessProps) {
 			exporting={false}
 			exportError={null}
 			columnCount={columns.length}
+			onOpenLead={onOpen ?? (() => {})}
 			noProfile={false}
 		/>
 	)
@@ -120,6 +124,10 @@ describe('LeadsList', () => {
 					strength: 24.2,
 				},
 				signal_count: 1,
+				independent_signals: 1,
+				decayed_signals: 0.5,
+				source_count: 1,
+				kind_count: 1,
 				signal_score: 12.1,
 				only_non_production: true,
 			},
@@ -249,5 +257,71 @@ describe('LeadsList', () => {
 		expect(hints[0]?.parentElement?.getAttribute('title')).toBe(
 			"Exclu par l'agent « Exclusions » : Concurrent (85 %)\nExclu par l'agent « Exclusions » : Client actuel (70 %)",
 		)
+	})
+	describe('grouped by company', () => {
+		const grouped: Lead[] = [
+			{
+				...leads[0],
+				grouped_leads: [
+					{
+						id: 'l9',
+						domain: 'acme.fr',
+						status: 'new',
+						verdict: 'a_verifier',
+						confidence: 41,
+					},
+					{
+						id: 'l10',
+						domain: 'acme.io',
+						status: 'qualified',
+						verdict: null,
+						confidence: null,
+					},
+				],
+			},
+			leads[1],
+		]
+
+		it('shows a +N domaines badge only on rows that stand for siblings', () => {
+			const { container } = render(<Harness data={grouped} state="ready" />)
+			const toggles = container.querySelectorAll('[data-group-toggle]')
+			expect(toggles).toHaveLength(1)
+			expect(toggles[0]?.textContent).toBe('+2 domaines')
+			expect(toggles[0]?.getAttribute('aria-expanded')).toBe('false')
+			expect(screen.queryByText('acme.fr')).toBeNull()
+		})
+
+		it('uses the singular for one more domain', () => {
+			const [first] = grouped
+			if (!first) throw new Error('fixture')
+			const one: Lead = {
+				...first,
+				grouped_leads: first.grouped_leads.slice(0, 1),
+			}
+			render(<Harness data={[one]} state="ready" />)
+			expect(screen.getByText('+1 domaine')).toBeTruthy()
+		})
+
+		it('expands the sibling domains with verdict and confidence and opens one', () => {
+			const onOpen = vi.fn()
+			const { container } = render(
+				<Harness data={grouped} state="ready" onOpen={onOpen} />,
+			)
+			fireEvent.click(screen.getByText('+2 domaines'))
+			const group = container.querySelector('[data-group="l1"]')
+			expect(group?.textContent).toContain('acme.fr')
+			expect(group?.textContent).toContain('acme.io')
+			expect(group?.textContent).toContain('À vérifier')
+			expect(group?.textContent).toMatch(/41\s%/)
+			expect(
+				container
+					.querySelector('[data-group-toggle]')
+					?.getAttribute('aria-expanded'),
+			).toBe('true')
+			fireEvent.click(screen.getByText('acme.fr'))
+			expect(onOpen).toHaveBeenCalledWith('l9')
+			fireEvent.click(screen.getByText('+2 domaines'))
+			expect(container.querySelector('[data-group="l1"]')).toBeNull()
+		})
 	})
 })

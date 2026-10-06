@@ -42,6 +42,16 @@ export function LeadFacts({ facts }: LeadFactsProps) {
 					<dd>{facts.signal_count}</dd>
 				</div>
 				<div>
+					<dt className="text-muted-foreground">Signaux indépendants</dt>
+					<dd>{facts.independent_signals}</dd>
+				</div>
+				{facts.sibling_domains.length > 0 ? (
+					<div data-facts="siblings">
+						<dt className="text-muted-foreground">Domaines regroupés</dt>
+						<dd>{facts.sibling_domains.join(', ')}</dd>
+					</div>
+				) : null}
+				<div>
 					<dt className="text-muted-foreground">Sources</dt>
 					<dd>
 						{facts.source_count === 0

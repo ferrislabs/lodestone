@@ -92,12 +92,23 @@ export namespace Schemas {
     siren: string;
   };
   export type CompanyPageDto = { url: string };
+  export type ProfileRefDto = { id: string; name: string };
+  export type VerdictDto = "fiable" | "a_verifier" | "ecarte";
+  export type SiblingLeadDto = {
+    confidence?: (number | null) | undefined;
+    domain: string;
+    id: string;
+    profile: ProfileRefDto;
+    verdict?: (null | VerdictDto) | undefined;
+  };
   export type CompanyDto = {
     built_at?: (string | null) | undefined;
     error?: (string | null) | undefined;
+    legal_name?: (string | null) | undefined;
     next_attempt_at: string;
     official?: (null | OfficialDataDto) | undefined;
     pages: Array<CompanyPageDto>;
+    siblings: Array<SiblingLeadDto>;
     siren?: (string | null) | undefined;
     state: string;
   };
@@ -146,17 +157,17 @@ export namespace Schemas {
     data: {
       built_at?: (string | null) | undefined;
       error?: (string | null) | undefined;
+      legal_name?: (string | null) | undefined;
       next_attempt_at: string;
       official?: (null | OfficialDataDto) | undefined;
       pages: Array<CompanyPageDto>;
+      siblings: Array<SiblingLeadDto>;
       siren?: (string | null) | undefined;
       state: string;
     };
     pagination?: (null | PaginationMetadata) | undefined;
   };
   export type DraftContactDto = { address: string; confidence: number; method: string };
-  export type ProfileRefDto = { id: string; name: string };
-  export type VerdictDto = "fiable" | "a_verifier" | "ecarte";
   export type DraftLeadDto = {
     confidence?: (number | null) | undefined;
     domain: string;
@@ -195,12 +206,15 @@ export namespace Schemas {
     distinct_subdomains: number;
     first_seen_at: string;
     hosts: Array<HostFactDto>;
+    independent_signals: number;
+    kinds: Array<string>;
     last_seen_at: string;
     official?: (null | OfficialFactsDto) | undefined;
     only_non_production: boolean;
     probable_country?: (null | CountryDto) | undefined;
     production_hosts: number;
     production_share?: (number | null) | undefined;
+    sibling_domains: Array<string>;
     signal_count: number;
     source_count: number;
     sources: Array<string>;
@@ -208,9 +222,13 @@ export namespace Schemas {
   export type EvidenceComponentsDto = { diversity: number; environment: number; strength: number; volume: number };
   export type EvidenceStrengthDto = {
     components: EvidenceComponentsDto;
+    decayed_signals: number;
+    independent_signals: number;
+    kind_count: number;
     only_non_production: boolean;
     signal_count: number;
     signal_score: number;
+    source_count: number;
     strength: number;
   };
   export type ExclusionDto = {
@@ -223,6 +241,13 @@ export namespace Schemas {
     probability: number;
     question_id: string;
   };
+  export type GroupedLeadDto = {
+    confidence?: (number | null) | undefined;
+    domain: string;
+    id: string;
+    status: LeadStatusDto;
+    verdict?: (null | VerdictDto) | undefined;
+  };
   export type VerdictReasonDto = "single_angle" | "weak_evidence" | "non_production" | "excluded";
   export type LeadDto = {
     confidence?: (number | null) | undefined;
@@ -230,6 +255,7 @@ export namespace Schemas {
     evidence?: (null | EvidenceStrengthDto) | undefined;
     exclusions: Array<ExclusionDto>;
     first_seen_at: string;
+    grouped_leads: Array<GroupedLeadDto>;
     id: string;
     last_seen_at: string;
     opinion?: (number | null) | undefined;
@@ -319,6 +345,7 @@ export namespace Schemas {
       evidence?: (null | EvidenceStrengthDto) | undefined;
       exclusions: Array<ExclusionDto>;
       first_seen_at: string;
+      grouped_leads: Array<GroupedLeadDto>;
       id: string;
       last_seen_at: string;
       opinion?: (number | null) | undefined;
@@ -525,6 +552,7 @@ export namespace Schemas {
       evidence?: (null | EvidenceStrengthDto) | undefined;
       exclusions: Array<ExclusionDto>;
       first_seen_at: string;
+      grouped_leads: Array<GroupedLeadDto>;
       id: string;
       last_seen_at: string;
       opinion?: (number | null) | undefined;
@@ -1091,6 +1119,7 @@ export namespace Endpoints {
         min_score: number;
         domain: string;
         signal: string;
+        group_by: string;
         sort: string;
         page: number;
         per_page: number;

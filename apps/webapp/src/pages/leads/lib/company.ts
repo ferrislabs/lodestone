@@ -1,4 +1,9 @@
-import type { Company, CompanyOfficial } from './types'
+import type {
+	Company,
+	CompanyOfficial,
+	GroupedLead,
+	SiblingLead,
+} from './types'
 
 export type CompanyState = 'pending' | 'complete' | 'partial' | 'unreachable'
 
@@ -104,4 +109,28 @@ const COUNTRY_BASIS_LABELS: Readonly<Record<string, string>> = {
 
 export function countryBasisLabel(basis: string | null | undefined): string {
 	return basis ? (COUNTRY_BASIS_LABELS[basis] ?? basis) : ''
+}
+
+export interface CompanyEntity {
+	legalName: string
+	siren: string
+}
+
+export function companyEntity(company: Company | null): CompanyEntity | null {
+	if (!company?.legal_name || !company.siren) return null
+	return { legalName: company.legal_name, siren: company.siren }
+}
+
+export function siblingLabel(
+	sibling: SiblingLead,
+	currentProfileId: string,
+): string {
+	return sibling.profile.id === currentProfileId
+		? sibling.domain
+		: `${sibling.domain} · ${sibling.profile.name}`
+}
+
+export function groupedBadge(members: readonly GroupedLead[]): string | null {
+	if (members.length === 0) return null
+	return `+${members.length} ${members.length > 1 ? 'domaines' : 'domaine'}`
 }

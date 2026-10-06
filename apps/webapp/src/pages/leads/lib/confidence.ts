@@ -1,3 +1,4 @@
+import { formatNumber } from '#/lib/format'
 import type { Exclusion, Lead } from '#/pages/leads/lib/types'
 import { formatConfidence } from '#/pages/leads/lib/verdict'
 
@@ -50,10 +51,14 @@ export function evidenceComponentRows(
 ): EvidenceComponentRow[] {
 	const { components } = evidence
 	return [
-		{ key: 'volume', label: 'Volume de signaux', value: components.volume },
+		{
+			key: 'volume',
+			label: 'Volume de signaux indépendants',
+			value: components.volume,
+		},
 		{
 			key: 'diversity',
-			label: 'Diversité des sources',
+			label: 'Diversité des sources et des types',
 			value: components.diversity,
 		},
 		{
@@ -62,5 +67,26 @@ export function evidenceComponentRows(
 			value: components.environment,
 		},
 		{ key: 'strength', label: 'Force des signaux', value: components.strength },
+	]
+}
+
+export interface EvidenceSignalRow {
+	key: 'independent' | 'decayed'
+	label: string
+	value: string
+}
+
+export function evidenceSignalRows(evidence: Evidence): EvidenceSignalRow[] {
+	return [
+		{
+			key: 'independent',
+			label: 'Signaux indépendants',
+			value: `${evidence.independent_signals} sur ${evidence.signal_count}`,
+		},
+		{
+			key: 'decayed',
+			label: 'Volume après décroissance',
+			value: `${formatNumber(evidence.decayed_signals)} sur ${evidence.independent_signals}`,
+		},
 	]
 }

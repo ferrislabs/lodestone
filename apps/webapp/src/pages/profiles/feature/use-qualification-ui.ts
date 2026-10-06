@@ -15,6 +15,7 @@ import {
 	setEscalationField,
 	setEvidenceField,
 	setEvidenceWeight,
+	setHalfLife,
 	setOptionField,
 	setQuestionField,
 	setQuestionWording,
@@ -161,6 +162,7 @@ export function useQualificationUi(
 			onChange(setEvidenceField(value, 'reference_score', score)),
 		setEvidenceWeight: (key, weight) =>
 			onChange(setEvidenceWeight(value, key, weight)),
+		setHalfLife: (key, days) => onChange(setHalfLife(value, key, days)),
 	}
 
 	return { agents, editing, confirmingRemove, picking, previewing, actions }

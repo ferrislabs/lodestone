@@ -36,6 +36,7 @@ function company(overrides: Partial<Company> = {}): Company {
 		built_at: '2026-10-06T10:00:00Z',
 		next_attempt_at: '2027-01-04T10:00:00Z',
 		error: null,
+		siblings: [],
 		...overrides,
 	}
 }

@@ -1,5 +1,5 @@
 export const NEW_PROFILE_TEMPLATE = `{
-  "schema_version": 9,
+  "schema_version": 10,
   "identity": {
     "offer": "",
     "target_customer": ""
@@ -29,6 +29,17 @@ export const NEW_PROFILE_TEMPLATE = `{
       "diversity": 1,
       "environment": 1,
       "strength": 1
+    },
+    "half_life_days": {
+      "job_offer": 90,
+      "public_tender": 180,
+      "awarded_contract": 365,
+      "saas_provider": 365,
+      "product_detected": 365,
+      "debt_marker": 365,
+      "contact": 365,
+      "role_contact_found": 365,
+      "default": 180
     }
   },
   "scoring": {

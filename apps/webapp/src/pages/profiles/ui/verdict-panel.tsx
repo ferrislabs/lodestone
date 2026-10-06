@@ -1,13 +1,18 @@
 import { Input } from '#/components/ui/input'
 import { Label } from '#/components/ui/label'
+import { signalKindLabel } from '#/lib/labels'
 import type { Problem } from '#/lib/schema-form'
 import {
 	EVIDENCE_WEIGHT_KEYS,
 	type EvidenceSettings,
 	type EvidenceWeightKey,
 	evidenceProblems,
+	HALF_LIFE_KEYS,
+	type HalfLifeKey,
 	MAX_CALIBRATION_FLOOR_PERCENT,
 	MAX_EVIDENCE_WEIGHT,
+	MAX_HALF_LIFE_DAYS,
+	MIN_HALF_LIFE_DAYS,
 	type Verdict,
 	verdictBands,
 	verdictProblems,
@@ -97,6 +102,12 @@ const WEIGHT_LABELS: Readonly<Record<EvidenceWeightKey, string>> = {
 	diversity: 'Poids : diversité des sources',
 	environment: 'Poids : environnement',
 	strength: 'Poids : force des signaux',
+}
+
+const DEFAULT_HALF_LIFE_LABEL = 'Autres signaux'
+
+function halfLifeLabel(key: HalfLifeKey): string {
+	return key === 'default' ? DEFAULT_HALF_LIFE_LABEL : signalKindLabel(key)
 }
 
 export function VerdictPanel({
@@ -204,9 +215,12 @@ export function VerdictPanel({
 			<div className="flex flex-col gap-2 border-t pt-3">
 				<h3 className="text-sm font-semibold">Solidité des preuves</h3>
 				<p className="text-xs text-muted-foreground">
-					Mesurée par le code à partir des signaux du lead : volume, diversité
-					des sources, environnement des hôtes et force des signaux. Confiance =
-					avis des agents × ((1 − influence) + influence × solidité).
+					Mesurée par le code à partir des signaux du lead et de ceux des autres
+					domaines de la même entreprise : volume de signaux indépendants (un
+					même signal vu par la même source compte une fois, et vieillit),
+					diversité des sources et des types de signaux, environnement des hôtes
+					et force des signaux. Confiance = avis des agents × ((1 − influence) +
+					influence × solidité).
 				</p>
 				<div className="flex flex-wrap gap-4">
 					<PercentInput
@@ -242,6 +256,30 @@ export function VerdictPanel({
 					))}
 				</div>
 			</div>
+			<fieldset className="flex flex-col gap-2 border-t pt-3">
+				<legend className="text-sm font-semibold">
+					Demi-vie des signaux (jours)
+				</legend>
+				<p className="text-xs text-muted-foreground">
+					Un signal de cet âge compte pour moitié dans le volume et la force des
+					preuves. « Autres signaux » s'applique aux types non listés.
+				</p>
+				<div className="flex flex-wrap gap-4">
+					{HALF_LIFE_KEYS.map((key) => (
+						<NumberInput
+							key={key}
+							id={`evidence-half-life-${key}`}
+							label={halfLifeLabel(key)}
+							value={evidence.halfLives[key]}
+							invalid={invalidFor(`evidence.half_life_days.${key}`)}
+							min={MIN_HALF_LIFE_DAYS}
+							max={MAX_HALF_LIFE_DAYS}
+							suffix="j"
+							onChange={(days) => actions.setHalfLife(key, days)}
+						/>
+					))}
+				</div>
+			</fieldset>
 			{messages.map((message) => (
 				<p
 					key={`${message.path}-${message.message}`}

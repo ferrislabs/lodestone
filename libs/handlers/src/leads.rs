@@ -142,13 +142,13 @@ fn percent(fraction: f64) -> f64 {
 /// Components of the evidence strength, each in percent from 0 to 100.
 #[derive(Debug, Serialize, PartialEq, ToSchema)]
 pub struct EvidenceComponentsDto {
-    /// Number of signals: 1 - exp(-signals / 3).
+    /// Decayed independent signals: 1 - exp(-decayed signals / 3).
     pub volume: f64,
-    /// Distinct sources: min(1, sources / 2).
+    /// Distinct sources and signal kinds: min(1, (sources + 0.5 x (kinds - 1)) / 2).
     pub diversity: f64,
     /// Share of production hosts among the hosts carrying signals; 50 when no signal names a host.
     pub environment: f64,
-    /// Signal score against the profile reference score, capped at 100.
+    /// Signal score, weighted by the mean freshness of the independent signals, against the profile reference score, capped at 100.
     pub strength: f64,
 }
 
@@ -158,7 +158,14 @@ pub struct EvidenceStrengthDto {
     /// Weighted mean of the components, in percent from 0 to 100.
     pub strength: f64,
     pub components: EvidenceComponentsDto,
+    /// Signals of the lead and of its siblings of the same profile, duplicates included.
     pub signal_count: u32,
+    /// Signals left once identical kind, value and source count once.
+    pub independent_signals: u32,
+    /// Independent signals after age decay: each one weighs 0.5 ^ (age in days / half-life of its kind).
+    pub decayed_signals: f64,
+    pub source_count: u32,
+    pub kind_count: u32,
     pub signal_score: f64,
     pub only_non_production: bool,
 }
@@ -175,6 +182,10 @@ impl From<&LeadScoring> for EvidenceStrengthDto {
                 strength: percent(evidence.components.strength),
             },
             signal_count: count(evidence.signal_count),
+            independent_signals: count(evidence.independent_signals),
+            decayed_signals: evidence.decayed_signals,
+            source_count: count(evidence.source_count),
+            kind_count: count(evidence.kind_count),
             signal_score: evidence.signal_score,
             only_non_production: evidence.only_non_production,
         }
@@ -200,6 +211,8 @@ pub struct LeadDto {
     pub verdict_reason: Option<VerdictReasonDto>,
     /// Exclusions decided by qualification agents; the verdict is `ecarte` when there is at least one.
     pub exclusions: Vec<ExclusionDto>,
+    /// Other leads of the same company and profile hidden behind this row when the list is grouped by company; empty otherwise.
+    pub grouped_leads: Vec<GroupedLeadDto>,
     /// Summary written by the aggregator; absent until the lead has been summarised.
     pub summary: Option<String>,
     #[schema(format = DateTime)]
@@ -212,7 +225,33 @@ pub struct LeadDto {
     pub updated_at: String,
 }
 
+#[derive(Debug, Serialize, PartialEq, ToSchema)]
+pub struct GroupedLeadDto {
+    pub id: String,
+    pub domain: String,
+    pub status: LeadStatusDto,
+    pub verdict: Option<VerdictDto>,
+    pub confidence: Option<f64>,
+}
+
+impl From<&Lead> for GroupedLeadDto {
+    fn from(lead: &Lead) -> Self {
+        Self {
+            id: lead.id.to_string(),
+            domain: lead.domain.as_str().to_owned(),
+            status: lead.status.into(),
+            verdict: lead.verdict.map(VerdictDto::from),
+            confidence: lead.confidence,
+        }
+    }
+}
+
 impl LeadDto {
+    fn grouped(mut self, members: &[Lead]) -> Self {
+        self.grouped_leads = members.iter().map(GroupedLeadDto::from).collect();
+        self
+    }
+
     fn new(
         lead: &Lead,
         profile: &Profile,
@@ -235,6 +274,7 @@ impl LeadDto {
             exclusions: scoring
                 .map(|scoring| scoring.exclusions.iter().map(ExclusionDto::from).collect())
                 .unwrap_or_default(),
+            grouped_leads: Vec::new(),
             summary: summary.map(str::to_owned),
             qualified_at: lead.qualified_at.map(|at| at.to_rfc3339()),
             first_seen_at: lead.first_seen_at.to_rfc3339(),
@@ -716,8 +756,13 @@ pub struct LeadFactsDto {
     /// Distinct subdomains seen for the domain, from signals and candidate hosts, apex excluded.
     pub distinct_subdomains: u32,
     pub signal_count: u32,
+    /// Signals left once identical kind, value and source count once.
+    pub independent_signals: u32,
     pub source_count: u32,
     pub sources: Vec<String>,
+    pub kinds: Vec<String>,
+    /// Other domains of the same company and profile whose signals and hosts are aggregated in these facts.
+    pub sibling_domains: Vec<String>,
     #[schema(format = DateTime)]
     pub first_seen_at: String,
     #[schema(format = DateTime)]
@@ -762,11 +807,22 @@ impl From<&LeadFacts> for LeadFactsDto {
             only_non_production: facts.only_non_production(),
             distinct_subdomains: count(facts.distinct_subdomains),
             signal_count: count(facts.signal_count),
+            independent_signals: count(facts.independent_signals()),
             source_count: count(facts.sources.len()),
             sources: facts
                 .sources
                 .iter()
                 .map(|source| source.as_str().to_owned())
+                .collect(),
+            kinds: facts
+                .kinds
+                .iter()
+                .map(|kind| kind.as_str().to_owned())
+                .collect(),
+            sibling_domains: facts
+                .sibling_domains
+                .iter()
+                .map(|domain| domain.as_str().to_owned())
                 .collect(),
             first_seen_at: facts.first_seen_at.to_rfc3339(),
             last_seen_at: facts.last_seen_at.to_rfc3339(),
@@ -830,7 +886,9 @@ impl LeadDetailDto {
     pub fn new(detail: &LeadDetail, providers: &[LlmProviderRecord]) -> Self {
         Self {
             summary_state: detail.summary_state.as_ref().and_then(SummaryStateDto::new),
-            company: detail.company.as_ref().map(CompanyDto::from),
+            company: detail.company.as_ref().map(|dossier| {
+                CompanyDto::from(dossier).with_entity(detail.entity.as_ref(), &detail.siblings)
+            }),
             qualification_results: ordered_results(detail, providers),
             lead: LeadDto::new(
                 &detail.lead,
@@ -873,6 +931,8 @@ pub struct ListLeadsParams {
     pub(crate) domain: Option<String>,
     /// Only leads having at least one signal of this kind.
     pub(crate) signal: Option<String>,
+    /// `company` to show one row per company, the best-confidence lead standing for its sibling domains; `none` (default) lists every lead.
+    pub(crate) group_by: Option<String>,
     /// One of confidence_desc (default), confidence_asc, score_desc, score_asc, last_seen_desc, first_seen_desc, domain_asc.
     pub(crate) sort: Option<String>,
     /// Page number, starting at 1.
@@ -991,6 +1051,12 @@ impl ListLeadsParams {
             })
             .transpose()?;
 
+        let group_by_company = match self.group_by.as_deref() {
+            None | Some("none") => false,
+            Some("company") => true,
+            Some(_) => return Err(invalid("group_by", "must be company or none")),
+        };
+
         let sort = match self.sort.as_deref() {
             None => LeadSort::default(),
             Some(raw) => LeadSort::parse(raw).ok_or_else(|| {
@@ -1010,6 +1076,7 @@ impl ListLeadsParams {
             min_score,
             domain_contains,
             signal_kind,
+            group_by_company,
             sort,
             limit: u32::try_from(pagination.per_page()).unwrap_or(u32::MAX),
             offset: pagination.offset(),
@@ -1090,6 +1157,13 @@ pub async fn list_leads(
                 &listing.profile,
                 listing.summaries.get(&lead.id).map(String::as_str),
                 listing.scorings.get(&lead.id),
+            )
+            .grouped(
+                listing
+                    .page
+                    .members
+                    .get(&lead.id)
+                    .map_or(&[], Vec::as_slice),
             )
         })
         .collect();

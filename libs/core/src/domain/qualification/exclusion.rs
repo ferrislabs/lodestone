@@ -306,6 +306,10 @@ mod tests {
             signal_count: 6,
             signal_score: 40.0,
             only_non_production: false,
+            independent_signals: 6,
+            decayed_signals: 6.0,
+            source_count: 1,
+            kind_count: 1,
         };
         let opinions = [
             AgentOpinion {

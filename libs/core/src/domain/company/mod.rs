@@ -7,10 +7,12 @@ use crate::domain::{
     source::SourceError,
 };
 
+mod entity;
 mod labels;
 pub mod ports;
 mod siren;
 
+pub use entity::{CompanyEntity, SiblingLead};
 pub use labels::{headcount_label, naf_section_label};
 pub use siren::{InvalidSiren, Siren};
 

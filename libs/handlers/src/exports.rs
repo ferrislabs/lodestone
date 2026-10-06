@@ -323,6 +323,7 @@ pub async fn export_leads(
         min_score: params.min_score,
         domain: params.domain,
         signal: params.signal,
+        group_by: None,
         sort: params.sort,
         page: None,
         per_page: None,

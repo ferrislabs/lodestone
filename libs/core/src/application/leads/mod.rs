@@ -10,9 +10,9 @@ use crate::{
         quality::{Decided, record_decisions},
     },
     domain::{
-        company::{CompanyDossier, ports::CompanyRepository},
-        facts::LeadFacts,
-        host::ports::KnownHostRepository,
+        company::{CompanyDossier, CompanyEntity, SiblingLead, ports::CompanyRepository},
+        facts::{LeadFacts, SiblingSignals},
+        host::{CandidateHost, ports::KnownHostRepository},
         lead::{
             Lead, LeadId, LeadStatus, Signal,
             ports::{AssessmentRepository, ContactRepository, LeadRepository, SignalRepository},
@@ -25,6 +25,49 @@ use crate::{
     },
     infrastructure::job::postgres::PgJobOutbox,
 };
+
+pub(crate) struct CompanyContext {
+    pub facts: LeadFacts,
+    pub dossier: Option<CompanyDossier>,
+    pub entity: Option<CompanyEntity>,
+    pub siblings: Vec<SiblingLead>,
+}
+
+async fn company_context(
+    signals: &mut impl SignalRepository,
+    known_hosts: &mut impl KnownHostRepository,
+    company: &mut impl CompanyRepository,
+    lead: &Lead,
+    own_signals: &[Signal],
+) -> Result<CompanyContext, CoreError> {
+    let dossier = company.find(&lead.domain).await?;
+    let entity = company.entity_of(&lead.domain).await?;
+    let siblings = company.siblings(lead.id).await?;
+    let mut hosts: Vec<CandidateHost> = known_hosts.list_for_domain(&lead.domain).await?;
+    let mut sibling_signals = Vec::new();
+    for sibling in siblings
+        .iter()
+        .filter(|sibling| sibling.shares_profile(lead.profile_id))
+    {
+        hosts.extend(known_hosts.list_for_domain(&sibling.domain).await?);
+        sibling_signals.push((&sibling.domain, signals.list_for_lead(sibling.id).await?));
+    }
+    let aggregated: Vec<SiblingSignals<'_>> = sibling_signals
+        .iter()
+        .map(|(domain, found)| SiblingSignals {
+            domain,
+            signals: found,
+        })
+        .collect();
+    let facts = LeadFacts::compute_aggregated(lead, own_signals, &hosts, &aggregated)
+        .with_dossier(dossier.as_ref());
+    Ok(CompanyContext {
+        facts,
+        dossier,
+        entity,
+        siblings,
+    })
+}
 
 impl LodestoneUseCase {
     #[transactional(lead, profile, assessment, qualification)]
@@ -103,15 +146,23 @@ impl LodestoneUseCase {
         let summary_state = qualification.summary_state(lead_id).await?;
         let scoring = qualification.scorings(&[lead_id]).await?.remove(&lead_id);
         let lead_signals = signals.list_for_lead(lead_id).await?;
-        let hosts = known_hosts.list_for_domain(&lead.domain).await?;
-        let dossier = company.find(&lead.domain).await?;
+        let context = company_context(
+            &mut signals,
+            &mut known_hosts,
+            &mut company,
+            &lead,
+            &lead_signals,
+        )
+        .await?;
         Ok(LeadDetail {
             summary_state,
             scoring,
             qualification_results,
             qualification_agents,
-            facts: LeadFacts::compute(&lead, &lead_signals, &hosts).with_dossier(dossier.as_ref()),
-            company: dossier,
+            facts: context.facts,
+            company: context.dossier,
+            entity: context.entity,
+            siblings: context.siblings,
             signals: lead_signals,
             contacts: contacts.list_for_lead(lead_id).await?,
             assessments: assessments.list_for_lead(lead_id).await?,
@@ -129,10 +180,9 @@ impl LodestoneUseCase {
         let mut known_hosts = known_host_repository;
         let mut company = company_repository;
         let found = signals.list_for_lead(lead.id).await?;
-        let hosts = known_hosts.list_for_domain(&lead.domain).await?;
-        let dossier = company.find(&lead.domain).await?;
-        let facts = LeadFacts::compute(lead, &found, &hosts).with_dossier(dossier.as_ref());
-        Ok((found, facts, dossier))
+        let context =
+            company_context(&mut signals, &mut known_hosts, &mut company, lead, &found).await?;
+        Ok((found, context.facts, context.dossier))
     }
 
     #[transactional(lead, suppression, qualification, profile, decision, assessment)]

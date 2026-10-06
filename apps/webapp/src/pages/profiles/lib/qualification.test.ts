@@ -8,6 +8,7 @@ import {
 	allAgentIds,
 	contractSchema,
 	DEFAULT_AGGREGATOR_PROMPT,
+	DEFAULT_HALF_LIVES,
 	displayOrder,
 	EVIDENCE_WEIGHT_KEYS,
 	escalationOf,
@@ -16,6 +17,7 @@ import {
 	evidenceSettingsOf,
 	exclusionThresholdOf,
 	FLOOR_ERROR,
+	HALF_LIFE_ERROR,
 	isExcludingOption,
 	isUnknownOption,
 	NO_WEIGHT_ERROR,
@@ -35,6 +37,7 @@ import {
 	setEscalationField,
 	setEvidenceField,
 	setEvidenceWeight,
+	setHalfLife,
 	setOptionField,
 	setQuestionWording,
 	setVerdictField,
@@ -71,7 +74,7 @@ describe('templates', () => {
 		])
 	})
 
-	it('builds templates that pass the v9 validation', () => {
+	it('builds templates that pass the v10 validation', () => {
 		for (const template of QUALIFICATION_TEMPLATES) {
 			if (template.id === 'vide') continue
 			const agent = newQualificationAgent(template.id, new Set(['ats']))
@@ -565,6 +568,7 @@ describe('evidence settings', () => {
 			influence: 60,
 			referenceScore: 50,
 			weights: { volume: 1, diversity: 1, environment: 1, strength: 1 },
+			halfLives: DEFAULT_HALF_LIVES,
 		})
 		expect(evidenceProblems(evidenceSettingsOf({}))).toEqual([])
 	})
@@ -576,6 +580,7 @@ describe('evidence settings', () => {
 				influence: 0.25,
 				reference_score: 30,
 				weights: { volume: 3, diversity: 0, environment: 2, strength: 1 },
+				half_life_days: { job_offer: 30, default: 60 },
 			},
 		})
 		expect(settings).toEqual({
@@ -584,6 +589,7 @@ describe('evidence settings', () => {
 			influence: 25,
 			referenceScore: 30,
 			weights: { volume: 3, diversity: 0, environment: 2, strength: 1 },
+			halfLives: { ...DEFAULT_HALF_LIVES, job_offer: 30, default: 60 },
 		})
 	})
 
@@ -603,6 +609,48 @@ describe('evidence settings', () => {
 			influence: 0.4,
 			weights: { volume: 4, strength: 2 },
 		})
+	})
+
+	it('writes a half-life without touching the other kinds', () => {
+		const first = setHalfLife(profile(), 'job_offer', 30)
+		expect(first.evidence).toEqual({ half_life_days: { job_offer: 30 } })
+		const second = setHalfLife(first, 'default', 45)
+		expect(second.evidence).toEqual({
+			half_life_days: { job_offer: 30, default: 45 },
+		})
+		expect(evidenceSettingsOf(second).halfLives.public_tender).toBe(180)
+	})
+
+	it('rejects half-lives that are not whole days from 1 to 3650', () => {
+		const base = evidenceSettingsOf({})
+		const problems = evidenceProblems({
+			...base,
+			halfLives: {
+				...base.halfLives,
+				job_offer: 0,
+				public_tender: 3651,
+				default: null,
+				saas_provider: 1.5,
+			},
+		})
+		expect(problems).toEqual([
+			{ path: 'evidence.half_life_days.job_offer', message: HALF_LIFE_ERROR },
+			{
+				path: 'evidence.half_life_days.public_tender',
+				message: HALF_LIFE_ERROR,
+			},
+			{
+				path: 'evidence.half_life_days.saas_provider',
+				message: HALF_LIFE_ERROR,
+			},
+			{ path: 'evidence.half_life_days.default', message: HALF_LIFE_ERROR },
+		])
+		expect(
+			evidenceProblems({
+				...base,
+				halfLives: { ...base.halfLives, job_offer: 3650, default: 1 },
+			}),
+		).toEqual([])
 	})
 
 	it('rejects a floor above 20 %, an empty percentage and a small reference', () => {

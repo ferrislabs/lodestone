@@ -1,5 +1,5 @@
 {
-  "schema_version": 9,
+  "schema_version": 10,
   "identity": {
     "offer": "Migration of Magento 1 and Magento 2 shops to a modern e-commerce platform, by a web agency",
     "target_customer": "Merchants and organizations running an outdated Magento storefront"
@@ -119,7 +119,18 @@
   "evidence": {
     "influence": 0.6,
     "reference_score": 50,
-    "weights": { "volume": 1, "diversity": 1, "environment": 1, "strength": 1 }
+    "weights": { "volume": 1, "diversity": 1, "environment": 1, "strength": 1 },
+    "half_life_days": {
+      "awarded_contract": 365,
+      "contact": 365,
+      "debt_marker": 365,
+      "default": 180,
+      "job_offer": 90,
+      "product_detected": 365,
+      "public_tender": 180,
+      "role_contact_found": 365,
+      "saas_provider": 365
+    }
   },
   "scoring": {
     "factors": [

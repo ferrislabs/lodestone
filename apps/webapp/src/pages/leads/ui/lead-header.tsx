@@ -1,13 +1,16 @@
 import { Button } from '#/components/ui/button'
 import { formatScore } from '#/pages/leads/lib/format'
 import { leadStatusLabel } from '#/pages/leads/lib/labels'
-import type { Lead, LeadStatus } from '#/pages/leads/lib/types'
+import type { Company, Lead, LeadStatus } from '#/pages/leads/lib/types'
+import { CompanyLine } from './company-line'
 import { LeadConfidence } from './lead-confidence'
 import { LeadStatusBadge } from './lead-status-badge'
 import { VerdictBadge } from './verdict-badge'
 
 interface LeadHeaderProps {
 	lead: Lead
+	company: Company | null
+	onOpenLead: (leadId: string) => void
 	nextStatuses: readonly LeadStatus[]
 	onChangeStatus: (status: LeadStatus) => void
 	changing: boolean
@@ -16,6 +19,8 @@ interface LeadHeaderProps {
 
 export function LeadHeader({
 	lead,
+	company,
+	onOpenLead,
 	nextStatuses,
 	onChangeStatus,
 	changing,
@@ -38,6 +43,11 @@ export function LeadHeader({
 					<dd className="font-mono">{formatScore(lead.score)}</dd>
 				</div>
 				<LeadConfidence lead={lead} />
+				<CompanyLine
+					company={company}
+					profileId={lead.profile.id}
+					onOpenLead={onOpenLead}
+				/>
 			</dl>
 			<div className="flex flex-wrap items-center gap-2">
 				<span className="text-sm text-muted-foreground">Passer à</span>

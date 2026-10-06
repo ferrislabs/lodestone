@@ -1,9 +1,17 @@
 use chrono::{DateTime, Utc};
 use common::CoreError;
 
+use uuid::Uuid;
+
 use crate::{
-    NormalizedDomain,
-    domain::company::{CompanyDossier, CompanyPage, DossierState, OfficialData, Siren},
+    LeadId, NormalizedDomain, ProfileId, ProfileName,
+    domain::{
+        company::{
+            CompanyDossier, CompanyEntity, CompanyPage, DossierState, OfficialData, SiblingLead,
+            Siren,
+        },
+        qualification::Verdict,
+    },
 };
 
 #[derive(Debug, Clone, sqlx::FromRow)]
@@ -53,6 +61,53 @@ impl TryFrom<DossierRow> for CompanyDossier {
             attempts: u32::try_from(row.attempts).unwrap_or_default(),
             next_attempt_at: row.next_attempt_at,
             error: row.error,
+        })
+    }
+}
+
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct EntityRow {
+    pub siren: String,
+    pub legal_name: String,
+}
+
+impl TryFrom<EntityRow> for CompanyEntity {
+    type Error = CoreError;
+
+    fn try_from(row: EntityRow) -> Result<Self, Self::Error> {
+        Ok(Self {
+            siren: Siren::parse(&row.siren).map_err(|_| invalid("entity siren"))?,
+            legal_name: row.legal_name,
+        })
+    }
+}
+
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct SiblingRow {
+    pub id: Uuid,
+    pub domain: String,
+    pub profile_id: Uuid,
+    pub profile_name: String,
+    pub verdict: Option<String>,
+    pub confidence: Option<f64>,
+}
+
+impl TryFrom<SiblingRow> for SiblingLead {
+    type Error = CoreError;
+
+    fn try_from(row: SiblingRow) -> Result<Self, Self::Error> {
+        Ok(Self {
+            id: LeadId(row.id),
+            domain: NormalizedDomain::from_host(&row.domain).map_err(|_| invalid("domain"))?,
+            profile_id: ProfileId(row.profile_id),
+            profile_name: ProfileName::parse(&row.profile_name)
+                .map_err(|_| invalid("profile name"))?,
+            verdict: row
+                .verdict
+                .as_deref()
+                .map(|raw| Verdict::parse(raw).ok_or_else(|| invalid("verdict")))
+                .transpose()?,
+            confidence: row.confidence,
         })
     }
 }

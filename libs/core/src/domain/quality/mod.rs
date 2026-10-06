@@ -177,6 +177,10 @@ mod tests {
             signal_count: 2,
             signal_score: 4.0,
             only_non_production: false,
+            independent_signals: 2,
+            decayed_signals: 2.0,
+            source_count: 1,
+            kind_count: 1,
         }
     }
 

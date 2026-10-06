@@ -34,6 +34,10 @@ fn evidence() -> EvidenceStrength {
         signal_count: 3,
         signal_score: 8.0,
         only_non_production: false,
+        independent_signals: 3,
+        decayed_signals: 3.0,
+        source_count: 1,
+        kind_count: 1,
     }
 }
 
