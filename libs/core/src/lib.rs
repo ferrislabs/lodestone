@@ -9,8 +9,10 @@ pub use application::*;
 pub use domain::{
     NormalizedDomain, NormalizedDomainError, User, UserId,
     aggregation::{
-        AggregationPrompt, AggregatorOutput, Facts, build as aggregation_prompt,
-        instruction as aggregation_instruction, missing_results, render_agent,
+        AggregationPrompt, AggregatorOutput, EVIDENCE_RETRY, Facts, build as aggregation_prompt,
+        check as check_aggregation, instruction as aggregation_instruction, missing_results,
+        render_agent, retry_message as aggregation_retry_message, warnings as aggregation_warnings,
+        with_problem as aggregation_problem,
     },
     ats_target::AtsTargets,
     contact::{
@@ -36,8 +38,8 @@ pub use domain::{
     },
     lead::{
         Assessment, AssessmentId, ContactEmail, ContactId, ContactKind, ContactMethod, Evidence,
-        InvalidScore, InvalidTransition, Lead, LeadId, LeadStatus, Score, Signal, SignalId,
-        UnknownLeadStatus,
+        InvalidScore, InvalidTransition, Lead, LeadId, LeadStatus, QualityWarning, Score, Signal,
+        SignalId, UnknownLeadStatus,
         draft::{
             DraftEdit, DraftEntry, DraftPage, DraftProblem, DraftQueue, DraftRecord, DraftReview,
             DraftStatus, InvalidDraftTransition, MAX_BODY_CHARS, MAX_REASON_CHARS,
@@ -53,8 +55,9 @@ pub use domain::{
         is_continuous, lock_key, stale_after,
     },
     llm::{
-        LlmError, LlmProvider, LlmRequest, LlmResponse, ProviderDefinition, ProviderKind,
-        ReasoningEffort, TokenUsage, UntrustedDocument,
+        GenerationParams, GenerationProblem, LlmError, LlmProvider, LlmRequest, LlmResponse,
+        MAX_TOKENS_LIMIT, ProviderDefinition, ProviderKind, ReasoningEffort, TokenUsage,
+        UntrustedDocument,
         cache::{CacheScope, CachedOutput, LlmCache},
         provider::{
             CipherError, LlmProviderRecord, LlmProviderRepository, ProviderId, ResolvedProvider,

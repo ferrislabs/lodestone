@@ -10,8 +10,9 @@ use common::{CoreError, Secret};
 use http::{HeaderValue, StatusCode, header::LOCATION};
 use llm::any::AnyProvider;
 use lodestone_core::{
-    LlmError, LlmProvider, LlmProviderRecord, LlmRequest, ProviderDefinition, ProviderId,
-    ProviderKind, ReasoningEffort, SecretCipher, Tier, TokenPricing,
+    GenerationParams, LlmError, LlmProvider, LlmProviderRecord, LlmRequest, MAX_TOKENS_LIMIT,
+    ProviderDefinition, ProviderId, ProviderKind, ReasoningEffort, SecretCipher, Tier,
+    TokenPricing,
     llm::{CreateLlmProvider, KeyChange, UpdateLlmProvider},
 };
 use serde::{Deserialize, Serialize};
@@ -62,7 +63,7 @@ pub struct PricingDto {
     pub output_cents_per_mtok: u32,
 }
 
-#[derive(Debug, Serialize, PartialEq, Eq, ToSchema)]
+#[derive(Debug, Serialize, PartialEq, ToSchema)]
 pub struct ProviderDto {
     pub id: String,
     pub name: String,
@@ -80,6 +81,16 @@ pub struct ProviderDto {
     pub tiers: Vec<String>,
     /// Sent to OpenAI-compatible providers only when set; `null` when not sent.
     pub reasoning_effort: Option<ReasoningEffortDto>,
+    /// Replaces the `max_tokens` of every request when set; `null` when not set.
+    pub max_tokens: Option<u32>,
+    /// Sampling temperature, 0 to 2; `null` when not sent.
+    pub temperature: Option<f64>,
+    /// -2 to 2, OpenAI-compatible providers only; `null` when not sent.
+    pub frequency_penalty: Option<f64>,
+    /// -2 to 2, OpenAI-compatible providers only; `null` when not sent.
+    pub presence_penalty: Option<f64>,
+    /// 1 to 2, OpenAI-compatible providers only. Ollama ignores a repeat penalty on its OpenAI endpoint, so it is sent as a `frequency_penalty` of `repeat_penalty - 1` unless `frequency_penalty` is set; `null` when not sent.
+    pub repeat_penalty: Option<f64>,
     #[schema(format = DateTime)]
     pub created_at: String,
     #[schema(format = DateTime)]
@@ -108,6 +119,11 @@ impl ProviderDto {
                 .map(|(tier, _)| tier.as_str().to_owned())
                 .collect(),
             reasoning_effort: record.reasoning_effort.map(ReasoningEffortDto::from),
+            max_tokens: record.generation.max_tokens,
+            temperature: record.generation.temperature,
+            frequency_penalty: record.generation.frequency_penalty,
+            presence_penalty: record.generation.presence_penalty,
+            repeat_penalty: record.generation.repeat_penalty,
             created_at: record.created_at.to_rfc3339(),
             updated_at: record.updated_at.to_rfc3339(),
         }
@@ -163,6 +179,16 @@ pub struct CreateProviderRequest {
     pub timeout_seconds: Option<u64>,
     /// `none`, `low`, `medium` or `high`. Sent to OpenAI-compatible providers only when set.
     pub reasoning_effort: Option<ReasoningEffortDto>,
+    /// 1 to 200000. Replaces the `max_tokens` of every request when set.
+    pub max_tokens: Option<u32>,
+    /// 0 to 2. Not sent when absent.
+    pub temperature: Option<f64>,
+    /// -2 to 2. OpenAI-compatible providers only.
+    pub frequency_penalty: Option<f64>,
+    /// -2 to 2. OpenAI-compatible providers only.
+    pub presence_penalty: Option<f64>,
+    /// 1 to 2. OpenAI-compatible providers only; sent as a `frequency_penalty` of `repeat_penalty - 1` unless `frequency_penalty` is set.
+    pub repeat_penalty: Option<f64>,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -180,6 +206,17 @@ pub struct UpdateProviderRequest {
     /// Absent keeps the stored value, `null` stops sending it, a value sets it.
     #[schema(value_type = Option<ReasoningEffortDto>, nullable)]
     pub reasoning_effort: Option<Option<ReasoningEffortDto>>,
+    /// Absent keeps the stored value, `null` stops sending it, a value sets it.
+    #[schema(value_type = Option<u32>, nullable)]
+    pub max_tokens: Option<Option<u32>>,
+    #[schema(value_type = Option<f64>, nullable)]
+    pub temperature: Option<Option<f64>>,
+    #[schema(value_type = Option<f64>, nullable)]
+    pub frequency_penalty: Option<Option<f64>>,
+    #[schema(value_type = Option<f64>, nullable)]
+    pub presence_penalty: Option<Option<f64>>,
+    #[schema(value_type = Option<f64>, nullable)]
+    pub repeat_penalty: Option<Option<f64>>,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -207,6 +244,28 @@ struct ProviderInput {
     output_cents: Option<u32>,
     timeout: Option<Duration>,
     reasoning_effort: Option<Option<ReasoningEffort>>,
+    generation: GenerationInput,
+}
+
+#[derive(Debug, Default, Clone)]
+struct GenerationInput {
+    max_tokens: Option<Option<u32>>,
+    temperature: Option<Option<f64>>,
+    frequency_penalty: Option<Option<f64>>,
+    presence_penalty: Option<Option<f64>>,
+    repeat_penalty: Option<Option<f64>>,
+}
+
+impl GenerationInput {
+    fn over(self, current: GenerationParams) -> GenerationParams {
+        GenerationParams {
+            max_tokens: self.max_tokens.unwrap_or(current.max_tokens),
+            temperature: self.temperature.unwrap_or(current.temperature),
+            frequency_penalty: self.frequency_penalty.unwrap_or(current.frequency_penalty),
+            presence_penalty: self.presence_penalty.unwrap_or(current.presence_penalty),
+            repeat_penalty: self.repeat_penalty.unwrap_or(current.repeat_penalty),
+        }
+    }
 }
 
 struct Parser {
@@ -279,6 +338,48 @@ impl Parser {
                 None
             }
         }
+    }
+
+    fn number(&mut self, map: &mut Map<String, Value>, field: &str) -> Option<Option<f64>> {
+        match map.remove(field)? {
+            Value::Null => Some(None),
+            Value::Number(number) => number.as_f64().map(Some),
+            _ => {
+                self.problem(field, "must be a number or null");
+                None
+            }
+        }
+    }
+
+    fn max_tokens(&mut self, map: &mut Map<String, Value>) -> Option<Option<u32>> {
+        match map.remove("max_tokens")? {
+            Value::Null => Some(None),
+            value => self
+                .integer("max_tokens", value, 1, u64::from(MAX_TOKENS_LIMIT))
+                .and_then(|number| u32::try_from(number).ok())
+                .map(Some),
+        }
+    }
+
+    fn generation(&mut self, map: &mut Map<String, Value>) -> GenerationInput {
+        let input = GenerationInput {
+            max_tokens: self.max_tokens(map),
+            temperature: self.number(map, "temperature"),
+            frequency_penalty: self.number(map, "frequency_penalty"),
+            presence_penalty: self.number(map, "presence_penalty"),
+            repeat_penalty: self.number(map, "repeat_penalty"),
+        };
+        let candidate = input.clone().over(GenerationParams::default());
+        for problem in candidate.problems() {
+            if !self
+                .problems
+                .iter()
+                .any(|known| known.path == problem.field)
+            {
+                self.problem(problem.field, &problem.message);
+            }
+        }
+        input
     }
 
     fn base_url(&mut self, map: &mut Map<String, Value>) -> Option<Url> {
@@ -379,6 +480,7 @@ fn parse_input(body: &[u8], required: bool) -> Result<ProviderInput, ApiError> {
         .and_then(|value| parser.integer("timeout_seconds", value, 1, MAX_TIMEOUT_SECONDS))
         .map(Duration::from_secs);
     let reasoning_effort = parser.reasoning_effort(&mut map);
+    let generation = parser.generation(&mut map);
 
     if required {
         for (field, present) in [
@@ -409,6 +511,7 @@ fn parse_input(body: &[u8], required: bool) -> Result<ProviderInput, ApiError> {
             output_cents,
             timeout,
             reasoning_effort,
+            generation,
         })
     } else {
         Err(ApiError::Rejected(parser.problems))
@@ -553,6 +656,7 @@ pub async fn create_provider(
                 },
                 api_key: key_secret(input.api_key),
                 reasoning_effort: input.reasoning_effort.flatten(),
+                generation: input.generation.over(GenerationParams::default()),
             },
             state.cipher.as_ref(),
         )
@@ -615,6 +719,7 @@ pub async fn update_provider(
                 },
                 api_key,
                 reasoning_effort: input.reasoning_effort.unwrap_or(current.reasoning_effort),
+                generation: input.generation.over(current.generation),
             },
             state.cipher.as_ref(),
         )
@@ -899,6 +1004,7 @@ async fn run_test(record: &LlmProviderRecord, cipher: &impl SecretCipher) -> Tes
         api_key,
         timeout: record.timeout.min(TEST_TIMEOUT),
         reasoning_effort: record.reasoning_effort,
+        generation: record.generation,
     };
     let key = definition.api_key.as_ref();
     let provider = match AnyProvider::from_definition(&definition) {

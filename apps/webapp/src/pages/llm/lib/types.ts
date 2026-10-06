@@ -35,6 +35,11 @@ export interface ProviderFormValues {
 	output_cents_per_mtok: string
 	api_key: string
 	reasoning_effort: string
+	max_tokens: string
+	temperature: string
+	frequency_penalty: string
+	presence_penalty: string
+	repeat_penalty: string
 }
 
 export type ProviderFieldName = keyof ProviderFormValues

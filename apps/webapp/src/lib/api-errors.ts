@@ -59,6 +59,7 @@ const EXACT_MESSAGES: Readonly<Record<string, string>> = {
 	'must be a non-negative integer': 'Doit être un entier positif ou nul',
 	'must be a non-negative number': 'Doit être un nombre positif ou nul',
 	'must be a number': 'Doit être un nombre',
+	'must be a number or null': 'Doit être un nombre ou null',
 	'must be an object': 'Doit être un objet',
 	'must be a JSON object': 'Doit être un objet JSON',
 	'must be a UUID': 'Doit être un UUID',
@@ -186,7 +187,7 @@ const RULES: readonly Rule[] = [
 		(m) => `Doit contenir au maximum ${m[1]} caractères`,
 	],
 	[
-		/^must be between (\d+) and (\d+)$/,
+		/^must be between (-?\d+(?:\.\d+)?) and (-?\d+(?:\.\d+)?)$/,
 		(m) => `Doit être compris entre ${m[1]} et ${m[2]}`,
 	],
 	[/^must be at least (\d+(?:\.\d+)?)$/, (m) => `Doit valoir au moins ${m[1]}`],

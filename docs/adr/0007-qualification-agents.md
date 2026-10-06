@@ -116,3 +116,23 @@ Every component is returned by the API and displayed.
 
 **Luzernrisk.** One `saas_provider=auth0` signal from one source on `login.dev.luzernrisk.com`, signal score 12.1, one agent with one axis answering `forte` 1/0/0: calibrated `A = 0.929`, `E = 0.256` (volume 0.283, diversity 0.5, environment 0, strength 0.242), `C = 51.4 %`, verdict "to check" (before: 100 %, reliable).
 
+
+## Amendment: synthesis guards and generation parameters (#156)
+
+A small model (gemma4:e2b) repeated "Le verdict est fiable avec une confiance de 100,0 %" five times in the narrative and restated the figures the application already displays.
+
+**Output checks** (pure, `domain/aggregation/checks.rs`), run on every aggregator answer:
+
+- repetition: two sentences of the same field or of two of `summary`, `verdict_narrative`, `approach_angle` that are identical or near-identical after normalisation (case, accents, typography; near = word-set similarity of at least 0.8 for sentences of four words or more). The draft body is checked within itself only;
+- length: `summary` 900, `verdict_narrative` 400, `approach_angle` 400, draft subject 120, draft body 2000 characters (constants in the module, also written in the prompt);
+- restated figures: in `summary`, `verdict_narrative` and `approach_angle`, any percentage, or a sentence that has a number and a confidence / verdict word (`confiance`, `fiable`, `à vérifier`, `écarté`, and their English counterparts).
+
+A violation triggers the existing single retry, whose message lists the violations (next to the evidence correction when both apply). When the second answer still violates, it is stored with `assessments.quality_warnings` (`repetition`, `too_long`, `restated_figures`) and the lead page shows "Synthèse de qualité incertaine : …". A lead is never blocked. An answer with violations is not cached.
+
+**Prompt.** The model is told that the application displays the confidence and the verdict, that it must not restate them, that `verdict_narrative` explains the reasons in words, that each sentence is written once, and that evidence is copied from the sentence opening a signal document, never from the `source:` / `observed:` lines.
+
+**Evidence flag.** The stored evidence only holds verified quotes, so `evidence_verified` now means "at least one quote was verified" instead of "no quote was dropped". The luzernrisk synthesis showed one verbatim quote flagged "preuves non vérifiées" because another quote of the same answer had been dropped. Dropped quotes are reported as the `dropped_quotes` quality warning. Quotes spanning lines, the `observed:` timestamp and the `dns:` provenance all verify (regression tests).
+
+**Generation parameters.** `llm_providers` gains optional `max_tokens` (1 to 200000, replaces the request's), `temperature` (0 to 2), `frequency_penalty` and `presence_penalty` (-2 to 2) and `repeat_penalty` (1 to 2); absent means not sent. Anthropic sends `max_tokens` and `temperature` only. OpenAI-compatible providers send `temperature`, `frequency_penalty` and `presence_penalty`. Ollama's OpenAI endpoint ignores `repeat_penalty`, both top-level and in `options` (checked against Ollama 0.35 with gemma4:e2b), so it is sent as `frequency_penalty = repeat_penalty - 1` unless a `frequency_penalty` is set.
+
+**Regeneration.** A rescore that changes a lead's verdict marks its summary due again; the aggregator runs again, and edited or decided drafts are protected as for any other new summary.

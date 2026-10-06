@@ -138,6 +138,7 @@ const detail: LeadDetailData = {
 				{ quote: 'We are hiring', provenance: 'https://acme.test/careers' },
 			],
 			evidence_verified: true,
+			quality_warnings: [],
 			model: 'model-x',
 			prompt_version: 'v2',
 			draft: { subject: 'Hello', body: 'Body text', status: 'pending' },
@@ -389,6 +390,35 @@ describe('LeadDetail', () => {
 		expect(screen.getByRole('status').textContent).toContain(
 			'Preuves non vérifiées',
 		)
+		expect(screen.getByText('Growing team')).toBeTruthy()
+	})
+
+	it('warns in French when the synthesis is of uncertain quality', () => {
+		const first = detail.assessments[0]
+		if (!first) throw new Error('fixture without assessment')
+		renderDetail({
+			detail: {
+				...detail,
+				assessments: [
+					{ ...first, quality_warnings: ['repetition', 'restated_figures'] },
+				],
+			},
+		})
+		expect(screen.getByRole('alert').textContent).toBe(
+			'Synthèse de qualité incertaine : répétitions, pourcentage ou verdict répétés avec un chiffre',
+		)
+		expect(screen.queryByRole('status')).toBeNull()
+		expect(screen.getByText('Growing team')).toBeTruthy()
+	})
+
+	it('shows no quality warning for a clean synthesis or an older API', () => {
+		const first = detail.assessments[0]
+		if (!first) throw new Error('fixture without assessment')
+		const { quality_warnings: _omitted, ...older } = first
+		renderDetail({
+			detail: { ...detail, assessments: [older as typeof first] },
+		})
+		expect(screen.queryByText(/qualité incertaine/)).toBeNull()
 		expect(screen.getByText('Growing team')).toBeTruthy()
 	})
 

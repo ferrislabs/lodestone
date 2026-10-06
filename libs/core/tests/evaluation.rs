@@ -10,11 +10,12 @@ use std::{
 use chrono::{DateTime, Utc};
 use common::{EncryptionKey, Secret};
 use lodestone_core::{
-    ActiveProfile, Clock, CreateProfileCommand, Lead, LeadRepository, LeadScoring, LlmError,
-    LlmProvider, LlmRequest, LlmResponse, LodestoneUseCase, Observation, ProfileId, ProfileName,
-    Provenance, ProviderDefinition, ProviderId, ProviderKind, QualificationResult, ResultStatus,
-    ReviseProfileCommand, SignalKind, SourceName, SuppressionTarget, Tier, TokenPricing,
-    TokenUsage, UnitInterval, ValidatedProfile, Verdict, VerdictCap,
+    ActiveProfile, Clock, CreateProfileCommand, GenerationParams, Lead, LeadRepository,
+    LeadScoring, LlmError, LlmProvider, LlmRequest, LlmResponse, LodestoneUseCase, Observation,
+    ProfileId, ProfileName, Provenance, ProviderDefinition, ProviderId, ProviderKind,
+    QualificationResult, ResultStatus, ReviseProfileCommand, SignalKind, SourceName,
+    SuppressionTarget, Tier, TokenPricing, TokenUsage, UnitInterval, ValidatedProfile, Verdict,
+    VerdictCap,
     evaluation::{EvaluationReport, EvaluationSettings, ProviderBuilder},
     infrastructure::{
         crypto::AesGcmCipher, lead::postgres::PgLeadRepository, llm_cache::postgres::PgLlmCache,
@@ -233,6 +234,7 @@ impl Harness {
                     },
                     api_key: None,
                     reasoning_effort: None,
+                    generation: GenerationParams::default(),
                 },
                 &self.cipher,
             )

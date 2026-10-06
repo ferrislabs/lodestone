@@ -236,11 +236,20 @@ pub struct Assessment {
     pub approach_angle: String,
     pub evidence: Vec<Evidence>,
     pub evidence_verified: bool,
+    pub quality_warnings: Vec<QualityWarning>,
     pub model: String,
     pub prompt_version: String,
     pub draft: Option<DraftMessage>,
     pub draft_review: Option<draft::DraftReview>,
     pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum QualityWarning {
+    Repetition,
+    TooLong,
+    RestatedFigures,
+    DroppedQuotes,
 }
 
 macro_rules! str_enum {
@@ -263,6 +272,13 @@ macro_rules! str_enum {
 }
 
 pub(crate) use str_enum;
+
+str_enum!(QualityWarning {
+    Repetition => "repetition",
+    TooLong => "too_long",
+    RestatedFigures => "restated_figures",
+    DroppedQuotes => "dropped_quotes",
+});
 
 str_enum!(ContactMethod {
     PublicPage => "public_page",

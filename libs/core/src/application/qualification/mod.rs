@@ -13,12 +13,12 @@ use crate::{
     },
     domain::{
         aggregation::{
-            AggregatorOutput, EVIDENCE_RETRY, Facts, agent_source, build, instruction,
-            missing_results, render_agent, with_problem,
+            AggregatorOutput, EVIDENCE_RETRY, Facts, agent_source, build, check, instruction,
+            missing_results, render_agent, retry_message, warnings, with_problem,
         },
         job::ports::Clock,
         lead::{
-            Assessment, AssessmentId, Evidence, Lead, LeadStatus, Signal,
+            Assessment, AssessmentId, Evidence, Lead, LeadStatus, QualityWarning, Signal,
             draft::{DraftReview, carry_draft},
             ports::{AssessmentRepository, LeadRepository},
         },
@@ -166,7 +166,6 @@ where
         };
         let mut current = base.clone();
         let mut candidate: Option<Candidate> = None;
-        let mut sound = false;
         let mut reason = REASON_CALL;
         for _ in 0..ATTEMPTS {
             let call = SchemaCall {
@@ -186,6 +185,7 @@ where
                 |value| {
                     AggregatorOutput::parse(value).is_ok_and(|output| {
                         check_evidence(&output.evidence, evidence_documents).is_sound()
+                            && check(&output).is_empty()
                     })
                 },
                 CallSettings {
@@ -216,24 +216,38 @@ where
                     );
                 }
                 Ok(output) => {
-                    sound = check_evidence(&output.evidence, evidence_documents).is_sound();
+                    let sound = check_evidence(&output.evidence, evidence_documents).is_sound();
+                    let violations = check(&output);
+                    let mut problems: Vec<String> = Vec::new();
+                    if !sound {
+                        warn!(lead_id = %lead.id, "aggregator evidence is not verbatim, retrying");
+                        problems.push(EVIDENCE_RETRY.to_owned());
+                    }
+                    if !violations.is_empty() {
+                        warn!(lead_id = %lead.id, violations = violations.len(), "aggregator answer broke the output rules, retrying");
+                        problems.push(retry_message(&violations));
+                    }
                     candidate = Some(Candidate {
                         output,
                         model: structured.model,
                     });
-                    if sound {
+                    if problems.is_empty() {
                         break;
                     }
-                    warn!(lead_id = %lead.id, "aggregator evidence is not verbatim, retrying");
-                    current = with_problem(&base, EVIDENCE_RETRY);
+                    current = with_problem(&base, &problems.join("\n\n"));
                 }
             }
         }
         let Some(Candidate { output, model }) = candidate else {
             return Ok(Outcome::Failed(reason));
         };
-        let check = check_evidence(&output.evidence, evidence_documents);
-        let evidence = evidence_of(&check, &signals);
+        let checked = check_evidence(&output.evidence, evidence_documents);
+        let verified = !checked.verified.is_empty();
+        let mut quality_warnings = warnings(&check(&output));
+        if verified && checked.rejected > 0 {
+            quality_warnings.push(QualityWarning::DroppedQuotes);
+        }
+        let evidence = evidence_of(&checked, &signals);
         let now = clock.now();
         let assessment = Assessment {
             id: AssessmentId(generate_uuid_v7()),
@@ -243,7 +257,8 @@ where
             verdict_narrative: output.verdict_narrative,
             approach_angle: output.approach_angle,
             evidence,
-            evidence_verified: sound,
+            evidence_verified: verified,
+            quality_warnings,
             model,
             prompt_version: prompt.tag.clone(),
             draft: Some(output.draft_message),
@@ -254,7 +269,7 @@ where
             return Ok(Outcome::Skipped);
         };
         match usecase.store_summary(&assessment, qualified_at, now).await {
-            Ok(true) => Ok(Outcome::Stored { verified: sound }),
+            Ok(true) => Ok(Outcome::Stored { verified }),
             Ok(false) => Ok(Outcome::Skipped),
             Err(CoreError::Conflict(reason)) => {
                 warn!(lead_id = %lead.id, %reason, "summary dropped, the lead changed meanwhile");

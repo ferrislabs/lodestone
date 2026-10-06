@@ -38,6 +38,8 @@ mod tests {
     use common::Secret;
     use url::Url;
 
+    use lodestone_core::GenerationParams;
+
     use super::*;
 
     fn definition(kind: ProviderKind, key: Option<&str>) -> ProviderDefinition {
@@ -48,6 +50,7 @@ mod tests {
             api_key: key.map(Secret::new),
             timeout: Duration::from_secs(5),
             reasoning_effort: None,
+            generation: GenerationParams::default(),
         }
     }
 

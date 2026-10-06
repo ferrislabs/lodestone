@@ -758,7 +758,32 @@ async fn the_detail_assessment_exposes_the_narrative_and_the_evidence_flag(pool:
     let assessment = &body["data"]["assessments"][0];
     assert_eq!(assessment["verdict_narrative"], "Les agents concordent.");
     assert_eq!(assessment["evidence_verified"], false);
+    assert_eq!(assessment["quality_warnings"], json!([]));
     assert_eq!(body["data"]["lead"]["summary"], "s");
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_detail_assessment_exposes_its_quality_warnings(pool: PgPool) {
+    let seed = Seed { pool: pool.clone() };
+    let profile = seed.profile("keycloak-ops").await;
+    let lead = seed.lead(&profile, "acme.com", "qualified", 5.0, 1).await;
+    sqlx::query(
+        "INSERT INTO assessments (id, lead_id, profile_revision, summary, verdict_narrative, approach_angle, evidence, evidence_verified, quality_warnings, model, prompt_version, created_at)
+         VALUES ($1, $2::uuid, 1, 's', 'n', 'angle', '[]'::jsonb, true, ARRAY['repetition', 'restated_figures'], 'm', 'aggregator@x', now())",
+    )
+    .bind(uuid::Uuid::now_v7())
+    .bind(&lead)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let api = Api::new(pool).await;
+
+    let (_, body) = api.get(&format!("/api/v1/leads/{lead}")).await;
+
+    assert_eq!(
+        body["data"]["assessments"][0]["quality_warnings"],
+        json!(["repetition", "restated_figures"])
+    );
 }
 
 async fn seed_state(pool: &PgPool, lead: &str, attempts: i32, error: Option<&str>) {

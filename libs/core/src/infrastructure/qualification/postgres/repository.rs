@@ -419,6 +419,14 @@ impl<'tx> QualificationRepository for PgQualificationRepository<'tx> {
         .execute(&mut ***tx)
         .await
         .map_err(map_sqlx_error)?;
+        sqlx::query(
+            "UPDATE lead_qualification_state SET summarised_at = NULL, summary_attempts = 0, summary_next_attempt_at = NULL, summary_error = NULL WHERE lead_id = $1 AND summarised_at IS NOT NULL AND (SELECT verdict IS DISTINCT FROM $2 FROM leads WHERE id = $1)",
+        )
+        .bind(rescoring.lead_id.0)
+        .bind(rescoring.judgement.verdict.map(|verdict| verdict.as_str()))
+        .execute(&mut ***tx)
+        .await
+        .map_err(map_sqlx_error)?;
         sqlx::query("UPDATE leads SET confidence = $2, verdict = $3 WHERE id = $1")
             .bind(rescoring.lead_id.0)
             .bind(rescoring.judgement.confidence)

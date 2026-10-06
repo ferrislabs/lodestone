@@ -274,6 +274,7 @@ mod tests {
                 provenance: Provenance::parse("https://acme.com/about").unwrap(),
             }],
             evidence_verified: true,
+            quality_warnings: Vec::new(),
             model: "m".to_owned(),
             prompt_version: "qualification@1".to_owned(),
             draft: Some(DraftMessage {

@@ -3,9 +3,9 @@ use std::{fs, num::NonZeroU32, path::PathBuf, time::Duration};
 use common::Secret;
 use llm::{anthropic::AnthropicProvider, openai::OpenAiCompatibleProvider};
 use lodestone_core::{
-    AggregatorOutput, Facts, LlmProvider, ProviderDefinition, ProviderKind, TokenPricing,
-    UntrustedDocument, ValidatedProfile, Verdict, aggregation_instruction, aggregation_prompt,
-    check_evidence,
+    AggregatorOutput, Facts, GenerationParams, LlmProvider, ProviderDefinition, ProviderKind,
+    TokenPricing, UntrustedDocument, ValidatedProfile, Verdict, aggregation_instruction,
+    aggregation_prompt, check_evidence,
     llm::gateway::{CallSettings, Prompt, RunBudget, call_structured},
 };
 use serde_json::Value;
@@ -32,6 +32,7 @@ fn definition_from_env() -> Option<ProviderDefinition> {
         api_key: std::env::var("LODESTONE_LLM_API_KEY").ok().map(Secret::new),
         timeout: Duration::from_secs(180),
         reasoning_effort: None,
+        generation: GenerationParams::default(),
     })
 }
 

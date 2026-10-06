@@ -100,6 +100,12 @@ describe('translateApiMessage', () => {
 		expect(translateApiMessage('must be between 1 and 100')).toBe(
 			'Doit être compris entre 1 et 100',
 		)
+		expect(translateApiMessage('must be between -2 and 2')).toBe(
+			'Doit être compris entre -2 et 2',
+		)
+		expect(translateApiMessage('must be a number or null')).toBe(
+			'Doit être un nombre ou null',
+		)
 		expect(translateApiMessage('duplicate value `ct`')).toBe(
 			'Valeur en double : `ct`',
 		)

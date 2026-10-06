@@ -1,8 +1,8 @@
 use std::time::Duration;
 
 use lodestone_core::{
-    LlmError, LlmProvider, LlmRequest, LlmResponse, ProviderDefinition, ProviderKind, TokenUsage,
-    render_user_content,
+    GenerationParams, LlmError, LlmProvider, LlmRequest, LlmResponse, ProviderDefinition,
+    ProviderKind, TokenUsage, render_user_content,
 };
 use reqwest::{Client, StatusCode, header::RETRY_AFTER};
 use serde::{Deserialize, Serialize};
@@ -17,6 +17,7 @@ pub struct AnthropicProvider {
     endpoint: Url,
     model: String,
     api_key: common::Secret,
+    generation: GenerationParams,
 }
 
 #[derive(Serialize)]
@@ -26,6 +27,8 @@ struct WireRequest<'a> {
     system: &'a str,
     messages: [WireMessage<'a>; 1],
     output_config: OutputConfig<'a>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    temperature: Option<f64>,
 }
 
 #[derive(Serialize)]
@@ -91,6 +94,7 @@ impl AnthropicProvider {
             endpoint,
             model: definition.model,
             api_key,
+            generation: definition.generation,
         })
     }
 
@@ -98,7 +102,7 @@ impl AnthropicProvider {
         let content = render_user_content(request);
         let body = WireRequest {
             model: &self.model,
-            max_tokens: request.max_tokens,
+            max_tokens: self.generation.max_tokens_or(request.max_tokens),
             system: request.system,
             messages: [WireMessage {
                 role: "user",
@@ -110,6 +114,7 @@ impl AnthropicProvider {
                     schema: request.schema,
                 },
             },
+            temperature: self.generation.temperature,
         };
         let response = self
             .client
