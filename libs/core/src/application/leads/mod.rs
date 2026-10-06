@@ -6,6 +6,7 @@ use crate::{
     UserId,
     application::{LodestoneUseCase, output::schedule_webhook},
     domain::{
+        company::{CompanyDossier, ports::CompanyRepository},
         facts::LeadFacts,
         host::ports::KnownHostRepository,
         lead::{
@@ -55,7 +56,8 @@ impl LodestoneUseCase {
         known_host,
         contact,
         assessment,
-        qualification
+        qualification,
+        company
     )]
     pub async fn lead_detail(&self, lead_id: LeadId) -> Result<LeadDetail, CoreError> {
         let mut leads = lead_repository;
@@ -66,6 +68,7 @@ impl LodestoneUseCase {
         let mut contacts = contact_repository;
         let mut assessments = assessment_repository;
         let mut qualification = qualification_repository;
+        let mut company = company_repository;
 
         let lead = leads.find(lead_id).await?.ok_or(CoreError::NotFound)?;
         if suppression.is_domain_suppressed(&lead.domain).await? {
@@ -96,12 +99,14 @@ impl LodestoneUseCase {
         let scoring = qualification.scorings(&[lead_id]).await?.remove(&lead_id);
         let lead_signals = signals.list_for_lead(lead_id).await?;
         let hosts = known_hosts.list_for_domain(&lead.domain).await?;
+        let dossier = company.find(&lead.domain).await?;
         Ok(LeadDetail {
             summary_state,
             scoring,
             qualification_results,
             qualification_agents,
-            facts: LeadFacts::compute(&lead, &lead_signals, &hosts),
+            facts: LeadFacts::compute(&lead, &lead_signals, &hosts).with_dossier(dossier.as_ref()),
+            company: dossier,
             signals: lead_signals,
             contacts: contacts.list_for_lead(lead_id).await?,
             assessments: assessments.list_for_lead(lead_id).await?,
@@ -110,17 +115,19 @@ impl LodestoneUseCase {
         })
     }
 
-    #[transactional(signal, known_host)]
+    #[transactional(signal, known_host, company)]
     pub(crate) async fn signals_with_facts(
         &self,
         lead: &Lead,
-    ) -> Result<(Vec<Signal>, LeadFacts), CoreError> {
+    ) -> Result<(Vec<Signal>, LeadFacts, Option<CompanyDossier>), CoreError> {
         let mut signals = signal_repository;
         let mut known_hosts = known_host_repository;
+        let mut company = company_repository;
         let found = signals.list_for_lead(lead.id).await?;
         let hosts = known_hosts.list_for_domain(&lead.domain).await?;
-        let facts = LeadFacts::compute(lead, &found, &hosts);
-        Ok((found, facts))
+        let dossier = company.find(&lead.domain).await?;
+        let facts = LeadFacts::compute(lead, &found, &hosts).with_dossier(dossier.as_ref());
+        Ok((found, facts, dossier))
     }
 
     #[transactional(lead, suppression)]

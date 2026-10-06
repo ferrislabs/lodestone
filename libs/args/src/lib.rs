@@ -2,16 +2,17 @@ use clap::Parser;
 use common::{Config, SettingsError};
 
 use crate::{
-    ats::AtsArgs, auth::AuthArgs, boamp::BoampArgs, contacts::ContactArgs, ct::CtArgs,
-    database::DatabaseArgs, decp::DecpArgs, france_travail::FranceTravailArgs, jobs::JobsArgs,
-    listeners::ListenerArgs, llm::LlmArgs, log::LogArgs, observability::ObservabilityArgs,
-    outbound::OutboundArgs, rate_limit::RateLimitArgs, server::ServerArgs, ted::TedArgs,
-    webhook::WebhookArgs,
+    ats::AtsArgs, auth::AuthArgs, boamp::BoampArgs, company::CompanyArgs, contacts::ContactArgs,
+    ct::CtArgs, database::DatabaseArgs, decp::DecpArgs, france_travail::FranceTravailArgs,
+    jobs::JobsArgs, listeners::ListenerArgs, llm::LlmArgs, log::LogArgs,
+    observability::ObservabilityArgs, outbound::OutboundArgs, rate_limit::RateLimitArgs,
+    server::ServerArgs, ted::TedArgs, webhook::WebhookArgs,
 };
 
 pub mod ats;
 pub mod auth;
 pub mod boamp;
+pub mod company;
 pub mod contacts;
 pub mod ct;
 pub mod database;
@@ -65,6 +66,9 @@ pub struct Args {
 
     #[command(flatten)]
     pub contacts: ContactArgs,
+
+    #[command(flatten)]
+    pub company: CompanyArgs,
 
     #[command(flatten)]
     pub boamp: BoampArgs,

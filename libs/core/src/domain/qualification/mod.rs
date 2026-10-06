@@ -403,6 +403,7 @@ pub struct Completion {
     pub sources: Vec<String>,
     pub judgement: Judgement,
     pub scoring_version: i32,
+    pub dossier_at: Option<DateTime<Utc>>,
     pub at: DateTime<Utc>,
 }
 

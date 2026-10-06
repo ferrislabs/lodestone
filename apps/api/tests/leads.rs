@@ -1033,6 +1033,146 @@ async fn the_facts_name_the_probable_country_and_stay_empty_without_hosts(pool: 
     assert_eq!(facts["probable_country"]["code"], "FR");
 }
 
+const OFFICIAL: &str = r#"{
+    "siren": "552081317",
+    "legal_name": "ELECTRICITE DE FRANCE",
+    "naf_code": "35.11Z",
+    "naf_label": "Production et distribution d'électricité",
+    "headcount_code": "53",
+    "headcount_range": "10 000 salariés et plus",
+    "head_office_city": "PARIS",
+    "head_office_postcode": "75008",
+    "head_office_country": "France",
+    "head_office_country_code": "FR",
+    "created_on": "1955-01-01"
+}"#;
+
+async fn seed_dossier(pool: &PgPool, domain: &str, state: &str, with_official: bool) {
+    let official: Option<Value> = with_official.then(|| serde_json::from_str(OFFICIAL).unwrap());
+    sqlx::query(
+        "INSERT INTO company_dossiers (domain, state, siren, official, pages, built_at, next_attempt_at)
+         VALUES ($1, $2, $3, $4, $5, now(), now() + interval '90 days')",
+    )
+    .bind(domain)
+    .bind(state)
+    .bind(with_official.then_some("552081317"))
+    .bind(official)
+    .bind(json!([
+        {"url": "https://acme.com/", "text": "Bienvenue"},
+        {"url": "https://acme.com/mentions-legales", "text": "SIREN 552 081 317"}
+    ]))
+    .execute(pool)
+    .await
+    .expect("dossier");
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_detail_carries_the_company_dossier_and_the_official_facts(pool: PgPool) {
+    let (seed, profile) = listing_fixture(&pool).await;
+    let lead = seed.lead(&profile, "acme.com", "new", 1.0, 1).await;
+    seed_dossier(&pool, "acme.com", "complete", true).await;
+    let api = Api::new(pool).await;
+
+    let (status, body) = api.get(&format!("/api/v1/leads/{lead}")).await;
+
+    assert_eq!(status, StatusCode::OK);
+    let company = &body["data"]["company"];
+    assert_eq!(company["state"], "complete");
+    assert_eq!(company["siren"], "552081317");
+    assert_eq!(company["official"]["legal_name"], "ELECTRICITE DE FRANCE");
+    assert_eq!(company["official"]["naf_code"], "35.11Z");
+    assert_eq!(
+        company["official"]["headcount_range"],
+        "10 000 salariés et plus"
+    );
+    assert_eq!(company["official"]["head_office_city"], "PARIS");
+    assert_eq!(company["official"]["created_on"], "1955-01-01");
+    assert_eq!(
+        company["official"]["annuaire_url"],
+        "https://annuaire-entreprises.data.gouv.fr/entreprise/552081317"
+    );
+    assert_eq!(
+        company["pages"],
+        json!([
+            {"url": "https://acme.com/"},
+            {"url": "https://acme.com/mentions-legales"}
+        ])
+    );
+    assert!(company["built_at"].is_string());
+    let facts = &body["data"]["facts"];
+    assert_eq!(facts["official"]["legal_name"], "ELECTRICITE DE FRANCE");
+    assert_eq!(facts["official"]["siren"], "552081317");
+    assert_eq!(facts["probable_country"]["code"], "FR");
+    assert_eq!(facts["country_basis"], "head_office");
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_lead_without_a_dossier_has_no_company_and_keeps_the_extension_basis(pool: PgPool) {
+    let (seed, profile) = listing_fixture(&pool).await;
+    let lead = seed.lead(&profile, "bare.fr", "new", 1.0, 1).await;
+    let api = Api::new(pool).await;
+
+    let (_, body) = api.get(&format!("/api/v1/leads/{lead}")).await;
+
+    assert!(body["data"]["company"].is_null());
+    assert!(body["data"]["facts"]["official"].is_null());
+    assert_eq!(body["data"]["facts"]["country_basis"], "tld");
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_company_refresh_is_for_users_and_makes_the_dossier_due_now(pool: PgPool) {
+    let (seed, profile) = listing_fixture(&pool).await;
+    let lead = seed.lead(&profile, "acme.com", "new", 1.0, 1).await;
+    let api = Api::new(pool.clone()).await;
+    let client = format!("Bearer {}", api.harness.valid_client_token());
+    let uri = format!("/api/v1/leads/{lead}/company/refresh");
+
+    let (forbidden, _, _) = send(api.app(), Method::POST, &uri, Some(&client), None).await;
+    assert_eq!(forbidden, StatusCode::FORBIDDEN);
+    let (anonymous, _, _) = send(api.app(), Method::POST, &uri, None, None).await;
+    assert_eq!(anonymous, StatusCode::UNAUTHORIZED);
+
+    let (created, body, _) = send(api.app(), Method::POST, &uri, Some(&api.bearer), None).await;
+    assert_eq!(created, StatusCode::ACCEPTED);
+    assert_eq!(body["data"]["state"], "pending");
+    let due: bool = sqlx::query_scalar(
+        "SELECT next_attempt_at <= now() FROM company_dossiers WHERE domain = 'acme.com'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(due);
+
+    sqlx::query("UPDATE company_dossiers SET state = 'complete', next_attempt_at = now() + interval '90 days'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (again, body, _) = send(api.app(), Method::POST, &uri, Some(&api.bearer), None).await;
+    assert_eq!(again, StatusCode::ACCEPTED);
+    assert_eq!(body["data"]["state"], "complete");
+    let due: bool = sqlx::query_scalar("SELECT next_attempt_at <= now() FROM company_dossiers")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert!(due);
+
+    let unknown = format!(
+        "/api/v1/leads/{}/company/refresh",
+        common::generate_uuid_v7()
+    );
+    let (missing, _, _) = send(api.app(), Method::POST, &unknown, Some(&api.bearer), None).await;
+    assert_eq!(missing, StatusCode::NOT_FOUND);
+    let (malformed, _, _) = send(
+        api.app(),
+        Method::POST,
+        "/api/v1/leads/nope/company/refresh",
+        Some(&api.bearer),
+        None,
+    )
+    .await;
+    assert_eq!(malformed, StatusCode::BAD_REQUEST);
+}
+
 #[sqlx::test(migrations = "../../migrations")]
 async fn a_lead_without_results_has_an_empty_qualification_list(pool: PgPool) {
     let (seed, profile) = listing_fixture(&pool).await;

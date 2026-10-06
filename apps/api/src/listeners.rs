@@ -10,7 +10,9 @@ use dns::HickoryResolver;
 use fetch::PoliteFetcher;
 use llm::any::AnyProvider;
 use lodestone_core::{
-    ContactFinder, LlmError, LodestoneUseCase, ProviderDefinition, Source, SourceName, StepOutcome,
+    CompanyBuilder, ContactFinder, LlmError, LodestoneUseCase, ProviderDefinition, Source,
+    SourceName, StepOutcome,
+    company::{COMPANY_RESEARCH_LISTENER, CompanyRunSettings},
     contacts::ContactRunSettings,
     evaluation::{EvaluationSettings, ProviderBuilder, QUALIFICATION_LISTENER},
     infrastructure::{
@@ -136,6 +138,34 @@ impl<F: ContactFinder> ListenerStep for ContactStep<F> {
             processed: report.domains.max(before.saturating_sub(backlog)),
             signals: report.contacts,
             backlog: Some(backlog),
+        })
+    }
+}
+
+pub struct CompanyStep<B: CompanyBuilder> {
+    pub usecase: LodestoneUseCase,
+    pub builder: B,
+    pub settings: CompanyRunSettings,
+}
+
+impl<B: CompanyBuilder> ListenerStep for CompanyStep<B> {
+    fn name(&self) -> &str {
+        COMPANY_RESEARCH_LISTENER
+    }
+
+    async fn is_active(&self) -> Result<bool, CoreError> {
+        Ok(true)
+    }
+
+    async fn run_once(&self) -> Result<StepOutcome, SourceRunError> {
+        let report = self
+            .usecase
+            .listen_company_research(&self.builder, self.settings, &SystemClock)
+            .await?;
+        Ok(StepOutcome {
+            processed: report.domains,
+            signals: report.changed,
+            backlog: Some(report.backlog),
         })
     }
 }

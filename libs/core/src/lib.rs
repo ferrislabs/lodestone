@@ -10,17 +10,26 @@ pub use domain::{
     NormalizedDomain, NormalizedDomainError, User, UserId,
     aggregation::{
         AggregationPrompt, AggregatorOutput, EVIDENCE_RETRY, Facts, build as aggregation_prompt,
-        check as check_aggregation, instruction as aggregation_instruction, missing_results,
+        check as check_aggregation, instruction as aggregation_instruction,
+        instruction_with_dossier as aggregation_instruction_with_dossier, missing_results,
         render_agent, retry_message as aggregation_retry_message, warnings as aggregation_warnings,
         with_problem as aggregation_problem,
     },
     ats_target::AtsTargets,
+    company::{
+        CompanyBuilder, CompanyDossier, CompanyPage, DossierBuild, DossierDocument, DossierState,
+        InvalidSiren, OFFICIAL_SOURCE, OfficialData, PAGE_PROMPT_CHARS, PAGE_STORE_CHARS, Siren,
+        bounded_error, headcount_label, naf_section_label, ports::CompanyRepository,
+    },
     contact::{
         ContactFinder, ContactTargets, FoundAddress, rank_contacts, rank_of,
         recipient::{NotARecipient, Recipient},
         select_for_profile,
     },
-    facts::{Country, Environment, HostFact, LeadFacts, environment_of, signal_sentence},
+    facts::{
+        CompanyFacts, Country, CountryBasis, Environment, HostFact, LeadFacts, OfficialFacts,
+        environment_of, signal_sentence,
+    },
     fetch::{
         FetchError, FetchPurpose, FetchRequest, FetchResponse,
         ports::{Fetcher, HostVisitRepository},

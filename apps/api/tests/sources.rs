@@ -216,7 +216,10 @@ async fn list_shows_every_source_with_states_and_last_runs(pool: PgPool) {
 
     let listed = api.list().await;
 
-    assert_eq!(listed.len(), SourceName::ALL.len() + 1);
+    assert_eq!(listed.len(), SourceName::ALL.len() + 2);
+    let company = entry(&listed, "company_research");
+    assert_eq!(company["mode"], "continuous");
+    assert_eq!(company["kind"], "listener.company_research");
     let boamp = entry(&listed, "boamp");
     assert_eq!(boamp["status"], "pending");
     assert_eq!(boamp["kind"], "source.run");

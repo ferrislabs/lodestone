@@ -1,5 +1,6 @@
 pub mod assessment;
 pub mod candidate_host;
+pub mod company;
 pub mod contact;
 pub mod contact_target;
 pub mod crypto;

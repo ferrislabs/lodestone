@@ -476,6 +476,93 @@
           ]
         }
       ]
+    },
+    {
+      "id": "recherche-entreprise",
+      "name": "Recherche entreprise",
+      "description": "Ce que fait l'entreprise et sa taille, d'après sa fiche entreprise : données officielles du registre et pages de son site.",
+      "enabled": true,
+      "provider_id": null,
+      "system_prompt": "Tu évalues l'entreprise à partir de sa fiche entreprise. Les documents « Company dossier » contiennent les données officielles du registre français (raison sociale, activité NAF, tranche d'effectif, siège, date de création) et le texte de pages du site de l'entreprise (accueil, à propos, mentions légales). Les données officielles sont fiables ; le texte du site est ce que l'entreprise dit d'elle-même. Appuie-toi uniquement sur cette fiche et sur le bloc « Faits ». Si la fiche est absente, ou si elle indique que le SIREN est introuvable, réponds « inconnu » : ne devine ni l'activité ni l'effectif d'après le nom de domaine. Évalue si l'activité de l'entreprise est pertinente pour l'offre, si sa taille correspond à la cible et si elle a de vrais enjeux d'identité et d'accès (clients, collaborateurs ou partenaires à authentifier, données sensibles, conformité). Ajuste la cible de taille dans ce prompt selon ton marché.",
+      "weight": 4,
+      "questions": [
+        {
+          "id": "activite_pertinente",
+          "wording": "L'activité de l'entreprise est-elle pertinente pour l'offre ?",
+          "weight": 5,
+          "options": [
+            {
+              "value": "oui",
+              "label": "Oui",
+              "score": 1
+            },
+            {
+              "value": "partiellement",
+              "label": "Partiellement",
+              "score": 0.5
+            },
+            {
+              "value": "non",
+              "label": "Non",
+              "score": 0
+            },
+            {
+              "value": "inconnu",
+              "label": "Inconnue",
+              "score": 0.3
+            }
+          ]
+        },
+        {
+          "id": "taille_cible",
+          "wording": "La taille de l'entreprise correspond-elle à la cible ?",
+          "weight": 4,
+          "options": [
+            {
+              "value": "dans_la_cible",
+              "label": "Dans la cible",
+              "score": 1
+            },
+            {
+              "value": "hors_cible",
+              "label": "Hors cible",
+              "score": 0
+            },
+            {
+              "value": "inconnu",
+              "label": "Inconnue",
+              "score": 0.3
+            }
+          ]
+        },
+        {
+          "id": "enjeux_identite",
+          "wording": "L'entreprise a-t-elle des enjeux d'identité et d'accès ?",
+          "weight": 5,
+          "options": [
+            {
+              "value": "forts",
+              "label": "Forts",
+              "score": 1
+            },
+            {
+              "value": "moyens",
+              "label": "Moyens",
+              "score": 0.5
+            },
+            {
+              "value": "faibles",
+              "label": "Faibles",
+              "score": 0
+            },
+            {
+              "value": "inconnu",
+              "label": "Inconnus",
+              "score": 0.3
+            }
+          ]
+        }
+      ]
     }
   ],
   "aggregator": {

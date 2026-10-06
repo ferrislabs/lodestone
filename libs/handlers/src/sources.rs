@@ -4,6 +4,7 @@ use axum::{
 };
 use lodestone_core::{
     JobStatus, ListenerStatus, QUALIFICATION_LISTENER, ScheduledJob, SourceName, SourceRunRecord,
+    company::COMPANY_RESEARCH_LISTENER,
     is_continuous,
     schedule::{schedule_key, source_of_schedule_key},
 };
@@ -20,6 +21,7 @@ use crate::{
 const MAX_SOURCE_NAME_LEN: usize = 64;
 const SOURCE_JOB_KIND: &str = "source.run";
 const QUALIFICATION_LISTENER_KIND: &str = "listener.qualification";
+const COMPANY_LISTENER_KIND: &str = "listener.company_research";
 
 #[derive(Debug, Serialize, PartialEq, Eq, ToSchema)]
 pub struct SourceRunDto {
@@ -105,7 +107,7 @@ pub struct SourceDto {
     pub mode: String,
     /// Listener state of a continuous source; absent for scheduled sources.
     pub listener: Option<ListenerDto>,
-    /// Job kind: `source.run` or `listener.qualification`.
+    /// Job kind: `source.run`, `listener.qualification` or `listener.company_research`.
     pub kind: String,
     /// Translation key of the source label.
     pub label_key: String,
@@ -257,6 +259,14 @@ pub async fn list_sources(
             listeners
                 .iter()
                 .find(|listener| listener.name == QUALIFICATION_LISTENER),
+            &[],
+        )))
+        .chain(std::iter::once(SourceDto::continuous(
+            COMPANY_RESEARCH_LISTENER,
+            COMPANY_LISTENER_KIND,
+            listeners
+                .iter()
+                .find(|listener| listener.name == COMPANY_RESEARCH_LISTENER),
             &[],
         )))
         .collect();

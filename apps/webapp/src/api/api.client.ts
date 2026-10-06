@@ -41,6 +41,28 @@ export namespace Schemas {
   export type AssignTierRequest = { provider_id: string };
   export type LeadStatusDto = "new" | "qualified" | "validated" | "rejected" | "contacted" | "uncertain";
   export type ChangeLeadStatusRequest = { status: LeadStatusDto };
+  export type OfficialDataDto = {
+    annuaire_url: string;
+    created_on?: (string | null) | undefined;
+    head_office_city?: (string | null) | undefined;
+    head_office_country?: (string | null) | undefined;
+    head_office_postcode?: (string | null) | undefined;
+    headcount_range?: (string | null) | undefined;
+    legal_name: string;
+    naf_code?: (string | null) | undefined;
+    naf_label?: (string | null) | undefined;
+    siren: string;
+  };
+  export type CompanyPageDto = { url: string };
+  export type CompanyDto = {
+    built_at?: (string | null) | undefined;
+    error?: (string | null) | undefined;
+    next_attempt_at: string;
+    official?: (null | OfficialDataDto) | undefined;
+    pages: Array<CompanyPageDto>;
+    siren?: (string | null) | undefined;
+    state: string;
+  };
   export type ContactDto = {
     address: string;
     confidence: number;
@@ -71,6 +93,28 @@ export namespace Schemas {
     temperature?: (number | null) | undefined;
     timeout_seconds?: (number | null) | undefined;
   };
+  export type PaginationMetadata = {
+    current_page: number;
+    first_page: number;
+    is_empty: boolean;
+    last_page?: (number | null) | undefined;
+    next_page?: (number | null) | undefined;
+    per_page: number;
+    prev_page?: (number | null) | undefined;
+    total?: (number | null) | undefined;
+  };
+  export type DataEnvelope_CompanyDto = {
+    data: {
+      built_at?: (string | null) | undefined;
+      error?: (string | null) | undefined;
+      next_attempt_at: string;
+      official?: (null | OfficialDataDto) | undefined;
+      pages: Array<CompanyPageDto>;
+      siren?: (string | null) | undefined;
+      state: string;
+    };
+    pagination?: (null | PaginationMetadata) | undefined;
+  };
   export type DraftContactDto = { address: string; confidence: number; method: string };
   export type ProfileRefDto = { id: string; name: string };
   export type VerdictDto = "fiable" | "a_verifier" | "ecarte";
@@ -81,16 +125,6 @@ export namespace Schemas {
     profile: ProfileRefDto;
     score: number;
     verdict?: (null | VerdictDto) | undefined;
-  };
-  export type PaginationMetadata = {
-    current_page: number;
-    first_page: number;
-    is_empty: boolean;
-    last_page?: (number | null) | undefined;
-    next_page?: (number | null) | undefined;
-    per_page: number;
-    prev_page?: (number | null) | undefined;
-    total?: (number | null) | undefined;
   };
   export type DataEnvelope_DraftEntryDto = {
     data: {
@@ -108,12 +142,22 @@ export namespace Schemas {
     pagination?: (null | PaginationMetadata) | undefined;
   };
   export type HostFactDto = { environment: string; host: string; signals: number };
+  export type OfficialFactsDto = {
+    head_office_country?: (string | null) | undefined;
+    headcount_range?: (string | null) | undefined;
+    legal_name: string;
+    naf_code?: (string | null) | undefined;
+    naf_label?: (string | null) | undefined;
+    siren: string;
+  };
   export type LeadFactsDto = {
+    country_basis?: (string | null) | undefined;
     distinct_hosts: number;
     distinct_subdomains: number;
     first_seen_at: string;
     hosts: Array<HostFactDto>;
     last_seen_at: string;
+    official?: (null | OfficialFactsDto) | undefined;
     only_non_production: boolean;
     probable_country?: (null | CountryDto) | undefined;
     production_hosts: number;
@@ -199,6 +243,7 @@ export namespace Schemas {
   export type DataEnvelope_LeadDetailDto = {
     data: {
       assessments: Array<AssessmentDto>;
+      company?: (null | CompanyDto) | undefined;
       contacts: Array<ContactDto>;
       facts: LeadFactsDto;
       lead: LeadDto;
@@ -443,6 +488,7 @@ export namespace Schemas {
   export type ErrorDetail = { message: string; path: string };
   export type LeadDetailDto = {
     assessments: Array<AssessmentDto>;
+    company?: (null | CompanyDto) | undefined;
     contacts: Array<ContactDto>;
     facts: LeadFactsDto;
     lead: LeadDto;
@@ -630,6 +676,15 @@ export namespace Endpoints {
       path: { lead_id: string };
     };
     responses: { 200: Schemas.DataEnvelope_LeadDetailDto; 400: unknown; 401: unknown; 404: unknown };
+  };
+  export type post_Refresh_company = {
+    method: "POST";
+    path: "/api/v1/leads/{lead_id}/company/refresh";
+    requestFormat: "json";
+    parameters: {
+      path: { lead_id: string };
+    };
+    responses: { 202: Schemas.DataEnvelope_CompanyDto; 400: unknown; 401: unknown; 403: unknown; 404: unknown };
   };
   export type patch_Change_lead_status = {
     method: "PATCH";
@@ -990,6 +1045,7 @@ export type EndpointByMethod = {
   post: {
     "/api/v1/drafts/{assessment_id}/approve": Endpoints.post_Approve_draft;
     "/api/v1/drafts/{assessment_id}/reject": Endpoints.post_Reject_draft;
+    "/api/v1/leads/{lead_id}/company/refresh": Endpoints.post_Refresh_company;
     "/api/v1/leads/{lead_id}/summary/retry": Endpoints.post_Retry_lead_summary;
     "/api/v1/llm/providers": Endpoints.post_Create_provider;
     "/api/v1/llm/providers/{provider_id}/disable": Endpoints.post_Disable_provider;

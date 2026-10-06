@@ -51,7 +51,7 @@ impl LodestoneUseCase {
     async fn rescore_lead(&self, active: &ActiveProfile, lead: &Lead) -> Result<(), CoreError> {
         let definition = active.revision.definition.definition();
         let results = self.lead_qualification_results(lead.id).await?;
-        let (_, facts) = self.signals_with_facts(lead).await?;
+        let (_, facts, _) = self.signals_with_facts(lead).await?;
         let mut opinions = Vec::new();
         let mut agent_scores = Vec::new();
         for agent in definition

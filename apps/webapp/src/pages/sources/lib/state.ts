@@ -30,7 +30,10 @@ export const SOURCE_GROUPS: readonly {
 		title: 'Contacts',
 		sources: ['public_page', 'security_txt', 'role_guess'],
 	},
-	{ title: 'Qualification', sources: ['qualification'] },
+	{
+		title: 'Qualification',
+		sources: ['company_research', 'qualification'],
+	},
 ]
 
 const STATE_LABELS: Readonly<Record<SourceState, string>> = {

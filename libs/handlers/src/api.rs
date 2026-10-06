@@ -10,7 +10,7 @@ use utoipa::ToSchema;
 
 use crate::{
     auth::{AuthenticatedUser, auth_middleware},
-    drafts,
+    company, drafts,
     errors::ApiError,
     exports, leads, llm, profiles,
     response::{DataEnvelope, Response},
@@ -101,6 +101,10 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route(
             "/leads/{lead_id}/summary/retry",
             post(leads::retry_lead_summary),
+        )
+        .route(
+            "/leads/{lead_id}/company/refresh",
+            post(company::refresh_company),
         );
 
     Router::new()

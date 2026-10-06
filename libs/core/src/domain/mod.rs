@@ -1,5 +1,6 @@
 pub(crate) mod aggregation;
 pub(crate) mod ats_target;
+pub(crate) mod company;
 pub(crate) mod contact;
 pub(crate) mod facts;
 pub(crate) mod fetch;
