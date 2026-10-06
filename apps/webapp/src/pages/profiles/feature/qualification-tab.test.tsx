@@ -168,7 +168,10 @@ describe('qualification tab', () => {
 		for (const label of [
 			'Pertinence',
 			'Maturité technique',
-			"Type d'organisation",
+			'Environnement',
+			"Type et taille d'organisation",
+			'Marché',
+			'Opportunité',
 			'Vide',
 		]) {
 			expect(within(picker).getByText(label)).toBeTruthy()
@@ -188,6 +191,32 @@ describe('qualification tab', () => {
 		expect(
 			sheet().getByLabelText('Prompt système', { selector: 'textarea' }),
 		).toBeTruthy()
+	})
+
+	it('inserts a multi-axis template and fills the sheet', () => {
+		const seen = vi.fn()
+		render(<Harness onValue={seen} />)
+		fireEvent.click(
+			screen.getByRole('button', { name: 'Ajouter un agent de qualification' }),
+		)
+		fireEvent.click(
+			within(
+				screen.getByLabelText("Choisir un modèle d'agent de qualification"),
+			).getByText('Marché'),
+		)
+		const agent = qualificationList(lastValue(seen))[1]
+		expect(agent).toMatchObject({ id: 'marche', name: 'Marché', weight: 5 })
+		expect(questionsOf(agent)).toHaveLength(2)
+		expect(sheet().getByLabelText('Nom')).toHaveProperty('value', 'Marché')
+		expect(sheet().getByLabelText('Axe 1')).toBeTruthy()
+		expect(sheet().getByLabelText('Axe 2')).toBeTruthy()
+		expect(
+			(
+				sheet().getByLabelText('Prompt système', {
+					selector: 'textarea',
+				}) as HTMLTextAreaElement
+			).value,
+		).toContain('Zone visée : France et Europe francophone.')
 	})
 
 	it('adds a blank agent with one empty question', () => {

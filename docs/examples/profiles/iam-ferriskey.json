@@ -222,14 +222,74 @@
         }
       ]
     },
-    {
-      "id": "type-organisation",
-      "name": "Type d'organisation",
-      "description": "Le type d'organisation du lead : administration, grande entreprise, PME ou autre structure.",
+{
+      "id": "environnement",
+      "name": "Environnement",
+      "description": "L'environnement des preuves : systèmes en production ou environnements de dev, test et démo, et réalité de l'usage.",
       "enabled": true,
       "provider_id": null,
-      "system_prompt": "You classify the organization by type from the documents. Public bodies buy through tenders, large companies run their own IT teams, small and medium businesses rarely do. Answer unknown when nothing shows it.",
-      "weight": 5,
+      "system_prompt": "Tu évalues si les preuves d'un lead viennent de systèmes réellement utilisés. Appuie-toi sur le bloc « Faits » (environnement par hôte, part de production, sources) et sur les documents. Des hôtes de production, une instance publique stable ou des offres d'emploi qui parlent d'exploitation indiquent un usage réel. Des hôtes nommés dev, test, staging ou demo, un projet de démonstration ou un dépôt d'exemple indiquent de la non-production. Ne déduis pas l'environnement d'un simple nom de domaine sans indice. Réponds « inconnu » quand rien ne permet de trancher.",
+      "weight": 4,
+      "questions": [
+        {
+          "id": "environnement",
+          "wording": "Les preuves viennent-elles de systèmes en production ou hors production ?",
+          "weight": 5,
+          "options": [
+            {
+              "value": "production",
+              "label": "Production",
+              "score": 1
+            },
+            {
+              "value": "mixte",
+              "label": "Mixte",
+              "score": 0.6
+            },
+            {
+              "value": "hors_production",
+              "label": "Hors production",
+              "score": 0
+            },
+            {
+              "value": "inconnu",
+              "label": "Inconnu",
+              "score": 0.3
+            }
+          ]
+        },
+        {
+          "id": "maturite_usage",
+          "wording": "Quel est le niveau d'usage réel constaté ?",
+          "weight": 5,
+          "options": [
+            {
+              "value": "usage_reel",
+              "label": "Usage réel",
+              "score": 1
+            },
+            {
+              "value": "experimentation",
+              "label": "Expérimentation",
+              "score": 0.4
+            },
+            {
+              "value": "inconnu",
+              "label": "Inconnu",
+              "score": 0.3
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "type-et-taille-d-organisation",
+      "name": "Type et taille d'organisation",
+      "description": "Le type et la taille de l'organisation : secteur public, grand compte, ETI, PME ou startup.",
+      "enabled": true,
+      "provider_id": null,
+      "system_prompt": "Tu classes l'organisation par type et par taille à partir des documents et du bloc « Faits ». Le secteur public achète par appels d'offres, un grand compte a ses équipes et ses processus d'achat, une ETI décide plus vite, une PME ou une startup a peu de moyens dédiés. Appuie-toi sur ce que les documents disent de l'effectif, du chiffre d'affaires, du statut ou du secteur. Ne devine pas la taille d'après le nom. Réponds « inconnu » quand rien ne permet de trancher. L'opérateur ajuste les scores selon sa cible.",
+      "weight": 3,
       "questions": [
         {
           "id": "type",
@@ -237,14 +297,19 @@
           "weight": 5,
           "options": [
             {
-              "value": "public",
-              "label": "Organisation publique",
-              "score": 0.8
+              "value": "secteur_public",
+              "label": "Secteur public",
+              "score": 0.7
             },
             {
-              "value": "grande_entreprise",
-              "label": "Grande entreprise",
-              "score": 1.0
+              "value": "grand_compte",
+              "label": "Grand compte",
+              "score": 1
+            },
+            {
+              "value": "eti",
+              "label": "ETI",
+              "score": 0.8
             },
             {
               "value": "pme",
@@ -252,9 +317,161 @@
               "score": 0.5
             },
             {
+              "value": "startup",
+              "label": "Startup",
+              "score": 0.4
+            },
+            {
               "value": "inconnu",
               "label": "Inconnu",
               "score": 0.3
+            }
+          ]
+        },
+        {
+          "id": "taille",
+          "wording": "Quelle est la taille de l'organisation ?",
+          "weight": 5,
+          "options": [
+            {
+              "value": "grande",
+              "label": "Grande",
+              "score": 1
+            },
+            {
+              "value": "moyenne",
+              "label": "Moyenne",
+              "score": 0.6
+            },
+            {
+              "value": "petite",
+              "label": "Petite",
+              "score": 0.3
+            },
+            {
+              "value": "inconnue",
+              "label": "Inconnue",
+              "score": 0.3
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "marche",
+      "name": "Marché",
+      "description": "L'adéquation au marché visé : zone géographique et langue de l'entreprise.",
+      "enabled": true,
+      "provider_id": null,
+      "system_prompt": "Zone visée : France et Europe francophone.\n\nTu évalues si l'entreprise appartient à la zone visée ci-dessus et si elle travaille dans la langue du marché. Appuie-toi sur le pays déduit des domaines dans le bloc « Faits » (extension de pays), sur l'adresse, la langue des documents et les offres d'emploi. Une extension de pays seule est un indice, pas une preuve : une extension .com ne dit rien. Une entreprise voisine de la zone, ou présente dans la zone par une filiale, est « proche ». Réponds « inconnu » quand rien ne permet de trancher. Modifie la première phrase pour changer de zone.",
+      "weight": 4,
+      "questions": [
+        {
+          "id": "zone",
+          "wording": "Où se situe l'entreprise par rapport à la zone visée ?",
+          "weight": 5,
+          "options": [
+            {
+              "value": "dans_la_zone",
+              "label": "Dans la zone",
+              "score": 1
+            },
+            {
+              "value": "proche",
+              "label": "Proche de la zone",
+              "score": 0.5
+            },
+            {
+              "value": "hors_zone",
+              "label": "Hors zone",
+              "score": 0
+            },
+            {
+              "value": "inconnu",
+              "label": "Inconnu",
+              "score": 0.3
+            }
+          ]
+        },
+        {
+          "id": "langue",
+          "wording": "Dans quelle langue l'entreprise travaille-t-elle ?",
+          "weight": 5,
+          "options": [
+            {
+              "value": "francais",
+              "label": "Français",
+              "score": 1
+            },
+            {
+              "value": "autre",
+              "label": "Autre langue",
+              "score": 0.3
+            },
+            {
+              "value": "inconnu",
+              "label": "Inconnue",
+              "score": 0.3
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "opportunite",
+      "name": "Opportunité",
+      "description": "Le potentiel d'opportunité : migration, dette technique, coût ou limites du SaaS actuel, recrutement sur le sujet.",
+      "enabled": true,
+      "provider_id": null,
+      "system_prompt": "Tu évalues si le lead a une raison d'agir maintenant, à partir des signaux et des documents. Cherche une migration annoncée ou probable, une dette technique visible (versions anciennes, fin de support, contournements), le coût ou les limites du SaaS actuel (prix, dépendance, conformité, hébergement des données) et des offres d'emploi sur le sujet de l'offre. Un projet de migration en cours ou un déclencheur explicite est fort. L'absence de signal n'est pas un signal négatif : réponds « inconnu » ou « aucun » selon ce que disent les documents, sans rien supposer.",
+      "weight": 6,
+      "questions": [
+        {
+          "id": "migration",
+          "wording": "Une migration est-elle en cours ou probable ?",
+          "weight": 5,
+          "options": [
+            {
+              "value": "en_cours",
+              "label": "En cours",
+              "score": 1
+            },
+            {
+              "value": "probable",
+              "label": "Probable",
+              "score": 0.7
+            },
+            {
+              "value": "improbable",
+              "label": "Improbable",
+              "score": 0
+            },
+            {
+              "value": "inconnu",
+              "label": "Inconnue",
+              "score": 0.3
+            }
+          ]
+        },
+        {
+          "id": "declencheur",
+          "wording": "Existe-t-il un déclencheur d'achat visible ?",
+          "weight": 5,
+          "options": [
+            {
+              "value": "fort",
+              "label": "Fort",
+              "score": 1
+            },
+            {
+              "value": "moyen",
+              "label": "Moyen",
+              "score": 0.5
+            },
+            {
+              "value": "aucun",
+              "label": "Aucun",
+              "score": 0
             }
           ]
         }

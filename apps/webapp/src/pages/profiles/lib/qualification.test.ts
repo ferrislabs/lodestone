@@ -48,13 +48,65 @@ function profile(): JsonObject {
 }
 
 describe('templates', () => {
-	it('offers pertinence, technical maturity, organization type and blank', () => {
+	it('offers the ready-made templates then blank', () => {
 		expect(QUALIFICATION_TEMPLATES.map((template) => template.label)).toEqual([
 			'Pertinence',
 			'Maturité technique',
-			"Type d'organisation",
+			'Environnement',
+			"Type et taille d'organisation",
+			'Marché',
+			'Opportunité',
 			'Vide',
 		])
+	})
+
+	it('builds templates that pass the v6 validation', () => {
+		for (const template of QUALIFICATION_TEMPLATES) {
+			if (template.id === 'vide') continue
+			const agent = newQualificationAgent(template.id, new Set(['ats']))
+			const value: JsonObject = {
+				...profile(),
+				qualification_agents: [agent],
+			}
+			expect(validateQualification(value), template.id).toEqual([])
+			expect(String(agent.description).length).toBeLessThanOrEqual(300)
+			expect(String(agent.system_prompt).length).toBeLessThanOrEqual(8000)
+			expect(String(agent.system_prompt)).not.toBe('')
+			const questions = questionsOf(agent)
+			expect(questions.length).toBe(template.axes.length)
+			for (const question of questions) {
+				const wording = (question as JsonObject).wording as string
+				expect(wording.length).toBeGreaterThan(0)
+				const scores = optionsOf(question).map(
+					(item) => (item as JsonObject).score as number,
+				)
+				expect(Math.max(...scores)).toBe(1)
+				expect(Math.min(...scores)).toBeGreaterThanOrEqual(0)
+			}
+		}
+	})
+
+	it('builds the environment, market and opportunity axes', () => {
+		const values = (id: string) =>
+			questionsOf(newQualificationAgent(id, new Set())).map((question) => [
+				(question as JsonObject).id,
+				optionsOf(question).map((item) => (item as JsonObject).value),
+			])
+		expect(values('environnement')).toEqual([
+			['environnement', ['production', 'mixte', 'hors_production', 'inconnu']],
+			['maturite_usage', ['usage_reel', 'experimentation', 'inconnu']],
+		])
+		expect(values('marche')).toEqual([
+			['zone', ['dans_la_zone', 'proche', 'hors_zone', 'inconnu']],
+			['langue', ['francais', 'autre', 'inconnu']],
+		])
+		expect(values('opportunite')).toEqual([
+			['migration', ['en_cours', 'probable', 'improbable', 'inconnu']],
+			['declencheur', ['fort', 'moyen', 'aucun']],
+		])
+		expect(newQualificationAgent('marche', new Set()).system_prompt).toContain(
+			'Zone visée : France et Europe francophone.',
+		)
 	})
 
 	it('builds a pertinence agent with the three scored options', () => {
@@ -87,14 +139,21 @@ describe('templates', () => {
 			{ value: 'saas', label: 'SaaS', score: 0.7 },
 			{ value: 'inconnu', label: 'Inconnue', score: 0.3 },
 		])
-		const kind = newQualificationAgent('type-organisation', new Set())
+		const kind = newQualificationAgent('type-taille-organisation', new Set())
 		expect(
 			optionsOf(questionsOf(kind)[0]).map((item) =>
 				typeof item === 'object' && item !== null && 'value' in item
 					? item.value
 					: null,
 			),
-		).toEqual(['public', 'grande_entreprise', 'pme', 'inconnu'])
+		).toEqual([
+			'secteur_public',
+			'grand_compte',
+			'eti',
+			'pme',
+			'startup',
+			'inconnu',
+		])
 	})
 
 	it('builds a blank agent with one empty question and two options', () => {
