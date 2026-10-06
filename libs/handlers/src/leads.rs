@@ -344,6 +344,10 @@ pub struct QualificationAnswerDto {
 pub struct QualificationResultDto {
     pub agent_id: String,
     pub agent_name: String,
+    /// What the agent evaluates, as written in the profile revision that produced the result.
+    pub agent_description: Option<String>,
+    /// Short summary written by the agent, in the profile language. Absent when the result is invalid or predates summaries.
+    pub summary: Option<String>,
     pub provider_id: Option<String>,
     pub provider_name: Option<String>,
     pub model: String,
@@ -417,6 +421,8 @@ impl QualificationResultDto {
                 || result.agent_id.as_str().to_owned(),
                 |agent| agent.name.clone(),
             ),
+            agent_description: agent.map(|agent| agent.description.clone()),
+            summary: result.summary.clone(),
             provider_id: result.provider_id.map(|id| id.to_string()),
             provider_name: provider.map(|record| record.name.clone()),
             model: result.model.clone(),

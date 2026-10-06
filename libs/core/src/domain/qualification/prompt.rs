@@ -36,9 +36,10 @@ fn language_line(definition: &ProfileDefinition) -> String {
     )
 }
 
-fn contract_rules(schema: &Value) -> String {
+fn contract_rules(definition: &ProfileDefinition, schema: &Value) -> String {
     format!(
-        "Answer only with one JSON object that follows this contract and nothing else. Every question has an entry under `answers` with `type` set to \"choice\", `choice` set to one option value, `confidence` between 0 and 1, and `probabilities` giving a probability between 0 and 1 for every option value, summing to 1.\n\nContract JSON schema:\n{schema}"
+        "Answer only with one JSON object that follows this contract and nothing else. `summary` is 2 to 4 sentences, at most 600 characters, written in {}, on what you observed for the aspect you evaluate, based only on the documents. Every question has an entry under `answers` with `type` set to \"choice\", `choice` set to one option value, `confidence` between 0 and 1, and `probabilities` giving a probability between 0 and 1 for every option value, summing to 1.\n\nContract JSON schema:\n{schema}",
+        definition.llm.language.name()
     )
 }
 
@@ -71,7 +72,7 @@ pub fn build(
         agent.system_prompt.trim(),
         identity_context(definition),
         language_line(definition),
-        contract_rules(schema),
+        contract_rules(definition, schema),
     );
     let instruction = questions_text(agent).trim_end().to_owned();
     let mut material = Vec::with_capacity(system.len() + instruction.len() + 1);
@@ -138,6 +139,9 @@ mod tests {
         assert!(prompt.system.contains("Write any free text in French."));
         assert!(prompt.system.contains("Contract JSON schema:"));
         assert!(prompt.system.contains("\"probabilities\""));
+        assert!(prompt.system.contains("`summary` is 2 to 4 sentences"));
+        assert!(prompt.system.contains("written in French"));
+        assert!(prompt.system.contains("based only on the documents"));
         assert_eq!(prompt.system.matches("<market_context>").count(), 1);
     }
 

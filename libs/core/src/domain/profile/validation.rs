@@ -8,11 +8,11 @@ use super::{
     definition::{
         Agent, AgentSource, Aggregator, CertificateTransparency, CnamePattern, ContactRanking,
         DebtRule, DnsCname, Fingerprint, HttpProbe, Identity, KeywordSource, LlmSettings,
-        MAX_OPTIONS, MAX_PROMPT_CHARS, MIN_OPTIONS, Matcher, PROFILE_SCHEMA_VERSION,
-        ProfileDefinition, QualificationAgent, Question, Scoring, VerdictThresholds,
-        VersionExtractor,
+        MAX_DESCRIPTION_CHARS, MAX_OPTIONS, MAX_PROMPT_CHARS, MIN_OPTIONS, Matcher,
+        PROFILE_SCHEMA_VERSION, ProfileDefinition, QualificationAgent, Question, Scoring,
+        VerdictThresholds, VersionExtractor,
     },
-    legacy::{ProfileDefinitionV1, ProfileDefinitionV2, ProfileDefinitionV3},
+    legacy::{ProfileDefinitionV1, ProfileDefinitionV2, ProfileDefinitionV3, ProfileDefinitionV4},
 };
 
 const REGEX_SIZE_LIMIT: usize = 1 << 20;
@@ -22,7 +22,7 @@ const MAX_PATTERN_LENGTH: usize = 1024;
 pub enum ProfileProblem {
     #[error("malformed: {0}")]
     Malformed(String),
-    #[error("unsupported schema version {found}, expected 1, 2, 3 or {PROFILE_SCHEMA_VERSION}")]
+    #[error("unsupported schema version {found}, expected 1, 2, 3, 4 or {PROFILE_SCHEMA_VERSION}")]
     UnsupportedSchemaVersion { found: u32 },
     #[error("must not be empty")]
     Empty,
@@ -42,6 +42,8 @@ pub enum ProfileProblem {
     InvalidScore,
     #[error("must be at most {MAX_PROMPT_CHARS} characters")]
     TooLong,
+    #[error("must be at most {MAX_DESCRIPTION_CHARS} characters")]
+    DescriptionTooLong,
     #[error("must be higher than `discard_below`")]
     ThresholdOrder,
     #[error("invalid regular expression")]
@@ -99,6 +101,7 @@ impl ValidatedProfile {
             Some(1) => decode::<ProfileDefinitionV1>(value)?.upgrade(),
             Some(2) => decode::<ProfileDefinitionV2>(value)?.upgrade(),
             Some(3) => decode::<ProfileDefinitionV3>(value)?.upgrade(),
+            Some(4) => decode::<ProfileDefinitionV4>(value)?.upgrade(),
             Some(PROFILE_SCHEMA_VERSION) | None => decode::<ProfileDefinition>(value)?,
             Some(found) => {
                 return Err(Path::root()
@@ -312,6 +315,11 @@ fn validate_qualification_agents(
 
 fn validate_qualification_agent(agent: &QualificationAgent, path: &Path) -> Check {
     non_empty(&agent.name, &path.field("name"))?;
+    let description = path.field("description");
+    non_empty(&agent.description, &description)?;
+    if agent.description.chars().count() > MAX_DESCRIPTION_CHARS {
+        return Err(description.fail(ProfileProblem::DescriptionTooLong));
+    }
     bounded_prompt(&agent.system_prompt, &path.field("system_prompt"))?;
     valid_weight(agent.weight, &path.field("weight"))?;
     let questions = path.field("questions");
@@ -745,10 +753,10 @@ mod tests {
             v["scoring"] = iam_scoring_v2();
             v["llm"]["qualification_threshold"] = json!(50);
         });
-        assert_eq!(profile.definition().schema_version, 4);
+        assert_eq!(profile.definition().schema_version, 5);
         assert_eq!(weights(&profile), [10, 5, 3, 8, 7, 2, 2]);
         assert_eq!(profile.definition().llm.qualification_threshold, 37);
-        assert_eq!(profile.to_json()["schema_version"], 4);
+        assert_eq!(profile.to_json()["schema_version"], 5);
     }
 
     #[test]
@@ -847,11 +855,11 @@ mod tests {
 
     #[test]
     fn unsupported_schema_version_is_rejected() {
-        let error = error_for(|v| v["schema_version"] = json!(5));
+        let error = error_for(|v| v["schema_version"] = json!(6));
         assert_eq!(error.path, "schema_version");
         assert_eq!(
             error.problem,
-            ProfileProblem::UnsupportedSchemaVersion { found: 5 }
+            ProfileProblem::UnsupportedSchemaVersion { found: 6 }
         );
         let error = error_for(|v| v["schema_version"] = json!(0));
         assert_eq!(
@@ -1177,7 +1185,7 @@ mod tests {
         value["sources"] = json!({"http_probe": source, "ats": {"keywords": ["sso"]}});
         let profile = ValidatedProfile::parse(value).unwrap();
         let definition = profile.definition();
-        assert_eq!(definition.schema_version, 4);
+        assert_eq!(definition.schema_version, 5);
         let summary: Vec<_> = definition
             .agents
             .iter()
@@ -1187,7 +1195,7 @@ mod tests {
             summary,
             [("http-probe", "HTTP probe", true), ("ats", "ATS", true)]
         );
-        assert_eq!(profile.to_json()["schema_version"], 4);
+        assert_eq!(profile.to_json()["schema_version"], 5);
         assert_eq!(profile.to_json()["agents"][0]["source"], agent);
     }
 
@@ -1259,11 +1267,15 @@ mod tests {
     fn version_three_is_upgraded_with_a_default_qualification_agent() {
         let profile = ValidatedProfile::parse(minimal()).unwrap();
         let definition = profile.definition();
-        assert_eq!(definition.schema_version, 4);
+        assert_eq!(definition.schema_version, 5);
         assert_eq!(definition.qualification_agents.len(), 1);
         let agent = &definition.qualification_agents[0];
         assert_eq!(agent.id.as_str(), "pertinence");
         assert_eq!(agent.name, "Pertinence");
+        assert_eq!(
+            agent.description,
+            "La pertinence du lead pour l'offre du profil."
+        );
         assert!(agent.enabled);
         assert_eq!(agent.provider_id, None);
         assert_eq!(agent.weight, 5);
@@ -1347,6 +1359,59 @@ mod tests {
         assert_eq!(agent.weight, 5);
         assert_eq!(agent.provider_id, None);
         assert_eq!(agent.questions[0].weight, 5);
+    }
+
+    #[test]
+    fn qualification_agent_description_is_required_and_bounded() {
+        let error = v4_error(|v| {
+            v["qualification_agents"][0]
+                .as_object_mut()
+                .unwrap()
+                .remove("description");
+        });
+        assert_eq!(error.path, "qualification_agents[0]");
+        let error = v4_error(|v| v["qualification_agents"][0]["description"] = json!(" "));
+        assert_eq!(error.path, "qualification_agents[0].description");
+        assert_eq!(error.problem, ProfileProblem::Empty);
+        let error =
+            v4_error(|v| v["qualification_agents"][0]["description"] = json!("x".repeat(301)));
+        assert_eq!(error.path, "qualification_agents[0].description");
+        assert_eq!(error.problem, ProfileProblem::DescriptionTooLong);
+        let ok = v4_ok(|v| v["qualification_agents"][0]["description"] = json!("x".repeat(300)));
+        assert_eq!(
+            ok.definition().qualification_agents[0]
+                .description
+                .chars()
+                .count(),
+            300
+        );
+    }
+
+    #[test]
+    fn version_four_documents_get_a_description_derived_from_the_name() {
+        let mut value = v4();
+        value["schema_version"] = json!(4);
+        let agent = value["qualification_agents"][0].as_object_mut().unwrap();
+        agent.remove("description");
+        agent.insert("name".to_owned(), json!("Maturité technique"));
+        let profile = ValidatedProfile::parse(value).unwrap();
+        let agent = &profile.definition().qualification_agents[0];
+        assert_eq!(profile.definition().schema_version, 5);
+        assert_eq!(agent.description, "Évalue : Maturité technique");
+        assert_eq!(agent.name, "Maturité technique");
+        assert_eq!(profile.to_json()["schema_version"], 5);
+    }
+
+    #[test]
+    fn version_four_upgrade_keeps_the_description_within_the_limit() {
+        let mut value = v4();
+        value["schema_version"] = json!(4);
+        let agent = value["qualification_agents"][0].as_object_mut().unwrap();
+        agent.remove("description");
+        agent.insert("name".to_owned(), json!("n".repeat(500)));
+        let profile = ValidatedProfile::parse(value).unwrap();
+        let description = &profile.definition().qualification_agents[0].description;
+        assert_eq!(description.chars().count(), 300);
     }
 
     #[test]

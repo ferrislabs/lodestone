@@ -1,10 +1,11 @@
 use serde::Deserialize;
+use uuid::Uuid;
 
 use super::definition::{
     Agent, AgentId, AgentSource, Aggregator, CertificateTransparency, ContactRanking, DnsCname,
-    HttpProbe, Identity, KeywordSource, Language, LlmSettings, MAX_PROMPT_CHARS,
-    PROFILE_SCHEMA_VERSION, ProfileDefinition, QualificationAgent, Question, QuestionOption,
-    Scoring, ScoringFactor, VerdictThresholds,
+    HttpProbe, Identity, KeywordSource, Language, LlmSettings, MAX_DESCRIPTION_CHARS,
+    MAX_PROMPT_CHARS, PROFILE_SCHEMA_VERSION, ProfileDefinition, QualificationAgent, Question,
+    QuestionOption, Scoring, ScoringFactor, VerdictThresholds,
 };
 use crate::domain::scoring::max_possible;
 
@@ -149,6 +150,7 @@ fn pertinence_agent(identity: &Identity, llm: &LlmSettings) -> QualificationAgen
     QualificationAgent {
         id: AgentId::new("pertinence"),
         name: "Pertinence".to_owned(),
+        description: "La pertinence du lead pour l'offre du profil.".to_owned(),
         enabled: true,
         provider_id: None,
         system_prompt: pertinence_prompt(identity, llm),
@@ -163,6 +165,84 @@ fn pertinence_agent(identity: &Identity, llm: &LlmSettings) -> QualificationAgen
                 option("faible", "Faible", 0.0),
             ],
         }],
+    }
+}
+
+fn default_enabled() -> bool {
+    true
+}
+
+fn default_weight() -> u8 {
+    5
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct QualificationAgentV4 {
+    id: AgentId,
+    name: String,
+    #[serde(default = "default_enabled")]
+    enabled: bool,
+    #[serde(default)]
+    provider_id: Option<Uuid>,
+    system_prompt: String,
+    #[serde(default = "default_weight")]
+    weight: u8,
+    questions: Vec<Question>,
+}
+
+impl QualificationAgentV4 {
+    fn upgrade(self) -> QualificationAgent {
+        let description: String = format!("Évalue : {}", self.name.trim())
+            .chars()
+            .take(MAX_DESCRIPTION_CHARS)
+            .collect();
+        QualificationAgent {
+            id: self.id,
+            name: self.name,
+            description,
+            enabled: self.enabled,
+            provider_id: self.provider_id,
+            system_prompt: self.system_prompt,
+            weight: self.weight,
+            questions: self.questions,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct ProfileDefinitionV4 {
+    #[serde(rename = "schema_version")]
+    _schema_version: u32,
+    identity: Identity,
+    agents: Vec<Agent>,
+    qualification_agents: Vec<QualificationAgentV4>,
+    aggregator: Aggregator,
+    #[serde(default)]
+    verdict: VerdictThresholds,
+    scoring: Scoring,
+    contact_ranking: ContactRanking,
+    llm: LlmSettings,
+}
+
+impl ProfileDefinitionV4 {
+    pub(super) fn upgrade(self) -> ProfileDefinition {
+        ProfileDefinition {
+            schema_version: PROFILE_SCHEMA_VERSION,
+            identity: self.identity,
+            agents: self.agents,
+            qualification_agents: self
+                .qualification_agents
+                .into_iter()
+                .map(QualificationAgentV4::upgrade)
+                .collect(),
+            aggregator: self.aggregator,
+            verdict: self.verdict,
+            scoring: self.scoring,
+            contact_ranking: self.contact_ranking,
+            llm: self.llm,
+        }
     }
 }
 

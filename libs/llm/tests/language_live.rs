@@ -52,6 +52,7 @@ fn fake_result(
         model: "gemma_laya".to_owned(),
         prompt_hash: String::new(),
         status: ResultStatus::Valid,
+        summary: Some("Résumé de l'agent.".to_owned()),
         answers: json!({question: {
             "type": "choice",
             "choice": choice,

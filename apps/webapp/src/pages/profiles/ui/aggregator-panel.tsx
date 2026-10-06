@@ -41,9 +41,9 @@ export function AggregatorPanel({
 			<div className="flex flex-col gap-1">
 				<h2 className="text-base font-semibold">Agrégateur</h2>
 				<p className="text-xs text-muted-foreground">
-					Rédige le bilan et le brouillon du lead à partir des réponses de tous
-					les agents de qualification. Il ne change ni la confiance ni le
-					verdict.
+					Rédige la synthèse finale et le brouillon du lead à partir des
+					rapports de tous les agents de qualification. Il ne change ni la
+					confiance ni le verdict.
 				</p>
 			</div>
 			<div className="flex flex-col gap-1.5">

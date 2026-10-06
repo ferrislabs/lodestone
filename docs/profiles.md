@@ -8,7 +8,7 @@ Profiles live in Postgres. Each edit creates a new revision; earlier revisions a
 
 ## Schema
 
-The JSON Schema is `docs/schemas/profile.v4.schema.json`. It is generated from `ProfileDefinition` and must not be edited by hand. Regenerate it with:
+The JSON Schema is `docs/schemas/profile.v5.schema.json`. It is generated from `ProfileDefinition` and must not be edited by hand. Regenerate it with:
 
 ```
 UPDATE_SCHEMA=1 cargo test -p lodestone-core --test profile_examples
@@ -23,7 +23,7 @@ Without `UPDATE_SCHEMA=1` the same test fails if the committed file is stale. Th
 
 ## Sections
 
-- `schema_version`: must be 4. See [Older versions](#older-versions).
+- `schema_version`: must be 5. See [Older versions](#older-versions).
 - `identity`: the offer and the target customer, in free text.
 - `agents`: the detection agents; at least one is required. An agent searches one source with its own settings (see ADR 0005). Several agents of the same kind are allowed.
   - `id`: slug matching `^[a-z0-9][a-z0-9-]{0,62}$`, unique in the profile.
@@ -34,6 +34,7 @@ Without `UPDATE_SCHEMA=1` the same test fails if the committed file is stale. Th
 - `qualification_agents`: at least one (ADR 0007). Each agent evaluates every lead of the profile, from every source, from one angle.
   - `id`: slug, unique among all agents of the profile, sourcing and qualification together.
   - `name`: display name, not empty. `enabled`: defaults to `true`.
+  - `description`: what the agent evaluates, 1 to 300 characters. Shown on the agent card and on the lead page.
   - `provider_id`: id of a declared LLM provider (`GET /api/v1/llm/providers`), or `null` for the default provider. The reference is not checked by profile validation: the runtime resolves it and treats a missing or disabled provider as an error.
   - `system_prompt`: not empty, at most 8000 characters.
   - `weight`: integer from 1 to 10, default 5, the agent's weight in the lead confidence.
@@ -146,7 +147,7 @@ A host or domain whose lookup, probe or crawl fails is marked checked like a suc
 
 ## Older versions
 
-Stored revisions are never rewritten. Versions 1, 2 and 3 are accepted and upgraded when read; new revisions are written in version 4. Errors on an older document keep that document's paths.
+Stored revisions are never rewritten. Versions 1, 2, 3 and 4 are accepted and upgraded when read; new revisions are written in version 5. Errors on an older document keep that document's paths.
 
 ### Version 1 to 2
 
@@ -170,3 +171,7 @@ The upgrade adds:
 - `verdict` with 70 and 30.
 
 Sourcing agents, scoring, contact ranking and `llm` are unchanged. A null `provider_id` means the default provider, resolved at runtime.
+
+### Version 4 to 5
+
+Qualification agents gain a required `description`. Parsing derives it from the name (`Évalue : <name>`, cut at 300 characters). The agent contract also changes (ADR 0007): the answer carries a required `summary` next to `answers`.

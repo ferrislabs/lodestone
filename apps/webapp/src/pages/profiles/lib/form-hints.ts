@@ -17,7 +17,7 @@ export const PROFILE_HINTS: UiHints = {
 		'aggregator.system_prompt',
 	],
 	defaults: {
-		schema_version: 4,
+		schema_version: 5,
 		'aggregator.system_prompt': DEFAULT_AGGREGATOR_PROMPT,
 		'llm.qualification_threshold': 50,
 		'scoring.factors.weight': 5,

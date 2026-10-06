@@ -1,5 +1,5 @@
 {
-  "schema_version": 4,
+  "schema_version": 5,
   "identity": {
     "offer": "Migration of Magento 1 and Magento 2 shops to a modern e-commerce platform, by a web agency",
     "target_customer": "Merchants and organizations running an outdated Magento storefront"
@@ -54,6 +54,7 @@
     {
       "id": "pertinence",
       "name": "Pertinence",
+      "description": "La pertinence du lead pour l'offre : la boutique tourne-t-elle sur Magento, ou un chantier de refonte est-il en préparation ?",
       "enabled": true,
       "provider_id": null,
       "system_prompt": "You judge whether a company is a relevant prospect for the offer, using the relevance criteria. Base your answers only on what the documents state.\n\nRelevance criteria: The organization runs an online shop on Magento, preferably an outdated version, or is hiring or tendering for a rebuild of its merchant site.",

@@ -1,5 +1,5 @@
 {
-  "schema_version": 4,
+  "schema_version": 5,
   "identity": {
     "offer": "FerrisKey (open source IAM/CIAM in Rust) and Autharie (managed IAM), both by Ferrislabs",
     "target_customer": "Organizations running self-hosted Keycloak or a similar IAM, or paying for a SaaS IAM"
@@ -159,6 +159,7 @@
     {
       "id": "pertinence",
       "name": "Pertinence",
+      "description": "La pertinence du lead pour l'offre : le prospect exploite-t-il ou prépare-t-il ce que le profil cible ?",
       "enabled": true,
       "provider_id": null,
       "system_prompt": "You judge whether a company is a relevant prospect for the offer, using the relevance criteria. Base your answers only on what the documents state.\n\nRelevance criteria: The organization operates its own identity infrastructure, such as a self-hosted Keycloak, or pays for a SaaS IAM, and shows signs of migration, staffing or procurement around it. Physical access control and unrelated directories are not relevant.",
@@ -191,6 +192,7 @@
     {
       "id": "maturite-technique",
       "name": "Maturité technique",
+      "description": "La maturité technique du lead : versions utilisées, dette visible et signes de modernisation ou de migration.",
       "enabled": true,
       "provider_id": null,
       "system_prompt": "You assess how the company runs its identity infrastructure from the signals and documents. Self-hosted and ageing Keycloak, or custom authentication code, means high debt and a strong opportunity. A recent SaaS IAM means a weaker one. Answer unknown when nothing shows it.",
@@ -223,6 +225,7 @@
     {
       "id": "type-organisation",
       "name": "Type d'organisation",
+      "description": "Le type d'organisation du lead : administration, grande entreprise, PME ou autre structure.",
       "enabled": true,
       "provider_id": null,
       "system_prompt": "You classify the organization by type from the documents. Public bodies buy through tenders, large companies run their own IT teams, small and medium businesses rarely do. Answer unknown when nothing shows it.",

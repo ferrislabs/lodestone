@@ -124,6 +124,7 @@ export namespace Schemas {
     wording: string;
   };
   export type QualificationResultDto = {
+    agent_description?: (string | null) | undefined;
     agent_id: string;
     agent_name: string;
     agent_score?: (number | null) | undefined;
@@ -134,6 +135,7 @@ export namespace Schemas {
     provider_id?: (string | null) | undefined;
     provider_name?: (string | null) | undefined;
     status: string;
+    summary?: (string | null) | undefined;
   };
   export type ScoreContributionDto = {
     contribution: number;

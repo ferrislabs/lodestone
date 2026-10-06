@@ -52,6 +52,8 @@ export function useQualificationUi(
 			onChange(setAgentField(value, index, 'enabled', enabled)),
 		setName: (index, name) =>
 			onChange(renameQualificationAgent(value, index, name)),
+		setDescription: (index, description) =>
+			onChange(setAgentField(value, index, 'description', description)),
 		setId: (index, id) => onChange(setAgentField(value, index, 'id', id)),
 		setProvider: (index, providerId) =>
 			onChange(

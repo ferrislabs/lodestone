@@ -4,6 +4,14 @@ import { FieldErrors } from '#/components/schema-form/field-frame'
 import { Button } from '#/components/ui/button'
 import { Input } from '#/components/ui/input'
 import { Label } from '#/components/ui/label'
+import {
+	Table,
+	TableBody,
+	TableCell,
+	TableHead,
+	TableHeader,
+	TableRow,
+} from '#/components/ui/table'
 import type { JsonValue, Problem } from '#/lib/schema-form'
 import { agentField } from '#/pages/profiles/lib/agents'
 import {
@@ -16,7 +24,7 @@ import type { QualificationActions } from '#/pages/profiles/lib/qualification-ac
 import { DEFAULT_WEIGHT } from '#/pages/profiles/lib/qualification-templates'
 import { WeightPicker } from '#/pages/profiles/ui/weight-picker'
 
-interface QuestionCardProps {
+interface AxisCardProps {
 	agentIndex: number
 	index: number
 	question: JsonValue
@@ -29,14 +37,14 @@ function at(problems: readonly Problem[], path: string): Problem[] {
 	return problems.filter((problem) => problem.path === path)
 }
 
-export function QuestionCard({
+export function AxisCard({
 	agentIndex,
 	index,
 	question,
 	problems,
 	removable,
 	actions,
-}: QuestionCardProps) {
+}: AxisCardProps) {
 	const base = `qualification_agents[${agentIndex}].questions[${index}]`
 	const key = `qa-${agentIndex}-q-${index}`
 	const options = optionsOf(question)
@@ -46,38 +54,59 @@ export function QuestionCard({
 	const weightProblems = at(problems, `${base}.weight`)
 	return (
 		<section
-			aria-label={`Question ${index + 1}`}
+			aria-label={`Axe ${index + 1}`}
 			data-question={index}
 			className="flex flex-col gap-3 rounded-md border bg-muted/20 p-3"
 		>
 			<div className="flex items-center justify-between gap-2">
-				<p className="text-sm font-semibold">Question {index + 1}</p>
+				<p className="text-sm font-semibold">Axe {index + 1}</p>
 				<Button
 					type="button"
 					variant="ghost"
 					size="sm"
 					disabled={!removable}
-					aria-label={`Supprimer la question ${index + 1}`}
+					aria-label={`Supprimer l'axe ${index + 1}`}
 					onClick={() => actions.removeQuestion(agentIndex, index)}
 				>
 					<Trash2Icon />
 					Supprimer
 				</Button>
 			</div>
-			<div className="flex flex-col gap-1.5">
-				<Label htmlFor={`${key}-wording`}>Libellé</Label>
-				<Input
-					id={`${key}-wording`}
-					value={agentField(question, 'wording')}
-					aria-invalid={wordingProblems.length > 0}
-					onChange={(event) =>
-						actions.setQuestionWording(agentIndex, index, event.target.value)
-					}
-				/>
-				<FieldErrors id={`${key}-wording`} problems={wordingProblems} />
+			<div className="grid gap-3 sm:grid-cols-[1fr_13rem]">
+				<div className="flex flex-col gap-1.5">
+					<Label htmlFor={`${key}-wording`}>Intitulé de l'axe</Label>
+					<Input
+						id={`${key}-wording`}
+						value={agentField(question, 'wording')}
+						aria-invalid={wordingProblems.length > 0}
+						onChange={(event) =>
+							actions.setQuestionWording(agentIndex, index, event.target.value)
+						}
+					/>
+					<FieldErrors id={`${key}-wording`} problems={wordingProblems} />
+				</div>
+				<div className="flex flex-col gap-1.5">
+					<Label htmlFor={`${key}-id`} className="text-xs">
+						Identifiant de l'axe
+					</Label>
+					<Input
+						id={`${key}-id`}
+						className="h-9 font-mono text-xs"
+						value={agentField(question, 'id')}
+						aria-invalid={idProblems.length > 0}
+						onChange={(event) =>
+							actions.setQuestionId(agentIndex, index, event.target.value)
+						}
+					/>
+					<FieldErrors id={`${key}-id`} problems={idProblems} />
+				</div>
 			</div>
+			<p className="text-xs text-muted-foreground">
+				L'identifiant est la clé de la réponse dans le JSON contractuel :
+				minuscules, chiffres, tirets et tirets bas.
+			</p>
 			<div className="flex flex-col gap-1.5">
-				<Label id={`${key}-weight-label`}>Poids de la question</Label>
+				<Label id={`${key}-weight-label`}>Poids de l'axe</Label>
 				<WeightPicker
 					labelledBy={`${key}-weight-label`}
 					value={numberField(question, 'weight') ?? DEFAULT_WEIGHT}
@@ -90,27 +119,37 @@ export function QuestionCard({
 			</div>
 			<div className="flex flex-col gap-2">
 				<p className="text-sm font-medium">Options</p>
-				<ul className="flex flex-col gap-2">
-					{Object.keys(options).map((slotKey) => {
-						const position = Number(slotKey)
-						const option = options[position] ?? null
-						const optionBase = `${base}.options[${position}]`
-						const slot = `${key}-o-${position}`
-						const valueProblems = at(problems, `${optionBase}.value`)
-						const labelProblems = at(problems, `${optionBase}.label`)
-						const scoreProblems = at(problems, `${optionBase}.score`)
-						return (
-							<li
-								key={slotKey}
-								data-option={position}
-								className="flex flex-col gap-1"
-							>
-								<div className="grid grid-cols-[1fr_1fr_5rem_auto] items-end gap-2">
-									<div className="flex flex-col gap-1">
-										<Label htmlFor={`${slot}-value`}>Valeur</Label>
+				<Table data-testid={`${key}-options`}>
+					<TableHeader>
+						<TableRow>
+							<TableHead className="h-8 px-1 text-xs">Valeur</TableHead>
+							<TableHead className="h-8 px-1 text-xs">Libellé</TableHead>
+							<TableHead className="h-8 w-24 px-1 text-xs">Score</TableHead>
+							<TableHead className="h-8 w-10 px-1">
+								<span className="sr-only">Actions</span>
+							</TableHead>
+						</TableRow>
+					</TableHeader>
+					<TableBody>
+						{Object.keys(options).map((slotKey) => {
+							const position = Number(slotKey)
+							const option = options[position] ?? null
+							const optionBase = `${base}.options[${position}]`
+							const slot = `${key}-o-${position}`
+							const valueProblems = at(problems, `${optionBase}.value`)
+							const labelProblems = at(problems, `${optionBase}.label`)
+							const scoreProblems = at(problems, `${optionBase}.score`)
+							return (
+								<TableRow
+									key={slotKey}
+									data-option={position}
+									className="border-0 align-top"
+								>
+									<TableCell className="px-1 py-1">
 										<Input
 											id={`${slot}-value`}
 											className="font-mono text-xs"
+											aria-label={`Valeur de l'option ${position + 1}`}
 											value={agentField(option, 'value')}
 											aria-invalid={valueProblems.length > 0}
 											onChange={(event) =>
@@ -122,11 +161,15 @@ export function QuestionCard({
 												)
 											}
 										/>
-									</div>
-									<div className="flex flex-col gap-1">
-										<Label htmlFor={`${slot}-label`}>Libellé de l'option</Label>
+										<FieldErrors
+											id={`${slot}-value`}
+											problems={valueProblems}
+										/>
+									</TableCell>
+									<TableCell className="px-1 py-1">
 										<Input
 											id={`${slot}-label`}
+											aria-label={`Libellé de l'option ${position + 1}`}
 											value={agentField(option, 'label')}
 											aria-invalid={labelProblems.length > 0}
 											onChange={(event) =>
@@ -138,9 +181,12 @@ export function QuestionCard({
 												)
 											}
 										/>
-									</div>
-									<div className="flex flex-col gap-1">
-										<Label htmlFor={`${slot}-score`}>Score</Label>
+										<FieldErrors
+											id={`${slot}-label`}
+											problems={labelProblems}
+										/>
+									</TableCell>
+									<TableCell className="px-1 py-1">
 										<Input
 											id={`${slot}-score`}
 											type="number"
@@ -148,6 +194,7 @@ export function QuestionCard({
 											max={1}
 											step={0.1}
 											inputMode="decimal"
+											aria-label={`Score de l'option ${position + 1}`}
 											value={numberField(option, 'score') ?? ''}
 											aria-invalid={scoreProblems.length > 0}
 											onChange={(event) => {
@@ -160,27 +207,30 @@ export function QuestionCard({
 												)
 											}}
 										/>
-									</div>
-									<Button
-										type="button"
-										variant="ghost"
-										size="sm"
-										disabled={options.length <= MIN_OPTIONS}
-										aria-label={`Supprimer l'option ${position + 1} de la question ${index + 1}`}
-										onClick={() =>
-											actions.removeOption(agentIndex, index, position)
-										}
-									>
-										<Trash2Icon />
-									</Button>
-								</div>
-								<FieldErrors id={`${slot}-value`} problems={valueProblems} />
-								<FieldErrors id={`${slot}-label`} problems={labelProblems} />
-								<FieldErrors id={`${slot}-score`} problems={scoreProblems} />
-							</li>
-						)
-					})}
-				</ul>
+										<FieldErrors
+											id={`${slot}-score`}
+											problems={scoreProblems}
+										/>
+									</TableCell>
+									<TableCell className="px-1 py-1">
+										<Button
+											type="button"
+											variant="ghost"
+											size="icon"
+											disabled={options.length <= MIN_OPTIONS}
+											aria-label={`Supprimer l'option ${position + 1} de l'axe ${index + 1}`}
+											onClick={() =>
+												actions.removeOption(agentIndex, index, position)
+											}
+										>
+											<Trash2Icon />
+										</Button>
+									</TableCell>
+								</TableRow>
+							)
+						})}
+					</TableBody>
+				</Table>
 				<FieldErrors id={`${key}-options`} problems={optionsProblems} />
 				<div>
 					<Button
@@ -188,7 +238,7 @@ export function QuestionCard({
 						variant="outline"
 						size="sm"
 						disabled={options.length >= MAX_OPTIONS}
-						aria-label={`Ajouter une option à la question ${index + 1}`}
+						aria-label={`Ajouter une option à l'axe ${index + 1}`}
 						onClick={() => actions.addOption(agentIndex, index)}
 					>
 						<PlusIcon />
@@ -196,29 +246,6 @@ export function QuestionCard({
 					</Button>
 				</div>
 			</div>
-			<details
-				open={idProblems.length > 0}
-				className="rounded-md border px-3 py-2"
-			>
-				<summary className="cursor-pointer text-sm font-medium">Avancé</summary>
-				<div className="mt-3 flex flex-col gap-1.5">
-					<Label htmlFor={`${key}-id`}>Identifiant de la question</Label>
-					<p className="text-xs text-muted-foreground">
-						Clé de la réponse dans le JSON contractuel : minuscules, chiffres,
-						tirets et tirets bas.
-					</p>
-					<Input
-						id={`${key}-id`}
-						className="font-mono text-xs"
-						value={agentField(question, 'id')}
-						aria-invalid={idProblems.length > 0}
-						onChange={(event) =>
-							actions.setQuestionId(agentIndex, index, event.target.value)
-						}
-					/>
-					<FieldErrors id={`${key}-id`} problems={idProblems} />
-				</div>
-			</details>
 		</section>
 	)
 }

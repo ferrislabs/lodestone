@@ -1,5 +1,5 @@
 export const NEW_PROFILE_TEMPLATE = `{
-  "schema_version": 4,
+  "schema_version": 5,
   "identity": {
     "offer": "",
     "target_customer": ""

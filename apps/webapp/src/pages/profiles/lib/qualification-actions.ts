@@ -6,6 +6,7 @@ export interface QualificationActions {
 	closeEdit: () => void
 	setEnabled: (index: number, enabled: boolean) => void
 	setName: (index: number, name: string) => void
+	setDescription: (index: number, description: string) => void
 	setId: (index: number, id: string) => void
 	setProvider: (index: number, providerId: string) => void
 	setWeight: (index: number, weight: number) => void

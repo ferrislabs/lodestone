@@ -232,14 +232,15 @@ impl<'tx> QualificationRepository for PgQualificationRepository<'tx> {
             r#"
             INSERT INTO qualification_results (
                 id, lead_id, profile_id, profile_revision, agent_id, provider_id, model,
-                prompt_hash, status, answers, agent_score, error, created_at
+                prompt_hash, status, summary, answers, agent_score, error, created_at
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
             ON CONFLICT (lead_id, profile_revision, agent_id) DO UPDATE SET
                 provider_id = EXCLUDED.provider_id,
                 model       = EXCLUDED.model,
                 prompt_hash = EXCLUDED.prompt_hash,
                 status      = EXCLUDED.status,
+                summary     = EXCLUDED.summary,
                 answers     = EXCLUDED.answers,
                 agent_score = EXCLUDED.agent_score,
                 error       = EXCLUDED.error,
@@ -255,6 +256,7 @@ impl<'tx> QualificationRepository for PgQualificationRepository<'tx> {
         .bind(&result.model)
         .bind(&result.prompt_hash)
         .bind(result.status.as_str())
+        .bind(result.summary.as_deref())
         .bind(&result.answers)
         .bind(result.agent_score)
         .bind(result.error.as_deref())
@@ -312,7 +314,7 @@ impl<'tx> QualificationRepository for PgQualificationRepository<'tx> {
         let rows = sqlx::query_as::<_, ResultRow>(
             r#"
             SELECT r.id, r.lead_id, r.profile_id, r.profile_revision, r.agent_id, r.provider_id,
-                   r.model, r.prompt_hash, r.status, r.answers, r.agent_score, r.error, r.created_at
+                   r.model, r.prompt_hash, r.status, r.summary, r.answers, r.agent_score, r.error, r.created_at
             FROM qualification_results r
             JOIN lead_qualification_state s
               ON s.lead_id = r.lead_id AND s.profile_revision = r.profile_revision

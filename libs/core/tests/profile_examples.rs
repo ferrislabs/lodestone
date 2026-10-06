@@ -117,7 +117,7 @@ fn parse_value(value: serde_json::Value) -> ValidatedProfile {
 fn version_one_iam_fixture_is_upgraded_to_the_current_example() {
     let upgraded = parse(IAM_V1);
     let current = parse(IAM);
-    assert_eq!(upgraded.definition().schema_version, 4);
+    assert_eq!(upgraded.definition().schema_version, 5);
     assert_eq!(
         agent_ids(&upgraded),
         [
@@ -192,10 +192,10 @@ fn iam_weights(profile: &ValidatedProfile) -> Vec<(&str, u8)> {
 }
 
 #[test]
-fn version_two_iam_fixture_is_upgraded_to_version_four() {
+fn version_two_iam_fixture_is_upgraded_to_version_five() {
     let upgraded = parse(IAM_V2);
     let definition = upgraded.definition();
-    assert_eq!(definition.schema_version, 4);
+    assert_eq!(definition.schema_version, 5);
     assert_eq!(
         iam_weights(&upgraded),
         [
@@ -210,7 +210,7 @@ fn version_two_iam_fixture_is_upgraded_to_version_four() {
     );
     assert_eq!(definition.llm.qualification_threshold, 37);
     assert_eq!(definition.max_score(), 47.0);
-    assert_eq!(upgraded.to_json()["schema_version"], 4);
+    assert_eq!(upgraded.to_json()["schema_version"], 5);
     assert_eq!(parse(IAM_V1).definition().scoring, definition.scoring);
 }
 
@@ -301,9 +301,32 @@ fn the_current_example_upgrades_from_its_version_three_form() {
         value.as_object_mut().expect("object").remove(key);
     }
     let upgraded = parse(&value.to_string());
-    assert_eq!(upgraded.definition().schema_version, 4);
+    assert_eq!(upgraded.definition().schema_version, 5);
     assert_eq!(upgraded.definition().agents, parse(IAM).definition().agents);
     assert_eq!(upgraded.definition().qualification_agents.len(), 1);
+}
+
+#[test]
+fn the_current_example_upgrades_from_its_version_four_form() {
+    let mut value: serde_json::Value = serde_json::from_str(IAM).expect("json");
+    value["schema_version"] = 4.into();
+    for agent in value["qualification_agents"].as_array_mut().expect("array") {
+        agent.as_object_mut().expect("object").remove("description");
+    }
+    let upgraded = parse(&value.to_string());
+    let current = parse(IAM);
+    assert_eq!(upgraded.definition().schema_version, 5);
+    for (old, new) in upgraded
+        .definition()
+        .qualification_agents
+        .iter()
+        .zip(&current.definition().qualification_agents)
+    {
+        assert_eq!(old.description, format!("Évalue : {}", old.name));
+        assert_eq!(old.questions, new.questions);
+        assert_eq!(old.system_prompt, new.system_prompt);
+        assert!(!new.description.is_empty());
+    }
 }
 
 #[test]
@@ -330,7 +353,7 @@ fn committed_schema_matches_definition() {
         serde_json::to_string_pretty(&schema_for!(ProfileDefinition)).expect("schema serializes");
     generated.push('\n');
     let path =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../docs/schemas/profile.v4.schema.json");
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../docs/schemas/profile.v5.schema.json");
     if std::env::var("UPDATE_SCHEMA").as_deref() == Ok("1") {
         fs::write(&path, &generated).expect("schema file is writable");
         return;
@@ -339,6 +362,6 @@ fn committed_schema_matches_definition() {
         fs::read_to_string(&path).expect("schema file exists, regenerate with UPDATE_SCHEMA=1");
     assert!(
         committed == generated,
-        "docs/schemas/profile.v4.schema.json is stale, regenerate with UPDATE_SCHEMA=1"
+        "docs/schemas/profile.v5.schema.json is stale, regenerate with UPDATE_SCHEMA=1"
     );
 }

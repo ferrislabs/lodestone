@@ -185,7 +185,8 @@ export const FIELD_COPY: Readonly<Record<string, FieldCopy>> = {
 	},
 	'qualification_agents[]': {
 		label: 'Agent de qualification',
-		description: 'Pose une liste de questions à un modèle sur chaque lead.',
+		description:
+			"Mesure une liste d'axes d'analyse sur chaque lead et en rédige un résumé.",
 	},
 	'qualification_agents[].id': {
 		label: 'Identifiant',
@@ -195,6 +196,11 @@ export const FIELD_COPY: Readonly<Record<string, FieldCopy>> = {
 	'qualification_agents[].name': {
 		label: 'Nom',
 		description: "Nom d'affichage.",
+	},
+	'qualification_agents[].description': {
+		label: 'Ce que cet agent évalue',
+		description:
+			"Ce que l'agent évalue, en une phrase. Affiché sur sa carte et dans la fiche du lead.",
 	},
 	'qualification_agents[].enabled': {
 		label: 'Activé',
@@ -210,32 +216,31 @@ export const FIELD_COPY: Readonly<Record<string, FieldCopy>> = {
 		description: 'Consigne donnée au modèle, 8000 caractères au maximum.',
 	},
 	'qualification_agents[].weight': {
-		label: 'Poids',
+		label: "Poids de l'agent",
 		description:
 			'Poids entier de 1 à 10 de cet agent dans la confiance du lead.',
 	},
 	'qualification_agents[].questions': {
-		label: 'Questions',
+		label: "Axes d'analyse",
 		description:
-			"Questions auxquelles l'agent répond. Au moins une est requise.",
+			"Axes d'analyse que l'agent mesure sur chaque lead. Au moins un est requis.",
 	},
 	'qualification_agents[].questions[]': {
-		label: 'Question',
+		label: "Axe d'analyse",
 		description: 'Une question à choix posée au modèle à propos du lead.',
-		add: 'Ajouter une question',
+		add: "Ajouter un axe d'analyse",
 	},
 	'qualification_agents[].questions[].id': {
-		label: 'Identifiant',
+		label: "Identifiant de l'axe",
 		description: "Identifiant unique dans l'agent, clé de la réponse.",
 	},
 	'qualification_agents[].questions[].wording': {
-		label: 'Libellé',
+		label: "Intitulé de l'axe",
 		description: 'La question posée au modèle.',
 	},
 	'qualification_agents[].questions[].weight': {
-		label: 'Poids',
-		description:
-			"Poids entier de 1 à 10 de cette question dans le score de l'agent.",
+		label: "Poids de l'axe",
+		description: "Poids entier de 1 à 10 de cet axe dans le score de l'agent.",
 	},
 	'qualification_agents[].questions[].options': {
 		label: 'Options',
@@ -248,7 +253,7 @@ export const FIELD_COPY: Readonly<Record<string, FieldCopy>> = {
 	},
 	'qualification_agents[].questions[].options[].value': {
 		label: 'Valeur',
-		description: 'Valeur renvoyée par le modèle, unique dans la question.',
+		description: "Valeur renvoyée par le modèle, unique dans l'axe.",
 	},
 	'qualification_agents[].questions[].options[].label': {
 		label: 'Libellé',

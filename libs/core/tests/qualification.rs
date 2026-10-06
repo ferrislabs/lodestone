@@ -116,7 +116,7 @@ fn answers_from(schema: &Value, last: bool) -> Value {
             }),
         );
     }
-    json!({"answers": answers})
+    json!({"summary": "Observations de l'agent sur le lead.", "answers": answers})
 }
 
 fn summary_with(quote: &str) -> Value {
@@ -131,7 +131,7 @@ fn summary_with(quote: &str) -> Value {
 
 impl LlmProvider for Scripted {
     async fn complete(&self, request: &LlmRequest<'_>) -> Result<LlmResponse, LlmError> {
-        let aggregator = request.schema["properties"].get("summary").is_some();
+        let aggregator = request.schema["properties"].get("answers").is_none();
         self.shared.seen.lock().unwrap().push(Seen {
             model: self.model.clone(),
             system: request.system.to_owned(),
@@ -191,6 +191,7 @@ fn agent(id: &str, weight: u8, provider: Option<ProviderId>) -> Value {
     json!({
         "id": id,
         "name": id,
+        "description": format!("DESCRIPTION-OF-{id}"),
         "enabled": true,
         "provider_id": provider.map(|provider| provider.0.to_string()),
         "system_prompt": format!("PROMPT-OF-{id}"),
@@ -593,6 +594,14 @@ async fn the_prompt_holds_the_aggregator_context_signals_agents_and_computed_fac
     assert_eq!(call.documents[2].0, "lead");
     assert!(call.documents[2].1.starts_with("lead: acme.com"));
     assert_eq!(call.documents[3].0, "qualification:one");
+    let block = &call.documents[3].1;
+    let evaluates = block.find("evaluates: DESCRIPTION-OF-one").unwrap();
+    let summary = block
+        .find("summary: Observations de l'agent sur le lead.")
+        .unwrap();
+    let measurement = block.find("question: Pertinent ?").unwrap();
+    assert!(block.starts_with("qualification agent: one"));
+    assert!(evaluates < summary && summary < measurement);
     assert!(call.documents[3].1.contains("agent score: 100 %"));
     assert!(
         call.documents[3]
