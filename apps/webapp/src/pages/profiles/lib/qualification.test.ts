@@ -8,10 +8,12 @@ import {
 	allAgentIds,
 	contractSchema,
 	DEFAULT_AGGREGATOR_PROMPT,
+	displayOrder,
 	EVIDENCE_WEIGHT_KEYS,
 	evidenceProblems,
 	evidenceSettingsOf,
 	FLOOR_ERROR,
+	isUnknownOption,
 	NO_WEIGHT_ERROR,
 	newQualificationAgent,
 	optionsOf,
@@ -61,7 +63,7 @@ describe('templates', () => {
 		])
 	})
 
-	it('builds templates that pass the v6 validation', () => {
+	it('builds templates that pass the v7 validation', () => {
 		for (const template of QUALIFICATION_TEMPLATES) {
 			if (template.id === 'vide') continue
 			const agent = newQualificationAgent(template.id, new Set(['ats']))
@@ -103,7 +105,7 @@ describe('templates', () => {
 		])
 		expect(values('opportunite')).toEqual([
 			['migration', ['en_cours', 'probable', 'improbable', 'inconnu']],
-			['declencheur', ['fort', 'moyen', 'aucun']],
+			['declencheur', ['fort', 'moyen', 'aucun', 'inconnu']],
 		])
 		expect(newQualificationAgent('marche', new Set()).system_prompt).toContain(
 			'Zone visée : France et Europe francophone.',
@@ -127,18 +129,24 @@ describe('templates', () => {
 			weight: 5,
 		})
 		expect(optionsOf(question)).toEqual([
-			{ value: 'forte', label: 'Forte', score: 1 },
-			{ value: 'moyenne', label: 'Moyenne', score: 0.5 },
-			{ value: 'faible', label: 'Faible', score: 0 },
+			{ value: 'forte', label: 'Forte', score: 1, is_unknown: false },
+			{ value: 'moyenne', label: 'Moyenne', score: 0.5, is_unknown: false },
+			{ value: 'faible', label: 'Faible', score: 0, is_unknown: false },
+			{ value: 'inconnu', label: 'Inconnu', score: 0.5, is_unknown: true },
 		])
 	})
 
 	it('builds the technical maturity and organization options', () => {
 		const maturity = newQualificationAgent('maturite-technique', new Set())
 		expect(optionsOf(questionsOf(maturity)[0]).map((item) => item)).toEqual([
-			{ value: 'legacy_auto_heberge', label: 'Ancien, auto-hébergé', score: 1 },
-			{ value: 'saas', label: 'SaaS', score: 0.7 },
-			{ value: 'inconnu', label: 'Inconnue', score: 0.3 },
+			{
+				value: 'legacy_auto_heberge',
+				label: 'Ancien, auto-hébergé',
+				score: 1,
+				is_unknown: false,
+			},
+			{ value: 'saas', label: 'SaaS', score: 0.7, is_unknown: false },
+			{ value: 'inconnu', label: 'Inconnue', score: 0.3, is_unknown: true },
 		])
 		const kind = newQualificationAgent('type-taille-organisation', new Set())
 		expect(
@@ -157,11 +165,28 @@ describe('templates', () => {
 		])
 	})
 
-	it('builds a blank agent with one empty question and two options', () => {
+	it('builds a blank agent with one empty question, two options and the unknown option', () => {
 		const agent = newQualificationAgent('vide', new Set())
 		expect(agent.system_prompt).toBe('')
 		expect(questionsOf(agent)).toHaveLength(1)
-		expect(optionsOf(questionsOf(agent)[0])).toHaveLength(2)
+		const options = optionsOf(questionsOf(agent)[0])
+		expect(options).toHaveLength(3)
+		expect(options[2]).toMatchObject({ value: 'inconnu', is_unknown: true })
+	})
+
+	it('gives every template axis exactly one unknown option', () => {
+		for (const template of QUALIFICATION_TEMPLATES) {
+			const agent = newQualificationAgent(template.id, new Set())
+			for (const question of questionsOf(agent)) {
+				const unknown = optionsOf(question).filter((item) =>
+					isUnknownOption(item),
+				)
+				expect(
+					unknown,
+					`${template.id}/${(question as JsonObject).id}`,
+				).toHaveLength(1)
+			}
+		}
 	})
 
 	it('keeps ids unique across sourcing and qualification agents', () => {
@@ -206,17 +231,51 @@ describe('agent and question edits', () => {
 		const questions = questionsOf(qualificationList(withQuestion)[0])
 		expect(questions).toHaveLength(2)
 		expect(questions[1]).toMatchObject({ id: 'question-2', wording: '' })
-		expect(optionsOf(questions[1])).toHaveLength(2)
+		expect(optionsOf(questions[1])).toHaveLength(3)
 		const grown = addOption(withQuestion, 0, 1)
-		expect(optionsOf(questionsOf(qualificationList(grown)[0])[1])).toHaveLength(
-			3,
-		)
+		const grownOptions = optionsOf(questionsOf(qualificationList(grown)[0])[1])
+		expect(grownOptions).toHaveLength(4)
+		expect(grownOptions.map((item) => (item as JsonObject).value)).toEqual([
+			'option-1',
+			'option-2',
+			'option-4',
+			'inconnu',
+		])
 		const shrunk = removeOption(grown, 0, 1, 0)
 		expect(
 			optionsOf(questionsOf(qualificationList(shrunk)[0])[1]),
-		).toHaveLength(2)
+		).toHaveLength(3)
 		const back = removeQuestion(shrunk, 0, 1)
 		expect(questionsOf(qualificationList(back)[0])).toHaveLength(1)
+	})
+
+	it('never removes the unknown option', () => {
+		const unknownAt = optionsOf(
+			questionsOf(qualificationList(profile())[0])[0],
+		).findIndex((item) => isUnknownOption(item))
+		expect(unknownAt).toBeGreaterThan(-1)
+		const same = removeOption(profile(), 0, 0, unknownAt)
+		expect(same).toEqual(profile())
+	})
+
+	it('keeps the unknown option editable on its score', () => {
+		const unknownAt = optionsOf(
+			questionsOf(qualificationList(profile())[0])[0],
+		).findIndex((item) => isUnknownOption(item))
+		const next = setOptionField(profile(), 0, 0, unknownAt, 'score', 0.2)
+		expect(
+			optionsOf(questionsOf(qualificationList(next)[0])[0])[unknownAt],
+		).toMatchObject({ value: 'inconnu', score: 0.2, is_unknown: true })
+	})
+
+	it('orders the unknown option last for display', () => {
+		expect(
+			displayOrder([
+				{ value: 'a', is_unknown: false },
+				{ value: 'inconnu', is_unknown: true },
+				{ value: 'b' },
+			]),
+		).toEqual([0, 2, 1])
 	})
 
 	it('edits an option score', () => {
@@ -277,10 +336,20 @@ describe('contractSchema', () => {
 		expect(question.required).toEqual([
 			'type',
 			'choice',
+			'evidence',
 			'confidence',
 			'probabilities',
 		])
 		expect(question.additionalProperties).toBe(false)
+	})
+
+	it('requires a bounded verbatim evidence string on every answer', () => {
+		const answers = (schema.properties as JsonObject).answers as JsonObject
+		const question = (answers.properties as JsonObject).maturite as JsonObject
+		const evidence = (question.properties as JsonObject).evidence as JsonObject
+		expect(evidence.type).toBe('string')
+		expect(evidence.maxLength).toBe(300)
+		expect(String(evidence.description)).toContain('verbatim')
 	})
 
 	it('bounds the probabilities to exactly the option keys', () => {
@@ -500,11 +569,61 @@ describe('validateQualification', () => {
 			],
 		}
 		expect(paths(withQualification(profile(), [agent]))).toEqual([
+			'qualification_agents[0].questions[0].options',
 			'qualification_agents[0].questions[0].options[0].score',
 			'qualification_agents[0].questions[0].options[1].value',
 			'qualification_agents[0].questions[1].id',
 			'qualification_agents[0].questions[1].options',
 		])
+	})
+
+	it('requires exactly one unknown option per axis', () => {
+		const base = newQualificationAgent('pertinence', new Set())
+		const question = questionsOf(base)[0] as JsonObject
+		const withOptions = (options: JsonObject[]) =>
+			withQualification(profile(), [
+				{ ...base, questions: [{ ...question, options }] },
+			])
+		const known = [
+			{ value: 'a', label: 'A', score: 1, is_unknown: false },
+			{ value: 'b', label: 'B', score: 0, is_unknown: false },
+		]
+		const unknown = (value: string) => ({
+			value,
+			label: 'Inconnu',
+			score: 0.5,
+			is_unknown: true,
+		})
+		const path = 'qualification_agents[0].questions[0].options'
+		expect(paths(withOptions([...known, unknown('inconnu')]))).toEqual([])
+		expect(paths(withOptions(known))).toEqual([path])
+		expect(
+			paths(withOptions([...known, unknown('inconnu'), unknown('autre')])),
+		).toEqual([path])
+		const messages = validateQualification(withOptions(known)).map(
+			(problem) => problem.message,
+		)
+		expect(messages).toEqual(['Doit avoir exactement une option « inconnu »'])
+	})
+
+	it('accepts eleven options and rejects twelve', () => {
+		const base = newQualificationAgent('pertinence', new Set())
+		const question = questionsOf(base)[0] as JsonObject
+		const many = (count: number): JsonObject[] =>
+			Array.from({ length: count }, (_, position) => ({
+				value: `o${position}`,
+				label: 'L',
+				score: 0.5,
+				is_unknown: position === 0,
+			}))
+		const check = (count: number) =>
+			paths(
+				withQualification(profile(), [
+					{ ...base, questions: [{ ...question, options: many(count) }] },
+				]),
+			)
+		expect(check(11)).toEqual([])
+		expect(check(12)).toEqual(['qualification_agents[0].questions[0].options'])
 	})
 
 	it('limits prompts to 8000 characters', () => {

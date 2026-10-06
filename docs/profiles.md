@@ -8,7 +8,7 @@ Profiles live in Postgres. Each edit creates a new revision; earlier revisions a
 
 ## Schema
 
-The JSON Schema is `docs/schemas/profile.v6.schema.json`. It is generated from `ProfileDefinition` and must not be edited by hand. Regenerate it with:
+The JSON Schema is `docs/schemas/profile.v7.schema.json`. It is generated from `ProfileDefinition` and must not be edited by hand. Regenerate it with:
 
 ```
 UPDATE_SCHEMA=1 cargo test -p lodestone-core --test profile_examples
@@ -23,7 +23,7 @@ Without `UPDATE_SCHEMA=1` the same test fails if the committed file is stale. Th
 
 ## Sections
 
-- `schema_version`: must be 6. See [Older versions](#older-versions).
+- `schema_version`: must be 7. See [Older versions](#older-versions).
 - `identity`: the offer and the target customer, in free text.
 - `agents`: the detection agents; at least one is required. An agent searches one source with its own settings (see ADR 0005). Several agents of the same kind are allowed.
   - `id`: slug matching `^[a-z0-9][a-z0-9-]{0,62}$`, unique in the profile.
@@ -38,7 +38,7 @@ Without `UPDATE_SCHEMA=1` the same test fails if the committed file is stale. Th
   - `provider_id`: id of a declared LLM provider (`GET /api/v1/llm/providers`), or `null` for the default provider. The reference is not checked by profile validation: the runtime resolves it and treats a missing or disabled provider as an error.
   - `system_prompt`: not empty, at most 8000 characters.
   - `weight`: integer from 1 to 10, default 5, the agent's weight in the lead confidence.
-  - `questions`: at least one. A question has an `id` (lowercase letters, digits, `-`, `_`, at most 63 characters, unique in the agent), a `wording`, a `weight` (1 to 10, default 5) and 2 to 10 `options`. An option has a `value` (same identifier rule, unique in the question), a `label` and a `score` from 0 to 1.
+  - `questions`: at least one. A question has an `id` (lowercase letters, digits, `-`, `_`, at most 63 characters, unique in the agent), a `wording`, a `weight` (1 to 10, default 5) and 2 to 11 `options`. An option has a `value` (same identifier rule, unique in the question), a `label`, a `score` from 0 to 1 and `is_unknown` (default false). Exactly one option per question is the unknown option (`is_unknown: true`, default value `inconnu`, label `Inconnu`, score 0.5): the model picks it when nothing in the documents supports an answer. Its score is editable, it cannot be removed, and the editor pins it last as `Option « inconnu »`. A question without exactly one unknown option is rejected (`UnknownOptionCount`, path `...options`).
   - Validation paths include the indexes, for example `qualification_agents[1].questions[0].options[2].score`.
   - Ready-made templates (editor, "Ajouter un agent de qualification"; French prompts and labels, higher score = better lead for the offer; the operator adjusts scores and weights):
     - `Pertinence`: axis `pertinence` (`forte`, `moyenne`, `faible`).
@@ -54,6 +54,8 @@ Without `UPDATE_SCHEMA=1` the same test fails if the committed file is stale. Th
 
 ### Contract JSON
 
+Grounding (issue 167). The `evidence` of every answer is checked against the documents given to that agent (lead facts, signal sentences, company dossier) with the same typographic normalisation as the aggregator's evidence. A choice other than the unknown option whose quote is empty or not found is retried once, listing the ungrounded questions. If it is still ungrounded the answer is downgraded, never the whole result: `choice` becomes the unknown option, `probabilities` puts 1 on it (the other options 0, then calibration applies as usual), `grounded` is `false` and `original_choice` keeps the first choice for display. The stored answer keeps `evidence`, `evidence_source` (source of the first document containing the quote), `grounded` and `original_choice`; rescoring reads the downgraded answer. A quote longer than 300 characters is cut to 300 before the check. The lead page shows the quote in italics with its source and, for a downgraded answer, the badge "Non étayé — ramené à « Inconnu »" with the original choice. The aggregator document of an agent lists the quote of each answer and an `ungrounded:` line for a downgraded one.
+
 A qualification agent answers, and only answers, with one object per question:
 
 ```json
@@ -62,6 +64,7 @@ A qualification agent answers, and only answers, with one object per question:
     "<question id>": {
       "type": "choice",
       "choice": "<option value>",
+      "evidence": "<sentence copied verbatim from the documents>",
       "confidence": 0.0,
       "probabilities": { "<option value>": 0.0 }
     }
@@ -69,7 +72,7 @@ A qualification agent answers, and only answers, with one object per question:
 }
 ```
 
-`contract_schema(&QualificationAgent)` (`libs/core/src/domain/profile/contract.rs`) builds the JSON Schema of this contract from the agent's questions: every question required, `choice` limited to the option values, `confidence` and every probability a number from 0 to 1, `probabilities` holding exactly the option keys, no additional property. The editor shows it read-only as "Aperçu du JSON contractuel".
+`contract_schema(&QualificationAgent)` (`libs/core/src/domain/profile/contract.rs`) builds the JSON Schema of this contract from the agent's questions: every question required, `choice` limited to the option values, `confidence` and every probability a number from 0 to 1, `probabilities` holding exactly the option keys, no additional property. Contract v3 adds `evidence`, a required string of at most 300 characters: the sentence of the documents that justifies the choice, copied verbatim. It may be empty only when the choice is the unknown option. The editor shows it read-only as "Aperçu du JSON contractuel".
 
 - `scoring`: weighted factors, each made of a signal, an optional value and a weight. The weight is an integer from 1 to 10, validated by the server (`scoring.factors[i].weight`). A lead's score is the sum, over factors, of `weight × measure`. For a normal factor the measure is the highest strength (0 to 1) among the lead's signals of that kind, and of that value when one is set; several matching signals count once. The reserved factor `distinct_signals` measures the number of distinct signal kinds on the lead. The score and its per-factor breakdown are recomputed whenever the lead's signals change, and stored on the lead. Scores stay in points.
 
@@ -156,7 +159,7 @@ A host or domain whose lookup, probe or crawl fails is marked checked like a suc
 
 ## Older versions
 
-Stored revisions are never rewritten. Versions 1, 2, 3, 4 and 5 are accepted and upgraded when read; new revisions are written in version 6. Errors on an older document keep that document's paths.
+Stored revisions are never rewritten. Versions 1, 2, 3, 4, 5 and 6 are accepted and upgraded when read; new revisions are written in version 7. Errors on an older document keep that document's paths.
 
 ### Version 1 to 2
 
@@ -188,3 +191,7 @@ Qualification agents gain a required `description`. Parsing derives it from the 
 ### Version 5 to 6
 
 The upgrade adds the `evidence` section with its defaults and the `verdict.calibration_floor` (0.05) and `verdict.min_evidence` (0.5) defaults; thresholds and everything else are kept. Stored leads are rescored from their stored answers on the next qualification loop, without calling a model.
+
+### Version 6 to 7
+
+Every question gains an unknown option (`is_unknown`). The upgrade marks the first option whose value is `inconnu`, `inconnue` or `unknown`; when there is none it appends `{ "value": "inconnu", "label": "Inconnu", "score": 0.5, "is_unknown": true }`, so a question with 10 options upgrades to 11, the new maximum. The contract becomes v3 (answers carry `evidence`). Stored answers without `evidence` stay readable and are rescored unchanged.

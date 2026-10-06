@@ -4,7 +4,7 @@ use uuid::Uuid;
 
 use crate::domain::values::SourceName;
 
-pub const PROFILE_SCHEMA_VERSION: u32 = 6;
+pub const PROFILE_SCHEMA_VERSION: u32 = 7;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -13,7 +13,7 @@ pub const PROFILE_SCHEMA_VERSION: u32 = 6;
     description = "Describes one market: what is sold, which agents scan which sources, which qualification agents judge a lead and how an aggregator sums it up, how leads are scored and which contacts to prefer."
 )]
 pub struct ProfileDefinition {
-    #[schemars(description = "Profile format version. Must be 6.")]
+    #[schemars(description = "Profile format version. Must be 7.")]
     pub schema_version: u32,
     pub identity: Identity,
     #[schemars(description = "Detection agents. At least one is required.")]
@@ -126,7 +126,11 @@ pub struct QualificationAgent {
 pub const MAX_PROMPT_CHARS: usize = 8000;
 pub const MAX_DESCRIPTION_CHARS: usize = 300;
 pub const MIN_OPTIONS: usize = 2;
-pub const MAX_OPTIONS: usize = 10;
+pub const MAX_OPTIONS: usize = 11;
+pub const UNKNOWN_VALUE: &str = "inconnu";
+pub const UNKNOWN_LABEL: &str = "Inconnu";
+pub const UNKNOWN_SCORE: f64 = 0.5;
+pub const EVIDENCE_MAX_CHARS: usize = 300;
 
 fn default_weight() -> u8 {
     5
@@ -154,10 +158,16 @@ pub struct Question {
     )]
     pub weight: u8,
     #[schemars(
-        length(min = 2, max = 10),
-        description = "Possible answers, from 2 to 10, with unique values."
+        length(min = 2, max = 11),
+        description = "Possible answers, from 2 to 11, with unique values. Exactly one of them is the unknown option."
     )]
     pub options: Vec<QuestionOption>,
+}
+
+impl Question {
+    pub fn unknown_option(&self) -> Option<&QuestionOption> {
+        self.options.iter().find(|option| option.is_unknown)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -180,6 +190,22 @@ pub struct QuestionOption {
         description = "Score from 0 to 1 of this answer."
     )]
     pub score: f64,
+    #[serde(default)]
+    #[schemars(
+        description = "Marks the unknown option, chosen when nothing in the documents supports an answer. Exactly one option per question carries it."
+    )]
+    pub is_unknown: bool,
+}
+
+impl QuestionOption {
+    pub fn unknown() -> Self {
+        Self {
+            value: UNKNOWN_VALUE.to_owned(),
+            label: UNKNOWN_LABEL.to_owned(),
+            score: UNKNOWN_SCORE,
+            is_unknown: true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]

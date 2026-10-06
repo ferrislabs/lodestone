@@ -236,6 +236,11 @@ export namespace Schemas {
     choice: string;
     choice_label: string;
     confidence: number;
+    evidence: string;
+    evidence_source?: (string | null) | undefined;
+    grounded: boolean;
+    original_choice?: (string | null) | undefined;
+    original_choice_label?: (string | null) | undefined;
     probabilities: Array<ProbabilityDto>;
     question_id: string;
     wording: string;

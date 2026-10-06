@@ -481,6 +481,15 @@ pub struct QualificationAnswerDto {
     pub wording: String,
     pub choice: String,
     pub choice_label: String,
+    /// Sentence copied verbatim from the documents that justifies the choice. Empty for an unknown choice and for answers stored before the quote existed.
+    pub evidence: String,
+    /// Source of the first document containing the quote, when known.
+    pub evidence_source: Option<String>,
+    /// False when the answer was downgraded to the unknown option for lack of a verified quote.
+    pub grounded: bool,
+    /// Value the model chose before the downgrade.
+    pub original_choice: Option<String>,
+    pub original_choice_label: Option<String>,
     pub confidence: f64,
     pub probabilities: Vec<ProbabilityDto>,
 }
@@ -521,15 +530,36 @@ fn answers_of(
             let answer = result.answers.get(&question.id)?;
             let choice = answer.get("choice")?.as_str()?;
             let probabilities = answer.get("probabilities")?.as_object()?;
+            let label_of = |value: &str| {
+                question
+                    .options
+                    .iter()
+                    .find(|option| option.value == value)
+                    .map_or_else(|| value.to_owned(), |option| option.label.clone())
+            };
+            let original_choice = answer
+                .get("original_choice")
+                .and_then(serde_json::Value::as_str);
             Some(QualificationAnswerDto {
                 question_id: question.id.clone(),
                 wording: question.wording.clone(),
                 choice: choice.to_owned(),
-                choice_label: question
-                    .options
-                    .iter()
-                    .find(|option| option.value == choice)
-                    .map_or_else(|| choice.to_owned(), |option| option.label.clone()),
+                choice_label: label_of(choice),
+                evidence: answer
+                    .get("evidence")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or_default()
+                    .to_owned(),
+                evidence_source: answer
+                    .get("evidence_source")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_owned),
+                grounded: answer
+                    .get("grounded")
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(true),
+                original_choice: original_choice.map(str::to_owned),
+                original_choice_label: original_choice.map(label_of),
                 confidence: answer
                     .get("confidence")
                     .and_then(serde_json::Value::as_f64)

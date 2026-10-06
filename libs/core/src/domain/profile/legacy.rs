@@ -143,6 +143,7 @@ fn option(value: &str, label: &str, score: f64) -> QuestionOption {
         value: value.to_owned(),
         label: label.to_owned(),
         score,
+        is_unknown: false,
     }
 }
 
@@ -163,6 +164,7 @@ fn pertinence_agent(identity: &Identity, llm: &LlmSettings) -> QualificationAgen
                 option("forte", "Forte", 1.0),
                 option("moyenne", "Moyenne", 0.5),
                 option("faible", "Faible", 0.0),
+                QuestionOption::unknown(),
             ],
         }],
     }
@@ -188,7 +190,91 @@ struct QualificationAgentV4 {
     system_prompt: String,
     #[serde(default = "default_weight")]
     weight: u8,
-    questions: Vec<Question>,
+    questions: Vec<QuestionV6>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct QuestionOptionV6 {
+    value: String,
+    label: String,
+    score: f64,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct QuestionV6 {
+    id: String,
+    wording: String,
+    #[serde(default = "default_weight")]
+    weight: u8,
+    options: Vec<QuestionOptionV6>,
+}
+
+const UNKNOWN_VALUES: [&str; 3] = ["inconnu", "inconnue", "unknown"];
+
+impl QuestionV6 {
+    fn upgrade(self) -> Question {
+        let marked = self
+            .options
+            .iter()
+            .position(|option| UNKNOWN_VALUES.contains(&option.value.as_str()));
+        let mut options: Vec<QuestionOption> = self
+            .options
+            .into_iter()
+            .enumerate()
+            .map(|(index, option)| QuestionOption {
+                value: option.value,
+                label: option.label,
+                score: option.score,
+                is_unknown: marked == Some(index),
+            })
+            .collect();
+        if marked.is_none() {
+            options.push(QuestionOption::unknown());
+        }
+        Question {
+            id: self.id,
+            wording: self.wording,
+            weight: self.weight,
+            options,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct QualificationAgentV6 {
+    id: AgentId,
+    name: String,
+    description: String,
+    #[serde(default = "default_enabled")]
+    enabled: bool,
+    #[serde(default)]
+    provider_id: Option<Uuid>,
+    system_prompt: String,
+    #[serde(default = "default_weight")]
+    weight: u8,
+    questions: Vec<QuestionV6>,
+}
+
+impl QualificationAgentV6 {
+    fn upgrade(self) -> QualificationAgent {
+        QualificationAgent {
+            id: self.id,
+            name: self.name,
+            description: self.description,
+            enabled: self.enabled,
+            provider_id: self.provider_id,
+            system_prompt: self.system_prompt,
+            weight: self.weight,
+            questions: self
+                .questions
+                .into_iter()
+                .map(QuestionV6::upgrade)
+                .collect(),
+        }
+    }
 }
 
 impl QualificationAgentV4 {
@@ -205,7 +291,11 @@ impl QualificationAgentV4 {
             provider_id: self.provider_id,
             system_prompt: self.system_prompt,
             weight: self.weight,
-            questions: self.questions,
+            questions: self
+                .questions
+                .into_iter()
+                .map(QuestionV6::upgrade)
+                .collect(),
         }
     }
 }
@@ -254,7 +344,7 @@ pub(super) struct ProfileDefinitionV5 {
     _schema_version: u32,
     identity: Identity,
     agents: Vec<Agent>,
-    qualification_agents: Vec<QualificationAgent>,
+    qualification_agents: Vec<QualificationAgentV6>,
     aggregator: Aggregator,
     #[serde(default)]
     verdict: VerdictThresholds,
@@ -269,10 +359,53 @@ impl ProfileDefinitionV5 {
             schema_version: PROFILE_SCHEMA_VERSION,
             identity: self.identity,
             agents: self.agents,
-            qualification_agents: self.qualification_agents,
+            qualification_agents: self
+                .qualification_agents
+                .into_iter()
+                .map(QualificationAgentV6::upgrade)
+                .collect(),
             aggregator: self.aggregator,
             verdict: self.verdict,
             evidence: EvidenceSettings::default(),
+            scoring: self.scoring,
+            contact_ranking: self.contact_ranking,
+            llm: self.llm,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct ProfileDefinitionV6 {
+    #[serde(rename = "schema_version")]
+    _schema_version: u32,
+    identity: Identity,
+    agents: Vec<Agent>,
+    qualification_agents: Vec<QualificationAgentV6>,
+    aggregator: Aggregator,
+    #[serde(default)]
+    verdict: VerdictThresholds,
+    #[serde(default)]
+    evidence: EvidenceSettings,
+    scoring: Scoring,
+    contact_ranking: ContactRanking,
+    llm: LlmSettings,
+}
+
+impl ProfileDefinitionV6 {
+    pub(super) fn upgrade(self) -> ProfileDefinition {
+        ProfileDefinition {
+            schema_version: PROFILE_SCHEMA_VERSION,
+            identity: self.identity,
+            agents: self.agents,
+            qualification_agents: self
+                .qualification_agents
+                .into_iter()
+                .map(QualificationAgentV6::upgrade)
+                .collect(),
+            aggregator: self.aggregator,
+            verdict: self.verdict,
+            evidence: self.evidence,
             scoring: self.scoring,
             contact_ranking: self.contact_ranking,
             llm: self.llm,

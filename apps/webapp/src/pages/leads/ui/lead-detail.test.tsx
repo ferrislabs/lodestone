@@ -61,6 +61,11 @@ const detail: LeadDetailData = {
 					wording: "Ce lead est-il pertinent pour l'offre ?",
 					choice: 'moyenne',
 					choice_label: 'Moyenne',
+					evidence: 'expose Keycloak 18 en production',
+					evidence_source: 'https://acme.test/realms/master',
+					grounded: true,
+					original_choice: null,
+					original_choice_label: null,
 					confidence: 0.8,
 					probabilities: [
 						{ value: 'forte', label: 'Forte', probability: 0.25 },
@@ -580,6 +585,92 @@ describe('LeadDetail', () => {
 			'width: 50%;',
 			'width: 25%;',
 		])
+	})
+
+	it('shows the verbatim quote in italics with its source under the answer', () => {
+		const { container } = renderDetail()
+		const evidence = container.querySelector(
+			'article[data-agent="pertinence"] [data-part="evidence"]',
+		)
+		expect(evidence?.textContent).toContain(
+			'« expose Keycloak 18 en production »',
+		)
+		expect(evidence?.querySelector('p.italic')).not.toBeNull()
+		const link = evidence?.querySelector('a')
+		expect(link?.getAttribute('href')).toBe('https://acme.test/realms/master')
+		expect(container.querySelector('[data-part="ungrounded"]')).toBeNull()
+	})
+
+	it('names the computed facts as the source of a quote taken from them', () => {
+		const first = detail.qualification_results[0]
+		const answer = first?.answers[0]
+		if (!first || !answer) throw new Error('fixture without answer')
+		const { container } = renderDetail({
+			detail: {
+				...detail,
+				qualification_results: [
+					{
+						...first,
+						answers: [{ ...answer, evidence_source: 'lead' }],
+					},
+				],
+			},
+		})
+		const source = container.querySelector('[data-part="evidence-source"]')
+		expect(source?.textContent).toContain('Faits calculés par le système')
+		expect(source?.querySelector('a')).toBeNull()
+	})
+
+	it('omits the quote block when the answer has no quote', () => {
+		const first = detail.qualification_results[0]
+		const answer = first?.answers[0]
+		if (!first || !answer) throw new Error('fixture without answer')
+		const { container } = renderDetail({
+			detail: {
+				...detail,
+				qualification_results: [
+					{
+						...first,
+						answers: [{ ...answer, evidence: '', evidence_source: null }],
+					},
+				],
+			},
+		})
+		expect(container.querySelector('[data-part="evidence"]')).toBeNull()
+		expect(container.querySelector('[data-part="ungrounded"]')).toBeNull()
+	})
+
+	it('flags a downgraded answer with the original choice and hides its quote', () => {
+		const first = detail.qualification_results[0]
+		const answer = first?.answers[0]
+		if (!first || !answer) throw new Error('fixture without answer')
+		const { container } = renderDetail({
+			detail: {
+				...detail,
+				qualification_results: [
+					{
+						...first,
+						answers: [
+							{
+								...answer,
+								choice: 'inconnu',
+								choice_label: 'Inconnu',
+								grounded: false,
+								original_choice: 'forte',
+								original_choice_label: 'Forte',
+								evidence: 'phrase inventée',
+								evidence_source: null,
+							},
+						],
+					},
+				],
+			},
+		})
+		const flag = container.querySelector('[data-part="ungrounded"]')
+		expect(flag?.textContent).toContain('Non étayé — ramené à « Inconnu »')
+		expect(flag?.textContent).toContain('Choix initial du modèle : Forte')
+		expect(container.querySelector('[data-part="evidence"]')).toBeNull()
+		expect(container.textContent).not.toContain('phrase inventée')
 	})
 
 	it('flags a valid result stored before agent summaries', () => {

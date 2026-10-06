@@ -15,6 +15,8 @@ import {
 import type { JsonValue, Problem } from '#/lib/schema-form'
 import { agentField } from '#/pages/profiles/lib/agents'
 import {
+	displayOrder,
+	isUnknownOption,
 	MAX_OPTIONS,
 	MIN_OPTIONS,
 	numberField,
@@ -119,6 +121,11 @@ export function AxisCard({
 			</div>
 			<div className="flex flex-col gap-2">
 				<p className="text-sm font-medium">Options</p>
+				<p className="text-xs text-muted-foreground">
+					Le modèle cite une phrase des documents pour justifier son choix. Sans
+					citation vérifiée, ou quand rien ne permet de répondre, la réponse
+					devient l'option « inconnu », dont le score reste modifiable.
+				</p>
 				<Table data-testid={`${key}-options`}>
 					<TableHeader>
 						<TableRow>
@@ -131,9 +138,10 @@ export function AxisCard({
 						</TableRow>
 					</TableHeader>
 					<TableBody>
-						{Object.keys(options).map((slotKey) => {
-							const position = Number(slotKey)
+						{displayOrder(options).map((position) => {
+							const slotKey = String(position)
 							const option = options[position] ?? null
+							const unknown = isUnknownOption(option)
 							const optionBase = `${base}.options[${position}]`
 							const slot = `${key}-o-${position}`
 							const valueProblems = at(problems, `${optionBase}.value`)
@@ -143,24 +151,37 @@ export function AxisCard({
 								<TableRow
 									key={slotKey}
 									data-option={position}
+									data-unknown={unknown ? 'true' : undefined}
 									className="border-0 align-top"
 								>
 									<TableCell className="px-1 py-1">
-										<Input
-											id={`${slot}-value`}
-											className="font-mono text-xs"
-											aria-label={`Valeur de l'option ${position + 1}`}
-											value={agentField(option, 'value')}
-											aria-invalid={valueProblems.length > 0}
-											onChange={(event) =>
-												actions.setOptionValue(
-													agentIndex,
-													index,
-													position,
-													event.target.value,
-												)
-											}
-										/>
+										{unknown ? (
+											<p
+												className="flex h-9 items-center text-xs font-medium"
+												data-part="unknown-option"
+											>
+												Option « inconnu »
+												<code className="ml-1.5 font-mono text-[11px] text-muted-foreground">
+													{agentField(option, 'value')}
+												</code>
+											</p>
+										) : (
+											<Input
+												id={`${slot}-value`}
+												className="font-mono text-xs"
+												aria-label={`Valeur de l'option ${position + 1}`}
+												value={agentField(option, 'value')}
+												aria-invalid={valueProblems.length > 0}
+												onChange={(event) =>
+													actions.setOptionValue(
+														agentIndex,
+														index,
+														position,
+														event.target.value,
+													)
+												}
+											/>
+										)}
 										<FieldErrors
 											id={`${slot}-value`}
 											problems={valueProblems}
@@ -217,8 +238,13 @@ export function AxisCard({
 											type="button"
 											variant="ghost"
 											size="icon"
-											disabled={options.length <= MIN_OPTIONS}
+											disabled={unknown || options.length <= MIN_OPTIONS}
 											aria-label={`Supprimer l'option ${position + 1} de l'axe ${index + 1}`}
+											title={
+												unknown
+													? "L'option « inconnu » est obligatoire"
+													: undefined
+											}
 											onClick={() =>
 												actions.removeOption(agentIndex, index, position)
 											}

@@ -371,7 +371,8 @@ async fn the_report_names_agents_after_the_profile_revisions_and_lists_reasons_a
             "weight": 5,
             "options": [
                 {"value": "oui", "label": "Oui", "score": 1.0},
-                {"value": "non", "label": "Non", "score": 0.0}
+                {"value": "non", "label": "Non", "score": 0.0},
+                {"value": "inconnu", "label": "Inconnu", "score": 0.5, "is_unknown": true}
             ]
         }]
     }]);

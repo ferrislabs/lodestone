@@ -44,7 +44,7 @@
 			}
 		},
 		"schema_version": {
-			"description": "Profile format version. Must be 6.",
+			"description": "Profile format version. Must be 7.",
 			"type": "integer",
 			"format": "uint32",
 			"minimum": 0
@@ -796,12 +796,12 @@
 					"pattern": "^[a-z0-9][a-z0-9_-]{0,62}$"
 				},
 				"options": {
-					"description": "Possible answers, from 2 to 10, with unique values.",
+					"description": "Possible answers, from 2 to 11, with unique values. Exactly one of them is the unknown option.",
 					"type": "array",
 					"items": {
 						"$ref": "#/$defs/QuestionOption"
 					},
-					"maxItems": 10,
+					"maxItems": 11,
 					"minItems": 2
 				},
 				"weight": {
@@ -825,6 +825,11 @@
 			"description": "One possible answer to a question and the score it is worth.",
 			"type": "object",
 			"properties": {
+				"is_unknown": {
+					"description": "Marks the unknown option, chosen when nothing in the documents supports an answer. Exactly one option per question carries it.",
+					"type": "boolean",
+					"default": false
+				},
 				"label": {
 					"description": "Display label.",
 					"type": "string"

@@ -24,7 +24,9 @@ const EXACT_MESSAGES: Readonly<Record<string, string>> = {
 		'Au moins un agent de qualification est requis',
 	'must be lowercase letters, digits, hyphens and underscores, at most 63 characters':
 		'Doit être composé de minuscules, chiffres, tirets et tirets bas, 63 caractères au maximum',
-	'must have from 2 to 10 options': 'Doit avoir de 2 à 10 options',
+	'must have from 2 to 11 options': 'Doit avoir de 2 à 11 options',
+	'must have exactly one option with `is_unknown` set to true':
+		'Doit avoir exactement une option « inconnu »',
 	'must be a number from 0 to 1': 'Doit être un nombre de 0 à 1',
 	'must be higher than `discard_below`':
 		'Doit être supérieur au seuil « Écarté sous »',

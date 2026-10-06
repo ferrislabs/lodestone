@@ -10,12 +10,12 @@ use std::{
 use chrono::{DateTime, Utc};
 use common::{EncryptionKey, Secret};
 use lodestone_core::{
-    ActiveProfile, Clock, CreateProfileCommand, GenerationParams, Lead, LeadRepository,
+    ActiveProfile, Clock, CreateProfileCommand, GenerationParams, Lead, LeadId, LeadRepository,
     LeadScoring, LlmError, LlmProvider, LlmRequest, LlmResponse, LodestoneUseCase, Observation,
     ProfileId, ProfileName, Provenance, ProviderDefinition, ProviderId, ProviderKind,
-    QualificationResult, ReasoningEffort, ResultStatus, ReviseProfileCommand, SignalKind,
-    SourceName, SuppressionTarget, Tier, TokenPricing, TokenUsage, UnitInterval, ValidatedProfile,
-    Verdict, VerdictCap,
+    QualificationResult, ReasoningEffort, ResultId, ResultStatus, ReviseProfileCommand,
+    RevisionNumber, SignalKind, SourceName, SuppressionTarget, Tier, TokenPricing, TokenUsage,
+    UnitInterval, ValidatedProfile, Verdict, VerdictCap,
     evaluation::{EvaluationReport, EvaluationSettings, ProviderBuilder},
     infrastructure::{
         crypto::AesGcmCipher, lead::postgres::PgLeadRepository, llm_cache::postgres::PgLlmCache,
@@ -79,21 +79,37 @@ impl ProviderBuilder for FakeBuilder {
     }
 }
 
-fn answers_from(schema: &Value, last: bool) -> Value {
+fn quote_of(request: &LlmRequest<'_>) -> String {
+    request
+        .documents
+        .first()
+        .and_then(|document| document.content.lines().next())
+        .unwrap_or_default()
+        .to_owned()
+}
+
+fn answers_from(schema: &Value, last: bool, quote: &str) -> Value {
     let mut answers = serde_json::Map::new();
     let questions = schema["properties"]["answers"]["properties"]
         .as_object()
         .unwrap();
     for (id, question) in questions {
-        let values = question["properties"]["choice"]["enum"].as_array().unwrap();
-        let index = if last { values.len() - 1 } else { 0 };
-        let probabilities: serde_json::Map<String, Value> = values
+        let all = question["properties"]["choice"]["enum"].as_array().unwrap();
+        let known: Vec<&Value> = all
             .iter()
-            .enumerate()
-            .map(|(position, value)| {
+            .filter(|value| value.as_str() != Some("inconnu"))
+            .collect();
+        let chosen = if last {
+            known[known.len() - 1]
+        } else {
+            known[0]
+        };
+        let probabilities: serde_json::Map<String, Value> = all
+            .iter()
+            .map(|value| {
                 (
                     value.as_str().unwrap().to_owned(),
-                    json!(if position == index { 1.0 } else { 0.0 }),
+                    json!(if value == chosen { 1.0 } else { 0.0 }),
                 )
             })
             .collect();
@@ -101,7 +117,8 @@ fn answers_from(schema: &Value, last: bool) -> Value {
             id.clone(),
             json!({
                 "type": "choice",
-                "choice": values[index],
+                "choice": chosen,
+                "evidence": quote,
                 "confidence": 0.9,
                 "probabilities": probabilities
             }),
@@ -131,8 +148,8 @@ impl LlmProvider for Scripted {
             .and_then(VecDeque::pop_front)
             .unwrap_or(Reply::Best);
         let output = match reply {
-            Reply::Best => answers_from(request.schema, false),
-            Reply::Worst => answers_from(request.schema, true),
+            Reply::Best => answers_from(request.schema, false, &quote_of(request)),
+            Reply::Worst => answers_from(request.schema, true, &quote_of(request)),
             Reply::Raw(value) => value,
             Reply::Fail(error) => return Err(error),
         };
@@ -179,7 +196,8 @@ fn agent(id: &str, weight: u8, provider: Option<ProviderId>, question: &str) -> 
             "options": [
                 {"value": "forte", "label": "Forte", "score": 1.0},
                 {"value": "moyenne", "label": "Moyenne", "score": 0.5},
-                {"value": "faible", "label": "Faible", "score": 0.0}
+                {"value": "faible", "label": "Faible", "score": 0.0},
+                {"value": "inconnu", "label": "Inconnu", "score": 0.5, "is_unknown": true}
             ]
         }]
     })
@@ -618,7 +636,7 @@ async fn agent_weights_drive_the_lead_confidence_and_the_verdict(pool: PgPool) {
 
 fn broken() -> Value {
     json!({"summary": "Observations.", "answers": {"q": {"type": "choice", "choice": "enorme", "confidence": 0.5,
-        "probabilities": {"forte": 1.0, "moyenne": 0.0, "faible": 0.0}}}})
+        "evidence": "lead: acme.com", "probabilities": {"forte": 1.0, "moyenne": 0.0, "faible": 0.0, "inconnu": 0.0}}}})
 }
 
 #[sqlx::test(migrations = "../../migrations")]
@@ -647,7 +665,7 @@ async fn a_contract_violation_is_retried_once_with_the_violation_list(pool: PgPo
 fn solo_answers() -> Value {
     let profile = ValidatedProfile::parse(definition(vec![agent("solo", 5, None, "q")])).unwrap();
     let schema = lodestone_core::contract_schema(&profile.definition().qualification_agents[0]);
-    answers_from(&schema, false)
+    answers_from(&schema, false, "lead: acme.com")
 }
 
 #[sqlx::test(migrations = "../../migrations")]
@@ -1042,7 +1060,7 @@ async fn a_single_dev_host_answered_with_certainty_is_calibrated_and_not_reliabl
 
     let results = harness.results(profile, "luzernrisk.com").await;
     let score = results[0].agent_score.unwrap();
-    assert!((score - (0.95 + 0.025) / 1.05).abs() < 1e-9, "{score}");
+    assert!((score - 1.0 / 1.1).abs() < 1e-9, "{score}");
     let lead = harness.lead(profile, "luzernrisk.com").await;
     let scoring = harness.scoring(profile, "luzernrisk.com").await.unwrap();
     assert!((scoring.opinion.unwrap() - score).abs() < 1e-9);
@@ -1172,7 +1190,7 @@ async fn leads_scored_before_the_evidence_rules_are_rescored_without_a_model_cal
     assert_eq!(rescored.verdict, Some(Verdict::ToCheck));
     assert_eq!(rescored.qualified_at, lead.qualified_at);
     let results = harness.results(profile, "acme.com").await;
-    assert!((results[0].agent_score.unwrap() - (0.95 + 0.025) / 1.05).abs() < 1e-9);
+    assert!((results[0].agent_score.unwrap() - 1.0 / 1.1).abs() < 1e-9);
     let scoring = harness.scoring(profile, "acme.com").await.unwrap();
     assert!(scoring.evidence.only_non_production);
     let again = harness.step(settings(100, 10)).await;
@@ -1208,4 +1226,191 @@ async fn a_new_signal_from_a_known_source_refreshes_the_evidence_without_a_model
     let after = harness.scoring(profile, "acme.com").await.unwrap();
     assert_eq!(after.evidence.signal_count, 2);
     assert!(after.evidence.components.volume > before.evidence.components.volume);
+}
+
+fn ungrounded_answers() -> Value {
+    let mut value = solo_answers();
+    value["answers"]["q"]["evidence"] = json!("une phrase inventée par le modèle");
+    value
+}
+
+fn unknown_answers() -> Value {
+    let mut value = solo_answers();
+    value["answers"]["q"]["choice"] = json!("inconnu");
+    value["answers"]["q"]["evidence"] = json!("");
+    value["answers"]["q"]["probabilities"] =
+        json!({"forte": 0.0, "moyenne": 0.0, "faible": 0.0, "inconnu": 1.0});
+    value
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn an_ungrounded_answer_is_retried_with_its_axes_and_stored_grounded(pool: PgPool) {
+    let harness = Harness::new(pool, 10);
+    let provider = harness.provider("model-a", 0).await;
+    harness.script(
+        "model-a",
+        vec![Reply::Raw(ungrounded_answers()), Reply::Best],
+    );
+    let profile = harness
+        .profile(vec![agent("solo", 5, Some(provider), "q")])
+        .await;
+    harness.observe("acme.com", SourceName::HttpProbe, 10).await;
+
+    let report = harness.step(settings(100, 10)).await;
+
+    assert_eq!(report.valid, 1);
+    let seen = harness.seen();
+    assert_eq!(seen.len(), 2);
+    assert!(!seen[0].instruction.contains("no verbatim quote"));
+    assert!(seen[1].instruction.contains("no verbatim quote"));
+    assert!(seen[1].instruction.contains("`q`"));
+    let results = harness.results(profile, "acme.com").await;
+    let answer = &results[0].answers["q"];
+    assert_eq!(answer["choice"], "forte");
+    assert_eq!(answer["grounded"], true);
+    assert_eq!(answer["evidence"], "lead: acme.com");
+    assert_eq!(answer["evidence_source"], "lead");
+    assert_eq!(results[0].agent_score, Some(1.0));
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn an_answer_still_ungrounded_after_the_retry_is_downgraded_not_invalid(pool: PgPool) {
+    let harness = Harness::new(pool, 10);
+    let provider = harness.provider("model-a", 0).await;
+    harness.script(
+        "model-a",
+        vec![
+            Reply::Raw(ungrounded_answers()),
+            Reply::Raw(ungrounded_answers()),
+        ],
+    );
+    let profile = harness
+        .profile(vec![agent("solo", 5, Some(provider), "q")])
+        .await;
+    harness.observe("acme.com", SourceName::HttpProbe, 10).await;
+
+    let report = harness.step(settings(100, 10)).await;
+
+    assert_eq!(report.valid, 1);
+    assert_eq!(report.invalid, 0);
+    assert_eq!(harness.calls(), 2);
+    let results = harness.results(profile, "acme.com").await;
+    assert_eq!(results[0].status, ResultStatus::Valid);
+    let answer = &results[0].answers["q"];
+    assert_eq!(answer["choice"], "inconnu");
+    assert_eq!(answer["grounded"], false);
+    assert_eq!(answer["original_choice"], "forte");
+    assert_eq!(answer["probabilities"]["inconnu"], 1.0);
+    assert_eq!(answer["probabilities"]["forte"], 0.0);
+    assert_eq!(results[0].agent_score, Some(0.5));
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_retry_that_breaks_the_contract_keeps_the_first_downgraded_answer(pool: PgPool) {
+    let harness = Harness::new(pool, 10);
+    let provider = harness.provider("model-a", 0).await;
+    harness.script(
+        "model-a",
+        vec![Reply::Raw(ungrounded_answers()), Reply::Raw(broken())],
+    );
+    let profile = harness
+        .profile(vec![agent("solo", 5, Some(provider), "q")])
+        .await;
+    harness.observe("acme.com", SourceName::HttpProbe, 10).await;
+
+    let report = harness.step(settings(100, 10)).await;
+
+    assert_eq!(report.valid, 1);
+    assert_eq!(harness.calls(), 2);
+    let results = harness.results(profile, "acme.com").await;
+    assert_eq!(results[0].status, ResultStatus::Valid);
+    assert_eq!(results[0].answers["q"]["choice"], "inconnu");
+    assert_eq!(results[0].answers["q"]["original_choice"], "forte");
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_unknown_option_with_an_empty_quote_is_accepted_without_a_retry(pool: PgPool) {
+    let harness = Harness::new(pool, 10);
+    let provider = harness.provider("model-a", 0).await;
+    harness.script("model-a", vec![Reply::Raw(unknown_answers())]);
+    let profile = harness
+        .profile(vec![agent("solo", 5, Some(provider), "q")])
+        .await;
+    harness.observe("acme.com", SourceName::HttpProbe, 10).await;
+
+    harness.step(settings(100, 10)).await;
+
+    assert_eq!(harness.calls(), 1);
+    let results = harness.results(profile, "acme.com").await;
+    let answer = &results[0].answers["q"];
+    assert_eq!(answer["choice"], "inconnu");
+    assert_eq!(answer["grounded"], true);
+    assert!(answer.get("original_choice").is_none());
+    assert_eq!(results[0].agent_score, Some(0.5));
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn rescoring_reads_the_downgraded_answers(pool: PgPool) {
+    let harness = Harness::new(pool.clone(), 10);
+    let provider = harness.provider("model-a", 0).await;
+    harness.script(
+        "model-a",
+        vec![
+            Reply::Raw(ungrounded_answers()),
+            Reply::Raw(ungrounded_answers()),
+        ],
+    );
+    let profile = harness
+        .profile(vec![agent("solo", 5, Some(provider), "q")])
+        .await;
+    harness.observe("acme.com", SourceName::HttpProbe, 10).await;
+    harness.step(settings(100, 10)).await;
+    sqlx::query("UPDATE lead_qualification_state SET scoring_version = 0, opinion = NULL, evidence = NULL, verdict_reason = NULL")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE qualification_results SET agent_score = 1")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let calls = harness.calls();
+
+    let report = harness.step(settings(100, 10)).await;
+
+    assert_eq!(report.rescored, 1);
+    assert_eq!(harness.calls(), calls);
+    let results = harness.results(profile, "acme.com").await;
+    assert_eq!(results[0].agent_score, Some(0.5));
+    assert_eq!(results[0].answers["q"]["grounded"], false);
+}
+
+#[test]
+fn the_aggregator_document_carries_the_quote_and_the_ungrounded_marker() {
+    let profile = ValidatedProfile::parse(definition(vec![agent("solo", 5, None, "q")])).unwrap();
+    let agent = &profile.definition().qualification_agents[0];
+    let mut result = QualificationResult {
+        id: ResultId(uuid::Uuid::nil()),
+        lead_id: LeadId(uuid::Uuid::nil()),
+        profile_id: ProfileId(uuid::Uuid::nil()),
+        profile_revision: RevisionNumber::FIRST,
+        agent_id: agent.id.clone(),
+        provenance: lodestone_core::RunProvenance::legacy("m".to_owned(), String::new()),
+        status: ResultStatus::Valid,
+        summary: Some("Résumé.".to_owned()),
+        answers: json!({"q": {
+            "type": "choice", "choice": "forte", "evidence": "Keycloak 18", "grounded": true,
+            "confidence": 0.9,
+            "probabilities": {"forte": 1.0, "moyenne": 0.0, "faible": 0.0, "inconnu": 0.0}
+        }}),
+        agent_score: Some(1.0),
+        error: None,
+        created_at: chrono::DateTime::from_timestamp(0, 0).unwrap(),
+    };
+    let grounded = lodestone_core::render_agent(agent, Some(&result));
+    assert!(grounded.contains("quote: \"Keycloak 18\""));
+    result.answers["q"]["choice"] = json!("inconnu");
+    result.answers["q"]["grounded"] = json!(false);
+    result.answers["q"]["original_choice"] = json!("forte");
+    let ungrounded = lodestone_core::render_agent(agent, Some(&result));
+    assert!(ungrounded.contains("ungrounded: the agent first chose `forte`"));
 }

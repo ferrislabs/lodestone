@@ -26,7 +26,11 @@ export {
 } from '#/pages/profiles/lib/qualification-templates'
 
 export const MIN_OPTIONS = 2
-export const MAX_OPTIONS = 10
+export const MAX_OPTIONS = 11
+export const MAX_EVIDENCE_CHARS = 300
+export const UNKNOWN_VALUE = 'inconnu'
+export const UNKNOWN_LABEL = 'Inconnu'
+export const UNKNOWN_SCORE = 0.5
 export const MAX_PROMPT_CHARS = 8000
 export const MAX_DESCRIPTION_CHARS = 300
 export const MAX_SUMMARY_CHARS = 600
@@ -107,6 +111,18 @@ export function questionsOf(agent: JsonValue | undefined): JsonValue[] {
 
 export function optionsOf(question: JsonValue | undefined): JsonValue[] {
 	return listField(question, 'options')
+}
+
+export function isUnknownOption(option: JsonValue | undefined): boolean {
+	return isJsonObject(option) && option.is_unknown === true
+}
+
+export function displayOrder(options: readonly JsonValue[]): number[] {
+	const positions = options.map((_, position) => position)
+	return [
+		...positions.filter((position) => !isUnknownOption(options[position])),
+		...positions.filter((position) => isUnknownOption(options[position])),
+	]
 }
 
 export function aggregatorOf(value: JsonObject): JsonObject {
@@ -287,8 +303,17 @@ export function verdictBands(verdict: Verdict): VerdictBands | null {
 	}
 }
 
-function option(value: string, label: string, score: number): JsonObject {
-	return { value, label, score }
+function option(
+	value: string,
+	label: string,
+	score: number,
+	unknown = false,
+): JsonObject {
+	return { value, label, score, is_unknown: unknown }
+}
+
+function unknownOption(): JsonObject {
+	return option(UNKNOWN_VALUE, UNKNOWN_LABEL, UNKNOWN_SCORE, true)
 }
 
 export function newQualificationAgent(
@@ -358,6 +383,7 @@ export function addQuestion(value: JsonObject, agent: number): JsonObject {
 		options: [
 			option('option-1', 'Option 1', 1),
 			option('option-2', 'Option 2', 0),
+			unknownOption(),
 		],
 	}
 	return toObject(
@@ -440,11 +466,14 @@ export function addOption(
 	const taken = new Set(options.map((item) => agentField(item, 'value')))
 	let counter = options.length + 1
 	while (taken.has(`option-${counter}`)) counter += 1
+	const created = option(`option-${counter}`, `Option ${counter}`, 0)
+	const firstUnknown = options.findIndex((item) => isUnknownOption(item))
+	const at = firstUnknown === -1 ? options.length : firstUnknown
 	return toObject(
-		appendIn(
+		setIn(
 			value,
 			['qualification_agents', agent, 'questions', question, 'options'],
-			option(`option-${counter}`, `Option ${counter}`, 0),
+			[...options.slice(0, at), created, ...options.slice(at)],
 		),
 		value,
 	)
@@ -456,6 +485,10 @@ export function removeOption(
 	question: number,
 	position: number,
 ): JsonObject {
+	const options = optionsOf(
+		questionsOf(qualificationList(value)[agent])[question],
+	)
+	if (isUnknownOption(options[position])) return value
 	return toObject(
 		removeIn(value, [
 			'qualification_agents',
@@ -566,6 +599,12 @@ function questionSchema(question: JsonValue): JsonObject {
 		properties: {
 			type: { type: 'string', const: 'choice' },
 			choice: { type: 'string', enum: values },
+			evidence: {
+				type: 'string',
+				maxLength: MAX_EVIDENCE_CHARS,
+				description:
+					'Sentence copied verbatim from the documents that justifies the choice. May be empty only when the choice is the unknown option.',
+			},
 			confidence: probabilitySchema(),
 			probabilities: {
 				type: 'object',
@@ -576,7 +615,7 @@ function questionSchema(question: JsonValue): JsonObject {
 				additionalProperties: false,
 			},
 		},
-		required: ['type', 'choice', 'confidence', 'probabilities'],
+		required: ['type', 'choice', 'evidence', 'confidence', 'probabilities'],
 		additionalProperties: false,
 	}
 }
@@ -613,6 +652,7 @@ export const CONTRACT_EXAMPLE = `{
     "<identifiant de l'axe>": {
       "type": "choice",
       "choice": "<valeur de l'option>",
+      "evidence": "<phrase copiée mot pour mot depuis les documents>",
       "confidence": 0.0,
       "probabilities": { "<valeur de l'option>": 0.0 }
     }
@@ -630,7 +670,9 @@ function checkOptions(
 ) {
 	const path = `${base}.options`
 	if (options.length < MIN_OPTIONS || options.length > MAX_OPTIONS) {
-		problems.push(problem(path, 'Doit avoir de 2 à 10 options'))
+		problems.push(problem(path, 'Doit avoir de 2 à 11 options'))
+	} else if (options.filter((item) => isUnknownOption(item)).length !== 1) {
+		problems.push(problem(path, 'Doit avoir exactement une option « inconnu »'))
 	}
 	const seen = new Set<string>()
 	options.forEach((item, position) => {

@@ -33,7 +33,7 @@ use crate::{
             AgentOpinion, Completion, EvidenceStrength, QualificationResult, ResultId,
             ResultStatus, SCORING_VERSION, ValidOutput, Violations, agent_score, judge,
             ports::QualificationRepository,
-            prompt::{AgentPrompt, build, lead_document, with_violations},
+            prompt::{AgentPrompt, build, lead_document, with_ungrounded, with_violations},
             validate_answers,
         },
     },
@@ -317,7 +317,7 @@ where
             &loaded.provider,
             self.cache,
             call,
-            |output| validate_answers(agent, output).is_ok(),
+            |output| validate_answers(agent, output, subject.documents).is_ok(),
             CallSettings {
                 max_retries: loaded.max_retries,
                 pricing: loaded.pricing,
@@ -356,9 +356,20 @@ where
                 "provider cache is inconsistent".to_owned(),
             ));
         };
+        let finish = |model: &str, output: &ValidOutput| {
+            let (result, opinion) = succeeded(
+                subject,
+                agent,
+                loaded.provenance(model, version.clone(), self.settings.max_tokens),
+                output,
+                at,
+            );
+            AgentOutcome::Result(Box::new(result), Some(opinion))
+        };
         let mut instruction = prompt.instruction.clone();
         let mut last: Option<Violations> = None;
-        for _ in 0..2 {
+        let mut fallback: Option<(ValidOutput, String)> = None;
+        for attempt in 0..2 {
             let structured = match self
                 .ask(loaded, subject, agent, &prompt, &instruction, budget)
                 .await
@@ -366,6 +377,9 @@ where
                 Ok(structured) => structured,
                 Err(LlmCallError::BudgetExhausted) => return Ok(AgentOutcome::BudgetExhausted),
                 Err(error) => {
+                    if fallback.is_some() {
+                        break;
+                    }
                     let result = failed(
                         subject,
                         agent,
@@ -376,16 +390,20 @@ where
                     return Ok(AgentOutcome::Result(Box::new(result), None));
                 }
             };
-            match validate_answers(agent, &structured.value) {
+            match validate_answers(agent, &structured.value, subject.documents) {
                 Ok(output) => {
-                    let (result, opinion) = succeeded(
-                        subject,
-                        agent,
-                        loaded.provenance(&structured.model, version, self.settings.max_tokens),
-                        &output,
-                        at,
-                    );
-                    return Ok(AgentOutcome::Result(Box::new(result), Some(opinion)));
+                    let ungrounded = output.answers.ungrounded();
+                    if attempt == 0 && !ungrounded.is_empty() {
+                        warn!(
+                            agent = agent.id.as_str(),
+                            axes = ungrounded.len(),
+                            "qualification answers without a verifiable quote, retrying"
+                        );
+                        instruction = with_ungrounded(&prompt.instruction, &ungrounded);
+                        fallback = Some((output, structured.model));
+                        continue;
+                    }
+                    return Ok(finish(&structured.model, &output));
                 }
                 Err(violations) => {
                     warn!(agent = agent.id.as_str(), %violations, "qualification answer broke the contract");
@@ -393,6 +411,9 @@ where
                     last = Some(violations);
                 }
             }
+        }
+        if let Some((output, model)) = &fallback {
+            return Ok(finish(model, output));
         }
         let message = last.map_or_else(String::new, |violations| violations.to_string());
         let result = failed(
