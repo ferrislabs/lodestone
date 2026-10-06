@@ -7,8 +7,10 @@ import { AgentsCard } from '#/pages/quality/ui/agents-card'
 import { ConfidenceHistogram } from '#/pages/quality/ui/confidence-histogram'
 import { DecisionsCard } from '#/pages/quality/ui/decisions-card'
 import { DiscardedCard } from '#/pages/quality/ui/discarded-card'
+import { RejectionReasonsCard } from '#/pages/quality/ui/rejection-reasons-card'
 import { SuggestionsCard } from '#/pages/quality/ui/suggestions-card'
 import { VerdictPrecisionCard } from '#/pages/quality/ui/verdict-precision-card'
+import { VersionsCard } from '#/pages/quality/ui/versions-card'
 
 const SELECT_CLASS =
 	'h-9 w-full rounded-md border bg-transparent px-3 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50'
@@ -114,6 +116,8 @@ export function QualityPage({
 					</div>
 					<ConfidenceHistogram buckets={quality.confidence} />
 					<AgentsCard agents={quality.agents} />
+					<VersionsCard versions={quality.versions} />
+					<RejectionReasonsCard profiles={quality.profiles} />
 					<SuggestionsCard
 						profiles={quality.profiles}
 						onOpenProfile={onOpenProfile}

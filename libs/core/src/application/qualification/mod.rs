@@ -275,8 +275,11 @@ where
             evidence,
             evidence_verified: verified,
             quality_warnings,
-            model,
-            prompt_version: prompt.tag.clone(),
+            provenance: self.loaded.provenance(
+                &model,
+                prompt.tag.clone(),
+                self.settings.max_tokens,
+            ),
             draft: Some(output.draft_message),
             draft_review: Some(DraftReview::pending()),
             created_at: now,

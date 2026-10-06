@@ -4,6 +4,7 @@ export namespace Schemas {
     agent_id: string;
     mean_rejected?: (number | null) | undefined;
     mean_validated?: (number | null) | undefined;
+    name: string;
     rejected: number;
     separation?: (number | null) | undefined;
     validated: number;
@@ -24,6 +25,22 @@ export namespace Schemas {
     suggested_subject?: (string | null) | undefined;
   };
   export type EvidenceDto = { provenance: string; quote: string };
+  export type GenerationDto = Partial<{
+    frequency_penalty: number | null;
+    max_tokens: number | null;
+    presence_penalty: number | null;
+    reasoning_effort: string | null;
+    repeat_penalty: number | null;
+    temperature: number | null;
+  }>;
+  export type ProvenanceDto = {
+    generation: GenerationDto;
+    model: string;
+    prompt_version: string;
+    provider_id?: (string | null) | undefined;
+    provider_name: string;
+    samples: number;
+  };
   export type AssessmentDto = {
     approach_angle: string;
     created_at: string;
@@ -34,6 +51,7 @@ export namespace Schemas {
     model: string;
     profile_revision: number;
     prompt_version: string;
+    provenance: ProvenanceDto;
     quality_warnings: Array<string>;
     summary: string;
     verdict_narrative: string;
@@ -47,8 +65,20 @@ export namespace Schemas {
     summary: string;
   };
   export type AssignTierRequest = { provider_id: string };
+  export type RejectionReasonDto =
+    | "hors_cible"
+    | "deja_client"
+    | "concurrent"
+    | "editeur_integrateur"
+    | "hebergeur_agence"
+    | "mauvaise_donnee"
+    | "autre";
   export type LeadStatusDto = "new" | "qualified" | "validated" | "rejected" | "contacted" | "uncertain";
-  export type ChangeLeadStatusRequest = { status: LeadStatusDto };
+  export type ChangeLeadStatusRequest = {
+    note?: (string | null) | undefined;
+    reason?: (null | RejectionReasonDto) | undefined;
+    status: LeadStatusDto;
+  };
   export type OfficialDataDto = {
     annuaire_url: string;
     created_on?: (string | null) | undefined;
@@ -219,6 +249,7 @@ export namespace Schemas {
     created_at: string;
     error?: (string | null) | undefined;
     model: string;
+    provenance: ProvenanceDto;
     provider_id?: (string | null) | undefined;
     provider_name?: (string | null) | undefined;
     status: string;
@@ -330,6 +361,7 @@ export namespace Schemas {
   };
   export type DiscardedShareDto = { discarded: number; share?: (number | null) | undefined; total: number };
   export type ThresholdsDto = { discard_below: number; reliable_from: number };
+  export type ReasonCountDto = { count: number; reason: RejectionReasonDto };
   export type SuggestionDto = {
     discard_below?: (number | null) | undefined;
     labelled: number;
@@ -343,6 +375,7 @@ export namespace Schemas {
     precision?: (number | null) | undefined;
     profile_id: string;
     rejected: number;
+    rejection_reasons: Array<ReasonCountDto>;
     suggestion: SuggestionDto;
     validated: number;
   };
@@ -353,6 +386,16 @@ export namespace Schemas {
     validated: number;
     verdict?: (null | VerdictDto) | undefined;
   };
+  export type VersionPrecisionDto = {
+    agent_id?: (string | null) | undefined;
+    agent_name?: (string | null) | undefined;
+    model: string;
+    n: number;
+    precision?: (number | null) | undefined;
+    prompt_version: string;
+    rejected: number;
+    validated: number;
+  };
   export type DataEnvelope_QualityDto = {
     data: {
       agents: Array<AgentQualityDto>;
@@ -361,6 +404,7 @@ export namespace Schemas {
       discarded: DiscardedShareDto;
       profiles: Array<ProfileQualityDto>;
       verdicts: Array<VerdictPrecisionDto>;
+      versions: Array<VersionPrecisionDto>;
     };
     pagination?: (null | PaginationMetadata) | undefined;
   };
@@ -606,8 +650,9 @@ export namespace Schemas {
     discarded: DiscardedShareDto;
     profiles: Array<ProfileQualityDto>;
     verdicts: Array<VerdictPrecisionDto>;
+    versions: Array<VersionPrecisionDto>;
   };
-  export type RejectDraftRequest = Partial<{ reason: string | null }>;
+  export type RejectDraftRequest = Partial<{ note: string | null; reason: null | RejectionReasonDto }>;
   export type RevisionDto = RevisionSummaryDto & { definition: Record<string, unknown> };
   export type SourceDto = {
     attempts: number;
@@ -761,6 +806,7 @@ export namespace Endpoints {
       403: unknown;
       404: unknown;
       409: unknown;
+      422: unknown;
     };
   };
   export type post_Retry_lead_summary = {

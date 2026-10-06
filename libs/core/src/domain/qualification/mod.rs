@@ -6,7 +6,7 @@ use thiserror::Error;
 
 use crate::domain::{
     lead::{LeadId, str_enum, uuid_id},
-    llm::provider::ProviderId,
+    llm::RunProvenance,
     profile::{
         ProfileId, RevisionNumber,
         definition::{AgentId, QualificationAgent, Question},
@@ -358,9 +358,7 @@ pub struct QualificationResult {
     pub profile_id: ProfileId,
     pub profile_revision: RevisionNumber,
     pub agent_id: AgentId,
-    pub provider_id: Option<ProviderId>,
-    pub model: String,
-    pub prompt_hash: String,
+    pub provenance: RunProvenance,
     pub status: ResultStatus,
     pub summary: Option<String>,
     pub answers: Value,

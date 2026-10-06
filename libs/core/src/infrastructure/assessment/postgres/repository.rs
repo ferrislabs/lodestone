@@ -59,6 +59,10 @@ impl<'tx> AssessmentRepository for PgAssessmentRepository<'tx> {
         let revision = i32::try_from(assessment.profile_revision.get())
             .map_err(|_| CoreError::Internal("profile revision number out of range".to_owned()))?;
         let evidence = evidence_to_json(&assessment.evidence)?;
+        let generation = serde_json::to_value(assessment.provenance.generation)
+            .map_err(|error| CoreError::Internal(error.to_string()))?;
+        let samples = i32::try_from(assessment.provenance.samples)
+            .map_err(|_| CoreError::Internal("assessment samples out of range".to_owned()))?;
         let mut tx = self.tx.lock().await;
         let review = assessment.draft.as_ref().map(|_| {
             assessment
@@ -79,9 +83,10 @@ impl<'tx> AssessmentRepository for PgAssessmentRepository<'tx> {
                 evidence_verified, model, prompt_version, draft_subject, draft_body, draft_status,
                 draft_reviewed_by, draft_reviewed_at, draft_edited_at, draft_rejection_reason,
                 draft_original_subject, draft_original_body, draft_suggested_subject,
-                draft_suggested_body, draft_outdated_at, created_at, quality_warnings
+                draft_suggested_body, draft_outdated_at, created_at, quality_warnings,
+                provider_id, provider_name, generation, samples
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28)
             "#,
         )
         .bind(assessment.id.0)
@@ -92,8 +97,8 @@ impl<'tx> AssessmentRepository for PgAssessmentRepository<'tx> {
         .bind(&assessment.approach_angle)
         .bind(&evidence)
         .bind(assessment.evidence_verified)
-        .bind(&assessment.model)
-        .bind(&assessment.prompt_version)
+        .bind(&assessment.provenance.model)
+        .bind(&assessment.provenance.prompt_version)
         .bind(draft.map(|draft| draft.subject.as_str()))
         .bind(draft.map(|draft| draft.body.as_str()))
         .bind(review.as_ref().map(|review| review.status.as_str()))
@@ -137,6 +142,10 @@ impl<'tx> AssessmentRepository for PgAssessmentRepository<'tx> {
         .bind(review.as_ref().and_then(|review| review.outdated_at))
         .bind(assessment.created_at)
         .bind(&warnings)
+        .bind(assessment.provenance.provider_id.map(|provider| provider.0))
+        .bind(&assessment.provenance.provider_name)
+        .bind(&generation)
+        .bind(samples)
         .execute(&mut ***tx)
         .await
         .map_err(map_sqlx_error)?;

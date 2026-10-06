@@ -204,3 +204,17 @@ describe('source run errors', () => {
 		expect(parsed.message).toBe('La source est déjà en cours')
 	})
 })
+
+describe('rejection messages', () => {
+	it('translates the reason requirements', () => {
+		expect(translateApiMessage('is required to reject')).toBe(
+			'Choisissez une raison de rejet',
+		)
+		expect(translateApiMessage('is required when the reason is autre')).toBe(
+			'Précisez la raison quand elle est « Autre »',
+		)
+		expect(translateApiMessage('must be at most 500 characters')).toBe(
+			'Doit contenir au maximum 500 caractères',
+		)
+	})
+})

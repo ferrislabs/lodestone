@@ -49,9 +49,7 @@ fn fake_result(
         profile_id: NIL.parse::<ProfileId>().unwrap(),
         profile_revision: RevisionNumber::FIRST,
         agent_id: AgentId::new(agent),
-        provider_id: None,
-        model: "gemma_laya".to_owned(),
-        prompt_hash: String::new(),
+        provenance: lodestone_core::RunProvenance::legacy("gemma_laya".to_owned(), String::new()),
         status: ResultStatus::Valid,
         summary: Some("Résumé de l'agent.".to_owned()),
         answers: json!({question: {

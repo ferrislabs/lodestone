@@ -13,9 +13,9 @@ use lodestone_core::{
     ActiveProfile, Clock, CreateProfileCommand, GenerationParams, Lead, LeadRepository,
     LeadScoring, LlmError, LlmProvider, LlmRequest, LlmResponse, LodestoneUseCase, Observation,
     ProfileId, ProfileName, Provenance, ProviderDefinition, ProviderId, ProviderKind,
-    QualificationResult, ResultStatus, ReviseProfileCommand, SignalKind, SourceName,
-    SuppressionTarget, Tier, TokenPricing, TokenUsage, UnitInterval, ValidatedProfile, Verdict,
-    VerdictCap,
+    QualificationResult, ReasoningEffort, ResultStatus, ReviseProfileCommand, SignalKind,
+    SourceName, SuppressionTarget, Tier, TokenPricing, TokenUsage, UnitInterval, ValidatedProfile,
+    Verdict, VerdictCap,
     evaluation::{EvaluationReport, EvaluationSettings, ProviderBuilder},
     infrastructure::{
         crypto::AesGcmCipher, lead::postgres::PgLeadRepository, llm_cache::postgres::PgLlmCache,
@@ -405,6 +405,74 @@ fn result_of<'a>(results: &'a [QualificationResult], agent: &str) -> &'a Qualifi
 }
 
 #[sqlx::test(migrations = "../../migrations")]
+async fn each_result_stores_the_provider_model_prompt_and_generation_settings(pool: PgPool) {
+    let harness = Harness::new(pool.clone(), 10);
+    let provider = harness
+        .usecase
+        .create_llm_provider(
+            CreateLlmProvider {
+                name: "local-gpu".to_owned(),
+                kind: ProviderKind::OpenAiCompatible,
+                base_url: "https://llm.example/v1".parse().unwrap(),
+                model: "model-tuned".to_owned(),
+                timeout: Duration::from_secs(30),
+                max_retries: 0,
+                pricing: TokenPricing {
+                    input_cents_per_mtok: 0,
+                    output_cents_per_mtok: 0,
+                },
+                api_key: None,
+                reasoning_effort: Some(ReasoningEffort::Low),
+                generation: GenerationParams {
+                    temperature: Some(0.3),
+                    presence_penalty: Some(0.5),
+                    ..GenerationParams::default()
+                },
+            },
+            &harness.cipher,
+        )
+        .await
+        .unwrap()
+        .id;
+    harness
+        .usecase
+        .assign_llm_tier(Tier::Triage, provider)
+        .await
+        .unwrap();
+    let profile = harness
+        .profile(vec![agent("pertinence", 5, None, "pertinence")])
+        .await;
+    harness.observe("acme.com", SourceName::HttpProbe, 10).await;
+
+    harness.step(settings(100, 10)).await;
+
+    let results = harness.results(profile, "acme.com").await;
+    let stored = &results[0].provenance;
+    assert_eq!(stored.provider_id, Some(provider));
+    assert_eq!(stored.provider_name, "local-gpu");
+    assert_eq!(stored.model, "model-tuned");
+    assert_eq!(stored.samples, 1);
+    assert_eq!(stored.generation.temperature, Some(0.3));
+    assert_eq!(stored.generation.presence_penalty, Some(0.5));
+    assert_eq!(stored.generation.frequency_penalty, None);
+    assert_eq!(
+        stored.generation.reasoning_effort,
+        Some(ReasoningEffort::Low)
+    );
+    assert_eq!(stored.generation.max_tokens, Some(512));
+    let row: (String, serde_json::Value, i32) = sqlx::query_as(
+        "SELECT provider_name, generation, samples FROM qualification_results WHERE lead_id = $1",
+    )
+    .bind(results[0].lead_id.0)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(row.0, "local-gpu");
+    assert_eq!(row.1["reasoning_effort"], "low");
+    assert_eq!(row.2, 1);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
 async fn valid_answers_are_stored_scored_and_judged(pool: PgPool) {
     let harness = Harness::new(pool, 10);
     harness.default_provider("model-default").await;
@@ -425,10 +493,16 @@ async fn valid_answers_are_stored_scored_and_judged(pool: PgPool) {
     let stored = &results[0];
     assert_eq!(stored.status, ResultStatus::Valid);
     assert_eq!(stored.agent_score, Some(1.0));
-    assert_eq!(stored.model, "model-default");
+    assert_eq!(stored.provenance.model, "model-default");
     assert_eq!(stored.answers["pertinence"]["choice"], "forte");
     assert_eq!(stored.answers["pertinence"]["type"], "choice");
-    assert_eq!(stored.prompt_hash.len(), 64);
+    assert!(
+        stored
+            .provenance
+            .prompt_version
+            .strip_prefix("qualification-agent@")
+            .is_some_and(|hash| hash.len() == 64)
+    );
     assert_eq!(
         stored.summary.as_deref(),
         Some("Observations de l'agent sur le lead.")

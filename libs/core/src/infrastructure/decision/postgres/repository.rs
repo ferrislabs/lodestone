@@ -6,8 +6,8 @@ use uuid::Uuid;
 use crate::{
     LeadId, ProfileId, RevisionNumber, UserId,
     domain::quality::{
-        DecisionKind, DecisionLabel, DecisionSnapshot, LabelFilter, VerdictCounts,
-        ports::DecisionRepository,
+        DecisionKind, DecisionLabel, DecisionSnapshot, LabelFilter, Rejection, RejectionReason,
+        VerdictCounts, ports::DecisionRepository,
     },
     infrastructure::{
         lead::postgres::repository::NOT_SUPPRESSED,
@@ -36,6 +36,8 @@ struct LabelRow {
     decided_by: Option<Uuid>,
     decided_at: DateTime<Utc>,
     snapshot: serde_json::Value,
+    rejection_reason: Option<String>,
+    rejection_note: Option<String>,
 }
 
 impl TryFrom<LabelRow> for DecisionLabel {
@@ -50,6 +52,21 @@ impl TryFrom<LabelRow> for DecisionLabel {
             .ok_or_else(|| CoreError::Internal("stored label kind is invalid".to_owned()))?;
         let snapshot: DecisionSnapshot = serde_json::from_value(row.snapshot)
             .map_err(|_| CoreError::Internal("stored label snapshot is invalid".to_owned()))?;
+        let rejection = row
+            .rejection_reason
+            .as_deref()
+            .map(|raw| {
+                RejectionReason::parse(raw)
+                    .ok_or_else(|| {
+                        CoreError::Internal("stored label rejection reason is invalid".to_owned())
+                    })
+                    .and_then(|reason| {
+                        Rejection::new(reason, row.rejection_note.as_deref()).map_err(|_| {
+                            CoreError::Internal("stored label rejection note is invalid".to_owned())
+                        })
+                    })
+            })
+            .transpose()?;
         Ok(Self {
             id: row.id,
             lead_id: LeadId(row.lead_id),
@@ -59,6 +76,7 @@ impl TryFrom<LabelRow> for DecisionLabel {
             decided_by: row.decided_by.map(UserId),
             decided_at: row.decided_at,
             snapshot,
+            rejection,
         })
     }
 }
@@ -76,8 +94,8 @@ impl<'tx> DecisionRepository for PgDecisionRepository<'tx> {
             .map_err(|error| CoreError::Internal(error.to_string()))?;
         let mut tx = self.tx.lock().await;
         sqlx::query(
-            "INSERT INTO decision_labels (id, lead_id, profile_id, profile_revision, kind, decided_by, decided_at, snapshot)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+            "INSERT INTO decision_labels (id, lead_id, profile_id, profile_revision, kind, decided_by, decided_at, snapshot, rejection_reason, rejection_note)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
         )
         .bind(label.id)
         .bind(label.lead_id.0)
@@ -87,6 +105,8 @@ impl<'tx> DecisionRepository for PgDecisionRepository<'tx> {
         .bind(label.decided_by.map(|user| user.0))
         .bind(label.decided_at)
         .bind(snapshot)
+        .bind(label.rejection.as_ref().map(|rejection| rejection.reason().as_str()))
+        .bind(label.rejection.as_ref().and_then(Rejection::note))
         .execute(&mut ***tx)
         .await
         .map_err(map_sqlx_error)?;
@@ -96,7 +116,7 @@ impl<'tx> DecisionRepository for PgDecisionRepository<'tx> {
     #[tracing::instrument(skip(self), fields(db.system = "postgresql", db.operation = "select", db.table = "decision_labels"), err)]
     async fn list(&mut self, filter: &LabelFilter) -> Result<Vec<DecisionLabel>, CoreError> {
         let query = format!(
-            "SELECT labels.id, labels.lead_id, labels.profile_id, labels.profile_revision, labels.kind, labels.decided_by, labels.decided_at, labels.snapshot
+            "SELECT labels.id, labels.lead_id, labels.profile_id, labels.profile_revision, labels.kind, labels.decided_by, labels.decided_at, labels.snapshot, labels.rejection_reason, labels.rejection_note
              FROM decision_labels labels
              JOIN leads ON leads.id = labels.lead_id
              WHERE ($1::timestamptz IS NULL OR labels.decided_at >= $1)

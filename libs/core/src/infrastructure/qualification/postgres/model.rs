@@ -3,7 +3,7 @@ use common::CoreError;
 use uuid::Uuid;
 
 use crate::{
-    LeadId, ProfileId, ProviderId, RevisionNumber,
+    GenerationSnapshot, LeadId, ProfileId, ProviderId, RevisionNumber, RunProvenance,
     definition::AgentId,
     domain::qualification::{
         EvidenceStrength, LeadScoring, QualificationResult, ResultId, ResultStatus, VerdictCap,
@@ -18,8 +18,11 @@ pub struct ResultRow {
     pub profile_revision: i32,
     pub agent_id: String,
     pub provider_id: Option<Uuid>,
+    pub provider_name: String,
     pub model: String,
-    pub prompt_hash: String,
+    pub prompt_version: String,
+    pub generation: serde_json::Value,
+    pub samples: i32,
     pub status: String,
     pub summary: Option<String>,
     pub answers: serde_json::Value,
@@ -38,15 +41,26 @@ impl TryFrom<ResultRow> for QualificationResult {
             .ok_or_else(|| CoreError::Internal("stored result revision is invalid".to_owned()))?;
         let status = ResultStatus::parse(&row.status)
             .ok_or_else(|| CoreError::Internal("stored result status is invalid".to_owned()))?;
+        let generation: GenerationSnapshot = serde_json::from_value(row.generation)
+            .map_err(|_| CoreError::Internal("stored result generation is invalid".to_owned()))?;
+        let samples = u32::try_from(row.samples)
+            .ok()
+            .filter(|samples| *samples >= 1)
+            .ok_or_else(|| CoreError::Internal("stored result samples is invalid".to_owned()))?;
         Ok(Self {
             id: ResultId(row.id),
             lead_id: LeadId(row.lead_id),
             profile_id: ProfileId(row.profile_id),
             profile_revision,
             agent_id: AgentId::new(row.agent_id),
-            provider_id: row.provider_id.map(ProviderId),
-            model: row.model,
-            prompt_hash: row.prompt_hash,
+            provenance: RunProvenance {
+                provider_id: row.provider_id.map(ProviderId),
+                provider_name: row.provider_name,
+                model: row.model,
+                prompt_version: row.prompt_version,
+                generation,
+                samples,
+            },
             status,
             summary: row.summary,
             answers: row.answers,

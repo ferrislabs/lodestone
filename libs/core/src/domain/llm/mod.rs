@@ -7,7 +7,10 @@ use url::Url;
 use crate::domain::lead::str_enum;
 
 pub mod cache;
+pub mod provenance;
 pub mod provider;
+
+pub use provenance::{GenerationSnapshot, RunProvenance};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ProviderKind {

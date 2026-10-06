@@ -40,6 +40,7 @@ const QUALITY: Quality = {
 		rejected: 0,
 	})),
 	agents: [],
+	versions: [],
 	profiles: [
 		{
 			profile_id: 'p1',
@@ -55,6 +56,7 @@ const QUALITY: Quality = {
 				reliable_from: null,
 				discard_below: null,
 			},
+			rejection_reasons: [],
 		},
 	],
 }

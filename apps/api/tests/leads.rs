@@ -160,12 +160,16 @@ impl Api {
     }
 
     async fn patch_status(&self, lead: &str, status: &str) -> (StatusCode, Value) {
+        self.patch_body(lead, json!({ "status": status })).await
+    }
+
+    async fn patch_body(&self, lead: &str, body: Value) -> (StatusCode, Value) {
         let (status, body, _) = send(
             self.app(),
             Method::PATCH,
             &format!("/api/v1/leads/{lead}/status"),
             Some(&self.bearer),
-            Some(json!({ "status": status })),
+            Some(body),
         )
         .await;
         (status, body)
@@ -517,7 +521,7 @@ impl Seed {
             error,
         } = seeded;
         sqlx::query(
-            "INSERT INTO qualification_results (id, lead_id, profile_id, profile_revision, agent_id, provider_id, model, prompt_hash, status, summary, answers, agent_score, error, created_at)
+            "INSERT INTO qualification_results (id, lead_id, profile_id, profile_revision, agent_id, provider_id, model, prompt_version, status, summary, answers, agent_score, error, created_at)
              SELECT $1, l.id, l.profile_id, 2, $3, $4::uuid, 'gemma_laya', 'hash', $5, $9, $6, $7, $8, now()
              FROM leads l WHERE l.id = $2::uuid",
         )
@@ -948,6 +952,9 @@ async fn detail_lists_the_qualification_results_with_labels_and_providers(pool: 
     assert_eq!(first["provider_name"], "Laya");
     assert_eq!(first["provider_id"], provider);
     assert_eq!(first["model"], "gemma_laya");
+    assert_eq!(first["provenance"]["model"], "gemma_laya");
+    assert_eq!(first["provenance"]["samples"], 1);
+    assert!(first["provenance"]["generation"].is_object());
     assert_eq!(first["status"], "valid");
     assert_eq!(first["agent_score"], 0.5);
     assert!(first["error"].is_null());
@@ -1230,6 +1237,37 @@ async fn an_invalid_transition_conflicts_and_leaves_the_lead_untouched(pool: PgP
     );
     let (_, detail) = api.get(&format!("/api/v1/leads/{lead}")).await;
     assert_eq!(detail["data"]["lead"]["status"], "new");
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn rejecting_a_lead_requires_a_known_reason_and_a_bounded_note(pool: PgPool) {
+    let (seed, profile) = listing_fixture(&pool).await;
+    let lead = seed.lead(&profile, "nope.com", "qualified", 1.0, 1).await;
+    let api = Api::new(pool.clone()).await;
+
+    for (body, path) in [
+        (json!({"status": "rejected"}), "reason"),
+        (
+            json!({"status": "rejected", "reason": "pas_une_raison"}),
+            "reason",
+        ),
+        (json!({"status": "rejected", "reason": "autre"}), "note"),
+        (
+            json!({"status": "rejected", "reason": "concurrent", "note": "n".repeat(501)}),
+            "note",
+        ),
+    ] {
+        let (status, response) = api.patch_body(&lead, body.clone()).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+        assert_eq!(response["details"][0]["path"], path, "{body}");
+    }
+    let (_, detail) = api.get(&format!("/api/v1/leads/{lead}")).await;
+    assert_eq!(detail["data"]["lead"]["status"], "qualified");
+    let labels: i64 = sqlx::query_scalar("SELECT count(*) FROM decision_labels")
+        .fetch_one(&pool)
+        .await
+        .expect("count");
+    assert_eq!(labels, 0);
 }
 
 #[sqlx::test(migrations = "../../migrations")]

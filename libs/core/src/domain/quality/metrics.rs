@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, HashMap};
 use crate::domain::{
     profile::{ProfileId, definition::VerdictThresholds},
     qualification::Verdict,
-    quality::{DecisionKind, DecisionLabel},
+    quality::{DecisionKind, DecisionLabel, RejectionReason},
 };
 
 pub const MIN_LABELLED_LEADS: u64 = 20;
@@ -94,11 +94,35 @@ pub struct ConfidenceBucket {
 #[derive(Debug, Clone, PartialEq)]
 pub struct AgentSeparation {
     pub agent_id: String,
+    pub name: String,
     pub mean_validated: Option<f64>,
     pub mean_rejected: Option<f64>,
     pub separation: Option<f64>,
     pub validated: u64,
     pub rejected: u64,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct VersionPrecision {
+    pub agent_id: Option<String>,
+    pub agent_name: Option<String>,
+    pub model: String,
+    pub prompt_version: String,
+    pub validated: u64,
+    pub rejected: u64,
+    pub precision: Option<f64>,
+}
+
+impl VersionPrecision {
+    pub fn decided(&self) -> u64 {
+        self.validated + self.rejected
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ReasonCount {
+    pub reason: RejectionReason,
+    pub count: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -123,6 +147,7 @@ pub struct ProfileQuality {
     pub rejected: u64,
     pub precision: Option<f64>,
     pub suggestion: Suggestion,
+    pub reasons: Vec<ReasonCount>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -132,6 +157,7 @@ pub struct QualityReport {
     pub discarded: DiscardedShare,
     pub confidence: Vec<ConfidenceBucket>,
     pub agents: Vec<AgentSeparation>,
+    pub versions: Vec<VersionPrecision>,
     pub profiles: Vec<ProfileQuality>,
 }
 
@@ -222,7 +248,93 @@ fn bucket_index(confidence: f64) -> usize {
         .count()
 }
 
-fn agent_separation(decisions: &[&DecisionLabel]) -> Vec<AgentSeparation> {
+fn agent_name(agent_names: &BTreeMap<String, String>, agent_id: &str) -> String {
+    agent_names
+        .get(agent_id)
+        .cloned()
+        .unwrap_or_else(|| agent_id.to_owned())
+}
+
+fn version_precision(
+    decisions: &[&DecisionLabel],
+    agent_names: &BTreeMap<String, String>,
+) -> Vec<VersionPrecision> {
+    type Key<'a> = (Option<&'a str>, &'a str, &'a str);
+    let mut tallies: BTreeMap<Key<'_>, (u64, u64)> = BTreeMap::new();
+    for label in decisions {
+        let validated = is_validated(label);
+        let agents = label
+            .snapshot
+            .agents
+            .iter()
+            .filter(|(_, snapshot)| snapshot.status == "valid")
+            .filter_map(|(agent, snapshot)| {
+                snapshot
+                    .provenance
+                    .as_ref()
+                    .map(|provenance| (Some(agent.as_str()), provenance))
+            });
+        let aggregator = label
+            .snapshot
+            .aggregator
+            .as_ref()
+            .map(|provenance| (None, provenance));
+        for (agent, provenance) in agents.chain(aggregator) {
+            let entry = tallies
+                .entry((
+                    agent,
+                    provenance.model.as_str(),
+                    provenance.prompt_version.as_str(),
+                ))
+                .or_default();
+            if validated {
+                entry.0 += 1;
+            } else {
+                entry.1 += 1;
+            }
+        }
+    }
+    tallies
+        .into_iter()
+        .map(
+            |((agent, model, prompt_version), (validated, rejected))| VersionPrecision {
+                agent_id: agent.map(str::to_owned),
+                agent_name: agent.map(|agent| agent_name(agent_names, agent)),
+                model: model.to_owned(),
+                prompt_version: prompt_version.to_owned(),
+                validated,
+                rejected,
+                precision: ratio(validated, validated + rejected),
+            },
+        )
+        .collect()
+}
+
+fn rejection_reasons(decisions: &[&DecisionLabel]) -> Vec<ReasonCount> {
+    RejectionReason::ALL
+        .into_iter()
+        .filter_map(|reason| {
+            let count = tally(
+                decisions
+                    .iter()
+                    .filter(|label| {
+                        !is_validated(label)
+                            && label
+                                .rejection
+                                .as_ref()
+                                .is_some_and(|rejection| rejection.reason() == reason)
+                    })
+                    .count(),
+            );
+            (count > 0).then_some(ReasonCount { reason, count })
+        })
+        .collect()
+}
+
+fn agent_separation(
+    decisions: &[&DecisionLabel],
+    agent_names: &BTreeMap<String, String>,
+) -> Vec<AgentSeparation> {
     let mut scores: BTreeMap<&str, (Vec<f64>, Vec<f64>)> = BTreeMap::new();
     for label in decisions {
         for (agent, snapshot) in &label.snapshot.agents {
@@ -248,6 +360,7 @@ fn agent_separation(decisions: &[&DecisionLabel]) -> Vec<AgentSeparation> {
             let mean_rejected = mean(&rejected);
             AgentSeparation {
                 agent_id: agent.to_owned(),
+                name: agent_name(agent_names, agent),
                 mean_validated,
                 mean_rejected,
                 separation: mean_validated.zip(mean_rejected).map(|(v, r)| v - r),
@@ -365,6 +478,7 @@ fn profile_quality(
         rejected,
         precision: ratio(validated, validated + rejected),
         suggestion: Suggestion::compute(&own),
+        reasons: rejection_reasons(&own),
     })
 }
 
@@ -374,6 +488,7 @@ impl QualityReport {
         verdicts: VerdictCounts,
         profiles: &[ProfileInfo],
         selected: Option<ProfileId>,
+        agent_names: &BTreeMap<String, String>,
     ) -> Self {
         let decisions = latest_lead_decisions(labels);
         let validated = tally(decisions.iter().filter(|label| is_validated(label)).count());
@@ -392,7 +507,8 @@ impl QualityReport {
                 share: ratio(verdicts.discarded, verdicts.total()),
             },
             confidence: confidence_histogram(&decisions),
-            agents: agent_separation(&decisions),
+            agents: agent_separation(&decisions, agent_names),
+            versions: version_precision(&decisions, agent_names),
             profiles: profiles
                 .iter()
                 .filter_map(|info| profile_quality(info, &decisions, selected))
@@ -409,8 +525,9 @@ mod tests {
     use super::*;
     use crate::domain::{
         lead::LeadId,
+        llm::RunProvenance,
         profile::RevisionNumber,
-        quality::{AgentSnapshot, DecisionSnapshot},
+        quality::{AgentSnapshot, DecisionSnapshot, Rejection},
     };
 
     fn at(seconds: i64) -> DateTime<Utc> {
@@ -419,6 +536,10 @@ mod tests {
 
     fn profile(n: u128) -> ProfileId {
         ProfileId(Uuid::from_u128(n))
+    }
+
+    fn provenance(model: &str, version: &str) -> RunProvenance {
+        RunProvenance::legacy(model.to_owned(), version.to_owned())
     }
 
     struct Builder {
@@ -442,7 +563,9 @@ mod tests {
                     verdict: verdict.map(str::to_owned),
                     verdict_reason: None,
                     agents: BTreeMap::new(),
+                    aggregator: None,
                 },
+                rejection: None,
             },
         }
     }
@@ -454,8 +577,31 @@ mod tests {
                 AgentSnapshot {
                     status: status.to_owned(),
                     score,
+                    provenance: None,
                 },
             );
+            self
+        }
+
+        fn versioned(mut self, id: &str, model: &str, version: &str) -> Self {
+            self.label.snapshot.agents.insert(
+                id.to_owned(),
+                AgentSnapshot {
+                    status: "valid".to_owned(),
+                    score: Some(0.5),
+                    provenance: Some(provenance(model, version)),
+                },
+            );
+            self
+        }
+
+        fn aggregated(mut self, model: &str, version: &str) -> Self {
+            self.label.snapshot.aggregator = Some(provenance(model, version));
+            self
+        }
+
+        fn because(mut self, reason: RejectionReason) -> Self {
+            self.label.rejection = Some(Rejection::new(reason, Some("note")).unwrap());
             self
         }
 
@@ -497,6 +643,7 @@ mod tests {
             VerdictCounts::default(),
             &[info(VerdictThresholds::default())],
             None,
+            &BTreeMap::new(),
         )
     }
 
@@ -568,11 +715,12 @@ mod tests {
             to_check: 3,
             discarded: 5,
         };
-        let report = QualityReport::compute(&[], counts, &[], None);
+        let report = QualityReport::compute(&[], counts, &[], None, &BTreeMap::new());
         assert_eq!(report.discarded.discarded, 5);
         assert_eq!(report.discarded.total, 10);
         assert_eq!(report.discarded.share, Some(0.5));
-        let empty = QualityReport::compute(&[], VerdictCounts::default(), &[], None);
+        let empty =
+            QualityReport::compute(&[], VerdictCounts::default(), &[], None, &BTreeMap::new());
         assert_eq!(empty.discarded.share, None);
     }
 
@@ -666,6 +814,7 @@ mod tests {
             VerdictCounts::default(),
             &[info(VerdictThresholds::default())],
             None,
+            &BTreeMap::new(),
         );
         assert!(matches!(
             enough.profiles[0].suggestion,
@@ -766,7 +915,13 @@ mod tests {
         };
         let labels = vec![validated(80.0, "fiable").profile(profile(2)).done()];
         let profiles = [info(VerdictThresholds::default()), other];
-        let unselected = QualityReport::compute(&labels, VerdictCounts::default(), &profiles, None);
+        let unselected = QualityReport::compute(
+            &labels,
+            VerdictCounts::default(),
+            &profiles,
+            None,
+            &BTreeMap::new(),
+        );
         assert_eq!(unselected.profiles.len(), 1);
         assert_eq!(unselected.profiles[0].name, "beta");
         assert_eq!(unselected.profiles[0].precision, Some(1.0));
@@ -775,6 +930,7 @@ mod tests {
             VerdictCounts::default(),
             &profiles[..1],
             Some(profile(1)),
+            &BTreeMap::new(),
         );
         assert_eq!(selected.profiles.len(), 1);
         assert_eq!(
@@ -783,6 +939,161 @@ mod tests {
                 labelled: 0,
                 required: 20
             }
+        );
+    }
+
+    #[test]
+    fn precision_is_split_by_agent_model_and_prompt_version() {
+        let labels = vec![
+            validated(80.0, "fiable")
+                .versioned("fit", "qwen3", "qualification-agent@a")
+                .aggregated("qwen3", "aggregator@x")
+                .done(),
+            validated(80.0, "fiable")
+                .versioned("fit", "qwen3", "qualification-agent@a")
+                .aggregated("mistral", "aggregator@x")
+                .done(),
+            rejected(30.0, "a_verifier")
+                .versioned("fit", "qwen3", "qualification-agent@a")
+                .aggregated("mistral", "aggregator@x")
+                .done(),
+            rejected(30.0, "a_verifier")
+                .versioned("fit", "qwen3", "qualification-agent@b")
+                .done(),
+            validated(80.0, "fiable").done(),
+        ];
+        let names = BTreeMap::from([("fit".to_owned(), "Adéquation".to_owned())]);
+        let report = QualityReport::compute(
+            &labels,
+            VerdictCounts::default(),
+            &[info(VerdictThresholds::default())],
+            None,
+            &names,
+        );
+        let rows: Vec<(Option<&str>, &str, &str, u64, u64)> = report
+            .versions
+            .iter()
+            .map(|row| {
+                (
+                    row.agent_id.as_deref(),
+                    row.model.as_str(),
+                    row.prompt_version.as_str(),
+                    row.validated,
+                    row.rejected,
+                )
+            })
+            .collect();
+        assert_eq!(
+            rows,
+            vec![
+                (None, "mistral", "aggregator@x", 1, 1),
+                (None, "qwen3", "aggregator@x", 1, 0),
+                (Some("fit"), "qwen3", "qualification-agent@a", 2, 1),
+                (Some("fit"), "qwen3", "qualification-agent@b", 0, 1),
+            ]
+        );
+        let fit = &report.versions[2];
+        assert_eq!(fit.agent_name.as_deref(), Some("Adéquation"));
+        assert!((fit.precision.unwrap() - 2.0 / 3.0).abs() < 1e-9);
+        assert_eq!(fit.decided(), 3);
+        assert_eq!(report.versions[0].agent_name, None);
+    }
+
+    #[test]
+    fn invalid_agent_results_and_legacy_labels_carry_no_version() {
+        let mut invalid = validated(80.0, "fiable");
+        invalid.label.snapshot.agents.insert(
+            "fit".to_owned(),
+            AgentSnapshot {
+                status: "invalid".to_owned(),
+                score: None,
+                provenance: Some(provenance("qwen3", "qualification-agent@a")),
+            },
+        );
+        let labels = vec![
+            invalid.done(),
+            validated(80.0, "fiable")
+                .agent("fit", "valid", Some(0.5))
+                .done(),
+        ];
+        assert!(report(&labels).versions.is_empty());
+    }
+
+    #[test]
+    fn agent_names_fall_back_to_the_id() {
+        let labels = vec![
+            validated(80.0, "fiable")
+                .agent("fit", "valid", Some(0.9))
+                .agent("market", "valid", Some(0.5))
+                .done(),
+        ];
+        let names = BTreeMap::from([("fit".to_owned(), "Adéquation".to_owned())]);
+        let report = QualityReport::compute(
+            &labels,
+            VerdictCounts::default(),
+            &[info(VerdictThresholds::default())],
+            None,
+            &names,
+        );
+        assert_eq!(report.agents[0].name, "Adéquation");
+        assert_eq!(report.agents[1].name, "market");
+    }
+
+    #[test]
+    fn rejection_reasons_are_counted_per_profile_for_rejected_leads_only() {
+        let other = ProfileInfo {
+            id: profile(2),
+            name: "beta".to_owned(),
+            thresholds: VerdictThresholds::default(),
+        };
+        let lead = LeadId(Uuid::now_v7());
+        let labels = vec![
+            rejected(30.0, "a_verifier")
+                .because(RejectionReason::OffTarget)
+                .done(),
+            rejected(30.0, "a_verifier")
+                .because(RejectionReason::OffTarget)
+                .done(),
+            rejected(30.0, "a_verifier")
+                .because(RejectionReason::Competitor)
+                .done(),
+            rejected(30.0, "a_verifier").done(),
+            rejected(30.0, "a_verifier")
+                .because(RejectionReason::BadData)
+                .profile(profile(2))
+                .done(),
+            rejected(30.0, "a_verifier")
+                .because(RejectionReason::Other)
+                .lead(lead, 10)
+                .done(),
+            validated(30.0, "a_verifier").lead(lead, 20).done(),
+        ];
+        let report = QualityReport::compute(
+            &labels,
+            VerdictCounts::default(),
+            &[info(VerdictThresholds::default()), other],
+            None,
+            &BTreeMap::new(),
+        );
+        assert_eq!(
+            report.profiles[0].reasons,
+            vec![
+                ReasonCount {
+                    reason: RejectionReason::OffTarget,
+                    count: 2
+                },
+                ReasonCount {
+                    reason: RejectionReason::Competitor,
+                    count: 1
+                },
+            ]
+        );
+        assert_eq!(
+            report.profiles[1].reasons,
+            vec![ReasonCount {
+                reason: RejectionReason::BadData,
+                count: 1
+            }]
         );
     }
 }

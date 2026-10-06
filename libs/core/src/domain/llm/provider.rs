@@ -94,6 +94,7 @@ impl From<CoreError> for TierError {
 #[derive(Debug, Clone)]
 pub struct ResolvedProvider {
     pub id: ProviderId,
+    pub name: String,
     pub definition: ProviderDefinition,
     pub max_retries: u8,
     pub pricing: TokenPricing,

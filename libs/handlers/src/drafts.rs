@@ -3,7 +3,7 @@ use axum::{
     extract::{Path, Query, State, rejection::JsonRejection},
 };
 use lodestone_core::{
-    AssessmentId, ContactEmail, DraftEdit, DraftEntry, DraftProblem, ProfileId, normalize_reason,
+    AssessmentId, ContactEmail, DraftEdit, DraftEntry, DraftProblem, ProfileId, Rejection,
 };
 use pagination::{Page, PaginationMetadata};
 use serde::{Deserialize, Serialize};
@@ -12,7 +12,10 @@ use utoipa::{IntoParams, ToSchema};
 use crate::{
     auth::AuthenticatedUser,
     errors::{ApiError, ErrorDetail},
-    leads::{DraftDto, EvidenceDto, VerdictDto, invalid, parse_pagination, parse_verdicts},
+    leads::{
+        DraftDto, EvidenceDto, RejectionReasonDto, VerdictDto, invalid, parse_pagination,
+        parse_verdicts, rejection_problem,
+    },
     profiles::ProfileRefDto,
     response::{DataEnvelope, Response},
     state::AppState,
@@ -126,8 +129,11 @@ pub struct EditDraftRequest {
 
 #[derive(Debug, Default, Deserialize, ToSchema)]
 pub struct RejectDraftRequest {
-    /// Why the draft is rejected, at most 1000 characters.
+    /// Required: one of `hors_cible`, `deja_client`, `concurrent`, `editeur_integrateur`, `hebergeur_agence`, `mauvaise_donnee`, `autre`.
+    #[schema(value_type = Option<RejectionReasonDto>)]
     pub reason: Option<String>,
+    /// Free text, at most 500 characters. Required when the reason is `autre`.
+    pub note: Option<String>,
 }
 
 fn assessment_id(raw: &str) -> Result<AssessmentId, ApiError> {
@@ -288,7 +294,7 @@ pub async fn approve_draft(
     tag = "drafts",
     security(("bearer_auth" = [])),
     params(("assessment_id" = String, Path, description = "Assessment identifier (UUID)")),
-    request_body(content = RejectDraftRequest, description = "Optional rejection reason"),
+    request_body(content = RejectDraftRequest, description = "Rejection reason, required"),
     responses(
         (status = 200, description = "The draft is marked rejected and its lead rejected", body = DataEnvelope<DraftEntryDto>),
         (status = 400, description = "Malformed assessment identifier or body"),
@@ -296,7 +302,7 @@ pub async fn approve_draft(
         (status = 403, description = "The caller is not a user"),
         (status = 404, description = "Unknown or superseded draft, or the lead domain is suppressed"),
         (status = 409, description = "The draft is not pending, or its lead is not qualified"),
-        (status = 422, description = "The reason is too long"),
+        (status = 422, description = "The reason is missing or unknown, or the note is too long or missing for `autre`"),
     )
 )]
 pub async fn reject_draft(
@@ -308,7 +314,8 @@ pub async fn reject_draft(
     let reviewer = actor(user)?;
     let id = assessment_id(&raw)?;
     let request = body.map(|Json(request)| request).unwrap_or_default();
-    let reason = normalize_reason(request.reason.as_deref()).map_err(|p| rejected(vec![p]))?;
-    let entry = state.usecase.reject_draft(id, reviewer, reason).await?;
+    let rejection = Rejection::parse(request.reason.as_deref(), request.note.as_deref())
+        .map_err(rejection_problem)?;
+    let entry = state.usecase.reject_draft(id, reviewer, rejection).await?;
     Ok(Response::OK(DraftEntryDto::try_from(&entry)?))
 }

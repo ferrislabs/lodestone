@@ -3,14 +3,16 @@ use axum::{
     extract::{Query, State},
 };
 use chrono::{DateTime, Utc};
-use lodestone_core::{MIN_LABELLED_LEADS, ProfileId, ProfileQuality, QualityReport, Suggestion};
+use lodestone_core::{
+    MIN_LABELLED_LEADS, ProfileId, ProfileQuality, QualityReport, ReasonCount, Suggestion,
+};
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
 use crate::{
     auth::AuthenticatedUser,
     errors::ApiError,
-    leads::{VerdictDto, invalid},
+    leads::{RejectionReasonDto, VerdictDto, invalid},
     response::{DataEnvelope, Response},
     state::AppState,
 };
@@ -57,6 +59,8 @@ pub struct ConfidenceBucketDto {
 #[derive(Debug, Serialize, PartialEq, ToSchema)]
 pub struct AgentQualityDto {
     pub agent_id: String,
+    /// Name of the agent in the profile revisions; the id when no revision declares it.
+    pub name: String,
     /// Mean score, between 0 and 1, of the validated leads the agent answered validly.
     pub mean_validated: Option<f64>,
     pub mean_rejected: Option<f64>,
@@ -64,6 +68,29 @@ pub struct AgentQualityDto {
     pub separation: Option<f64>,
     pub validated: u64,
     pub rejected: u64,
+}
+
+#[derive(Debug, Serialize, PartialEq, ToSchema)]
+pub struct VersionPrecisionDto {
+    /// Absent for the aggregator.
+    pub agent_id: Option<String>,
+    pub agent_name: Option<String>,
+    pub model: String,
+    /// `qualification-agent@<hash>` or `aggregator@<hash>`.
+    pub prompt_version: String,
+    pub validated: u64,
+    pub rejected: u64,
+    /// Number of decided leads, validated plus rejected.
+    pub n: u64,
+    /// Validated over decided, between 0 and 1.
+    pub precision: Option<f64>,
+}
+
+#[derive(Debug, Serialize, PartialEq, ToSchema)]
+pub struct ReasonCountDto {
+    #[schema(value_type = RejectionReasonDto)]
+    pub reason: String,
+    pub count: u64,
 }
 
 #[derive(Debug, Serialize, PartialEq, ToSchema)]
@@ -94,6 +121,8 @@ pub struct ProfileQualityDto {
     /// Thresholds of the latest revision. Suggestions are never applied automatically.
     pub current: ThresholdsDto,
     pub suggestion: SuggestionDto,
+    /// Reasons given for the rejected leads of the profile, most frequent first.
+    pub rejection_reasons: Vec<ReasonCountDto>,
 }
 
 #[derive(Debug, Serialize, PartialEq, ToSchema)]
@@ -104,6 +133,8 @@ pub struct QualityDto {
     /// Ten buckets of 10 %, from 0 to 100.
     pub confidence: Vec<ConfidenceBucketDto>,
     pub agents: Vec<AgentQualityDto>,
+    /// Precision per agent, model and prompt version, then per aggregator model and prompt version.
+    pub versions: Vec<VersionPrecisionDto>,
     pub profiles: Vec<ProfileQualityDto>,
 }
 
@@ -134,6 +165,15 @@ impl From<&Suggestion> for SuggestionDto {
 
 impl From<&ProfileQuality> for ProfileQualityDto {
     fn from(profile: &ProfileQuality) -> Self {
+        let mut counts: Vec<&ReasonCount> = profile.reasons.iter().collect();
+        counts.sort_by(|a, b| b.count.cmp(&a.count).then(a.reason.cmp(&b.reason)));
+        let reasons = counts
+            .into_iter()
+            .map(|row| ReasonCountDto {
+                reason: row.reason.as_str().to_owned(),
+                count: row.count,
+            })
+            .collect();
         Self {
             profile_id: profile.profile_id.to_string(),
             name: profile.name.clone(),
@@ -145,6 +185,7 @@ impl From<&ProfileQuality> for ProfileQualityDto {
                 discard_below: profile.current.discard_below,
             },
             suggestion: SuggestionDto::from(&profile.suggestion),
+            rejection_reasons: reasons,
         }
     }
 }
@@ -189,11 +230,26 @@ impl From<&QualityReport> for QualityDto {
                 .iter()
                 .map(|agent| AgentQualityDto {
                     agent_id: agent.agent_id.clone(),
+                    name: agent.name.clone(),
                     mean_validated: agent.mean_validated,
                     mean_rejected: agent.mean_rejected,
                     separation: agent.separation,
                     validated: agent.validated,
                     rejected: agent.rejected,
+                })
+                .collect(),
+            versions: report
+                .versions
+                .iter()
+                .map(|row| VersionPrecisionDto {
+                    agent_id: row.agent_id.clone(),
+                    agent_name: row.agent_name.clone(),
+                    model: row.model.clone(),
+                    prompt_version: row.prompt_version.clone(),
+                    validated: row.validated,
+                    rejected: row.rejected,
+                    n: row.decided(),
+                    precision: row.precision,
                 })
                 .collect(),
             profiles: report

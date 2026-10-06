@@ -2,8 +2,8 @@ mod support;
 
 use common::CoreError;
 use lodestone_core::{
-    AssessmentId, DraftEdit, DraftStatus, LeadId, LeadStatus, LodestoneUseCase, ProfileId, UserId,
-    VerdictFilter,
+    AssessmentId, DraftEdit, DraftStatus, LeadId, LeadStatus, LodestoneUseCase, ProfileId,
+    Rejection, RejectionReason, UserId, VerdictFilter,
 };
 use sqlx::PgPool;
 use support::{create_profile, seen_lead};
@@ -353,7 +353,11 @@ async fn rejecting_rejects_the_lead_and_keeps_the_reason(pool: PgPool) {
     let usecase = LodestoneUseCase::new(pool.clone());
 
     let entry = usecase
-        .reject_draft(id, reviewer, Some("not a fit".to_owned()))
+        .reject_draft(
+            id,
+            reviewer,
+            Rejection::new(RejectionReason::Other, Some("not a fit")).unwrap(),
+        )
         .await
         .unwrap();
 
@@ -362,7 +366,13 @@ async fn rejecting_rejects_the_lead_and_keeps_the_reason(pool: PgPool) {
     assert_eq!(review.rejection_reason.as_deref(), Some("not a fit"));
     assert_eq!(entry.record.lead.status, LeadStatus::Rejected);
     assert!(matches!(
-        usecase.reject_draft(id, reviewer, None).await,
+        usecase
+            .reject_draft(
+                id,
+                reviewer,
+                Rejection::new(RejectionReason::OffTarget, None).unwrap()
+            )
+            .await,
         Err(CoreError::Conflict(_))
     ));
 }
@@ -389,7 +399,13 @@ async fn a_suppressed_domain_hides_the_draft_and_blocks_decisions(pool: PgPool) 
         Err(CoreError::NotFound)
     ));
     assert!(matches!(
-        usecase.reject_draft(id, reviewer, None).await,
+        usecase
+            .reject_draft(
+                id,
+                reviewer,
+                Rejection::new(RejectionReason::OffTarget, None).unwrap()
+            )
+            .await,
         Err(CoreError::NotFound)
     ));
     let status: String = sqlx::query_scalar("SELECT status FROM leads WHERE id = $1")

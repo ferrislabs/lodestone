@@ -16,9 +16,9 @@ use lodestone_core::{
     ActiveProfile, Assessment, Clock, CreateProfileCommand, DraftEdit, DraftStatus,
     GenerationParams, Lead, LeadRepository, LeadStatus, LlmError, LlmProvider, LlmRequest,
     LlmResponse, LodestoneUseCase, Observation, ProfileId, ProfileName, Provenance,
-    ProviderDefinition, ProviderId, ProviderKind, QualityWarning, ReviseProfileCommand, SignalKind,
-    SourceName, SummaryState, Tier, TokenPricing, TokenUsage, UnitInterval, UserId,
-    ValidatedProfile, Verdict, VerdictFilter,
+    ProviderDefinition, ProviderId, ProviderKind, QualityWarning, Rejection, RejectionReason,
+    ReviseProfileCommand, SignalKind, SourceName, SummaryState, Tier, TokenPricing, TokenUsage,
+    UnitInterval, UserId, ValidatedProfile, Verdict, VerdictFilter,
     evaluation::{EvaluationSettings, ProviderBuilder},
     infrastructure::{
         crypto::AesGcmCipher, lead::postgres::PgLeadRepository, llm_cache::postgres::PgLlmCache,
@@ -477,8 +477,8 @@ async fn the_summary_is_written_once_every_agent_has_a_result(pool: PgPool) {
         stored.evidence[0].provenance.as_str(),
         "https://acme.com/http_probe"
     );
-    assert_eq!(stored.model, SYNTHESIS);
-    assert!(stored.prompt_version.starts_with("aggregator@"));
+    assert_eq!(stored.provenance.model, SYNTHESIS);
+    assert!(stored.provenance.prompt_version.starts_with("aggregator@"));
     assert_eq!(harness.aggregator_calls().len(), 1);
     assert_eq!(
         harness.lead(profile, "acme.com").await.status,
@@ -561,7 +561,9 @@ async fn the_aggregator_uses_its_provider_else_the_synthesis_default(pool: PgPoo
             .all(|call| call.model == CLASSIFIER)
     );
     assert_eq!(
-        harness.assessments(profile, "acme.com").await[0].model,
+        harness.assessments(profile, "acme.com").await[0]
+            .provenance
+            .model,
         "model-own"
     );
 
@@ -1468,13 +1470,17 @@ async fn a_decided_draft_stays_untouched_when_the_lead_is_summarised_again(pool:
     let user = harness.user().await;
     harness
         .usecase
-        .reject_draft(first.id, user, Some("hors sujet".to_owned()))
+        .reject_draft(
+            first.id,
+            user,
+            Rejection::new(RejectionReason::Other, Some("hors sujet")).unwrap(),
+        )
         .await
         .unwrap();
     let lead = harness.lead(profile, "acme.com").await;
     harness
         .usecase
-        .change_lead_status(lead.id, LeadStatus::New, user)
+        .change_lead_status(lead.id, LeadStatus::New, user, None)
         .await
         .unwrap();
     harness.script(SYNTHESIS, vec![rewritten("Objet suggéré")]);

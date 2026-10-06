@@ -283,8 +283,7 @@ mod tests {
             evidence: Vec::new(),
             evidence_verified: true,
             quality_warnings: Vec::new(),
-            model: String::new(),
-            prompt_version: String::new(),
+            provenance: crate::domain::llm::RunProvenance::legacy(String::new(), String::new()),
             draft: Some(DraftMessage {
                 subject: subject.to_owned(),
                 body: format!("body of {subject}"),

@@ -297,6 +297,7 @@ fn resolve_record<C: SecretCipher>(
         .transpose()?;
     Ok(ResolvedProvider {
         id: record.id,
+        name: record.name,
         definition: ProviderDefinition {
             kind: record.kind,
             base_url: record.base_url,

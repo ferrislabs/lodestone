@@ -66,6 +66,54 @@ async fn label(
     .expect("label");
 }
 
+fn provenance(model: &str, prompt: &str) -> Value {
+    json!({
+        "provider_id": null,
+        "provider_name": "local",
+        "model": model,
+        "prompt_version": prompt,
+        "generation": {"temperature": 0.2},
+        "samples": 1,
+    })
+}
+
+async fn versioned_label(
+    pool: &PgPool,
+    lead: &str,
+    profile: &str,
+    kind: &str,
+    agent_model: &str,
+    agent_prompt: &str,
+    reason: Option<&str>,
+) {
+    sqlx::query(
+        "INSERT INTO decision_labels (id, lead_id, profile_id, profile_revision, kind, decided_at, snapshot, rejection_reason, rejection_note)
+         VALUES ($1, $2::uuid, $3::uuid, 1, $4, now(), $5, $6, $7)",
+    )
+    .bind(common::generate_uuid_v7())
+    .bind(lead)
+    .bind(profile)
+    .bind(kind)
+    .bind(json!({
+        "confidence": 60.0,
+        "opinion": null,
+        "evidence": null,
+        "verdict": "fiable",
+        "verdict_reason": null,
+        "agents": {"fit": {
+            "status": "valid",
+            "score": 0.6,
+            "provenance": provenance(agent_model, agent_prompt),
+        }},
+        "aggregator": provenance("big", "aggregator@x"),
+    }))
+    .bind(reason)
+    .bind(reason.filter(|reason| *reason == "autre").map(|_| "détail"))
+    .execute(pool)
+    .await
+    .expect("label");
+}
+
 struct Api {
     harness: Harness,
     bearer: String,
@@ -184,6 +232,78 @@ async fn the_report_carries_counts_precision_agents_and_suggestions(pool: PgPool
 }
 
 #[sqlx::test(migrations = "../../migrations")]
+async fn precision_is_split_by_version_and_rejections_by_reason(pool: PgPool) {
+    let alpha = profile(&pool, "alpha").await;
+    for (index, (kind, model, prompt, reason)) in [
+        ("lead_validated", "qwen3", "qualification-agent@a", None),
+        ("lead_validated", "qwen3", "qualification-agent@a", None),
+        (
+            "lead_rejected",
+            "qwen3",
+            "qualification-agent@a",
+            Some("hors_cible"),
+        ),
+        (
+            "lead_rejected",
+            "mistral",
+            "qualification-agent@b",
+            Some("hors_cible"),
+        ),
+        (
+            "lead_rejected",
+            "mistral",
+            "qualification-agent@b",
+            Some("autre"),
+        ),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let status = if kind == "lead_validated" {
+            "validated"
+        } else {
+            "rejected"
+        };
+        let id = lead(&pool, &alpha, &format!("l{index}.com"), status).await;
+        versioned_label(&pool, &id, &alpha, kind, model, prompt, reason).await;
+    }
+
+    let api = Api::new(pool).await;
+    let (status, body) = api.get("/api/v1/quality").await;
+
+    assert_eq!(status, StatusCode::OK);
+    let versions = body["data"]["versions"].as_array().unwrap();
+    let rows: Vec<(Value, &str, &str, u64)> = versions
+        .iter()
+        .map(|row| {
+            (
+                row["agent_id"].clone(),
+                row["model"].as_str().unwrap(),
+                row["prompt_version"].as_str().unwrap(),
+                row["n"].as_u64().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        rows,
+        [
+            (Value::Null, "big", "aggregator@x", 5),
+            (json!("fit"), "mistral", "qualification-agent@b", 2),
+            (json!("fit"), "qwen3", "qualification-agent@a", 3),
+        ]
+    );
+    assert_eq!(versions[0]["agent_name"], Value::Null);
+    assert_eq!(versions[1]["agent_name"], "fit");
+    assert_eq!(versions[1]["precision"], 0.0);
+    assert!((versions[2]["precision"].as_f64().unwrap() - 2.0 / 3.0).abs() < 1e-9);
+    assert_eq!(body["data"]["agents"][0]["name"], "fit");
+    assert_eq!(
+        body["data"]["profiles"][0]["rejection_reasons"],
+        json!([{"reason": "hors_cible", "count": 2}, {"reason": "autre", "count": 1}])
+    );
+}
+
+#[sqlx::test(migrations = "../../migrations")]
 async fn the_period_bounds_the_decisions(pool: PgPool) {
     let alpha = profile(&pool, "alpha").await;
     let recent = lead(&pool, &alpha, "recent.com", "validated").await;
@@ -260,6 +380,38 @@ async fn a_status_change_through_the_api_records_a_label(pool: PgPool) {
     let (_, body) = api.get("/api/v1/quality").await;
     assert_eq!(body["data"]["decisions"]["validated"], 1);
     assert_eq!(body["data"]["verdicts"][3]["verdict"], Value::Null);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn rejecting_a_lead_with_a_reason_stores_it_on_the_label(pool: PgPool) {
+    let alpha = profile(&pool, "alpha").await;
+    let lead = lead(&pool, &alpha, "nope.com", "qualified").await;
+    let api = Api::new(pool.clone()).await;
+
+    let (status, body, _) = send(
+        api.harness.public(),
+        Method::PATCH,
+        &format!("/api/v1/leads/{lead}/status"),
+        Some(&api.bearer),
+        Some(json!({"status": "rejected", "reason": "autre", "note": "  déjà en discussion  "})),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["data"]["status"], "rejected");
+    let label: (String, Option<String>, Option<String>) =
+        sqlx::query_as("SELECT kind, rejection_reason, rejection_note FROM decision_labels")
+            .fetch_one(&pool)
+            .await
+            .expect("label");
+    assert_eq!(
+        label,
+        (
+            "lead_rejected".to_owned(),
+            Some("autre".to_owned()),
+            Some("déjà en discussion".to_owned())
+        )
+    );
 }
 
 #[test]

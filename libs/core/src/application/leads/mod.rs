@@ -4,7 +4,11 @@ use lodestone_macros::transactional;
 
 use crate::{
     UserId,
-    application::{LodestoneUseCase, output::schedule_webhook, quality::record_decisions},
+    application::{
+        LodestoneUseCase,
+        output::schedule_webhook,
+        quality::{Decided, record_decisions},
+    },
     domain::{
         company::{CompanyDossier, ports::CompanyRepository},
         facts::LeadFacts,
@@ -16,7 +20,7 @@ use crate::{
         },
         profile::{ProfileId, ports::ProfileRepository},
         qualification::ports::QualificationRepository,
-        quality::DecisionKind,
+        quality::{DecisionKind, Rejection},
         suppression::ports::SuppressionRepository,
     },
     infrastructure::job::postgres::PgJobOutbox,
@@ -131,14 +135,16 @@ impl LodestoneUseCase {
         Ok((found, facts, dossier))
     }
 
-    #[transactional(lead, suppression, qualification, profile, decision)]
+    #[transactional(lead, suppression, qualification, profile, decision, assessment)]
     pub async fn change_lead_status(
         &self,
         lead_id: LeadId,
         to: LeadStatus,
         actor: UserId,
+        rejection: Option<Rejection>,
     ) -> Result<Lead, CoreError> {
         let mut leads = lead_repository;
+        let mut assessments = assessment_repository;
         let mut suppression = suppression_repository;
         let mut qualification = qualification_repository;
         let mut profiles = profile_repository;
@@ -156,6 +162,12 @@ impl LodestoneUseCase {
                 to.as_str()
             ))
         })?;
+        if target == LeadStatus::Rejected && rejection.is_none() {
+            return Err(CoreError::Invalid {
+                field: "reason".to_owned(),
+                message: "is required to reject".to_owned(),
+            });
+        }
         let updated = leads
             .update_status(lead_id, from, target, Utc::now())
             .await?
@@ -167,10 +179,14 @@ impl LodestoneUseCase {
                 &mut decisions,
                 &mut qualification,
                 &mut profiles,
+                &mut assessments,
                 &lead,
-                &[kind],
-                actor,
-                updated.updated_at,
+                Decided {
+                    kinds: &[kind],
+                    rejection: rejection.as_ref(),
+                    actor,
+                    at: updated.updated_at,
+                },
             )
             .await?;
         }

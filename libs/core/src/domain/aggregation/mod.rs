@@ -238,9 +238,7 @@ mod tests {
             profile_id: ProfileId(uuid::Uuid::nil()),
             profile_revision: RevisionNumber::new(1).unwrap(),
             agent_id: agent.id.clone(),
-            provider_id: None,
-            model: "m".to_owned(),
-            prompt_hash: String::new(),
+            provenance: crate::domain::llm::RunProvenance::legacy("m".to_owned(), String::new()),
             status,
             summary: (status == ResultStatus::Valid).then(|| "Résumé de l'agent.".to_owned()),
             answers: match status {

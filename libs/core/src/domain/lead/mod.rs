@@ -5,6 +5,7 @@ use thiserror::Error;
 
 use crate::domain::{
     NormalizedDomain,
+    llm::RunProvenance,
     profile::{ProfileId, RevisionNumber, definition::AgentId},
     prompt::DraftMessage,
     values::{EmailAddress, Provenance, SignalKind, SourceName, UnitInterval},
@@ -16,7 +17,10 @@ pub mod query;
 
 macro_rules! uuid_id {
     ($name:ident) => {
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+        #[derive(
+            Debug, Clone, Copy, PartialEq, Eq, Hash, ::serde::Serialize, ::serde::Deserialize,
+        )]
+        #[serde(transparent)]
         pub struct $name(pub ::uuid::Uuid);
 
         impl ::std::str::FromStr for $name {
@@ -237,8 +241,7 @@ pub struct Assessment {
     pub evidence: Vec<Evidence>,
     pub evidence_verified: bool,
     pub quality_warnings: Vec<QualityWarning>,
-    pub model: String,
-    pub prompt_version: String,
+    pub provenance: RunProvenance,
     pub draft: Option<DraftMessage>,
     pub draft_review: Option<draft::DraftReview>,
     pub created_at: DateTime<Utc>,

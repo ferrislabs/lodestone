@@ -4,7 +4,11 @@ use lodestone_macros::transactional;
 
 use crate::{
     UserId,
-    application::{LodestoneUseCase, output::schedule_webhook, quality::record_decisions},
+    application::{
+        LodestoneUseCase,
+        output::schedule_webhook,
+        quality::{Decided, record_decisions},
+    },
     domain::{
         lead::{
             AssessmentId, ContactEmail, Lead, LeadStatus,
@@ -16,7 +20,7 @@ use crate::{
             query::VerdictFilter,
         },
         profile::{ProfileId, ports::ProfileRepository},
-        quality::DecisionKind,
+        quality::{DecisionKind, Rejection},
         suppression::ports::SuppressionRepository,
     },
     infrastructure::job::postgres::PgJobOutbox,
@@ -25,10 +29,17 @@ use crate::{
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Decision {
     Approve,
-    Reject(Option<String>),
+    Reject(Rejection),
 }
 
 impl Decision {
+    fn rejection(&self) -> Option<&Rejection> {
+        match self {
+            Self::Approve => None,
+            Self::Reject(rejection) => Some(rejection),
+        }
+    }
+
     fn kind(&self) -> DecisionKind {
         match self {
             Self::Approve => DecisionKind::DraftApproved,
@@ -51,7 +62,7 @@ impl Decision {
     ) -> Result<DraftReview, InvalidDraftTransition> {
         match self {
             Self::Approve => review.approve(by, at),
-            Self::Reject(reason) => review.reject(by, at, reason.clone()),
+            Self::Reject(rejection) => review.reject(by, at, rejection.note().map(str::to_owned)),
         }
     }
 }
@@ -183,9 +194,10 @@ impl LodestoneUseCase {
         &self,
         id: AssessmentId,
         actor: UserId,
-        reason: Option<String>,
+        rejection: Rejection,
     ) -> Result<DraftEntry, CoreError> {
-        self.decide_draft(id, actor, Decision::Reject(reason)).await
+        self.decide_draft(id, actor, Decision::Reject(rejection))
+            .await
     }
 
     #[transactional(
@@ -245,10 +257,14 @@ impl LodestoneUseCase {
             &mut decisions,
             &mut qualification,
             &mut profiles,
+            &mut assessments,
             &record.lead,
-            &kinds,
-            actor,
-            now,
+            Decided {
+                kinds: &kinds,
+                rejection: decision.rejection(),
+                actor,
+                at: now,
+            },
         )
         .await?;
         if to == LeadStatus::Validated {

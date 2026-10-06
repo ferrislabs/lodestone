@@ -54,8 +54,13 @@ export function AgentsCard({ agents }: AgentsCardProps) {
 						<TableBody>
 							{agents.map((agent) => (
 								<TableRow key={agent.agent_id}>
-									<TableCell className="font-mono text-xs">
-										{agent.agent_id}
+									<TableCell>
+										<div>{agent.name}</div>
+										{agent.name !== agent.agent_id ? (
+											<div className="font-mono text-xs text-muted-foreground">
+												{agent.agent_id}
+											</div>
+										) : null}
 									</TableCell>
 									<TableCell className="text-right tabular-nums">
 										{formatScore(agent.mean_validated)}

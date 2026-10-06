@@ -265,18 +265,26 @@ impl<'tx> QualificationRepository for PgQualificationRepository<'tx> {
     #[tracing::instrument(skip(self, result), fields(db.system = "postgresql", db.operation = "upsert", db.table = "qualification_results", lead.id = %result.lead_id, agent.id = result.agent_id.as_str()), err)]
     async fn store_result(&mut self, result: &QualificationResult) -> Result<(), CoreError> {
         let revision = revision_number(result.profile_revision)?;
+        let generation = serde_json::to_value(result.provenance.generation)
+            .map_err(|error| CoreError::Internal(error.to_string()))?;
+        let samples = i32::try_from(result.provenance.samples)
+            .map_err(|_| CoreError::Internal("result samples out of range".to_owned()))?;
         let mut tx = self.tx.lock().await;
         sqlx::query(
             r#"
             INSERT INTO qualification_results (
                 id, lead_id, profile_id, profile_revision, agent_id, provider_id, model,
-                prompt_hash, status, summary, answers, agent_score, error, created_at
+                prompt_version, status, summary, answers, agent_score, error, created_at,
+                provider_name, generation, samples
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
             ON CONFLICT (lead_id, profile_revision, agent_id) DO UPDATE SET
-                provider_id = EXCLUDED.provider_id,
-                model       = EXCLUDED.model,
-                prompt_hash = EXCLUDED.prompt_hash,
+                provider_id    = EXCLUDED.provider_id,
+                model          = EXCLUDED.model,
+                prompt_version = EXCLUDED.prompt_version,
+                provider_name  = EXCLUDED.provider_name,
+                generation     = EXCLUDED.generation,
+                samples        = EXCLUDED.samples,
                 status      = EXCLUDED.status,
                 summary     = EXCLUDED.summary,
                 answers     = EXCLUDED.answers,
@@ -290,15 +298,18 @@ impl<'tx> QualificationRepository for PgQualificationRepository<'tx> {
         .bind(result.profile_id.0)
         .bind(revision)
         .bind(result.agent_id.as_str())
-        .bind(result.provider_id.map(|provider| provider.0))
-        .bind(&result.model)
-        .bind(&result.prompt_hash)
+        .bind(result.provenance.provider_id.map(|provider| provider.0))
+        .bind(&result.provenance.model)
+        .bind(&result.provenance.prompt_version)
         .bind(result.status.as_str())
         .bind(result.summary.as_deref())
         .bind(&result.answers)
         .bind(result.agent_score)
         .bind(result.error.as_deref())
         .bind(result.created_at)
+        .bind(&result.provenance.provider_name)
+        .bind(&generation)
+        .bind(samples)
         .execute(&mut ***tx)
         .await
         .map_err(map_sqlx_error)?;
@@ -365,7 +376,8 @@ impl<'tx> QualificationRepository for PgQualificationRepository<'tx> {
         let rows = sqlx::query_as::<_, ResultRow>(
             r#"
             SELECT r.id, r.lead_id, r.profile_id, r.profile_revision, r.agent_id, r.provider_id,
-                   r.model, r.prompt_hash, r.status, r.summary, r.answers, r.agent_score, r.error, r.created_at
+                   r.provider_name, r.model, r.prompt_version, r.generation, r.samples,
+                   r.status, r.summary, r.answers, r.agent_score, r.error, r.created_at
             FROM qualification_results r
             JOIN lead_qualification_state s
               ON s.lead_id = r.lead_id AND s.profile_revision = r.profile_revision

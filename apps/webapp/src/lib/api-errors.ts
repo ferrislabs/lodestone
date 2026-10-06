@@ -72,6 +72,9 @@ const EXACT_MESSAGES: Readonly<Record<string, string>> = {
 	'unknown field': 'Champ inconnu',
 	'unknown provider': 'Fournisseur inconnu',
 	'is required': 'Champ obligatoire',
+	'is required to reject': 'Choisissez une raison de rejet',
+	'is required when the reason is autre':
+		'Précisez la raison quand elle est « Autre »',
 	'is required for this provider kind':
 		'Obligatoire pour ce type de fournisseur',
 	'is too long': 'Trop long',
