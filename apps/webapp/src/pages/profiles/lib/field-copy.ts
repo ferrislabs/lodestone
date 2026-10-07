@@ -213,11 +213,6 @@ export const FIELD_COPY: Readonly<Record<string, FieldCopy>> = {
 		label: 'Prompt système',
 		description: 'Consigne donnée au modèle, 8000 caractères au maximum.',
 	},
-	'qualification_agents[].weight': {
-		label: "Poids de l'agent",
-		description:
-			'Poids entier de 1 à 10 de cet agent dans la confiance du lead.',
-	},
 	'qualification_agents[].exclusion_threshold': {
 		label: "Seuil d'exclusion",
 		description:
@@ -324,7 +319,7 @@ export const FIELD_COPY: Readonly<Record<string, FieldCopy>> = {
 	'scoring_agents[].weight': {
 		label: "Poids de l'agent",
 		description:
-			'Poids entier de 1 à 10 de cet agent dans le score et le verdict du lead.',
+			'Poids entier de 1 à 10 de cet agent dans la moyenne pondérée du score et du verdict du lead. Affiché à partir de deux agents de scoring.',
 	},
 	'scoring_agents[].system_prompt': {
 		label: 'Prompt système',

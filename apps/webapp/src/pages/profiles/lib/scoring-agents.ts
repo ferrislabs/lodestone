@@ -173,16 +173,23 @@ export function setScoringField(
 	return setAgentField(value, index, key, next, SCORING_SCOPE)
 }
 
+export const MIN_AGENTS_FOR_WEIGHT = 2
+
+export function weightsApply(agentCount: number): boolean {
+	return agentCount >= MIN_AGENTS_FOR_WEIGHT
+}
+
 export function scoringSummary(
 	agent: JsonValue | undefined,
 	providers: readonly ProviderOption[],
+	showWeight: boolean,
 ): string {
 	const count = criteriaOf(agent).length
 	const samples = scoringSamplesOf(agent) ?? DEFAULT_SCORING_SAMPLES
 	return [
 		`${count} ${pluralize(count, 'critère', 'critères')}`,
 		`fournisseur : ${providerName(agentProvider(agent), providers)}`,
-		`poids ${agentWeight(agent)}`,
+		...(showWeight ? [`poids ${agentWeight(agent)}`] : []),
 		`${samples} ${pluralize(samples, 'échantillon', 'échantillons')}`,
 	].join(' · ')
 }

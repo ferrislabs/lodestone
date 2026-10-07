@@ -805,7 +805,6 @@ export function qualificationSummary(
 	return [
 		`${count} ${pluralize(count, "axe d'analyse", "axes d'analyse")}`,
 		`fournisseur : ${providerName(agentProvider(agent), providers)}`,
-		`poids ${agentWeight(agent)}`,
 	].join(' · ')
 }
 

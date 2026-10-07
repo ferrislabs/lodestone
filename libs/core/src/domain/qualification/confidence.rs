@@ -10,7 +10,7 @@ use crate::domain::{
     scoring::{signal_strength, strength_score},
 };
 
-pub const SCORING_VERSION: i32 = 4;
+pub const SCORING_VERSION: i32 = 5;
 
 const VOLUME_SCALE: f64 = 3.0;
 const SOURCES_FOR_FULL_DIVERSITY: f64 = 2.0;
@@ -40,21 +40,16 @@ pub fn calibrate(probabilities: &[(String, f64)], floor: f64) -> Vec<(String, f6
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct AgentOpinion {
-    pub weight: u8,
     pub score: f64,
     pub axes: usize,
 }
 
 pub fn opinion(agents: &[AgentOpinion]) -> Option<f64> {
-    let total: f64 = agents.iter().map(|agent| f64::from(agent.weight)).sum();
-    if total <= 0.0 {
+    if agents.is_empty() {
         return None;
     }
-    let weighted: f64 = agents
-        .iter()
-        .map(|agent| f64::from(agent.weight) * agent.score)
-        .sum();
-    Some(weighted / total)
+    let total: f64 = agents.iter().map(|agent| agent.score).sum();
+    Some(total / count(agents.len()))
 }
 
 pub fn has_independent_angles(agents: &[AgentOpinion]) -> bool {
@@ -384,11 +379,7 @@ mod tests {
     }
 
     fn agent(score: f64, axes: usize) -> AgentOpinion {
-        AgentOpinion {
-            weight: 5,
-            score,
-            axes,
-        }
+        AgentOpinion { score, axes }
     }
 
     #[test]
@@ -415,20 +406,22 @@ mod tests {
     }
 
     #[test]
-    fn the_opinion_is_the_weighted_mean_of_the_agent_scores() {
+    fn the_opinion_is_the_plain_mean_of_the_agent_scores() {
         let agents = [
             AgentOpinion {
-                weight: 1,
                 score: 1.0,
                 axes: 1,
             },
             AgentOpinion {
-                weight: 3,
                 score: 0.0,
                 axes: 1,
             },
+            AgentOpinion {
+                score: 0.5,
+                axes: 1,
+            },
         ];
-        assert_eq!(opinion(&agents), Some(0.25));
+        assert_eq!(opinion(&agents), Some(0.5));
         assert_eq!(opinion(&[]), None);
     }
 

@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 use crate::domain::values::SourceName;
 
-pub const PROFILE_SCHEMA_VERSION: u32 = 14;
+pub const PROFILE_SCHEMA_VERSION: u32 = 15;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -15,7 +15,7 @@ pub const PROFILE_SCHEMA_VERSION: u32 = 14;
     description = "Describes one market: what is sold, which agents scan which sources, which qualification agents judge a lead, which scoring agents decide its score and verdict, how an aggregator sums it up and which contacts to prefer."
 )]
 pub struct ProfileDefinition {
-    #[schemars(description = "Profile format version. Must be 14.")]
+    #[schemars(description = "Profile format version. Must be 15.")]
     pub schema_version: u32,
     pub identity: Identity,
     #[serde(default)]
@@ -32,7 +32,7 @@ pub struct ProfileDefinition {
     pub qualification_agents: Vec<QualificationAgent>,
     #[serde(default)]
     #[schemars(
-        description = "Scoring agents. Each one decides a score and a verdict for every lead from the reports of the qualification agents, through a contract imposed by the application. The lead score and verdict are the weighted means of their answers. With none enabled, the verdict stays pending."
+        description = "Scoring agents. Each one decides a score and a verdict for every lead from the reports of the qualification agents, through a contract imposed by the application. The lead score and verdict are the means of their answers weighted by the weight of each agent. With none enabled, the verdict stays pending."
     )]
     pub scoring_agents: Vec<ScoringAgent>,
     pub aggregator: Aggregator,
@@ -123,12 +123,6 @@ pub struct QualificationAgent {
         description = "System prompt given to the model."
     )]
     pub system_prompt: String,
-    #[serde(default = "default_weight")]
-    #[schemars(
-        range(min = 1, max = 10),
-        description = "Integer weight from 1 to 10 of this agent in the lead confidence."
-    )]
-    pub weight: u8,
     #[serde(default = "default_exclusion_threshold")]
     #[schemars(
         range(min = 0.5, max = 1.0),
@@ -189,7 +183,7 @@ pub struct ScoringAgent {
     #[serde(default = "default_weight")]
     #[schemars(
         range(min = 1, max = 10),
-        description = "Integer weight from 1 to 10 of this agent in the lead score and verdict."
+        description = "Integer weight from 1 to 10 of this agent in the lead score and verdict. It only matters when the profile has two or more scoring agents."
     )]
     pub weight: u8,
     #[schemars(

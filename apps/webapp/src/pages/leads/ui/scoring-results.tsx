@@ -58,7 +58,13 @@ function VerdictBars({
 	)
 }
 
-function AgentScoring({ result }: { result: ScoringResult }) {
+function AgentScoring({
+	result,
+	showWeight,
+}: {
+	result: ScoringResult
+	showWeight: boolean
+}) {
 	const valid = result.status === 'valid'
 	const verdict = result.verdict ?? null
 	const note = verdict ? declaredChoiceNote(verdict) : null
@@ -75,7 +81,7 @@ function AgentScoring({ result }: { result: ScoringResult }) {
 					<Badge variant={valid ? 'secondary' : 'destructive'}>
 						{valid ? 'Valide' : 'Invalide'}
 					</Badge>
-					{result.weight != null ? (
+					{showWeight && result.weight != null ? (
 						<span className="text-xs text-muted-foreground">
 							{scoringWeightLabel(result.weight)}
 						</span>
@@ -219,8 +225,10 @@ export function ScoringResults({ results, lead }: ScoringResultsProps) {
 				<CardTitle>Scoring ({results.length})</CardTitle>
 				<p className="text-sm text-muted-foreground">
 					Chaque agent de scoring décide d'un score et d'un verdict à partir des
-					rapports de qualification et des indicateurs. Le résultat combiné est
-					la moyenne pondérée par le poids des agents.
+					rapports de qualification et des indicateurs.
+					{results.length > 1
+						? ' Le résultat combiné est la moyenne pondérée par le poids des agents.'
+						: ''}
 				</p>
 			</CardHeader>
 			<CardContent className="flex flex-col gap-4">
@@ -231,7 +239,11 @@ export function ScoringResults({ results, lead }: ScoringResultsProps) {
 				) : (
 					<div className="grid gap-4 lg:grid-cols-2">
 						{results.map((result) => (
-							<AgentScoring key={result.agent_id} result={result} />
+							<AgentScoring
+								key={result.agent_id}
+								result={result}
+								showWeight={results.length > 1}
+							/>
 						))}
 					</div>
 				)}

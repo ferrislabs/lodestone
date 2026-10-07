@@ -286,7 +286,6 @@ fn definition() -> Value {
         "enabled": true,
         "provider_id": null,
         "system_prompt": "PROMPT-OF-one",
-        "weight": 5,
         "samples": 1,
         "questions": [question("q"), question("q2")]
     }]);

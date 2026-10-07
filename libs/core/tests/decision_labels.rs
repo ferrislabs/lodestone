@@ -465,7 +465,6 @@ async fn the_report_names_agents_after_the_profile_revisions_and_lists_reasons_a
         "description": "Fit",
         "enabled": true,
         "system_prompt": "PROMPT",
-        "weight": 5,
         "questions": [{
             "id": "q",
             "wording": "Pertinent ?",

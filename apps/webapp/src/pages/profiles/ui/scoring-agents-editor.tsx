@@ -9,6 +9,7 @@ import {
 import { agentField } from '#/pages/profiles/lib/agents'
 import type { ProviderOption } from '#/pages/profiles/lib/qualification'
 import type { ScoringActions } from '#/pages/profiles/lib/qualification-actions'
+import { weightsApply } from '#/pages/profiles/lib/scoring-agents'
 import { ScoringAgentCard } from '#/pages/profiles/ui/scoring-agent-card'
 import { ScoringAgentSheet } from '#/pages/profiles/ui/scoring-agent-sheet'
 
@@ -34,6 +35,7 @@ export function ScoringAgentsEditor({
 	actions,
 }: ScoringAgentsEditorProps) {
 	const editingAgent = editing === null ? undefined : agents[editing]
+	const showWeight = weightsApply(agents.length)
 	return (
 		<section aria-label="Agents de scoring" className="flex flex-col gap-3">
 			<h2 className="text-base font-semibold">Agents de scoring</h2>
@@ -64,6 +66,7 @@ export function ScoringAgentsEditor({
 							index={index}
 							problems={problems}
 							providers={providers}
+							showWeight={showWeight}
 							editing={editing === index}
 							confirmingRemove={confirmingRemove === index}
 							onEdit={() => actions.edit(index)}
@@ -92,6 +95,7 @@ export function ScoringAgentsEditor({
 					index={editing}
 					problems={problems}
 					providers={providers}
+					showWeight={showWeight}
 					calibration={
 						calibration[
 							calibrationKey('scoring', agentField(editingAgent, 'id'))

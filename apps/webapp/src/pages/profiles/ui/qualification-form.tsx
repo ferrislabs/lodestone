@@ -16,7 +16,6 @@ import {
 import { agentEnabled, agentField } from '#/pages/profiles/lib/agents'
 import {
 	agentProvider,
-	agentWeight,
 	contractSchema,
 	exclusionThresholdOf,
 	MAX_DESCRIPTION_CHARS,
@@ -35,7 +34,6 @@ import { AxisCard } from '#/pages/profiles/ui/axis-card'
 import { ContractPreview } from '#/pages/profiles/ui/contract-preview'
 import { LearnedCalibrationField } from '#/pages/profiles/ui/learned-calibration-field'
 import { ProviderSelect } from '#/pages/profiles/ui/provider-select'
-import { WeightPicker } from '#/pages/profiles/ui/weight-picker'
 
 interface QualificationFormProps {
 	agent: JsonValue
@@ -96,7 +94,6 @@ export function QualificationForm({
 	const idProblems = at(problems, `${base}.id`)
 	const descriptionProblems = at(problems, `${base}.description`)
 	const providerProblems = at(problems, `${base}.provider_id`)
-	const weightProblems = at(problems, `${base}.weight`)
 	const exclusionProblems = at(problems, `${base}.exclusion_threshold`)
 	const exclusionThreshold = exclusionThresholdOf(agent)
 	const samplesProblems = at(problems, `${base}.samples`)
@@ -183,19 +180,6 @@ export function QualificationForm({
 						onChange={(providerId) => actions.setProvider(index, providerId)}
 					/>
 					<FieldErrors id={`${key}-provider`} problems={providerProblems} />
-				</div>
-				<div className="flex flex-col gap-1.5">
-					<Label id={`${key}-weight-label`}>Poids de l'agent</Label>
-					<p className="text-xs text-muted-foreground">
-						Poids de cet agent dans la confiance du lead, de 1 à 10.
-					</p>
-					<WeightPicker
-						labelledBy={`${key}-weight-label`}
-						value={agentWeight(agent)}
-						invalid={weightProblems.length > 0}
-						onChange={(weight) => actions.setWeight(index, weight)}
-					/>
-					<FieldErrors id={`${key}-weight`} problems={weightProblems} />
 				</div>
 				<LearnedCalibrationField
 					id={`${key}-learned-calibration`}

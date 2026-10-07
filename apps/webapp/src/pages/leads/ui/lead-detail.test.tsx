@@ -739,7 +739,7 @@ describe('LeadDetail', () => {
 		expect(card?.getAttribute('data-status')).toBe('valid')
 		expect(card?.textContent).toContain('Score global')
 		expect(card?.textContent).toContain('Valide')
-		expect(card?.textContent).toContain('poids 5')
+		expect(card?.textContent).not.toContain('poids')
 		expect(card?.querySelector('[data-part="agent-score"]')?.textContent).toBe(
 			'72 / 100',
 		)

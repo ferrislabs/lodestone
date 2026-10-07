@@ -21,6 +21,7 @@ interface ScoringAgentSheetProps {
 	index: number
 	problems: readonly Problem[]
 	providers: readonly ProviderOption[]
+	showWeight: boolean
 	calibration: AgentCalibrationState | undefined
 	previewing: boolean
 	actions: ScoringActions
@@ -31,6 +32,7 @@ export function ScoringAgentSheet({
 	index,
 	problems,
 	providers,
+	showWeight,
 	calibration,
 	previewing,
 	actions,
@@ -68,6 +70,7 @@ export function ScoringAgentSheet({
 						index={index}
 						problems={problems}
 						providers={providers}
+						showWeight={showWeight}
 						calibration={calibration}
 						previewing={previewing}
 						actions={actions}

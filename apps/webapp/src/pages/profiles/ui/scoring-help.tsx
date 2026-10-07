@@ -5,6 +5,7 @@ import { HelpPanel } from '#/pages/profiles/ui/help-panel'
 
 interface ScoringHelpProps {
 	collapsed: boolean
+	showWeight: boolean
 	onToggle: () => void
 }
 
@@ -17,7 +18,11 @@ const FLOW: readonly string[] = [
 	'Agrégateur : rédige la synthèse et le brouillon.',
 ]
 
-export function ScoringHelp({ collapsed, onToggle }: ScoringHelpProps) {
+export function ScoringHelp({
+	collapsed,
+	showWeight,
+	onToggle,
+}: ScoringHelpProps) {
 	return (
 		<HelpPanel title="Scoring" collapsed={collapsed} onToggle={onToggle}>
 			<ol className="flex list-decimal flex-col gap-1.5 pl-4 text-xs">
@@ -28,8 +33,13 @@ export function ScoringHelp({ collapsed, onToggle }: ScoringHelpProps) {
 			<p>
 				Un agent de scoring décrit ce qu'il évalue, choisit un fournisseur LLM,
 				un prompt système et des critères à choix. Plusieurs agents peuvent
-				coexister : chacun pèse de 1 à 10 dans le score et le verdict du lead.
-				Sans agent de scoring actif, le verdict reste « en attente du scoring ».
+				coexister. Sans agent de scoring actif, le verdict reste « en attente du
+				scoring ».
+			</p>
+			<p data-testid="scoring-weight-help">
+				{showWeight
+					? 'Le poids de chaque agent, de 1 à 10, fixe sa part dans la moyenne pondérée du score et du verdict du lead : un agent de poids 6 compte deux fois plus qu’un agent de poids 3.'
+					: 'Avec un seul agent, son score et son verdict sont ceux du lead. Le poids de l’agent n’apparaît qu’à partir de deux agents de scoring.'}
 			</p>
 			<p>
 				La force des signaux (0 à 100) ordonne la liste des leads. C'est la

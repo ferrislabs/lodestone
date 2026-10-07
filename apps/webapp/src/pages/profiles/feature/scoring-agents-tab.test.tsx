@@ -59,7 +59,7 @@ const PROVIDERS: ProviderOption[] = [
 function base(): JsonObject {
 	const taken = new Set(['ats', 'pertinence'])
 	return {
-		schema_version: 14,
+		schema_version: 15,
 		identity: { offer: 'o', target_customer: 't' },
 		agents: [newAgent('ats', [])],
 		qualification_agents: [
@@ -71,6 +71,15 @@ function base(): JsonObject {
 		contact_ranking: { preferred_local_parts: [] },
 		language: 'fr',
 	}
+}
+
+function withTwoAgents(): JsonObject {
+	const value = base()
+	const second = {
+		...newScoringAgent(new Set(['ats', 'pertinence', 'score-global'])),
+		weight: 7,
+	}
+	return { ...value, scoring_agents: [...scoringList(value), second] }
 }
 
 function Harness({
@@ -159,11 +168,87 @@ describe('scoring tab', () => {
 		const card = document.querySelector('[data-scoring-agent="0"]')
 		expect(card?.textContent).toContain('Score global')
 		expect(card?.textContent).toContain(
-			'3 critères · fournisseur : par défaut · poids 5 · 1 échantillon',
+			'3 critères · fournisseur : par défaut · 1 échantillon',
 		)
+		expect(card?.textContent).not.toContain('poids')
 		expect(
 			screen.getByRole('button', { name: 'Ajouter un agent de scoring' }),
 		).toBeTruthy()
+	})
+
+	it('shows the weight on the cards from two scoring agents', () => {
+		render(<Harness initial={withTwoAgents()} />)
+		expect(
+			document.querySelector('[data-scoring-agent="0"]')?.textContent,
+		).toContain(
+			'3 critères · fournisseur : par défaut · poids 5 · 1 échantillon',
+		)
+		expect(
+			document.querySelector('[data-scoring-agent="1"]')?.textContent,
+		).toContain('poids 7')
+	})
+
+	it('hides the weight field with one scoring agent and keeps its value', () => {
+		const seen = vi.fn()
+		const initial = base()
+		const [only] = scoringList(initial)
+		render(
+			<Harness
+				initial={{
+					...initial,
+					scoring_agents: [{ ...(only as JsonObject), weight: 9 }],
+				}}
+				onValue={seen}
+			/>,
+		)
+		openFirst()
+		expect(sheet().queryByText("Poids de l'agent")).toBeNull()
+		expect(
+			sheet().queryByRole('radiogroup', { name: "Poids de l'agent" }),
+		).toBeNull()
+		fireEvent.change(sheet().getByLabelText('Nom'), {
+			target: { value: 'Décideur' },
+		})
+		expect(scoringList(lastValue(seen))[0]).toMatchObject({
+			name: 'Décideur',
+			weight: 9,
+		})
+	})
+
+	it('shows the weight field from two scoring agents and edits it', () => {
+		const seen = vi.fn()
+		render(<Harness initial={withTwoAgents()} onValue={seen} />)
+		fireEvent.click(
+			screen.getAllByRole('button', {
+				name: 'Modifier Score global',
+			})[1] as HTMLElement,
+		)
+		const group = sheet().getByRole('radiogroup', { name: "Poids de l'agent" })
+		fireEvent.click(within(group).getByRole('radio', { name: '3' }))
+		expect(scoringList(lastValue(seen))[1]).toMatchObject({ weight: 3 })
+		expect(scoringList(lastValue(seen))[0]).toMatchObject({ weight: 5 })
+	})
+
+	it('reveals the weight field once a second agent is added', () => {
+		render(<Harness />)
+		fireEvent.click(
+			screen.getByRole('button', { name: 'Ajouter un agent de scoring' }),
+		)
+		expect(
+			sheet().getByRole('radiogroup', { name: "Poids de l'agent" }),
+		).toBeTruthy()
+	})
+
+	it('explains the weight in the help panel only when it applies', () => {
+		const one = render(<Harness />)
+		expect(screen.getByTestId('scoring-weight-help').textContent).toContain(
+			'Avec un seul agent',
+		)
+		one.unmount()
+		render(<Harness initial={withTwoAgents()} />)
+		expect(screen.getByTestId('scoring-weight-help').textContent).toContain(
+			'moyenne pondérée',
+		)
 	})
 
 	it('says the verdict stays pending without any scoring agent', () => {
@@ -197,8 +282,12 @@ describe('scoring tab', () => {
 
 	it('edits the agent section of the sheet', () => {
 		const seen = vi.fn()
-		render(<Harness onValue={seen} />)
-		openFirst()
+		render(<Harness initial={withTwoAgents()} onValue={seen} />)
+		fireEvent.click(
+			screen.getAllByRole('button', {
+				name: 'Modifier Score global',
+			})[0] as HTMLElement,
+		)
 		fireEvent.change(sheet().getByLabelText('Nom'), {
 			target: { value: 'Décideur prudent' },
 		})
@@ -376,13 +465,17 @@ describe('scoring tab', () => {
 			{ path: 'scoring_agents[0].weight', message: 'Doit être de 1 à 10' },
 			{ path: 'scoring_agents[0].criteria[1].id', message: 'Doit être unique' },
 		]
-		render(<Harness problems={problems} />)
+		render(<Harness initial={withTwoAgents()} problems={problems} />)
 		const card = document.querySelector('[data-scoring-agent="0"]')
 		expect(card?.textContent).toContain('2 problèmes')
 		expect(screen.getByRole('tab', { name: /Scoring/ }).textContent).toContain(
 			'2',
 		)
-		openFirst()
+		fireEvent.click(
+			screen.getAllByRole('button', {
+				name: 'Modifier Score global',
+			})[0] as HTMLElement,
+		)
 		expect(sheet().getByText('Doit être de 1 à 10')).toBeTruthy()
 		expect(sheet().getByText('Doit être unique')).toBeTruthy()
 	})

@@ -10,7 +10,7 @@ use super::definition::{
     Identity, KeywordSource, Language, MAX_DESCRIPTION_CHARS, MAX_PROMPT_CHARS,
     PROFILE_SCHEMA_VERSION, ProfileDefinition, QualificationAgent, Question, QuestionOption,
     ScoringAgent, VerdictThresholds, default_exclusion_threshold, default_half_life_days,
-    default_influence,
+    default_influence, default_samples, default_sampling_temperature,
 };
 
 #[derive(Debug, Deserialize)]
@@ -149,15 +149,15 @@ fn option(value: &str, label: &str, score: f64) -> QuestionOption {
     }
 }
 
-fn pertinence_agent(identity: &Identity, llm: &LlmV13) -> QualificationAgent {
-    QualificationAgent {
+fn pertinence_agent(identity: &Identity, llm: &LlmV13) -> QualificationAgentV14 {
+    QualificationAgentV14 {
         id: AgentId::new("pertinence"),
         name: "Pertinence".to_owned(),
         description: "La pertinence du lead pour l'offre du profil.".to_owned(),
         enabled: true,
         provider_id: None,
         system_prompt: pertinence_prompt(identity, llm),
-        weight: 5,
+        _weight: IgnoredAny,
         exclusion_threshold: DEFAULT_EXCLUSION_THRESHOLD,
         samples: DEFAULT_SAMPLES,
         sampling_temperature: DEFAULT_SAMPLING_TEMPERATURE,
@@ -244,6 +244,48 @@ fn default_weight() -> u8 {
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub(super) struct QualificationAgentV14 {
+    id: AgentId,
+    name: String,
+    description: String,
+    #[serde(default = "default_enabled")]
+    enabled: bool,
+    #[serde(default)]
+    provider_id: Option<Uuid>,
+    system_prompt: String,
+    #[serde(default, rename = "weight")]
+    _weight: IgnoredAny,
+    #[serde(default = "default_exclusion_threshold")]
+    exclusion_threshold: f64,
+    #[serde(default = "default_samples")]
+    samples: u8,
+    #[serde(default = "default_sampling_temperature")]
+    sampling_temperature: f64,
+    questions: Vec<Question>,
+    #[serde(default = "default_enabled")]
+    learned_calibration: bool,
+}
+
+impl QualificationAgentV14 {
+    fn upgrade(self) -> QualificationAgent {
+        QualificationAgent {
+            id: self.id,
+            name: self.name,
+            description: self.description,
+            enabled: self.enabled,
+            provider_id: self.provider_id,
+            system_prompt: self.system_prompt,
+            exclusion_threshold: self.exclusion_threshold,
+            samples: self.samples,
+            sampling_temperature: self.sampling_temperature,
+            questions: self.questions,
+            learned_calibration: self.learned_calibration,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct QualificationAgentV4 {
     id: AgentId,
     name: String,
@@ -252,8 +294,8 @@ struct QualificationAgentV4 {
     #[serde(default)]
     provider_id: Option<Uuid>,
     system_prompt: String,
-    #[serde(default = "default_weight")]
-    weight: u8,
+    #[serde(default, rename = "weight")]
+    _weight: IgnoredAny,
     questions: Vec<QuestionV6>,
 }
 
@@ -318,21 +360,21 @@ struct QualificationAgentV6 {
     #[serde(default)]
     provider_id: Option<Uuid>,
     system_prompt: String,
-    #[serde(default = "default_weight")]
-    weight: u8,
+    #[serde(default, rename = "weight")]
+    _weight: IgnoredAny,
     questions: Vec<QuestionV6>,
 }
 
 impl QualificationAgentV6 {
-    fn upgrade(self) -> QualificationAgent {
-        QualificationAgent {
+    fn upgrade(self) -> QualificationAgentV14 {
+        QualificationAgentV14 {
             id: self.id,
             name: self.name,
             description: self.description,
             enabled: self.enabled,
             provider_id: self.provider_id,
             system_prompt: self.system_prompt,
-            weight: self.weight,
+            _weight: IgnoredAny,
             exclusion_threshold: DEFAULT_EXCLUSION_THRESHOLD,
             samples: DEFAULT_SAMPLES,
             sampling_temperature: DEFAULT_SAMPLING_TEMPERATURE,
@@ -347,19 +389,19 @@ impl QualificationAgentV6 {
 }
 
 impl QualificationAgentV4 {
-    fn upgrade(self) -> QualificationAgent {
+    fn upgrade(self) -> QualificationAgentV14 {
         let description: String = format!("Évalue : {}", self.name.trim())
             .chars()
             .take(MAX_DESCRIPTION_CHARS)
             .collect();
-        QualificationAgent {
+        QualificationAgentV14 {
             id: self.id,
             name: self.name,
             description,
             enabled: self.enabled,
             provider_id: self.provider_id,
             system_prompt: self.system_prompt,
-            weight: self.weight,
+            _weight: IgnoredAny,
             exclusion_threshold: DEFAULT_EXCLUSION_THRESHOLD,
             samples: DEFAULT_SAMPLES,
             sampling_temperature: DEFAULT_SAMPLING_TEMPERATURE,
@@ -550,21 +592,21 @@ struct QualificationAgentV7 {
     #[serde(default)]
     provider_id: Option<Uuid>,
     system_prompt: String,
-    #[serde(default = "default_weight")]
-    weight: u8,
+    #[serde(default, rename = "weight")]
+    _weight: IgnoredAny,
     questions: Vec<QuestionV7>,
 }
 
 impl QualificationAgentV7 {
-    fn upgrade(self) -> QualificationAgent {
-        QualificationAgent {
+    fn upgrade(self) -> QualificationAgentV14 {
+        QualificationAgentV14 {
             id: self.id,
             name: self.name,
             description: self.description,
             enabled: self.enabled,
             provider_id: self.provider_id,
             system_prompt: self.system_prompt,
-            weight: self.weight,
+            _weight: IgnoredAny,
             exclusion_threshold: DEFAULT_EXCLUSION_THRESHOLD,
             samples: DEFAULT_SAMPLES,
             sampling_temperature: DEFAULT_SAMPLING_TEMPERATURE,
@@ -632,23 +674,23 @@ struct QualificationAgentV8 {
     #[serde(default)]
     provider_id: Option<Uuid>,
     system_prompt: String,
-    #[serde(default = "default_weight")]
-    weight: u8,
+    #[serde(default, rename = "weight")]
+    _weight: IgnoredAny,
     #[serde(default = "default_exclusion_threshold")]
     exclusion_threshold: f64,
     questions: Vec<Question>,
 }
 
 impl QualificationAgentV8 {
-    fn upgrade(self) -> QualificationAgent {
-        QualificationAgent {
+    fn upgrade(self) -> QualificationAgentV14 {
+        QualificationAgentV14 {
             id: self.id,
             name: self.name,
             description: self.description,
             enabled: self.enabled,
             provider_id: self.provider_id,
             system_prompt: self.system_prompt,
-            weight: self.weight,
+            _weight: IgnoredAny,
             exclusion_threshold: self.exclusion_threshold,
             samples: DEFAULT_SAMPLES,
             sampling_temperature: DEFAULT_SAMPLING_TEMPERATURE,
@@ -861,7 +903,7 @@ pub(super) struct ProfileDefinitionV10 {
     _schema_version: u32,
     identity: Identity,
     agents: Vec<AgentV13>,
-    qualification_agents: Vec<QualificationAgent>,
+    qualification_agents: Vec<QualificationAgentV14>,
     aggregator: Aggregator,
     #[serde(default)]
     escalation: Escalation,
@@ -902,7 +944,7 @@ pub(super) struct ProfileDefinitionV11 {
     _schema_version: u32,
     identity: Identity,
     agents: Vec<AgentV13>,
-    qualification_agents: Vec<QualificationAgent>,
+    qualification_agents: Vec<QualificationAgentV14>,
     #[serde(default)]
     scoring_agents: Vec<ScoringAgent>,
     aggregator: Aggregator,
@@ -945,7 +987,7 @@ pub(super) struct ProfileDefinitionV12 {
     _schema_version: u32,
     identity: Identity,
     agents: Vec<AgentV13>,
-    qualification_agents: Vec<QualificationAgent>,
+    qualification_agents: Vec<QualificationAgentV14>,
     #[serde(default)]
     scoring_agents: Vec<ScoringAgent>,
     aggregator: Aggregator,
@@ -990,7 +1032,7 @@ pub(super) struct ProfileDefinitionV13 {
     _schema_version: u32,
     identity: Identity,
     agents: Vec<AgentV13>,
-    qualification_agents: Vec<QualificationAgent>,
+    qualification_agents: Vec<QualificationAgentV14>,
     #[serde(default)]
     scoring_agents: Vec<ScoringAgent>,
     aggregator: Aggregator,
@@ -1033,7 +1075,7 @@ impl ProfileDefinitionV13 {
         let Self {
             identity,
             agents,
-            mut qualification_agents,
+            qualification_agents,
             mut scoring_agents,
             aggregator,
             escalation,
@@ -1044,6 +1086,10 @@ impl ProfileDefinitionV13 {
             llm,
             ..
         } = self;
+        let mut qualification_agents: Vec<QualificationAgent> = qualification_agents
+            .into_iter()
+            .map(QualificationAgentV14::upgrade)
+            .collect();
         if let Some(first) = qualification_agents.first_mut() {
             append_criteria(
                 &mut first.system_prompt,
@@ -1087,6 +1133,50 @@ impl ProfileDefinitionV13 {
             verdict,
             evidence,
             contact_ranking,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct ProfileDefinitionV14 {
+    #[serde(rename = "schema_version")]
+    _schema_version: u32,
+    identity: Identity,
+    #[serde(default)]
+    language: Language,
+    agents: Vec<Agent>,
+    qualification_agents: Vec<QualificationAgentV14>,
+    #[serde(default)]
+    scoring_agents: Vec<ScoringAgent>,
+    aggregator: Aggregator,
+    #[serde(default)]
+    escalation: Escalation,
+    #[serde(default)]
+    verdict: VerdictThresholds,
+    #[serde(default)]
+    evidence: EvidenceSettings,
+    contact_ranking: ContactRanking,
+}
+
+impl ProfileDefinitionV14 {
+    pub(super) fn upgrade(self) -> ProfileDefinition {
+        ProfileDefinition {
+            schema_version: PROFILE_SCHEMA_VERSION,
+            identity: self.identity,
+            language: self.language,
+            agents: self.agents,
+            qualification_agents: self
+                .qualification_agents
+                .into_iter()
+                .map(QualificationAgentV14::upgrade)
+                .collect(),
+            scoring_agents: self.scoring_agents,
+            aggregator: self.aggregator,
+            escalation: self.escalation,
+            verdict: self.verdict,
+            evidence: self.evidence,
+            contact_ranking: self.contact_ranking,
         }
     }
 }

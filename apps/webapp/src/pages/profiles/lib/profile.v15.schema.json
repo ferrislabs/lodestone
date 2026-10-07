@@ -65,13 +65,13 @@
 			}
 		},
 		"schema_version": {
-			"description": "Profile format version. Must be 14.",
+			"description": "Profile format version. Must be 15.",
 			"type": "integer",
 			"format": "uint32",
 			"minimum": 0
 		},
 		"scoring_agents": {
-			"description": "Scoring agents. Each one decides a score and a verdict for every lead from the reports of the qualification agents, through a contract imposed by the application. The lead score and verdict are the weighted means of their answers. With none enabled, the verdict stays pending.",
+			"description": "Scoring agents. Each one decides a score and a verdict for every lead from the reports of the qualification agents, through a contract imposed by the application. The lead score and verdict are the means of their answers weighted by the weight of each agent. With none enabled, the verdict stays pending.",
 			"type": "array",
 			"default": [],
 			"items": {
@@ -816,14 +816,6 @@
 					"type": "string",
 					"maxLength": 8000,
 					"minLength": 1
-				},
-				"weight": {
-					"description": "Integer weight from 1 to 10 of this agent in the lead confidence.",
-					"type": "integer",
-					"format": "uint8",
-					"default": 5,
-					"maximum": 10,
-					"minimum": 1
 				}
 			},
 			"additionalProperties": false,
@@ -968,7 +960,7 @@
 					"minLength": 1
 				},
 				"weight": {
-					"description": "Integer weight from 1 to 10 of this agent in the lead score and verdict.",
+					"description": "Integer weight from 1 to 10 of this agent in the lead score and verdict. It only matters when the profile has two or more scoring agents.",
 					"type": "integer",
 					"format": "uint8",
 					"default": 5,

@@ -130,8 +130,8 @@ describe('templates', () => {
 			description: "La pertinence du lead pour l'offre du profil.",
 			enabled: true,
 			provider_id: null,
-			weight: 5,
 		})
+		expect(agent).not.toHaveProperty('weight')
 		const [question] = questionsOf(agent)
 		expect(question).toMatchObject({
 			id: 'pertinence',
@@ -170,15 +170,15 @@ describe('templates', () => {
 		])
 	})
 
-	it('builds the exclusions agent with excluding options and a low weight', () => {
+	it('builds the exclusions agent with excluding options', () => {
 		const agent = newQualificationAgent('exclusions', new Set())
 		expect(agent).toMatchObject({
 			id: 'exclusions',
 			name: 'Exclusions',
 			enabled: true,
-			weight: 1,
 			exclusion_threshold: 0.6,
 		})
+		expect(agent).not.toHaveProperty('weight')
 		expect(String(agent.system_prompt)).toContain('Clients actuels :')
 		expect(String(agent.system_prompt)).toContain('Concurrents :')
 		expect(String(agent.system_prompt)).toContain(
@@ -506,17 +506,17 @@ describe('contractSchema', () => {
 describe('summary', () => {
 	const agent = newQualificationAgent('pertinence', new Set())
 
-	it('counts questions, names the provider and shows the weight', () => {
+	it('counts questions and names the provider without a weight', () => {
 		expect(qualificationSummary(agent, [])).toBe(
-			"1 axe d'analyse · fournisseur : par défaut · poids 5",
+			"1 axe d'analyse · fournisseur : par défaut",
 		)
-		const provider = { ...agent, provider_id: 'p1', weight: 8 }
+		const provider = { ...agent, provider_id: 'p1' }
 		const two = addQuestion(withQualification(profile(), [provider]), 0)
 		expect(
 			qualificationSummary(qualificationList(two)[0], [
 				{ id: 'p1', name: 'Ollama local', enabled: true },
 			]),
-		).toBe("2 axes d'analyse · fournisseur : Ollama local · poids 8")
+		).toBe("2 axes d'analyse · fournisseur : Ollama local")
 		expect(qualificationSummary(provider, [])).toContain('introuvable')
 	})
 })

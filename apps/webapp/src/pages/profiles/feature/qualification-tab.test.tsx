@@ -147,7 +147,7 @@ describe('qualification tab', () => {
 		const card = document.querySelector('[data-qualification-agent="0"]')
 		expect(card?.textContent).toContain('Pertinence')
 		expect(card?.textContent).toContain(
-			"1 axe d'analyse · fournisseur : par défaut · poids 5",
+			"1 axe d'analyse · fournisseur : par défaut",
 		)
 		expect(
 			screen.getByRole('button', { name: 'Ajouter un agent de qualification' }),
@@ -208,7 +208,8 @@ describe('qualification tab', () => {
 			).getByText('Marché'),
 		)
 		const agent = qualificationList(lastValue(seen))[1]
-		expect(agent).toMatchObject({ id: 'marche', name: 'Marché', weight: 5 })
+		expect(agent).toMatchObject({ id: 'marche', name: 'Marché' })
+		expect(agent).not.toHaveProperty('weight')
 		expect(questionsOf(agent)).toHaveLength(2)
 		expect(sheet().getByLabelText('Nom')).toHaveProperty('value', 'Marché')
 		expect(sheet().getByLabelText('Axe 1')).toBeTruthy()
@@ -234,7 +235,7 @@ describe('qualification tab', () => {
 		expect(optionsOf(questionsOf(agent)[0])).toHaveLength(3)
 	})
 
-	it('edits name, enabled, weight and prompt', () => {
+	it('edits name, enabled and prompt, without a weight field', () => {
 		const seen = vi.fn()
 		render(<Harness onValue={seen} />)
 		fireEvent.click(screen.getByRole('button', { name: 'Modifier Pertinence' }))
@@ -255,9 +256,10 @@ describe('qualification tab', () => {
 		expect(qualificationList(lastValue(seen))[0]).toMatchObject({
 			enabled: false,
 		})
-		const group = sheet().getByRole('radiogroup', { name: "Poids de l'agent" })
-		fireEvent.click(within(group).getByRole('radio', { name: '8' }))
-		expect(qualificationList(lastValue(seen))[0]).toMatchObject({ weight: 8 })
+		expect(
+			sheet().queryByRole('radiogroup', { name: "Poids de l'agent" }),
+		).toBeNull()
+		expect(sheet().queryByText("Poids de l'agent")).toBeNull()
 		fireEvent.change(
 			sheet().getByLabelText('Prompt système', { selector: 'textarea' }),
 			{ target: { value: 'Nouveau prompt' } },
@@ -298,7 +300,7 @@ describe('qualification tab', () => {
 		]
 		render(<Harness initial={initial} />)
 		expect(
-			screen.getByText("1 axe d'analyse · fournisseur : introuvable · poids 5"),
+			screen.getByText("1 axe d'analyse · fournisseur : introuvable"),
 		).toBeTruthy()
 		fireEvent.click(screen.getByRole('button', { name: 'Modifier Pertinence' }))
 		const select = sheet().getByLabelText(

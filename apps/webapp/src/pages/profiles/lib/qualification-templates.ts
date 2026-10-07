@@ -23,7 +23,6 @@ export interface QualificationTemplate {
 	name: string
 	evaluates: string
 	prompt: string
-	weight?: number
 	axes: readonly QualificationAxis[]
 }
 
@@ -280,7 +279,6 @@ export const QUALIFICATION_TEMPLATES: readonly QualificationTemplate[] = [
 			"Les raisons d'écarter le lead : éditeur ou intégrateur du domaine, hébergeur ou agence, domaine parqué ou inactif, client actuel, concurrent.",
 		prompt:
 			"Tu décides si une entreprise doit être écartée des prospects. Tu n'évalues pas son intérêt : tu cherches uniquement une raison explicite de l'exclure. Choisis une option qui exclut seulement quand une phrase des documents le dit explicitement et copie cette phrase mot pour mot comme preuve. Un nom proche d'une entreprise de la liste, une simple ressemblance ou une impression ne suffisent pas : réponds alors « non » ou « inconnu ». Quand rien dans les documents ne permet de trancher, réponds « inconnu ».\n\nLes listes suivantes sont maintenues par l'opérateur. Modifie-les pour adapter l'agent à ton marché.\n\nClients actuels : (liste à compléter)\nConcurrents : Okta, Auth0, Ping Identity, ForgeRock, Microsoft Entra, Keycloak, Red Hat\nÉditeurs et intégrateurs du domaine : Thales, Wallix, Ilex, Inwebo, Ubble, IDnow, Evidian, Eviden, Atos, Capgemini, Sopra Steria, Wavestone\n\nPour « hébergeur ou agence », exclus seulement quand le signal détecté concerne un client de l'entreprise (elle héberge ou opère le site d'un tiers) et non l'entreprise elle-même. Pour « domaine parqué ou inactif », exclus seulement quand les documents montrent une page de parking, un site en vente ou un domaine sans activité.",
-		weight: 1,
 		axes: [
 			{
 				id: 'editeur_integrateur',
@@ -355,7 +353,6 @@ export function templateAgent(
 		enabled: true,
 		provider_id: null,
 		system_prompt: template.prompt,
-		weight: template.weight ?? DEFAULT_WEIGHT,
 		exclusion_threshold: DEFAULT_EXCLUSION_THRESHOLD,
 		samples: DEFAULT_TEMPLATE_SAMPLES,
 		sampling_temperature: DEFAULT_TEMPLATE_SAMPLING_TEMPERATURE,
