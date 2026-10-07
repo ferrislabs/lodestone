@@ -72,6 +72,7 @@ async fn run_case<P: LlmProvider>(provider: &P) -> Result<(), String> {
         Facts {
             confidence: Some(88.0),
             verdict: Some(Verdict::Reliable),
+            score: Some(88),
         },
         docs.len(),
     );

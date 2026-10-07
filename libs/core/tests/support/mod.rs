@@ -69,3 +69,59 @@ pub async fn seen_lead(pool: &PgPool, profile: ProfileId, host: &str) -> Lead {
 pub async fn lead_id(pool: &PgPool, profile: ProfileId, host: &str) -> LeadId {
     seen_lead(pool, profile, host).await.id
 }
+
+pub fn scoring_answer(schema: &serde_json::Value, quote: &str, worst: bool) -> serde_json::Value {
+    use serde_json::{Map, Value, json};
+    let mut criteria = Map::new();
+    let listed = schema["properties"]["criteria"]["properties"]
+        .as_object()
+        .unwrap();
+    for (id, criterion) in listed {
+        let all = criterion["properties"]["choice"]["enum"]
+            .as_array()
+            .unwrap();
+        let known: Vec<&Value> = all
+            .iter()
+            .filter(|value| value.as_str() != Some("inconnu"))
+            .collect();
+        let chosen = if worst {
+            known[known.len() - 1]
+        } else {
+            known[0]
+        };
+        let probabilities: Map<String, Value> = all
+            .iter()
+            .map(|value| {
+                (
+                    value.as_str().unwrap().to_owned(),
+                    json!(if value == chosen { 1.0 } else { 0.0 }),
+                )
+            })
+            .collect();
+        criteria.insert(
+            id.clone(),
+            json!({
+                "type": "choice",
+                "choice": chosen,
+                "evidence": quote,
+                "confidence": 0.9,
+                "probabilities": probabilities
+            }),
+        );
+    }
+    let (score, fiable, a_verifier, ecarte) = if worst {
+        (10, 0.05, 0.15, 0.8)
+    } else {
+        (85, 0.8, 0.15, 0.05)
+    };
+    json!({
+        "criteria": criteria,
+        "score": score,
+        "verdict": {
+            "choice": if worst { "ecarte" } else { "fiable" },
+            "confidence": if worst { ecarte } else { fiable },
+            "probabilities": {"fiable": fiable, "a_verifier": a_verifier, "ecarte": ecarte}
+        },
+        "reasons": ["Le lead correspond à la cible.", "Les preuves sont cohérentes."]
+    })
+}

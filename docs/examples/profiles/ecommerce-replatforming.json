@@ -1,5 +1,5 @@
 {
-  "schema_version": 10,
+  "schema_version": 11,
   "identity": {
     "offer": "Migration of Magento 1 and Magento 2 shops to a modern e-commerce platform, by a web agency",
     "target_customer": "Merchants and organizations running an outdated Magento storefront"
@@ -99,6 +99,126 @@
           ]
         }
       ]
+    }
+  ],
+  "scoring_agents": [
+    {
+      "id": "score-global",
+      "name": "Score global",
+      "description": "Décide du score et du verdict du lead à partir des rapports des agents de qualification.",
+      "enabled": true,
+      "provider_id": null,
+      "weight": 5,
+      "system_prompt": "Tu décides du score et du verdict d'un lead pour un outil de détection de leads B2B. Tu reçois le lead, ses faits, ses signaux, le dossier de l'entreprise, le rapport de chaque agent de qualification (résumé, réponses avec citations, accord entre échantillons, exclusions) et des indicateurs calculés par le système. Pèse l'ensemble comme le ferait un commercial prudent. Réponds à chaque critère en citant mot pour mot une phrase des documents, ou choisis l'option inconnue quand rien ne la soutient. Donne un score de 0 à 100, la probabilité de chaque verdict et quelques raisons courtes. Base-toi uniquement sur ce qui est fourni.",
+      "criteria": [
+        {
+          "id": "adequation_offre",
+          "wording": "Le lead correspond-il à la cible de l'offre ?",
+          "weight": 5,
+          "options": [
+            {
+              "value": "forte",
+              "label": "Forte",
+              "score": 1.0,
+              "is_unknown": false,
+              "excludes": false
+            },
+            {
+              "value": "moyenne",
+              "label": "Moyenne",
+              "score": 0.5,
+              "is_unknown": false,
+              "excludes": false
+            },
+            {
+              "value": "faible",
+              "label": "Faible",
+              "score": 0.0,
+              "is_unknown": false,
+              "excludes": false
+            },
+            {
+              "value": "inconnu",
+              "label": "Inconnu",
+              "score": 0.5,
+              "is_unknown": true,
+              "excludes": false
+            }
+          ]
+        },
+        {
+          "id": "solidite_preuves",
+          "wording": "Les preuves rassemblées sont-elles solides et récentes ?",
+          "weight": 5,
+          "options": [
+            {
+              "value": "solide",
+              "label": "Solide",
+              "score": 1.0,
+              "is_unknown": false,
+              "excludes": false
+            },
+            {
+              "value": "partielle",
+              "label": "Partielle",
+              "score": 0.5,
+              "is_unknown": false,
+              "excludes": false
+            },
+            {
+              "value": "fragile",
+              "label": "Fragile",
+              "score": 0.0,
+              "is_unknown": false,
+              "excludes": false
+            },
+            {
+              "value": "inconnu",
+              "label": "Inconnu",
+              "score": 0.5,
+              "is_unknown": true,
+              "excludes": false
+            }
+          ]
+        },
+        {
+          "id": "priorite_commerciale",
+          "wording": "Ce lead mérite-t-il d'être contacté en priorité ?",
+          "weight": 5,
+          "options": [
+            {
+              "value": "haute",
+              "label": "Haute",
+              "score": 1.0,
+              "is_unknown": false,
+              "excludes": false
+            },
+            {
+              "value": "normale",
+              "label": "Normale",
+              "score": 0.5,
+              "is_unknown": false,
+              "excludes": false
+            },
+            {
+              "value": "basse",
+              "label": "Basse",
+              "score": 0.0,
+              "is_unknown": false,
+              "excludes": false
+            },
+            {
+              "value": "inconnu",
+              "label": "Inconnu",
+              "score": 0.5,
+              "is_unknown": true,
+              "excludes": false
+            }
+          ]
+        }
+      ],
+      "samples": 1,
+      "sampling_temperature": 0.7
     }
   ],
   "aggregator": {

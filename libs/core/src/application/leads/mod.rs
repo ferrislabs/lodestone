@@ -21,6 +21,7 @@ use crate::{
         profile::{ProfileId, ports::ProfileRepository},
         qualification::ports::QualificationRepository,
         quality::{DecisionKind, Rejection},
+        scoring_agent::ports::ScoringRepository,
         suppression::ports::SuppressionRepository,
     },
     infrastructure::job::postgres::PgJobOutbox,
@@ -105,6 +106,7 @@ impl LodestoneUseCase {
         contact,
         assessment,
         qualification,
+        scoring_agent,
         company
     )]
     pub async fn lead_detail(&self, lead_id: LeadId) -> Result<LeadDetail, CoreError> {
@@ -116,6 +118,7 @@ impl LodestoneUseCase {
         let mut contacts = contact_repository;
         let mut assessments = assessment_repository;
         let mut qualification = qualification_repository;
+        let mut scoring_agents = scoring_agent_repository;
         let mut company = company_repository;
 
         let lead = leads.find(lead_id).await?.ok_or(CoreError::NotFound)?;
@@ -127,21 +130,30 @@ impl LodestoneUseCase {
             .await?
             .ok_or(CoreError::NotFound)?;
         let qualification_results = qualification.current_results(lead_id).await?;
-        let qualification_agents = match qualification_results.first() {
-            Some(first) => profiles
+        let scoring_results = scoring_agents.current_results(lead_id).await?;
+        let revision_number = qualification_results
+            .first()
+            .map(|result| result.profile_revision)
+            .or_else(|| {
+                scoring_results
+                    .first()
+                    .map(|result| result.profile_revision)
+            });
+        let (qualification_agents, scoring_agents) = match revision_number {
+            Some(number) => profiles
                 .list_revisions(lead.profile_id)
                 .await?
                 .into_iter()
-                .find(|revision| revision.number == first.profile_revision)
+                .find(|revision| revision.number == number)
                 .map(|revision| {
-                    revision
-                        .definition
-                        .definition()
-                        .qualification_agents
-                        .clone()
+                    let definition = revision.definition.definition();
+                    (
+                        definition.qualification_agents.clone(),
+                        definition.scoring_agents.clone(),
+                    )
                 })
                 .unwrap_or_default(),
-            None => Vec::new(),
+            None => (Vec::new(), Vec::new()),
         };
         let summary_state = qualification.summary_state(lead_id).await?;
         let scoring = qualification.scorings(&[lead_id]).await?.remove(&lead_id);
@@ -159,6 +171,8 @@ impl LodestoneUseCase {
             scoring,
             qualification_results,
             qualification_agents,
+            scoring_results,
+            scoring_agents,
             facts: context.facts,
             company: context.dossier,
             entity: context.entity,
@@ -185,7 +199,15 @@ impl LodestoneUseCase {
         Ok((found, context.facts, context.dossier))
     }
 
-    #[transactional(lead, suppression, qualification, profile, decision, assessment)]
+    #[transactional(
+        lead,
+        suppression,
+        qualification,
+        scoring_agent,
+        profile,
+        decision,
+        assessment
+    )]
     pub async fn change_lead_status(
         &self,
         lead_id: LeadId,
@@ -197,6 +219,7 @@ impl LodestoneUseCase {
         let mut assessments = assessment_repository;
         let mut suppression = suppression_repository;
         let mut qualification = qualification_repository;
+        let mut scoring_agents = scoring_agent_repository;
         let mut profiles = profile_repository;
         let mut decisions = decision_repository;
 
@@ -228,6 +251,7 @@ impl LodestoneUseCase {
             record_decisions(
                 &mut decisions,
                 &mut qualification,
+                &mut scoring_agents,
                 &mut profiles,
                 &mut assessments,
                 &lead,

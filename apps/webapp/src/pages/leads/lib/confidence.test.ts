@@ -5,6 +5,7 @@ import {
 	evidenceComponentRows,
 	exclusionSummary,
 	exclusionTitle,
+	indicatorCapLabel,
 	verdictReasonLabel,
 } from './confidence'
 
@@ -23,7 +24,7 @@ const evidence = {
 describe('confidenceBreakdown', () => {
 	it('sums up the opinion and the evidence strength', () => {
 		expect(confidenceBreakdown({ opinion: 100, evidence })).toMatch(
-			/^Avis 100\s%\s·\sPreuves 35\s%$/,
+			/^Indicateurs : avis 100\s%\s×\spreuves 35\s%$/,
 		)
 	})
 
@@ -94,6 +95,26 @@ describe('exclusions', () => {
 	})
 
 	it('labels the excluded verdict reason', () => {
+		expect(verdictReasonLabel('excluded')).toBe(
+			'Écarté : un agent de qualification a exclu le lead',
+		)
+	})
+})
+
+describe('indicator labels', () => {
+	it('words the cap of the indicators apart from the verdict', () => {
+		expect(indicatorCapLabel('single_angle')).toBe(
+			"Indicateurs plafonnés : un seul angle d'analyse",
+		)
+		expect(indicatorCapLabel('weak_evidence')).toBe(
+			'Indicateurs plafonnés : preuves insuffisantes',
+		)
+	})
+
+	it('words the pending scoring and the exclusion', () => {
+		expect(verdictReasonLabel('awaiting_scoring')).toBe(
+			"En attente : aucun agent de scoring n'a répondu",
+		)
 		expect(verdictReasonLabel('excluded')).toBe(
 			'Écarté : un agent de qualification a exclu le lead',
 		)

@@ -172,6 +172,7 @@ async fn the_aggregator_summarises_an_iam_lead_in_french_live() {
         Facts {
             confidence: Some(94.0),
             verdict: Some(Verdict::Reliable),
+            score: Some(88),
         },
         signals.len(),
     );

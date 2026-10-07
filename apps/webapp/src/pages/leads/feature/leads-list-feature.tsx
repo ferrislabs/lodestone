@@ -48,7 +48,6 @@ export function LeadsListFeature() {
 	})
 
 	const leads = leadsQuery.data?.data ?? NO_LEADS
-	const maxScore = leads.reduce((max, lead) => Math.max(max, lead.score), 0)
 
 	const openLead = useCallback(
 		(leadId: string) => {
@@ -57,10 +56,7 @@ export function LeadsListFeature() {
 		[navigate],
 	)
 
-	const columns = useMemo(
-		() => buildLeadColumns(maxScore, openLead),
-		[maxScore, openLead],
-	)
+	const columns = useMemo(() => buildLeadColumns(openLead), [openLead])
 
 	const table = useReactTable({
 		data: leads,

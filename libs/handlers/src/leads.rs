@@ -8,8 +8,11 @@ use lodestone_core::{
     Assessment, ContactEmail, DraftMessage, DraftReview, DraftStatus, Exclusion, Lead, LeadDetail,
     LeadFacts, LeadId, LeadQuery, LeadScoring, LeadSort, LeadStatus, LlmProviderRecord, Profile,
     ProfileId, QualificationResult, Rejection, RejectionProblem, ResultStatus, RunProvenance,
-    SUMMARY_FAILED_AFTER, ScoreContribution, Signal, SignalKind, SummaryState, Verdict, VerdictCap,
-    VerdictFilter, VerdictReason, definition::QualificationAgent, signal_sentence,
+    SUMMARY_FAILED_AFTER, ScoreContribution, ScoringResult, Signal, SignalKind, SummaryState,
+    Verdict, VerdictAnswer, VerdictCap, VerdictFilter, VerdictProbabilities, VerdictReason,
+    VerdictSource,
+    definition::{QualificationAgent, Question, ScoringAgent},
+    signal_sentence,
 };
 use pagination::{MAX_PAGE, MAX_PER_PAGE, Page, PaginationMetadata, PaginationParams};
 use serde::{Deserialize, Serialize};
@@ -90,6 +93,7 @@ pub enum VerdictReasonDto {
     WeakEvidence,
     NonProduction,
     Excluded,
+    AwaitingScoring,
 }
 
 impl From<VerdictReason> for VerdictReasonDto {
@@ -99,6 +103,41 @@ impl From<VerdictReason> for VerdictReasonDto {
             VerdictReason::Capped(VerdictCap::WeakEvidence) => Self::WeakEvidence,
             VerdictReason::Capped(VerdictCap::NonProduction) => Self::NonProduction,
             VerdictReason::Excluded => Self::Excluded,
+            VerdictReason::AwaitingScoring => Self::AwaitingScoring,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum VerdictSourceDto {
+    Indicators,
+    Scoring,
+}
+
+impl From<VerdictSource> for VerdictSourceDto {
+    fn from(source: VerdictSource) -> Self {
+        match source {
+            VerdictSource::Indicators => Self::Indicators,
+            VerdictSource::Scoring => Self::Scoring,
+        }
+    }
+}
+
+/// Probability of each verdict, in percent from 0 to 100.
+#[derive(Debug, Serialize, PartialEq, ToSchema)]
+pub struct VerdictProbabilitiesDto {
+    pub fiable: f64,
+    pub a_verifier: f64,
+    pub ecarte: f64,
+}
+
+impl From<&VerdictProbabilities> for VerdictProbabilitiesDto {
+    fn from(probabilities: &VerdictProbabilities) -> Self {
+        Self {
+            fiable: percent(probabilities.reliable),
+            a_verifier: percent(probabilities.to_check),
+            ecarte: percent(probabilities.discarded),
         }
     }
 }
@@ -199,15 +238,25 @@ pub struct LeadDto {
     pub domain: String,
     pub status: LeadStatusDto,
     pub score: f64,
-    /// Weighted confidence in percent from 0 to 100; absent until a qualification agent answered validly.
+    /// Confidence of the verdict in percent from 0 to 100: the probability of the winning verdict in the weighted mean of the scoring agents, 100 when a qualification agent excluded the lead. Absent while the verdict is pending.
     pub confidence: Option<f64>,
-    /// One of `fiable`, `a_verifier`, `ecarte`; absent while the verdict is pending.
+    /// One of `fiable`, `a_verifier`, `ecarte`; absent while the verdict is pending (`en_attente`, awaiting the scoring agents).
     pub verdict: Option<VerdictDto>,
+    /// Score from 0 to 100: the weighted mean of the scores of the scoring agents. Absent until a scoring agent answered validly.
+    pub llm_score: Option<u8>,
+    /// Probability of each verdict in the weighted mean of the scoring agents, in percent.
+    pub verdict_probabilities: Option<VerdictProbabilitiesDto>,
+    /// `scoring` when the verdict comes from the scoring agents, `indicators` for a lead qualified before the scoring agents existed and not scored since.
+    pub verdict_source: Option<VerdictSourceDto>,
+    /// Confidence computed in code from the agents opinion and the evidence strength, in percent. Information given to the scoring agents; it no longer decides.
+    pub indicator_confidence: Option<f64>,
+    /// Rule that capped the indicator confidence (`single_angle`, `weak_evidence` or `non_production`).
+    pub indicator_cap: Option<VerdictReasonDto>,
     /// Opinion of the qualification agents in percent from 0 to 100, after calibration; absent until an agent answered validly.
     pub opinion: Option<f64>,
     /// Strength of the evidence behind the lead; absent until the lead has been scored.
     pub evidence: Option<EvidenceStrengthDto>,
-    /// Rule that capped a confident lead at `a_verifier` (`single_angle`, `weak_evidence` or `non_production`), or `excluded` when a qualification agent excluded the lead; absent when no rule applied.
+    /// `excluded` when a qualification agent excluded the lead, `awaiting_scoring` while no scoring agent answered validly; absent otherwise. Leads still carrying their former indicator verdict may show `single_angle`, `weak_evidence` or `non_production`.
     pub verdict_reason: Option<VerdictReasonDto>,
     /// Exclusions decided by qualification agents; the verdict is `ecarte` when there is at least one.
     pub exclusions: Vec<ExclusionDto>,
@@ -232,6 +281,7 @@ pub struct GroupedLeadDto {
     pub status: LeadStatusDto,
     pub verdict: Option<VerdictDto>,
     pub confidence: Option<f64>,
+    pub llm_score: Option<u8>,
 }
 
 impl From<&Lead> for GroupedLeadDto {
@@ -242,6 +292,7 @@ impl From<&Lead> for GroupedLeadDto {
             status: lead.status.into(),
             verdict: lead.verdict.map(VerdictDto::from),
             confidence: lead.confidence,
+            llm_score: lead.llm_score,
         }
     }
 }
@@ -266,10 +317,19 @@ impl LeadDto {
             score: lead.score.get(),
             confidence: lead.confidence,
             verdict: lead.verdict.map(VerdictDto::from),
+            llm_score: lead.llm_score,
+            verdict_probabilities: scoring
+                .and_then(|scoring| scoring.probabilities.as_ref())
+                .map(VerdictProbabilitiesDto::from),
+            verdict_source: scoring.map(|scoring| scoring.verdict_source.into()),
+            indicator_confidence: scoring.and_then(|scoring| scoring.indicator_confidence),
+            indicator_cap: scoring
+                .and_then(|scoring| scoring.cap)
+                .map(|cap| VerdictReasonDto::from(VerdictReason::Capped(cap))),
             opinion: scoring.and_then(|scoring| scoring.opinion).map(percent),
             evidence: scoring.map(EvidenceStrengthDto::from),
             verdict_reason: scoring
-                .and_then(LeadScoring::reason)
+                .and_then(|scoring| scoring.reason)
                 .map(VerdictReasonDto::from),
             exclusions: scoring
                 .map(|scoring| scoring.exclusions.iter().map(ExclusionDto::from).collect())
@@ -606,11 +666,17 @@ fn answers_of(
     let Some(agent) = agent else {
         return Vec::new();
     };
-    agent
-        .questions
+    answers_from(&result.answers, &agent.questions)
+}
+
+fn answers_from(
+    answers: &serde_json::Value,
+    questions: &[Question],
+) -> Vec<QualificationAnswerDto> {
+    questions
         .iter()
         .filter_map(|question| {
-            let answer = result.answers.get(&question.id)?;
+            let answer = answers.get(&question.id)?;
             let choice = answer.get("choice")?.as_str()?;
             let probabilities = answer.get("probabilities")?.as_object()?;
             let label_of = |value: &str| {
@@ -698,6 +764,92 @@ impl QualificationResultDto {
             answers: answers_of(result, agent),
             error: result.error.clone(),
             escalated: result.escalated,
+            created_at: result.created_at.to_rfc3339(),
+        }
+    }
+}
+
+/// Verdict of one scoring agent, drawn from the probabilities it gave.
+#[derive(Debug, Serialize, PartialEq, ToSchema)]
+pub struct ScoringVerdictDto {
+    /// Verdict with the highest probability; ties go to `a_verifier`, then `ecarte`.
+    pub choice: VerdictDto,
+    /// Verdict the model declared when it differs from the one its probabilities designate.
+    pub declared_choice: Option<VerdictDto>,
+    /// Probability of the verdict, in percent from 0 to 100.
+    pub confidence: f64,
+    pub probabilities: VerdictProbabilitiesDto,
+}
+
+impl From<&VerdictAnswer> for ScoringVerdictDto {
+    fn from(answer: &VerdictAnswer) -> Self {
+        Self {
+            choice: answer.choice.into(),
+            declared_choice: answer.declared_choice.map(VerdictDto::from),
+            confidence: percent(answer.confidence),
+            probabilities: VerdictProbabilitiesDto::from(&answer.probabilities),
+        }
+    }
+}
+
+#[derive(Debug, Serialize, PartialEq, ToSchema)]
+pub struct ScoringResultDto {
+    pub agent_id: String,
+    pub agent_name: String,
+    /// What the agent evaluates, as written in the profile revision that produced the result.
+    pub agent_description: Option<String>,
+    /// Weight of the agent in the lead score and verdict.
+    pub weight: Option<u8>,
+    pub provider_id: Option<String>,
+    pub provider_name: Option<String>,
+    pub model: String,
+    pub provenance: ProvenanceDto,
+    /// One of `valid`, `invalid`.
+    pub status: String,
+    /// Score from 0 to 100, absent when the result is invalid.
+    pub score: Option<u8>,
+    pub verdict: Option<ScoringVerdictDto>,
+    /// One to five short sentences, in the profile language, that explain the score and the verdict.
+    pub reasons: Vec<String>,
+    pub criteria: Vec<QualificationAnswerDto>,
+    pub error: Option<String>,
+    #[schema(format = DateTime)]
+    pub created_at: String,
+}
+
+impl ScoringResultDto {
+    fn new(
+        result: &ScoringResult,
+        agents: &[ScoringAgent],
+        providers: &[LlmProviderRecord],
+    ) -> Self {
+        let agent = agents.iter().find(|agent| agent.id == result.agent_id);
+        let provider = result
+            .provenance
+            .provider_id
+            .and_then(|id| providers.iter().find(|record| record.id == id));
+        Self {
+            agent_id: result.agent_id.as_str().to_owned(),
+            agent_name: agent.map_or_else(
+                || result.agent_id.as_str().to_owned(),
+                |agent| agent.name.clone(),
+            ),
+            agent_description: agent.map(|agent| agent.description.clone()),
+            weight: agent.map(|agent| agent.weight),
+            provider_id: result.provenance.provider_id.map(|id| id.to_string()),
+            provider_name: provider.map(|record| record.name.clone()).or_else(|| {
+                Some(result.provenance.provider_name.clone()).filter(|name| !name.is_empty())
+            }),
+            model: result.provenance.model.clone(),
+            provenance: ProvenanceDto::from(&result.provenance),
+            status: result.status.as_str().to_owned(),
+            score: result.score,
+            verdict: result.verdict.as_ref().map(ScoringVerdictDto::from),
+            reasons: result.reasons.clone(),
+            criteria: agent
+                .map(|agent| answers_from(&result.criteria, &agent.criteria))
+                .unwrap_or_default(),
+            error: result.error.clone(),
             created_at: result.created_at.to_rfc3339(),
         }
     }
@@ -857,6 +1009,8 @@ pub struct LeadDetailDto {
     pub assessments: Vec<AssessmentDto>,
     /// Latest result of every qualification agent of the revision last used, in profile order.
     pub qualification_results: Vec<QualificationResultDto>,
+    /// Latest result of every scoring agent of the revision last used, in profile order.
+    pub scoring_results: Vec<ScoringResultDto>,
     /// Present while the summary of the lead failed at least once since the agents last answered.
     pub summary_state: Option<SummaryStateDto>,
     /// Company dossier of the lead domain; null until the company research listener has seen the domain.
@@ -882,6 +1036,22 @@ fn ordered_results(
         .collect()
 }
 
+fn ordered_scoring(detail: &LeadDetail, providers: &[LlmProviderRecord]) -> Vec<ScoringResultDto> {
+    let position = |result: &ScoringResult| {
+        detail
+            .scoring_agents
+            .iter()
+            .position(|agent| agent.id == result.agent_id)
+            .unwrap_or(usize::MAX)
+    };
+    let mut results: Vec<&ScoringResult> = detail.scoring_results.iter().collect();
+    results.sort_by_key(|result| position(result));
+    results
+        .into_iter()
+        .map(|result| ScoringResultDto::new(result, &detail.scoring_agents, providers))
+        .collect()
+}
+
 impl LeadDetailDto {
     pub fn new(detail: &LeadDetail, providers: &[LlmProviderRecord]) -> Self {
         Self {
@@ -890,6 +1060,7 @@ impl LeadDetailDto {
                 CompanyDto::from(dossier).with_entity(detail.entity.as_ref(), &detail.siblings)
             }),
             qualification_results: ordered_results(detail, providers),
+            scoring_results: ordered_scoring(detail, providers),
             lead: LeadDto::new(
                 &detail.lead,
                 &detail.profile,
@@ -933,7 +1104,7 @@ pub struct ListLeadsParams {
     pub(crate) signal: Option<String>,
     /// `company` to show one row per company, the best-confidence lead standing for its sibling domains; `none` (default) lists every lead.
     pub(crate) group_by: Option<String>,
-    /// One of confidence_desc (default), confidence_asc, score_desc, score_asc, last_seen_desc, first_seen_desc, domain_asc.
+    /// One of confidence_desc (default), confidence_asc, score_desc, score_asc (signal score), llm_score_desc, llm_score_asc (score decided by the scoring agents, leads without one last), last_seen_desc, first_seen_desc, domain_asc.
     pub(crate) sort: Option<String>,
     /// Page number, starting at 1.
     #[param(value_type = Option<u64>, minimum = 1)]
@@ -1062,7 +1233,7 @@ impl ListLeadsParams {
             Some(raw) => LeadSort::parse(raw).ok_or_else(|| {
                 invalid(
                     "sort",
-                    "must be one of confidence_desc, confidence_asc, score_desc, score_asc, last_seen_desc, first_seen_desc, domain_asc",
+                    "must be one of confidence_desc, confidence_asc, score_desc, score_asc, llm_score_desc, llm_score_asc, last_seen_desc, first_seen_desc, domain_asc",
                 )
             })?,
         };

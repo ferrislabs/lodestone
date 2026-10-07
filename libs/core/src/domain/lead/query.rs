@@ -4,8 +4,12 @@ use crate::domain::{
     company::{CompanyDossier, CompanyEntity, SiblingLead},
     facts::LeadFacts,
     lead::{Assessment, ContactEmail, Lead, LeadId, LeadStatus, Signal},
-    profile::{Profile, ProfileId, ProfileName, RevisionNumber, definition::QualificationAgent},
+    profile::{
+        Profile, ProfileId, ProfileName, RevisionNumber,
+        definition::{QualificationAgent, ScoringAgent},
+    },
     qualification::{LeadScoring, QualificationResult, SummaryState, Verdict},
+    scoring_agent::ScoringResult,
     values::SignalKind,
 };
 
@@ -16,17 +20,21 @@ pub enum LeadSort {
     ConfidenceAsc,
     ScoreDesc,
     ScoreAsc,
+    LlmScoreDesc,
+    LlmScoreAsc,
     LastSeenDesc,
     FirstSeenDesc,
     DomainAsc,
 }
 
 impl LeadSort {
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 9] = [
         Self::ConfidenceDesc,
         Self::ConfidenceAsc,
         Self::ScoreDesc,
         Self::ScoreAsc,
+        Self::LlmScoreDesc,
+        Self::LlmScoreAsc,
         Self::LastSeenDesc,
         Self::FirstSeenDesc,
         Self::DomainAsc,
@@ -38,6 +46,8 @@ impl LeadSort {
             Self::ConfidenceAsc => "confidence_asc",
             Self::ScoreDesc => "score_desc",
             Self::ScoreAsc => "score_asc",
+            Self::LlmScoreDesc => "llm_score_desc",
+            Self::LlmScoreAsc => "llm_score_asc",
             Self::LastSeenDesc => "last_seen_desc",
             Self::FirstSeenDesc => "first_seen_desc",
             Self::DomainAsc => "domain_asc",
@@ -127,6 +137,8 @@ pub struct LeadDetail {
     pub assessments: Vec<Assessment>,
     pub qualification_results: Vec<QualificationResult>,
     pub qualification_agents: Vec<QualificationAgent>,
+    pub scoring_results: Vec<ScoringResult>,
+    pub scoring_agents: Vec<ScoringAgent>,
     pub summary_state: Option<SummaryState>,
     pub scoring: Option<LeadScoring>,
     pub company: Option<CompanyDossier>,

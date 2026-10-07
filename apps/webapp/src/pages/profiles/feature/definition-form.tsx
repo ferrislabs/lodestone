@@ -11,6 +11,7 @@ import {
 } from '#/lib/schema-form'
 import { useAgentsUi } from '#/pages/profiles/feature/use-agents-ui'
 import { useQualificationUi } from '#/pages/profiles/feature/use-qualification-ui'
+import { useScoringAgentsUi } from '#/pages/profiles/feature/use-scoring-agents-ui'
 import { useScoringUi } from '#/pages/profiles/feature/use-scoring-ui'
 import { PROFILE_HINTS } from '#/pages/profiles/lib/form-hints'
 import { PROFILE_SCHEMA } from '#/pages/profiles/lib/profile-schema'
@@ -29,8 +30,10 @@ import { AgentsEditor } from '#/pages/profiles/ui/agents-editor'
 import { AgentsHelp } from '#/pages/profiles/ui/agents-help'
 import { QualificationEditor } from '#/pages/profiles/ui/qualification-editor'
 import { QualificationHelp } from '#/pages/profiles/ui/qualification-help'
+import { ScoringAgentsEditor } from '#/pages/profiles/ui/scoring-agents-editor'
 import { ScoringExplainer } from '#/pages/profiles/ui/scoring-explainer'
 import { ScoringGrid } from '#/pages/profiles/ui/scoring-grid'
+import { ScoringHelp } from '#/pages/profiles/ui/scoring-help'
 import { ThresholdField } from '#/pages/profiles/ui/threshold-field'
 import type { SourceTrigger } from '#/pages/sources/feature/use-source-trigger'
 import type { ListenerSummary } from '#/pages/sources/lib/types'
@@ -84,6 +87,7 @@ export function DefinitionTabContent({
 	const agents = useAgentsUi(value, onChange)
 	const qualification = useQualificationUi(value, onChange)
 	const scoring = useScoringUi(value, onChange)
+	const scoringAgents = useScoringAgentsUi(value, onChange)
 	const [helpCollapsed, setHelpCollapsed] = useState(false)
 	const context: FormContext = {
 		root: PROFILE_SCHEMA,
@@ -112,31 +116,58 @@ export function DefinitionTabContent({
 					data-testid="help-layout"
 					className="flex flex-col gap-4 lg:grid lg:grid-cols-4 lg:gap-6"
 				>
-					<ScoringExplainer
-						collapsed={helpCollapsed}
-						onToggle={() => setHelpCollapsed((current) => !current)}
-						thresholdSummary={thresholdSummary(
-							scoring.threshold,
-							isValidThreshold(scoring.threshold)
-								? qualificationPoints(scoring.threshold, scoring.maxScore)
-								: null,
-						)}
-						example={workedExample(scoring.factors)}
-						onNavigate={() => onNavigate?.('settings')}
-					/>
-					<div className="lg:order-1 lg:col-span-3">
-						<ScoringGrid
-							factors={scoring.factors}
-							problems={problems}
-							suggestions={scoring.suggestions}
-							available={scoring.available}
-							maxScore={scoring.maxScore}
-							onAdd={scoring.add}
-							onRemove={scoring.remove}
-							onSignal={scoring.setSignal}
-							onWeight={scoring.setWeight}
-							onValue={scoring.setValue}
+					<div className="flex flex-col gap-4 lg:order-2 lg:col-span-1">
+						<ScoringHelp
+							collapsed={helpCollapsed}
+							onToggle={() => setHelpCollapsed((current) => !current)}
 						/>
+						<ScoringExplainer
+							collapsed={helpCollapsed}
+							onToggle={() => setHelpCollapsed((current) => !current)}
+							thresholdSummary={thresholdSummary(
+								scoring.threshold,
+								isValidThreshold(scoring.threshold)
+									? qualificationPoints(scoring.threshold, scoring.maxScore)
+									: null,
+							)}
+							example={workedExample(scoring.factors)}
+							onNavigate={() => onNavigate?.('settings')}
+						/>
+					</div>
+					<div className="flex flex-col gap-8 lg:order-1 lg:col-span-3">
+						<ScoringAgentsEditor
+							agents={scoringAgents.agents}
+							problems={problems}
+							providers={providers}
+							editing={scoringAgents.editing}
+							confirmingRemove={scoringAgents.confirmingRemove}
+							previewing={scoringAgents.previewing}
+							actions={scoringAgents.actions}
+						/>
+						<section
+							aria-label="Poids des signaux (sourcing)"
+							className="flex flex-col gap-3"
+						>
+							<h2 className="text-base font-semibold">
+								Poids des signaux (sourcing)
+							</h2>
+							<p className="text-sm text-muted-foreground">
+								Le score des signaux ordonne les leads trouvés par le sourcing.
+								Il ne décide pas du verdict : ce sont les agents de scoring.
+							</p>
+							<ScoringGrid
+								factors={scoring.factors}
+								problems={problems}
+								suggestions={scoring.suggestions}
+								available={scoring.available}
+								maxScore={scoring.maxScore}
+								onAdd={scoring.add}
+								onRemove={scoring.remove}
+								onSignal={scoring.setSignal}
+								onWeight={scoring.setWeight}
+								onValue={scoring.setValue}
+							/>
+						</section>
 					</div>
 				</div>
 			)

@@ -110,13 +110,19 @@ fn order_by(sort: LeadSort) -> &'static str {
         }
         LeadSort::ScoreDesc => " ORDER BY leads.score DESC, leads.id ASC",
         LeadSort::ScoreAsc => " ORDER BY leads.score ASC, leads.id ASC",
+        LeadSort::LlmScoreDesc => {
+            " ORDER BY leads.llm_score DESC NULLS LAST, leads.confidence DESC NULLS LAST, leads.id ASC"
+        }
+        LeadSort::LlmScoreAsc => {
+            " ORDER BY leads.llm_score ASC NULLS LAST, leads.confidence DESC NULLS LAST, leads.id ASC"
+        }
         LeadSort::LastSeenDesc => " ORDER BY leads.last_seen_at DESC, leads.id ASC",
         LeadSort::FirstSeenDesc => " ORDER BY leads.first_seen_at DESC, leads.id ASC",
         LeadSort::DomainAsc => " ORDER BY leads.domain ASC, leads.id ASC",
     }
 }
 
-const LEAD_COLUMNS: &str = "leads.id, leads.profile_id, leads.domain, leads.status, leads.score, leads.score_breakdown, leads.confidence, leads.verdict, leads.qualified_at, leads.first_seen_at, leads.last_seen_at, leads.updated_at";
+const LEAD_COLUMNS: &str = "leads.id, leads.profile_id, leads.domain, leads.status, leads.score, leads.score_breakdown, leads.confidence, leads.verdict, leads.llm_score, leads.qualified_at, leads.first_seen_at, leads.last_seen_at, leads.updated_at";
 
 const COMPANY_KEY: &str = "COALESCE(d.company_siren, leads.id::text)";
 
@@ -135,7 +141,7 @@ impl<'tx> PgLeadRepository<'tx> {
             "WITH ranked AS (SELECT {LEAD_COLUMNS}, d.company_siren AS siren, ROW_NUMBER() OVER (PARTITION BY {COMPANY_KEY} ORDER BY leads.confidence DESC NULLS LAST, leads.score DESC, leads.id ASC) AS group_rank FROM leads LEFT JOIN company_dossiers d ON d.domain = leads.domain"
         ));
         push_filters(&mut select, profile_id, query);
-        select.push(") SELECT leads.id, leads.profile_id, leads.domain, leads.status, leads.score, leads.score_breakdown, leads.confidence, leads.verdict, leads.qualified_at, leads.first_seen_at, leads.last_seen_at, leads.updated_at, leads.siren FROM ranked AS leads WHERE leads.group_rank = 1");
+        select.push(") SELECT leads.id, leads.profile_id, leads.domain, leads.status, leads.score, leads.score_breakdown, leads.confidence, leads.verdict, leads.llm_score, leads.qualified_at, leads.first_seen_at, leads.last_seen_at, leads.updated_at, leads.siren FROM ranked AS leads WHERE leads.group_rank = 1");
         select.push(order_by(query.sort));
         select.push(" LIMIT ").push_bind(i64::from(query.limit));
         select
@@ -220,7 +226,7 @@ impl<'tx> LeadRepository for PgLeadRepository<'tx> {
                 last_seen_at  = GREATEST(leads.last_seen_at, EXCLUDED.last_seen_at),
                 first_seen_at = LEAST(leads.first_seen_at, EXCLUDED.first_seen_at),
                 updated_at    = EXCLUDED.updated_at
-            RETURNING id, profile_id, domain, status, score, score_breakdown, confidence, verdict, qualified_at, first_seen_at, last_seen_at, updated_at
+            RETURNING id, profile_id, domain, status, score, score_breakdown, confidence, verdict, llm_score, qualified_at, first_seen_at, last_seen_at, updated_at
             "#,
             common::generate_uuid_v7(),
             profile_id.0,
@@ -240,7 +246,7 @@ impl<'tx> LeadRepository for PgLeadRepository<'tx> {
         let row = sqlx::query_as!(
             LeadRow,
             r#"
-            SELECT id, profile_id, domain, status, score, score_breakdown, confidence, verdict, qualified_at, first_seen_at, last_seen_at, updated_at
+            SELECT id, profile_id, domain, status, score, score_breakdown, confidence, verdict, llm_score, qualified_at, first_seen_at, last_seen_at, updated_at
             FROM leads
             WHERE id = $1
             "#,
@@ -263,7 +269,7 @@ impl<'tx> LeadRepository for PgLeadRepository<'tx> {
         let row = sqlx::query_as!(
             LeadRow,
             r#"
-            SELECT id, profile_id, domain, status, score, score_breakdown, confidence, verdict, qualified_at, first_seen_at, last_seen_at, updated_at
+            SELECT id, profile_id, domain, status, score, score_breakdown, confidence, verdict, llm_score, qualified_at, first_seen_at, last_seen_at, updated_at
             FROM leads
             WHERE profile_id = $1 AND domain = $2
             "#,
@@ -283,7 +289,7 @@ impl<'tx> LeadRepository for PgLeadRepository<'tx> {
         let rows = sqlx::query_as!(
             LeadRow,
             r#"
-            SELECT id, profile_id, domain, status, score, score_breakdown, confidence, verdict, qualified_at, first_seen_at, last_seen_at, updated_at
+            SELECT id, profile_id, domain, status, score, score_breakdown, confidence, verdict, llm_score, qualified_at, first_seen_at, last_seen_at, updated_at
             FROM leads
             WHERE domain = $1
             ORDER BY profile_id
@@ -311,7 +317,7 @@ impl<'tx> LeadRepository for PgLeadRepository<'tx> {
             UPDATE leads
             SET status = $3, updated_at = $4
             WHERE id = $1 AND status = $2
-            RETURNING id, profile_id, domain, status, score, score_breakdown, confidence, verdict, qualified_at, first_seen_at, last_seen_at, updated_at
+            RETURNING id, profile_id, domain, status, score, score_breakdown, confidence, verdict, llm_score, qualified_at, first_seen_at, last_seen_at, updated_at
             "#,
             id.0,
             from.as_str(),
@@ -341,7 +347,7 @@ impl<'tx> LeadRepository for PgLeadRepository<'tx> {
             UPDATE leads
             SET score = $2, score_breakdown = $4, updated_at = $3
             WHERE id = $1
-            RETURNING id, profile_id, domain, status, score, score_breakdown, confidence, verdict, qualified_at, first_seen_at, last_seen_at, updated_at
+            RETURNING id, profile_id, domain, status, score, score_breakdown, confidence, verdict, llm_score, qualified_at, first_seen_at, last_seen_at, updated_at
             "#,
             id.0,
             breakdown.total.get(),
@@ -361,7 +367,7 @@ impl<'tx> LeadRepository for PgLeadRepository<'tx> {
         let rows = sqlx::query_as!(
             LeadRow,
             r#"
-            SELECT id, profile_id, domain, status, score, score_breakdown, confidence, verdict, qualified_at, first_seen_at, last_seen_at, updated_at
+            SELECT id, profile_id, domain, status, score, score_breakdown, confidence, verdict, llm_score, qualified_at, first_seen_at, last_seen_at, updated_at
             FROM leads
             WHERE profile_id = $1
             ORDER BY score DESC, domain ASC
@@ -388,7 +394,7 @@ impl<'tx> LeadRepository for PgLeadRepository<'tx> {
         push_filters(&mut count, profile_id, query);
 
         let mut select = QueryBuilder::<Postgres>::new(
-            "SELECT leads.id, leads.profile_id, leads.domain, leads.status, leads.score, leads.score_breakdown, leads.confidence, leads.verdict, leads.qualified_at, leads.first_seen_at, leads.last_seen_at, leads.updated_at FROM leads",
+            "SELECT leads.id, leads.profile_id, leads.domain, leads.status, leads.score, leads.score_breakdown, leads.confidence, leads.verdict, leads.llm_score, leads.qualified_at, leads.first_seen_at, leads.last_seen_at, leads.updated_at FROM leads",
         );
         push_filters(&mut select, profile_id, query);
         select.push(order_by(query.sort));

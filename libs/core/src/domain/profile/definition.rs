@@ -6,16 +6,16 @@ use uuid::Uuid;
 
 use crate::domain::values::SourceName;
 
-pub const PROFILE_SCHEMA_VERSION: u32 = 10;
+pub const PROFILE_SCHEMA_VERSION: u32 = 11;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[schemars(
     title = "Detection profile",
-    description = "Describes one market: what is sold, which agents scan which sources, which qualification agents judge a lead and how an aggregator sums it up, how leads are scored and which contacts to prefer."
+    description = "Describes one market: what is sold, which agents scan which sources, which qualification agents judge a lead, which scoring agents decide its score and verdict, how an aggregator sums it up, how signals are weighted and which contacts to prefer."
 )]
 pub struct ProfileDefinition {
-    #[schemars(description = "Profile format version. Must be 10.")]
+    #[schemars(description = "Profile format version. Must be 11.")]
     pub schema_version: u32,
     pub identity: Identity,
     #[schemars(description = "Detection agents. At least one is required.")]
@@ -24,6 +24,11 @@ pub struct ProfileDefinition {
         description = "Qualification agents. Each one evaluates every lead of the profile from one angle. At least one is required."
     )]
     pub qualification_agents: Vec<QualificationAgent>,
+    #[serde(default)]
+    #[schemars(
+        description = "Scoring agents. Each one decides a score and a verdict for every lead from the reports of the qualification agents, through a contract imposed by the application. The lead score and verdict are the weighted means of their answers. With none enabled, the verdict stays pending."
+    )]
+    pub scoring_agents: Vec<ScoringAgent>,
     pub aggregator: Aggregator,
     #[serde(default)]
     pub escalation: Escalation,
@@ -143,6 +148,69 @@ pub struct QualificationAgent {
         description = "Questions the agent answers. At least one is required."
     )]
     pub questions: Vec<Question>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(
+    title = "Scoring agent",
+    description = "Decides the score and the verdict of every lead from the reports of the qualification agents. The shape of its answer is imposed by the application: criteria choices, a score from 0 to 100, probabilities for each verdict and reasons."
+)]
+pub struct ScoringAgent {
+    #[schemars(
+        description = "Unique slug among all agents of the profile, sourcing, qualification and scoring, for example score-global."
+    )]
+    pub id: AgentId,
+    #[schemars(description = "Display name.")]
+    pub name: String,
+    #[schemars(
+        length(min = 1, max = 300),
+        description = "What this agent evaluates, in one sentence."
+    )]
+    pub description: String,
+    #[serde(default = "default_enabled")]
+    #[schemars(description = "A disabled agent is kept but not run.")]
+    pub enabled: bool,
+    #[serde(default)]
+    #[schemars(
+        with = "Option<String>",
+        description = "Id of a declared LLM provider. The default provider of the aggregator tier applies when null."
+    )]
+    pub provider_id: Option<Uuid>,
+    #[serde(default = "default_weight")]
+    #[schemars(
+        range(min = 1, max = 10),
+        description = "Integer weight from 1 to 10 of this agent in the lead score and verdict."
+    )]
+    pub weight: u8,
+    #[schemars(
+        length(min = 1, max = 8000),
+        description = "System prompt given to the model."
+    )]
+    pub system_prompt: String,
+    #[schemars(
+        length(min = 1),
+        description = "Criteria the agent answers before it scores. Same rules as qualification questions, except that no option can exclude a lead. At least one is required."
+    )]
+    pub criteria: Vec<Question>,
+    #[serde(default = "default_scoring_samples")]
+    #[schemars(
+        range(min = 1, max = 5),
+        description = "Number of independent model calls per lead, from 1 to 5. The criteria are voted, the score and the verdict probabilities are averaged. Default 1."
+    )]
+    pub samples: u8,
+    #[serde(default = "default_sampling_temperature")]
+    #[schemars(
+        range(min = 0.0, max = 1.5),
+        description = "Temperature of the calls when samples is above 1, overriding the provider temperature. Default 0.7."
+    )]
+    pub sampling_temperature: f64,
+}
+
+pub const DEFAULT_SCORING_SAMPLES: u8 = 1;
+
+pub fn default_scoring_samples() -> u8 {
+    DEFAULT_SCORING_SAMPLES
 }
 
 pub const MAX_PROMPT_CHARS: usize = 8000;
@@ -907,6 +975,10 @@ impl ProfileDefinition {
 
     pub fn qualification_points(&self) -> f64 {
         f64::from(self.llm.qualification_threshold) * self.max_score() / 100.0
+    }
+
+    pub fn enabled_scoring_agents(&self) -> impl Iterator<Item = &ScoringAgent> {
+        self.scoring_agents.iter().filter(|agent| agent.enabled)
     }
 
     pub fn enabled_agents(&self, source: SourceName) -> impl Iterator<Item = &Agent> {

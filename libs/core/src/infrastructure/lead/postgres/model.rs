@@ -17,6 +17,7 @@ pub struct LeadRow {
     pub score_breakdown: serde_json::Value,
     pub confidence: Option<f64>,
     pub verdict: Option<String>,
+    pub llm_score: Option<i16>,
     pub qualified_at: Option<DateTime<Utc>>,
     pub first_seen_at: DateTime<Utc>,
     pub last_seen_at: DateTime<Utc>,
@@ -63,6 +64,17 @@ impl TryFrom<LeadRow> for Lead {
             score_breakdown,
             confidence: row.confidence,
             verdict,
+            llm_score: row
+                .llm_score
+                .map(|score| {
+                    u8::try_from(score)
+                        .ok()
+                        .filter(|score| *score <= 100)
+                        .ok_or_else(|| {
+                            CoreError::Internal("stored lead llm score is invalid".to_owned())
+                        })
+                })
+                .transpose()?,
             qualified_at: row.qualified_at,
             first_seen_at: row.first_seen_at,
             last_seen_at: row.last_seen_at,

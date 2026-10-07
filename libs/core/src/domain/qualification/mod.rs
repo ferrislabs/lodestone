@@ -21,11 +21,12 @@ pub mod prompt;
 pub mod voting;
 
 pub use confidence::{
-    AgentOpinion, EXCLUDED_REASON, EvidenceComponents, EvidenceStrength, Judgement, LeadScoring,
-    SCORING_VERSION, VerdictCap, VerdictReason, calibrate, judge, verdict_for,
+    AWAITING_SCORING_REASON, AgentOpinion, EvidenceComponents, EvidenceStrength, Judgement,
+    LeadScoring, SCORING_VERSION, VerdictCap, VerdictReason, VerdictSource, calibrate, judge,
+    verdict_for,
 };
 pub use exclusion::{Exclusion, exclusions};
-pub use voting::{VOTE_SHARE_WEIGHT, sample_record, vote};
+pub use voting::{VOTE_SHARE_WEIGHT, most_agreeing, sample_record, vote, vote_answers};
 
 uuid_id!(ResultId);
 
@@ -160,13 +161,13 @@ impl ValidAnswers {
     }
 }
 
-fn unit(value: &Value) -> Option<f64> {
+pub(crate) fn unit(value: &Value) -> Option<f64> {
     value
         .as_f64()
         .filter(|number| number.is_finite() && (0.0..=1.0).contains(number))
 }
 
-fn check_question(question: &Question, raw: &Value) -> Result<Answer, Vec<Violation>> {
+pub(crate) fn check_question(question: &Question, raw: &Value) -> Result<Answer, Vec<Violation>> {
     let id = question.id.clone();
     let Some(object) = raw.as_object() else {
         return Err(vec![Violation::MalformedAnswer { question: id }]);
@@ -301,7 +302,11 @@ fn is_unknown_choice(question: &Question, choice: &str) -> bool {
         .any(|option| option.is_unknown && option.value == choice)
 }
 
-fn ground(question: &Question, mut answer: Answer, documents: &[UntrustedDocument<'_>]) -> Answer {
+pub(crate) fn ground(
+    question: &Question,
+    mut answer: Answer,
+    documents: &[UntrustedDocument<'_>],
+) -> Answer {
     answer.evidence = answer
         .evidence
         .trim()
@@ -349,7 +354,6 @@ pub fn validate_answers(
     let Some(answers) = root.get("answers").and_then(Value::as_object) else {
         return Err(Violations(vec![Violation::MissingAnswers]));
     };
-    let mut valid = Vec::with_capacity(agent.questions.len());
     let mut violations = Vec::new();
     let summary = match check_summary(root) {
         Ok(summary) => Some(summary),
@@ -358,7 +362,24 @@ pub fn validate_answers(
             None
         }
     };
-    for question in &agent.questions {
+    let valid = validate_questions(&agent.questions, answers, documents, &mut violations);
+    match summary {
+        Some(summary) if violations.is_empty() => Ok(ValidOutput {
+            summary,
+            answers: ValidAnswers(valid),
+        }),
+        _ => Err(Violations(violations)),
+    }
+}
+
+pub(crate) fn validate_questions(
+    questions: &[Question],
+    answers: &Map<String, Value>,
+    documents: &[UntrustedDocument<'_>],
+    violations: &mut Vec<Violation>,
+) -> Vec<Answer> {
+    let mut valid = Vec::with_capacity(questions.len());
+    for question in questions {
         match answers.get(&question.id) {
             None => violations.push(Violation::MissingQuestion {
                 question: question.id.clone(),
@@ -374,13 +395,7 @@ pub fn validate_answers(
             },
         }
     }
-    match summary {
-        Some(summary) if violations.is_empty() => Ok(ValidOutput {
-            summary,
-            answers: ValidAnswers(valid),
-        }),
-        _ => Err(Violations(violations)),
-    }
+    valid
 }
 
 pub fn question_score(question: &Question, answer: &Answer, floor: f64) -> f64 {
@@ -416,9 +431,12 @@ pub fn agent_score(agent: &QualificationAgent, answers: &ValidAnswers, floor: f6
 }
 
 pub fn stored_answers(agent: &QualificationAgent, answers: &Value) -> Option<ValidAnswers> {
+    stored_answers_for(&agent.questions, answers)
+}
+
+pub fn stored_answers_for(questions: &[Question], answers: &Value) -> Option<ValidAnswers> {
     let object = answers.as_object()?;
-    agent
-        .questions
+    questions
         .iter()
         .map(|question| check_question(question, object.get(&question.id)?).ok())
         .collect::<Option<Vec<_>>>()
@@ -500,6 +518,7 @@ pub struct Completion {
     pub profile_revision: RevisionNumber,
     pub sources: Vec<String>,
     pub judgement: Judgement,
+    pub exclusions: Vec<Exclusion>,
     pub scoring_version: i32,
     pub dossier_at: Option<DateTime<Utc>>,
     pub escalated_revision: Option<RevisionNumber>,
@@ -510,6 +529,7 @@ pub struct Completion {
 pub struct Rescoring {
     pub lead_id: LeadId,
     pub judgement: Judgement,
+    pub exclusions: Vec<Exclusion>,
     pub scoring_version: i32,
     pub scored_at: DateTime<Utc>,
     pub agent_scores: Vec<(ResultId, f64)>,

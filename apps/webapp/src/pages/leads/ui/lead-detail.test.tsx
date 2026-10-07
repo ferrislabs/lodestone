@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import type { LeadDetailData } from '#/pages/leads/lib/types'
+import type { LeadDetailData, ScoringResult } from '#/pages/leads/lib/types'
 import { LeadDetail } from './lead-detail'
 
 afterEach(cleanup)
@@ -13,6 +13,63 @@ const provenance = {
 	prompt_version: 'qualification-agent@abc',
 	generation: { temperature: 0.2, max_tokens: 2048 },
 	samples: 1,
+}
+
+const scoringResult: ScoringResult = {
+	agent_id: 'score-global',
+	agent_name: 'Score global',
+	agent_description: 'Décide du score et du verdict.',
+	weight: 5,
+	provider_id: 'prov-2',
+	provider_name: 'Synthèse',
+	model: 'gemma_laya',
+	provenance: {
+		...provenance,
+		provider_name: 'Synthèse',
+		prompt_version: 'scoring-agent@abc',
+	},
+	status: 'valid',
+	score: 72,
+	verdict: {
+		choice: 'a_verifier',
+		declared_choice: 'fiable',
+		confidence: 60,
+		probabilities: { fiable: 30, a_verifier: 60, ecarte: 10 },
+	},
+	reasons: ['Un seul signal.', 'Entreprise ciblée.'],
+	criteria: [
+		{
+			question_id: 'adequation_offre',
+			wording: "Le lead correspond-il à la cible de l'offre ?",
+			choice: 'forte',
+			choice_label: 'Forte',
+			evidence: 'expose Keycloak 18',
+			evidence_source: 'https://acme.test/realms/master',
+			grounded: true,
+			original_choice: null,
+			original_choice_label: null,
+			confidence: 0.8,
+			probabilities: [
+				{ value: 'forte', label: 'Forte', probability: 0.8 },
+				{ value: 'inconnu', label: 'Inconnu', probability: 0.2 },
+			],
+		},
+		{
+			question_id: 'solidite_preuves',
+			wording: 'Les preuves sont-elles solides ?',
+			choice: 'inconnu',
+			choice_label: 'Inconnu',
+			evidence: 'phrase inventée',
+			evidence_source: null,
+			grounded: false,
+			original_choice: 'solide',
+			original_choice_label: 'Solide',
+			confidence: 0.5,
+			probabilities: [{ value: 'inconnu', label: 'Inconnu', probability: 1 }],
+		},
+	],
+	error: null,
+	created_at: '2026-02-01T00:00:00Z',
 }
 
 const detail: LeadDetailData = {
@@ -29,6 +86,11 @@ const detail: LeadDetailData = {
 		updated_at: '2026-02-01T00:00:00Z',
 		confidence: 72.5,
 		verdict: 'a_verifier',
+		llm_score: 68,
+		verdict_probabilities: { fiable: 20, a_verifier: 72.5, ecarte: 7.5 },
+		verdict_source: 'scoring',
+		indicator_confidence: 41.5,
+		indicator_cap: 'non_production',
 		opinion: 92.9,
 		evidence: {
 			strength: 35,
@@ -46,9 +108,10 @@ const detail: LeadDetailData = {
 			signal_score: 12.1,
 			only_non_production: true,
 		},
-		verdict_reason: 'non_production',
+		verdict_reason: null,
 		qualified_at: '2026-02-01T00:00:00Z',
 	},
+	scoring_results: [],
 	qualification_results: [
 		{
 			agent_id: 'pertinence',
@@ -311,28 +374,49 @@ describe('LeadDetail', () => {
 		expect(screen.getByText('En attente')).toBeTruthy()
 	})
 
-	it('shows the verdict and the confidence of the lead', () => {
+	it('shows the verdict, its confidence and the score out of 100 in the header', () => {
 		const { container } = renderDetail()
-		const badge = container.querySelector('[data-verdict]')
+		const badge = container.querySelector('h1 ~ [data-verdict]')
 		expect(badge?.getAttribute('data-verdict')).toBe('a_verifier')
 		expect(badge?.textContent).toBe('À vérifier')
-		expect(screen.getByText('Confiance')).toBeTruthy()
-		expect(screen.getByText(/^72,5\s%$/)).toBeTruthy()
+		expect(screen.getAllByText('Confiance du verdict').length).toBeGreaterThan(
+			0,
+		)
+		expect(
+			container.querySelector('[data-part="verdict-confidence"]')?.textContent,
+		).toMatch(/^72,5\s%$/)
+		expect(
+			container.querySelector('dl [data-part="llm-score"]')?.textContent,
+		).toBe('68 / 100')
 	})
 
-	it('names the signal score and splits the confidence into opinion and evidence', () => {
+	it('names the signal score apart from the score of the scoring agents', () => {
 		renderDetail()
 		expect(screen.getByText('Score des signaux')).toBeTruthy()
-		expect(screen.queryByText('Score')).toBeNull()
-		expect(
-			screen.getByText('Avis des agents').nextSibling?.textContent,
-		).toMatch(/^92,9\s%$/)
-		expect(
-			screen.getByText('Solidité des preuves').nextSibling?.textContent,
-		).toMatch(/^35\s%$/)
+		expect(screen.getByText('Score des signaux').nextSibling?.textContent).toBe(
+			'42,5',
+		)
 	})
 
-	it('lists the evidence components and the verdict reason in the calculation', () => {
+	it('puts the indicators, opinion by evidence, in the calculation', () => {
+		const { container } = renderDetail()
+		const indicators = container.querySelector(
+			'[data-section="confidence-calculation"] [data-part="indicators"]',
+		)
+		expect(indicators?.textContent).toContain('Indicateurs')
+		expect(indicators?.textContent).toContain('ne décident pas du verdict')
+		expect(
+			indicators?.querySelector('[data-indicator="opinion"]')?.textContent,
+		).toMatch(/Avis des agents92,9\s%/)
+		expect(
+			indicators?.querySelector('[data-indicator="evidence"]')?.textContent,
+		).toMatch(/Solidité des preuves35\s%/)
+		expect(
+			indicators?.querySelector('[data-indicator="confidence"]')?.textContent,
+		).toMatch(/Confiance des indicateurs41,5\s%/)
+	})
+
+	it('lists the evidence components and the indicator cap in the calculation', () => {
 		const { container } = renderDetail()
 		const calculation = container.querySelector(
 			'[data-section="confidence-calculation"]',
@@ -351,39 +435,74 @@ describe('LeadDetail', () => {
 				?.textContent,
 		).toMatch(/28,4\s%/)
 		expect(
-			calculation?.querySelector('[data-verdict-reason]')?.textContent,
-		).toBe('Plafonné à « À vérifier » : uniquement des hôtes hors production')
+			calculation?.querySelector('[data-indicator-cap]')?.textContent,
+		).toBe('Indicateurs plafonnés : uniquement des hôtes hors production')
 	})
 
-	it('shows no verdict reason when no rule applied, and no calculation before scoring', () => {
+	it('opens the calculation on a pending verdict and says why', () => {
 		const { container } = renderDetail({
 			detail: {
 				...detail,
-				lead: { ...detail.lead, verdict_reason: null },
+				lead: {
+					...detail.lead,
+					verdict: null,
+					confidence: null,
+					llm_score: null,
+					verdict_probabilities: null,
+					verdict_reason: 'awaiting_scoring',
+				},
 			},
 		})
-		expect(container.querySelector('[data-verdict-reason]')).toBeNull()
+		const calculation = container.querySelector(
+			'[data-section="confidence-calculation"]',
+		)
+		expect(calculation?.hasAttribute('open')).toBe(true)
 		expect(
-			container.querySelector('[data-section="confidence-calculation"]'),
-		).not.toBeNull()
-		cleanup()
-		const bare = renderDetail({
+			calculation?.querySelector('[data-verdict-reason]')?.textContent,
+		).toBe("En attente : aucun agent de scoring n'a répondu")
+		expect(container.querySelector('h1 ~ [data-verdict]')?.textContent).toBe(
+			'En attente du scoring',
+		)
+		expect(
+			container.querySelector('dl [data-part="llm-score"]')?.textContent,
+		).toBe('—')
+	})
+
+	it('keeps the former cap wording on a lead still carrying an indicator verdict', () => {
+		const { container } = renderDetail({
+			detail: {
+				...detail,
+				lead: {
+					...detail.lead,
+					verdict_source: 'indicators',
+					verdict_reason: 'non_production',
+				},
+			},
+		})
+		expect(container.querySelector('[data-verdict-reason]')?.textContent).toBe(
+			'Plafonné à « À vérifier » : uniquement des hôtes hors production',
+		)
+		expect(container.querySelector('[data-indicator-cap]')).toBeNull()
+	})
+
+	it('shows no calculation before the lead was qualified', () => {
+		const { container } = renderDetail({
 			detail: {
 				...detail,
 				lead: {
 					...detail.lead,
 					evidence: null,
 					opinion: null,
+					indicator_confidence: null,
+					indicator_cap: null,
 					verdict_reason: null,
 				},
 			},
 		})
 		expect(
-			bare.container.querySelector('[data-section="confidence-calculation"]'),
+			container.querySelector('[data-section="confidence-calculation"]'),
 		).toBeNull()
-		expect(screen.getByText('Avis des agents').nextSibling?.textContent).toBe(
-			'—',
-		)
+		expect(screen.queryByText('Avis des agents')).toBeNull()
 	})
 
 	it('puts the summary on top with verdict narrative, angle and evidence', () => {
@@ -597,6 +716,181 @@ describe('LeadDetail', () => {
 			'width: 50%;',
 			'width: 25%;',
 		])
+	})
+
+	it('renders the scoring section between the agents analysis and the summary', () => {
+		const { container } = renderDetail({
+			detail: { ...detail, scoring_results: [scoringResult] },
+		})
+		const sections = Array.from(
+			container.querySelectorAll('[data-section]'),
+		).map((node) => node.getAttribute('data-section'))
+		const agents = sections.indexOf('agents')
+		const scoring = sections.indexOf('scoring')
+		const summary = sections.indexOf('summary')
+		expect(agents).toBeGreaterThanOrEqual(0)
+		expect(scoring).toBeGreaterThan(agents)
+		expect(summary).toBeGreaterThan(scoring)
+		expect(screen.getByText('Scoring (1)')).toBeTruthy()
+	})
+
+	it('shows one card per scoring agent with its score, verdict, bars and reasons', () => {
+		const { container } = renderDetail({
+			detail: { ...detail, scoring_results: [scoringResult] },
+		})
+		const card = container.querySelector(
+			'article[data-scoring-agent="score-global"]',
+		)
+		expect(card?.getAttribute('data-status')).toBe('valid')
+		expect(card?.textContent).toContain('Score global')
+		expect(card?.textContent).toContain('Valide')
+		expect(card?.textContent).toContain('poids 5')
+		expect(card?.querySelector('[data-part="agent-score"]')?.textContent).toBe(
+			'72 / 100',
+		)
+		expect(card?.querySelector('[data-part="model"]')?.textContent).toContain(
+			'Synthèse (gemma_laya)',
+		)
+		expect(card?.querySelector('[data-part="evaluates"]')?.textContent).toBe(
+			"Ce qu'il évalue : Décide du score et du verdict.",
+		)
+		expect(
+			card?.querySelector('[data-verdict]')?.getAttribute('data-verdict'),
+		).toBe('a_verifier')
+		const bars = card?.querySelectorAll('[data-verdict-probability]') ?? []
+		expect(
+			Array.from(bars).map((bar) => [
+				bar.getAttribute('data-verdict-probability'),
+				bar.getAttribute('style'),
+			]),
+		).toEqual([
+			['fiable', 'width: 30%;'],
+			['a_verifier', 'width: 60%;'],
+			['ecarte', 'width: 10%;'],
+		])
+		expect(card?.textContent).toMatch(/probabilité 60\s%/)
+		expect(
+			Array.from(card?.querySelectorAll('[data-part="reasons"] li') ?? []).map(
+				(item) => item.textContent,
+			),
+		).toEqual(['Un seul signal.', 'Entreprise ciblée.'])
+		expect(
+			card?.querySelector('[data-part="declared"]')?.textContent,
+		).toContain('Verdict annoncé par le modèle : Fiable')
+	})
+
+	it('shows the criteria with their quotes and flags the ungrounded ones', () => {
+		const { container } = renderDetail({
+			detail: { ...detail, scoring_results: [scoringResult] },
+		})
+		const card = container.querySelector(
+			'article[data-scoring-agent="score-global"]',
+		)
+		const grounded = card?.querySelector('[data-question="adequation_offre"]')
+		expect(grounded?.textContent).toContain('Réponse : Forte')
+		expect(
+			grounded?.querySelector('[data-part="evidence"]')?.textContent,
+		).toContain('« expose Keycloak 18 »')
+		const ungrounded = card?.querySelector(
+			'[data-question="solidite_preuves"] [data-part="ungrounded"]',
+		)
+		expect(ungrounded?.textContent).toContain(
+			'Non étayé — ramené à « Inconnu »',
+		)
+		expect(ungrounded?.textContent).toContain(
+			'Choix initial du modèle : Solide',
+		)
+	})
+
+	it('shows an invalid scoring agent with its error and no verdict', () => {
+		const { container } = renderDetail({
+			detail: {
+				...detail,
+				scoring_results: [
+					{
+						...scoringResult,
+						status: 'invalid',
+						score: null,
+						verdict: null,
+						reasons: [],
+						criteria: [],
+						error:
+							'Réponse non conforme au contrat : `score` doit être un entier',
+					},
+				],
+			},
+		})
+		const card = container.querySelector('article[data-scoring-agent]')
+		expect(card?.getAttribute('data-status')).toBe('invalid')
+		expect(card?.textContent).toContain('Invalide')
+		expect(card?.textContent).toContain('Réponse non conforme au contrat')
+		expect(card?.querySelector('[data-part="verdict"]')).toBeNull()
+		expect(card?.querySelector('[data-part="agent-score"]')).toBeNull()
+	})
+
+	it('shows the combined result under the agent cards', () => {
+		const { container } = renderDetail({
+			detail: { ...detail, scoring_results: [scoringResult] },
+		})
+		const combined = container.querySelector('[data-part="combined"]')
+		expect(
+			combined?.querySelector('[data-part="combined-score"]')?.textContent,
+		).toBe('68 / 100')
+		expect(
+			combined?.querySelector('[data-verdict]')?.getAttribute('data-verdict'),
+		).toBe('a_verifier')
+		expect(
+			combined?.querySelector('[data-part="combined-confidence"]')?.textContent,
+		).toMatch(/72,5\s%/)
+		expect(
+			Array.from(
+				combined?.querySelectorAll('[data-verdict-probability]') ?? [],
+			).map((bar) => bar.getAttribute('style')),
+		).toEqual(['width: 20%;', 'width: 73%;', 'width: 8%;'])
+	})
+
+	it('says so when no scoring agent answered and shows the pending combination', () => {
+		const { container } = renderDetail({
+			detail: {
+				...detail,
+				lead: {
+					...detail.lead,
+					verdict: null,
+					confidence: null,
+					llm_score: null,
+					verdict_probabilities: null,
+					verdict_reason: 'awaiting_scoring',
+				},
+			},
+		})
+		const section = container.querySelector('[data-section="scoring"]')
+		expect(section?.textContent).toContain(
+			"Aucun agent de scoring n'a répondu pour le moment.",
+		)
+		const combined = section?.querySelector('[data-part="combined"]')
+		expect(
+			combined?.querySelector('[data-part="combined-score"]')?.textContent,
+		).toBe('—')
+		expect(combined?.querySelector('[data-verdict]')?.textContent).toBe(
+			'En attente du scoring',
+		)
+		expect(combined?.querySelector('[data-verdict-reason]')?.textContent).toBe(
+			"En attente : aucun agent de scoring n'a répondu",
+		)
+		expect(combined?.querySelector('[data-verdict-probability]')).toBeNull()
+	})
+
+	it('explains an exclusion in the combined result', () => {
+		const { container } = renderDetail({
+			detail: {
+				...detail,
+				lead: { ...detail.lead, verdict: 'ecarte', verdict_reason: 'excluded' },
+			},
+		})
+		expect(
+			container.querySelector('[data-part="combined"] [data-verdict-reason]')
+				?.textContent,
+		).toBe('Écarté : un agent de qualification a exclu le lead')
 	})
 
 	it('shows the verbatim quote in italics with its source under the answer', () => {

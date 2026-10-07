@@ -14,8 +14,10 @@ import { VERDICT_KEYS, verdictKeyLabel } from '#/pages/leads/lib/verdict'
 const SORT_LABELS: Record<(typeof LEAD_SORTS)[number], string> = {
 	confidence_desc: 'Confiance décroissante',
 	confidence_asc: 'Confiance croissante',
-	score_desc: 'Score décroissant',
-	score_asc: 'Score croissant',
+	llm_score_desc: 'Score décroissant',
+	llm_score_asc: 'Score croissant',
+	score_desc: 'Score des signaux décroissant',
+	score_asc: 'Score des signaux croissant',
 	last_seen_desc: 'Dernière détection, la plus récente',
 	first_seen_desc: 'Première détection, la plus récente',
 	domain_asc: 'Domaine, de A à Z',

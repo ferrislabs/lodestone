@@ -1,6 +1,6 @@
 # 0009. A profile has three agent kinds: sourcing, qualification and scoring
 
-Status: accepted
+Status: accepted (implemented by issue 172)
 Date: 2026-10-07
 
 ## Context
@@ -30,7 +30,18 @@ Order of a lead through the pipeline: sourcing, qualification agents (with exclu
 
 ### Supersession
 
-The scoring agents are implemented in issue 172. Until that issue lands, ADR 0007 and issue 155 remain in force unchanged. Once it lands, the verdict part of ADR 0007 ("Evidence and calibration": confidence blend, thresholds `reliable_from` and `discard_below`, caps) is superseded by this decision; exclusions, the contract of qualification agents, the aggregator and the company dossier are not.
+The scoring agents are implemented in issue 172 and the verdict part of ADR 0007 ("Evidence and calibration": confidence blend, thresholds `reliable_from` and `discard_below`, caps) is superseded by this decision: the blend, the thresholds and the caps are still computed, but only as the "Indicateurs"; they no longer decide. Exclusions, the contract of qualification agents, the aggregator and the company dossier are not superseded.
+
+## Scoring agents (issue 172)
+
+Profile schema 11 adds `scoring_agents`. The contract, the inputs, the combination, the storage and the due logic are specified in `docs/profiles.md` ("Scoring agents"). The decisions:
+
+- **Imposed contract.** `criteria` (same shape and grounding as qualification answers, no exclusion), an integer `score`, a `verdict` with `choice`, `confidence` and probabilities for `fiable`, `a_verifier` and `ecarte`, and 1 to 5 `reasons`. Validated like a qualification answer, one retry, an invalid answer makes the agent result missing.
+- **Combination.** Weighted mean of the scores, rounded; argmax of the weighted mean of the verdict probabilities with prudent ties (`a_verifier`, then `ecarte`, then `fiable`); the confidence of the verdict is the probability of the winner. Qualification exclusions force `ecarte` with confidence 100. No valid scoring result: verdict `null` and reason `awaiting_scoring`. `calibrate_verdict` is the identity until issue 171.
+- **Pipeline.** qualification agents (escalation included), scoring agents, aggregator. A lead is due for scoring when its qualification results changed or its profile revision changed; the aggregator waits for the scoring of the lead.
+- **Rescoring.** The loop without model call refreshes the indicators and the decay and no longer decides; it recombines stored scoring results, and only exclusions can change a verdict.
+- **Migration.** A lead keeps the verdict computed by the former formula (`verdict_source` `indicators`) until its first scoring.
+- **Quality.** Snapshots keep the scoring results; the versions table counts precision per scoring agent and per version with a `kind`.
 
 ## Indicators given to the scoring agents (issue 170)
 
@@ -52,4 +63,4 @@ The indicators are computed in code without any model call and must be reliable 
 - The scoring contract is imposed, so a profile cannot break the arithmetic of the aggregation, and small classifiers can fill it.
 - A company with several domains is one entity in evidence and in the list (grouped rows), while each domain keeps its own lead, status and decisions.
 - Decay is computed when a lead is scored; between two rescorings the stored evidence ages. A lead that nothing touches keeps the strength it had at its last scoring.
-- Until issue 172, the decision is still the ADR 0007 formula, fed by the corrected indicators.
+- The decision is taken by the scoring agents; the ADR 0007 formula, fed by the corrected indicators, is kept as the indicators they are given.

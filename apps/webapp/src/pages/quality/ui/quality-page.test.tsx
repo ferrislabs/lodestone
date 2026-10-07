@@ -67,6 +67,7 @@ const FILLED: Quality = {
 	],
 	versions: [
 		{
+			kind: 'aggregator',
 			agent_id: null,
 			agent_name: null,
 			model: 'gros-modele',
@@ -78,6 +79,7 @@ const FILLED: Quality = {
 			precision: 0.7,
 		},
 		{
+			kind: 'qualification',
 			agent_id: 'pertinence',
 			agent_name: 'Pertinence métier',
 			model: 'qwen3',
@@ -89,6 +91,7 @@ const FILLED: Quality = {
 			precision: 0.9,
 		},
 		{
+			kind: 'qualification',
 			agent_id: 'pertinence',
 			agent_name: 'Pertinence métier',
 			model: 'qwen3',
@@ -98,6 +101,18 @@ const FILLED: Quality = {
 			escalated: false,
 			n: 10,
 			precision: 0.3,
+		},
+		{
+			kind: 'scoring',
+			agent_id: 'score-global',
+			agent_name: 'Score global',
+			model: 'gemma_laya',
+			prompt_version: 'scoring-agent@9a9a',
+			validated: 8,
+			rejected: 2,
+			escalated: false,
+			n: 10,
+			precision: 0.8,
 		},
 	],
 	profiles: [
@@ -247,6 +262,7 @@ describe('QualityPage', () => {
 			.getAllByRole('columnheader')
 			.map((cell) => cell.textContent)
 		expect(headers).toEqual([
+			'Type',
 			'Agent',
 			'Modèle',
 			'Version du prompt',
@@ -261,9 +277,22 @@ describe('QualityPage', () => {
 		const second = card.getByRole('row', { name: /def456/ })
 		expect(within(second).getByText('30 %')).toBeTruthy()
 		const aggregator = card.getByRole('row', { name: /aggregator@f00/ })
-		expect(within(aggregator).getByText('Agrégateur')).toBeTruthy()
+		expect(within(aggregator).getAllByText('Agrégateur')).toHaveLength(2)
 		expect(within(aggregator).getByText('gros-modele')).toBeTruthy()
 		expect(within(aggregator).getByText('70 %')).toBeTruthy()
+	})
+
+	it('counts the precision of each scoring agent per version', () => {
+		renderPage()
+		const card = within(screen.getByLabelText('Précision par version'))
+		const scoring = card.getByRole('row', { name: /scoring-agent@9a9a/ })
+		expect(scoring.getAttribute('data-version-kind')).toBe('scoring')
+		expect(within(scoring).getByText('Scoring')).toBeTruthy()
+		expect(within(scoring).getByText('Score global')).toBeTruthy()
+		expect(within(scoring).getByText('gemma_laya')).toBeTruthy()
+		expect(within(scoring).getByText('80 %')).toBeTruthy()
+		const qualification = card.getByRole('row', { name: /abc123/ })
+		expect(within(qualification).getByText('Qualification')).toBeTruthy()
 	})
 
 	it('counts escalated runs on their own row with a badge', () => {

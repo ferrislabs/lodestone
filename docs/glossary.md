@@ -45,3 +45,5 @@
 | half-life | The age in days at which a signal of a given kind counts for half in the evidence volume and strength (`evidence.half_life_days`, by signal kind, `default` for the others). A signal weighs `0.5 ^ (age / half-life)`. | expiry, TTL |
 | scoring agent | An LLM agent that decides the score and the verdict through a normed contract imposed by the application (ADR 0009, implemented by issue 172). Several per profile, each weighted; the score is the weighted mean and the verdict the argmax of the weighted verdict probabilities. | judge, classifier |
 | indicators | The values computed in code and given to the scoring agents: the agents' opinion, the evidence strength with its components, independent signals and decayed volume. Shown as "Calcul" on the lead page. | metrics, features |
+| lead score | The score from 0 to 100 of a lead: the weighted mean of the scores of the scoring agents. Distinct from the signal score, the sum of the weighted signals of the sourcing. | rating |
+| verdict source | `scoring` when the verdict comes from the scoring agents, `indicators` for a lead qualified before they existed and not scored since. | n/a |

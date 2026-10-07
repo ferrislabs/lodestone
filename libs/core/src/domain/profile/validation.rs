@@ -13,12 +13,13 @@ use super::{
         KeywordSource, LlmSettings, MAX_CALIBRATION_FLOOR, MAX_DESCRIPTION_CHARS,
         MAX_HALF_LIFE_DAYS, MAX_OPTIONS, MAX_PROMPT_CHARS, MAX_SAMPLES, MAX_SAMPLING_TEMPERATURE,
         MIN_EXCLUSION_THRESHOLD, MIN_HALF_LIFE_DAYS, MIN_OPTIONS, Matcher, PROFILE_SCHEMA_VERSION,
-        ProfileDefinition, QualificationAgent, Question, Scoring, VerdictThresholds,
+        ProfileDefinition, QualificationAgent, Question, Scoring, ScoringAgent, VerdictThresholds,
         VersionExtractor,
     },
     legacy::{
         ProfileDefinitionV1, ProfileDefinitionV2, ProfileDefinitionV3, ProfileDefinitionV4,
         ProfileDefinitionV5, ProfileDefinitionV6, ProfileDefinitionV7, ProfileDefinitionV8,
+        ProfileDefinitionV10,
     },
 };
 
@@ -30,7 +31,7 @@ pub enum ProfileProblem {
     #[error("malformed: {0}")]
     Malformed(String),
     #[error(
-        "unsupported schema version {found}, expected 1, 2, 3, 4, 5, 6, 7, 8, 9 or {PROFILE_SCHEMA_VERSION}"
+        "unsupported schema version {found}, expected 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 or {PROFILE_SCHEMA_VERSION}"
     )]
     UnsupportedSchemaVersion { found: u32 },
     #[error("must not be empty")]
@@ -61,6 +62,8 @@ pub enum ProfileProblem {
     BandOrder,
     #[error("the unknown option cannot exclude the lead")]
     UnknownCannotExclude,
+    #[error("a scoring criterion cannot exclude the lead")]
+    CriterionCannotExclude,
     #[error("must be at most {MAX_PROMPT_CHARS} characters")]
     TooLong,
     #[error("must be at most {MAX_DESCRIPTION_CHARS} characters")]
@@ -141,11 +144,7 @@ impl ValidatedProfile {
             Some(6) => decode::<ProfileDefinitionV6>(value)?.upgrade(),
             Some(7) => decode::<ProfileDefinitionV7>(value)?.upgrade(),
             Some(8) => decode::<ProfileDefinitionV8>(value)?.upgrade(),
-            Some(9) => {
-                let mut definition = decode::<ProfileDefinition>(value)?;
-                definition.schema_version = PROFILE_SCHEMA_VERSION;
-                definition
-            }
+            Some(9 | 10) => decode::<ProfileDefinitionV10>(value)?.upgrade(),
             Some(PROFILE_SCHEMA_VERSION) | None => decode::<ProfileDefinition>(value)?,
             Some(found) => {
                 return Err(Path::root()
@@ -235,6 +234,12 @@ fn validate(definition: &ProfileDefinition) -> Check {
         &definition.qualification_agents,
         &definition.agents,
         &root.field("qualification_agents"),
+    )?;
+    validate_scoring_agents(
+        &definition.scoring_agents,
+        &definition.agents,
+        &definition.qualification_agents,
+        &root.field("scoring_agents"),
     )?;
     validate_aggregator(&definition.aggregator, &root.field("aggregator"))?;
     validate_escalation(&definition.escalation, &root.field("escalation"))?;
@@ -401,6 +406,88 @@ fn validate_qualification_agent(agent: &QualificationAgent, path: &Path) -> Chec
     )?;
     for (index, question) in agent.questions.iter().enumerate() {
         validate_question(question, &questions.index(index))?;
+    }
+    Ok(())
+}
+
+fn validate_scoring_agents(
+    agents: &[ScoringAgent],
+    sourcing: &[Agent],
+    qualification: &[QualificationAgent],
+    path: &Path,
+) -> Check {
+    for (index, agent) in agents.iter().enumerate() {
+        if !agent.id.is_slug() {
+            return Err(path
+                .index(index)
+                .field("id")
+                .fail(ProfileProblem::InvalidAgentId));
+        }
+    }
+    let mut seen: HashSet<&str> = sourcing
+        .iter()
+        .map(|agent| agent.id.as_str())
+        .chain(qualification.iter().map(|agent| agent.id.as_str()))
+        .collect();
+    for (index, agent) in agents.iter().enumerate() {
+        if !seen.insert(agent.id.as_str()) {
+            return Err(path
+                .index(index)
+                .field("id")
+                .fail(ProfileProblem::Duplicate(agent.id.as_str().to_owned())));
+        }
+    }
+    for (index, agent) in agents.iter().enumerate() {
+        validate_scoring_agent(agent, &path.index(index))?;
+    }
+    Ok(())
+}
+
+fn validate_scoring_agent(agent: &ScoringAgent, path: &Path) -> Check {
+    non_empty(&agent.name, &path.field("name"))?;
+    let description = path.field("description");
+    non_empty(&agent.description, &description)?;
+    if agent.description.chars().count() > MAX_DESCRIPTION_CHARS {
+        return Err(description.fail(ProfileProblem::DescriptionTooLong));
+    }
+    bounded_prompt(&agent.system_prompt, &path.field("system_prompt"))?;
+    valid_weight(agent.weight, &path.field("weight"))?;
+    if !(1..=MAX_SAMPLES).contains(&agent.samples) {
+        return Err(path.field("samples").fail(ProfileProblem::InvalidSamples));
+    }
+    if !(0.0..=MAX_SAMPLING_TEMPERATURE).contains(&agent.sampling_temperature) {
+        return Err(path
+            .field("sampling_temperature")
+            .fail(ProfileProblem::InvalidSamplingTemperature));
+    }
+    let criteria = path.field("criteria");
+    non_empty_list(&agent.criteria, &criteria)?;
+    for (index, criterion) in agent.criteria.iter().enumerate() {
+        if !is_identifier(&criterion.id) {
+            return Err(criteria
+                .index(index)
+                .field("id")
+                .fail(ProfileProblem::InvalidIdentifier));
+        }
+    }
+    unique(
+        agent
+            .criteria
+            .iter()
+            .map(|criterion| criterion.id.as_str())
+            .enumerate(),
+        |index| criteria.index(index).field("id"),
+    )?;
+    for (index, criterion) in agent.criteria.iter().enumerate() {
+        let criterion_path = criteria.index(index);
+        validate_question(criterion, &criterion_path)?;
+        if let Some(position) = criterion.options.iter().position(|option| option.excludes) {
+            return Err(criterion_path
+                .field("options")
+                .index(position)
+                .field("excludes")
+                .fail(ProfileProblem::CriterionCannotExclude));
+        }
     }
     Ok(())
 }
@@ -893,10 +980,10 @@ mod tests {
             v["scoring"] = iam_scoring_v2();
             v["llm"]["qualification_threshold"] = json!(50);
         });
-        assert_eq!(profile.definition().schema_version, 10);
+        assert_eq!(profile.definition().schema_version, 11);
         assert_eq!(weights(&profile), [10, 5, 3, 8, 7, 2, 2]);
         assert_eq!(profile.definition().llm.qualification_threshold, 37);
-        assert_eq!(profile.to_json()["schema_version"], 10);
+        assert_eq!(profile.to_json()["schema_version"], 11);
     }
 
     #[test]
@@ -995,11 +1082,11 @@ mod tests {
 
     #[test]
     fn unsupported_schema_version_is_rejected() {
-        let error = error_for(|v| v["schema_version"] = json!(11));
+        let error = error_for(|v| v["schema_version"] = json!(12));
         assert_eq!(error.path, "schema_version");
         assert_eq!(
             error.problem,
-            ProfileProblem::UnsupportedSchemaVersion { found: 11 }
+            ProfileProblem::UnsupportedSchemaVersion { found: 12 }
         );
         let error = error_for(|v| v["schema_version"] = json!(0));
         assert_eq!(
@@ -1325,7 +1412,7 @@ mod tests {
         value["sources"] = json!({"http_probe": source, "ats": {"keywords": ["sso"]}});
         let profile = ValidatedProfile::parse(value).unwrap();
         let definition = profile.definition();
-        assert_eq!(definition.schema_version, 10);
+        assert_eq!(definition.schema_version, 11);
         let summary: Vec<_> = definition
             .agents
             .iter()
@@ -1335,7 +1422,7 @@ mod tests {
             summary,
             [("http-probe", "HTTP probe", true), ("ats", "ATS", true)]
         );
-        assert_eq!(profile.to_json()["schema_version"], 10);
+        assert_eq!(profile.to_json()["schema_version"], 11);
         assert_eq!(profile.to_json()["agents"][0]["source"], agent);
     }
 
@@ -1404,6 +1491,7 @@ mod tests {
     fn v8() -> Value {
         let mut value = v4();
         value["schema_version"] = json!(8);
+        value.as_object_mut().unwrap().remove("scoring_agents");
         value.as_object_mut().unwrap().remove("escalation");
         for agent in value["qualification_agents"].as_array_mut().unwrap() {
             let agent = agent.as_object_mut().unwrap();
@@ -1448,7 +1536,7 @@ mod tests {
     fn version_three_is_upgraded_with_a_default_qualification_agent() {
         let profile = ValidatedProfile::parse(minimal()).unwrap();
         let definition = profile.definition();
-        assert_eq!(definition.schema_version, 10);
+        assert_eq!(definition.schema_version, 11);
         assert_eq!(definition.qualification_agents.len(), 1);
         let agent = &definition.qualification_agents[0];
         assert_eq!(agent.id.as_str(), "pertinence");
@@ -1550,7 +1638,7 @@ mod tests {
     fn version_five_is_upgraded_with_default_evidence_settings() {
         let profile = ValidatedProfile::parse(v5()).unwrap();
         let definition = profile.definition();
-        assert_eq!(definition.schema_version, 10);
+        assert_eq!(definition.schema_version, 11);
         assert_eq!(definition.verdict.reliable_from, 80);
         assert_eq!(definition.verdict.discard_below, 20);
         assert_eq!(definition.verdict.calibration_floor, 0.05);
@@ -1558,7 +1646,7 @@ mod tests {
         assert_eq!(definition.evidence, EvidenceSettings::default());
         assert_eq!(definition.evidence.influence, 0.6);
         assert_eq!(definition.evidence.reference_score, 50.0);
-        assert_eq!(profile.to_json()["schema_version"], 10);
+        assert_eq!(profile.to_json()["schema_version"], 11);
     }
 
     #[test]
@@ -1682,12 +1770,13 @@ mod tests {
     fn version_nine_is_upgraded_with_the_default_half_lives() {
         let mut value = v4();
         value["schema_version"] = json!(9);
+        value.as_object_mut().unwrap().remove("scoring_agents");
         value["evidence"]
             .as_object_mut()
             .unwrap()
             .remove("half_life_days");
         let profile = ValidatedProfile::parse(value).unwrap();
-        assert_eq!(profile.definition().schema_version, 10);
+        assert_eq!(profile.definition().schema_version, 11);
         assert_eq!(profile.definition().evidence, EvidenceSettings::default());
     }
 
@@ -1746,10 +1835,10 @@ mod tests {
         agent.insert("name".to_owned(), json!("Maturité technique"));
         let profile = ValidatedProfile::parse(value).unwrap();
         let agent = &profile.definition().qualification_agents[0];
-        assert_eq!(profile.definition().schema_version, 10);
+        assert_eq!(profile.definition().schema_version, 11);
         assert_eq!(agent.description, "Évalue : Maturité technique");
         assert_eq!(agent.name, "Maturité technique");
-        assert_eq!(profile.to_json()["schema_version"], 10);
+        assert_eq!(profile.to_json()["schema_version"], 11);
     }
 
     #[test]
@@ -1976,7 +2065,7 @@ mod tests {
                     json!({"value": value, "label": "Je ne sais pas", "score": 0.4}),
                 );
             let profile = ValidatedProfile::parse(document).unwrap();
-            assert_eq!(profile.definition().schema_version, 10);
+            assert_eq!(profile.definition().schema_version, 11);
             assert_eq!(
                 options_of(&profile),
                 [
@@ -2005,7 +2094,7 @@ mod tests {
         );
         let appended = &profile.definition().qualification_agents[0].questions[0].options[3];
         assert_eq!(appended.label, "Inconnu");
-        assert_eq!(profile.to_json()["schema_version"], 10);
+        assert_eq!(profile.to_json()["schema_version"], 11);
     }
 
     #[test]
@@ -2042,7 +2131,7 @@ mod tests {
     fn version_seven_is_upgraded_with_exclusion_defaults() {
         let profile = ValidatedProfile::parse(v7()).unwrap();
         let definition = profile.definition();
-        assert_eq!(definition.schema_version, 10);
+        assert_eq!(definition.schema_version, 11);
         for agent in &definition.qualification_agents {
             assert_eq!(agent.exclusion_threshold, 0.6);
             assert!(
@@ -2053,7 +2142,7 @@ mod tests {
                     .all(|option| !option.excludes)
             );
         }
-        assert_eq!(profile.to_json()["schema_version"], 10);
+        assert_eq!(profile.to_json()["schema_version"], 11);
         assert_eq!(profile, ValidatedProfile::parse(v4()).unwrap());
     }
 
@@ -2073,7 +2162,7 @@ mod tests {
     fn version_eight_is_upgraded_with_sampling_and_escalation_defaults() {
         let profile = ValidatedProfile::parse(v8()).unwrap();
         let definition = profile.definition();
-        assert_eq!(definition.schema_version, 10);
+        assert_eq!(definition.schema_version, 11);
         assert_eq!(definition.escalation, Escalation::default());
         assert_eq!(definition.escalation.provider, None);
         assert_eq!(
@@ -2087,7 +2176,7 @@ mod tests {
             assert_eq!(agent.samples, 3);
             assert_eq!(agent.sampling_temperature, 0.7);
         }
-        assert_eq!(profile.to_json()["schema_version"], 10);
+        assert_eq!(profile.to_json()["schema_version"], 11);
         assert_eq!(profile, ValidatedProfile::parse(v4()).unwrap());
     }
 
@@ -2269,5 +2358,160 @@ mod tests {
     fn display_prefixes_the_path() {
         let error = error_for(|v| v["identity"]["offer"] = json!(""));
         assert_eq!(error.to_string(), "identity.offer: must not be empty");
+    }
+
+    #[test]
+    fn version_ten_is_upgraded_with_the_default_scoring_agent() {
+        let mut value = v4();
+        value["schema_version"] = json!(10);
+        value.as_object_mut().unwrap().remove("scoring_agents");
+        let profile = ValidatedProfile::parse(value).unwrap();
+        let definition = profile.definition();
+        assert_eq!(definition.schema_version, 11);
+        assert_eq!(definition.scoring_agents.len(), 1);
+        let agent = &definition.scoring_agents[0];
+        assert_eq!(agent.id.as_str(), "score-global");
+        assert_eq!(agent.name, "Score global");
+        assert_eq!(agent.weight, 5);
+        assert_eq!(agent.samples, 1);
+        assert_eq!(agent.provider_id, None);
+        assert!(agent.enabled);
+        let ids: Vec<&str> = agent.criteria.iter().map(|c| c.id.as_str()).collect();
+        assert_eq!(
+            ids,
+            [
+                "adequation_offre",
+                "solidite_preuves",
+                "priorite_commerciale"
+            ]
+        );
+        for criterion in &agent.criteria {
+            assert!(criterion.unknown_option().is_some());
+            assert!(criterion.options.iter().all(|option| !option.excludes));
+        }
+        assert!(agent.system_prompt.starts_with("Tu décides"));
+    }
+
+    #[test]
+    fn every_older_version_gets_the_default_scoring_agent() {
+        for value in [v6(), v7(), v8()] {
+            let profile = ValidatedProfile::parse(value).unwrap();
+            assert_eq!(profile.definition().scoring_agents.len(), 1);
+        }
+        let profile = ValidatedProfile::parse(minimal()).unwrap();
+        assert_eq!(profile.definition().scoring_agents.len(), 1);
+    }
+
+    #[test]
+    fn a_profile_without_scoring_agents_is_valid() {
+        let profile = v4_ok(|v| v["scoring_agents"] = json!([]));
+        assert!(profile.definition().scoring_agents.is_empty());
+        let profile = v4_ok(|v| {
+            v.as_object_mut().unwrap().remove("scoring_agents");
+        });
+        assert!(profile.definition().scoring_agents.is_empty());
+    }
+
+    #[test]
+    fn scoring_agent_defaults() {
+        let profile = v4_ok(|v| {
+            let agent = v["scoring_agents"][0].as_object_mut().unwrap();
+            agent.remove("enabled");
+            agent.remove("weight");
+            agent.remove("provider_id");
+            agent.remove("samples");
+            agent.remove("sampling_temperature");
+        });
+        let agent = &profile.definition().scoring_agents[0];
+        assert!(agent.enabled);
+        assert_eq!(agent.weight, 5);
+        assert_eq!(agent.samples, 1);
+        assert_eq!(agent.sampling_temperature, 0.7);
+    }
+
+    #[test]
+    fn scoring_agent_ids_are_slugs_unique_across_every_kind() {
+        let error = v4_error(|v| v["scoring_agents"][0]["id"] = json!("Bad Id"));
+        assert_eq!(error.path, "scoring_agents[0].id");
+        assert_eq!(error.problem, ProfileProblem::InvalidAgentId);
+        let error = v4_error(|v| {
+            let id = v["qualification_agents"][0]["id"].clone();
+            v["scoring_agents"][0]["id"] = id;
+        });
+        assert_eq!(error.path, "scoring_agents[0].id");
+        assert!(matches!(error.problem, ProfileProblem::Duplicate(_)));
+        let error = v4_error(|v| {
+            let first = v["scoring_agents"][0].clone();
+            v["scoring_agents"].as_array_mut().unwrap().push(first);
+        });
+        assert_eq!(error.path, "scoring_agents[1].id");
+    }
+
+    #[test]
+    fn scoring_agent_weight_samples_and_temperature_are_bounded() {
+        for weight in [0, 11] {
+            let error = v4_error(|v| v["scoring_agents"][0]["weight"] = json!(weight));
+            assert_eq!(error.path, "scoring_agents[0].weight");
+            assert_eq!(error.problem, ProfileProblem::InvalidWeight);
+        }
+        for samples in [0, 6] {
+            let error = v4_error(|v| v["scoring_agents"][0]["samples"] = json!(samples));
+            assert_eq!(error.path, "scoring_agents[0].samples");
+            assert_eq!(error.problem, ProfileProblem::InvalidSamples);
+        }
+        let error = v4_error(|v| v["scoring_agents"][0]["sampling_temperature"] = json!(1.6));
+        assert_eq!(error.path, "scoring_agents[0].sampling_temperature");
+        assert_eq!(error.problem, ProfileProblem::InvalidSamplingTemperature);
+        let _ = v4_ok(|v| v["scoring_agents"][0]["samples"] = json!(5));
+    }
+
+    #[test]
+    fn scoring_agent_text_fields_are_bounded() {
+        let error = v4_error(|v| v["scoring_agents"][0]["description"] = json!("x".repeat(301)));
+        assert_eq!(error.problem, ProfileProblem::DescriptionTooLong);
+        let error = v4_error(|v| v["scoring_agents"][0]["system_prompt"] = json!(" "));
+        assert_eq!(error.path, "scoring_agents[0].system_prompt");
+        assert_eq!(error.problem, ProfileProblem::Empty);
+        let error = v4_error(|v| v["scoring_agents"][0]["name"] = json!(""));
+        assert_eq!(error.path, "scoring_agents[0].name");
+    }
+
+    #[test]
+    fn scoring_criteria_follow_the_question_rules() {
+        let error = v4_error(|v| v["scoring_agents"][0]["criteria"] = json!([]));
+        assert_eq!(error.path, "scoring_agents[0].criteria");
+        assert_eq!(error.problem, ProfileProblem::Empty);
+        let error = v4_error(|v| v["scoring_agents"][0]["criteria"][0]["id"] = json!("Bad Id"));
+        assert_eq!(error.path, "scoring_agents[0].criteria[0].id");
+        assert_eq!(error.problem, ProfileProblem::InvalidIdentifier);
+        let error = v4_error(|v| {
+            let first = v["scoring_agents"][0]["criteria"][0].clone();
+            v["scoring_agents"][0]["criteria"]
+                .as_array_mut()
+                .unwrap()
+                .push(first);
+        });
+        assert_eq!(error.path, "scoring_agents[0].criteria[3].id");
+        let error = v4_error(|v| {
+            for option in v["scoring_agents"][0]["criteria"][0]["options"]
+                .as_array_mut()
+                .unwrap()
+            {
+                option["is_unknown"] = json!(false);
+            }
+        });
+        assert_eq!(error.problem, ProfileProblem::UnknownOptionCount);
+    }
+
+    #[test]
+    fn a_scoring_criterion_cannot_exclude() {
+        let error = v4_error(|v| {
+            v["scoring_agents"][0]["criteria"][1]["options"][0]["excludes"] = json!(true);
+        });
+        assert_eq!(
+            error.path,
+            "scoring_agents[0].criteria[1].options[0].excludes"
+        );
+        assert_eq!(error.problem, ProfileProblem::CriterionCannotExclude);
     }
 }

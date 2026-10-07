@@ -332,13 +332,10 @@ mod tests {
         assert_eq!(judged.verdict, Some(Verdict::Reliable));
         let agents = [agent("excl", 0.6, vec![question("q")])];
         let results = [valid("excl", json!({"q": answer(0.7, 0.0, 0.2, 0.1)}))];
-        let excluded = judged.clone().excluding(exclusions(&results, &agents));
-        assert_eq!(excluded.verdict, Some(Verdict::Discarded));
-        assert_eq!(excluded.confidence, judged.confidence);
-        assert!(excluded.confidence.unwrap() >= 70.0);
-        assert_eq!(excluded.reason().map(|r| r.as_str()), Some("excluded"));
-        let untouched = judged.clone().excluding(Vec::new());
-        assert_eq!(untouched, judged);
-        assert_eq!(untouched.verdict, Some(Verdict::Reliable));
+        let found = exclusions(&results, &agents);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].option, "oui");
+        assert_eq!(judged.verdict, Some(Verdict::Reliable));
+        assert!(judged.confidence.unwrap() >= 70.0);
     }
 }

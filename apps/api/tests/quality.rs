@@ -462,6 +462,8 @@ async fn precision_is_split_by_version_and_rejections_by_reason(pool: PgPool) {
     );
     assert!(versions.iter().all(|row| row["escalated"] == false));
     assert_eq!(versions[0]["agent_name"], Value::Null);
+    assert_eq!(versions[0]["kind"], "aggregator");
+    assert_eq!(versions[1]["kind"], "qualification");
     assert_eq!(versions[1]["agent_name"], "fit");
     assert_eq!(versions[1]["precision"], 0.0);
     assert!((versions[2]["precision"].as_f64().unwrap() - 2.0 / 3.0).abs() < 1e-9);

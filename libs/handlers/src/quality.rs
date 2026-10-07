@@ -72,11 +72,13 @@ pub struct AgentQualityDto {
 
 #[derive(Debug, Serialize, PartialEq, ToSchema)]
 pub struct VersionPrecisionDto {
+    /// One of `qualification`, `scoring`, `aggregator`.
+    pub kind: String,
     /// Absent for the aggregator.
     pub agent_id: Option<String>,
     pub agent_name: Option<String>,
     pub model: String,
-    /// `qualification-agent@<hash>` or `aggregator@<hash>`.
+    /// `qualification-agent@<hash>`, `scoring-agent@<hash>` or `aggregator@<hash>`.
     pub prompt_version: String,
     /// True for the runs of the escalation provider, counted apart from the original runs.
     pub escalated: bool,
@@ -273,6 +275,7 @@ impl From<&QualityReport> for QualityDto {
                 .versions
                 .iter()
                 .map(|row| VersionPrecisionDto {
+                    kind: row.kind.as_str().to_owned(),
                     agent_id: row.agent_id.clone(),
                     agent_name: row.agent_name.clone(),
                     model: row.model.clone(),

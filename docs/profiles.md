@@ -1,6 +1,6 @@
 # Detection profiles
 
-A detection profile describes one market: what is sold, which agents scan which sources, which qualification agents judge a lead and how an aggregator sums it up, how leads are scored and which contacts to prefer.
+A detection profile describes one market: what is sold, which agents scan which sources, which qualification agents judge a lead, which scoring agents decide its score and verdict, how an aggregator sums it up, how signals are weighted and which contacts to prefer.
 
 ## Storage
 
@@ -8,7 +8,7 @@ Profiles live in Postgres. Each edit creates a new revision; earlier revisions a
 
 ## Schema
 
-The JSON Schema is `docs/schemas/profile.v10.schema.json`. It is generated from `ProfileDefinition` and must not be edited by hand. Regenerate it with:
+The JSON Schema is `docs/schemas/profile.v11.schema.json`. It is generated from `ProfileDefinition` and must not be edited by hand. Regenerate it with:
 
 ```
 UPDATE_SCHEMA=1 cargo test -p lodestone-core --test profile_examples
@@ -23,7 +23,7 @@ Without `UPDATE_SCHEMA=1` the same test fails if the committed file is stale. Th
 
 ## Sections
 
-- `schema_version`: must be 10. See [Older versions](#older-versions).
+- `schema_version`: must be 11. See [Older versions](#older-versions).
 - `identity`: the offer and the target customer, in free text.
 - `agents`: the detection agents; at least one is required. An agent searches one source with its own settings (see ADR 0005). Several agents of the same kind are allowed.
   - `id`: slug matching `^[a-z0-9][a-z0-9-]{0,62}$`, unique in the profile.
@@ -53,10 +53,63 @@ Without `UPDATE_SCHEMA=1` the same test fails if the committed file is stale. Th
     - `Recherche entreprise`: what the company does and its size, from its dossier.
     - `Exclusions`: weight 1. Axes `editeur_integrateur`, `hebergeur_agence` (the signal concerns a customer of the company), `domaine_inactif` (`parque_ou_inactif`, `actif`, `inconnu`), `client_actuel` and `concurrent`; the other four have `oui` (excludes, score 0), `non` (score 1) and `inconnu` (score 0.5). The prompt holds three operator-editable lists in French, `Clients actuels :`, `Concurrents :` and `Éditeurs et intégrateurs du domaine :`, with short IAM-oriented defaults.
     - The IAM example (`docs/examples/profiles/iam-ferriskey.json`) enables all of them.
+- `scoring_agents`: zero or more (ADR 0009). Each agent *decides* a score and a verdict for every lead from the reports of the qualification agents, through a contract imposed by the application. With none enabled the verdict stays pending (`en_attente`, reason `awaiting_scoring`).
+  - `id`: slug, unique among all agents of the profile (sourcing, qualification and scoring). `name`, `enabled` (default `true`), `description` (1 to 300 characters), `provider_id` (`null` for the Synthèse default provider, the one of the aggregator), `system_prompt` (not empty, at most 8000 characters).
+  - `weight`: integer from 1 to 10, default 5, the agent's weight in the lead score and verdict.
+  - `criteria`: at least one. Same rules as qualification `questions` (identifier, `wording`, `weight`, 2 to 11 options with a score from 0 to 1, exactly one unknown option), except that no option can exclude a lead (`CriterionCannotExclude`, path `scoring_agents[i].criteria[j].options[k].excludes`).
+  - `samples`: integer from 1 to 5, default 1. `sampling_temperature`: from 0 to 1.5, default 0.7, used when `samples` is above 1.
+  - Default agent given to every profile of an older version on upgrade (and carried by both examples): `score-global`, "Score global", weight 5, 1 sample, provider `null`, a French description and prompt, and three criteria (`adequation_offre` forte/moyenne/faible, `solidite_preuves` solide/partielle/fragile, `priorite_commerciale` haute/normale/basse), each with an unknown option.
 - `aggregator`: `provider_id` (or `null` for the synthesis default) and a `system_prompt` (not empty, at most 8000 characters). Once every enabled qualification agent has a result for a lead, it writes the lead summary and a message draft (see "Qualification and summary").
 - `escalation`: `provider` (id of a declared LLM provider, `null` by default which disables escalation), `band_low` (0 to 100, default 40) and `band_high` (0 to 100, default 70) with `band_high > band_low` (see "Escalation"). The whole section and each field are optional.
 - `verdict`: `reliable_from` (0 to 100, default 70) and `discard_below` (0 to 100, default 30), with `reliable_from > discard_below`. Percentages of the lead confidence: reliable from the first (and only when the two conditions below hold), to check between the two, discarded below the second. `calibration_floor` (0 to 0.2, default 0.05, 0 disables) clamps every answer probability to `[floor, 1 - floor]` before scoring, then renormalises. `min_evidence` (0 to 1, default 0.5) is the evidence strength a lead needs to be reliable.
 - `evidence`: how the strength of the evidence weighs on the confidence (ADR 0007, "Evidence and calibration"). `influence` (0 to 1, default 0.6), `reference_score` (at least 1, default 50) and `weights` (`volume`, `diversity`, `environment`, `strength`, integers from 0 to 10, default 1, at least one above 0). `half_life_days` maps a signal kind to its half-life in days (see "Evidence indicators"). The whole section and each field are optional.
+
+### Scoring agents
+
+Order of a lead: sourcing, qualification agents (with exclusions and escalation), indicators computed in code, scoring agents, aggregator. The qualification listener runs the three phases in that order on every pass.
+
+**Contract imposed by the application.** `scoring_contract_schema(&ScoringAgent)` (`libs/core/src/domain/profile/contract.rs`) builds it; the operator edits the prompt and the criteria, never this shape:
+
+```json
+{
+  "criteria": {
+    "<criterion id>": {
+      "type": "choice",
+      "choice": "<option value>",
+      "evidence": "<sentence copied verbatim from the documents>",
+      "confidence": 0.0,
+      "probabilities": { "<option value>": 0.0 }
+    }
+  },
+  "score": 0,
+  "verdict": {
+    "choice": "fiable | a_verifier | ecarte",
+    "confidence": 0.0,
+    "probabilities": { "fiable": 0.0, "a_verifier": 0.0, "ecarte": 0.0 }
+  },
+  "reasons": ["<1 to 5 sentences of at most 200 characters, in the profile language>"]
+}
+```
+
+Validation is `validate_scoring` (`libs/core/src/domain/scoring_agent/mod.rs`) and follows the qualification rules: every criterion is checked like a question (choice among the options, confidence and probabilities from 0 to 1, probabilities summing to 1 within 0.05 then renormalised) and grounded against the documents (a quote not found downgrades the criterion to the unknown option, after one retry that lists the ungrounded criteria); `score` is an integer from 0 to 100; `verdict.probabilities` has exactly `fiable`, `a_verifier` and `ecarte`, summing to 1 within 0.05 then renormalised; `reasons` has 1 to 5 non empty strings of at most 200 characters. One retry lists every violation. An answer still invalid after the retry makes the result of that agent invalid (stored with its error, left out of the combination). The stored verdict is the argmax of the probabilities (ties: `a_verifier`, then `ecarte`, then `fiable`) with its probability as confidence; a `verdict.choice` that disagrees is kept as `declared_choice`.
+
+**Inputs.** Documents given to a scoring agent, in order: the lead overview with the facts (company entity, independent and decayed evidence), the signals as sentences, the company dossier, one report per enabled qualification agent (source `qualification:<id>`: description, summary, voted answers with quotes, agreement between samples, ungrounded flags, exclusions raised), and an `indicators` document (agents opinion, evidence strength with its four components, independent signals, decayed weight, indicator confidence). The system prompt is the agent prompt, the market context, the language line, the notes on facts, dossier, reports and indicators, and the contract. When no qualification result is valid, no scoring call is made: every enabled scoring agent gets an invalid result ("aucun rapport de qualification valide") and the verdict stays pending.
+
+**Samples.** With `samples` above 1, each sample is a contract call with its own validation and cache entry. The criteria are voted with the qualification `vote` rules; the score is the mean of the valid samples rounded to the nearest integer; the verdict probabilities are the mean of the valid samples (then renormalised) and the verdict is their argmax; the reasons are those of the first sample that agrees with the final verdict and the most final criteria. Raw samples are kept in `scoring_results.raw_samples`.
+
+**Combination.** Pure function `combine` / `decide` (`libs/core/src/domain/scoring_agent/combination.rs`), over the valid results of the enabled scoring agents:
+
+- lead score = weighted mean of the agent scores (weights 1 to 10), rounded half up to an integer;
+- verdict probabilities = weighted mean of the agents' verdict probabilities, each first passed through `calibrate_verdict(probabilities, agent)`, the identity until issue 171;
+- verdict = argmax, ties resolved prudently `a_verifier` > `ecarte` > `fiable`; verdict confidence = that probability, stored in percent on the lead (`leads.confidence`);
+- qualification exclusions force `ecarte` with reason `excluded` and confidence 100, whatever the scoring agents say, even when none answered;
+- no valid scoring result and no exclusion: verdict `null`, score `null`, reason `awaiting_scoring`.
+
+**Storage and due logic.** Results live in `scoring_results` (lead, profile revision, agent, status, criteria answers, score, verdict, reasons, provenance, raw samples), upserted on `(lead_id, profile_revision, agent_id)`. The lead score is `leads.llm_score`, the verdict and its confidence `leads.verdict` and `leads.confidence`, the verdict probabilities, reason and source `lead_qualification_state.verdict_probabilities`, `verdict_reason` and `verdict_source` (`scoring`, or `indicators` for a lead qualified before the scoring agents existed and not scored since: it keeps its former computed verdict until scored). The indicators stay in `opinion`, `evidence`, `indicator_confidence` and `indicator_cap`. A lead is due for scoring when its qualification results changed (`lead_qualification_state.completed_at` differs from `scoring_for`) or its profile revision differs from `scoring_revision`. The aggregator only summarises a lead whose scoring is up to date, and receives the scoring results (score, verdict, reasons) as documents; it still must not restate figures.
+
+**Rescoring.** The rescoring loop (no model call) refreshes the indicators and the decay (`SCORING_VERSION` 4) and no longer decides: it recombines the stored scoring results and changes a verdict only through exclusions (a lead scored by the scoring agents is recombined, an `indicators` lead is untouched unless a qualification agent excludes it).
+
+**Quality.** Decision label snapshots keep the scoring results (`scoring_agents`, `llm_score`, `indicator_confidence`, `verdict_source`); the versions table of `GET /api/v1/quality` has a `kind` (`qualification`, `scoring`, `aggregator`), so precision is counted per scoring agent and per version (model and prompt).
 
 ### Evidence indicators
 
@@ -80,7 +133,7 @@ The strength of the evidence is computed in code (ADR 0007, "Evidence and calibr
 
 **API.** The lead page shows `facts.independent_signals`, `facts.sibling_domains` and, in `evidence`, `independent_signals`, `decayed_signals`, `source_count` and `kind_count`. The lead list accepts `group_by=company`: one row per company and profile, the lead with the best confidence (then score) standing for the others, which are returned in `grouped_leads`; the other filters apply before grouping, and `total` counts rows. Default is `none`. The webapp groups by default ("Regrouper par entreprise") and shows a "+N domaines" badge that expands the sibling domains.
 
-**Rescoring.** `SCORING_VERSION` 3 (v10 counting rules) rescored every stored lead without calling a model. A lead is rescored whenever the number of signals it aggregates changes, including signals of a sibling. Decay is evaluated at each scoring; it does not run on its own.
+**Rescoring.** `SCORING_VERSION` 3 (v10 counting rules) rescored every stored lead without calling a model; version 4 (v11) refreshes the indicators of every stored lead the same way. A lead is rescored whenever the number of signals it aggregates changes, including signals of a sibling. Decay is evaluated at each scoring; it does not run on its own.
 
 ### Exclusions
 
@@ -219,7 +272,7 @@ A host or domain whose lookup, probe or crawl fails is marked checked like a suc
 
 ## Older versions
 
-Stored revisions are never rewritten. Versions 1, 2, 3, 4, 5, 6, 7, 8 and 9 are accepted and upgraded when read; new revisions are written in version 10. Errors on an older document keep that document's paths.
+Stored revisions are never rewritten. Versions 1, 2, 3, 4, 5, 6, 7, 8, 9 and 10 are accepted and upgraded when read; new revisions are written in version 11. Errors on an older document keep that document's paths.
 
 ### Version 1 to 2
 
@@ -267,3 +320,7 @@ Every qualification agent gains `samples` (3) and `sampling_temperature` (0.7), 
 ### Version 9 to 10
 
 `evidence` gains `half_life_days` with the defaults above. Stored leads are rescored without a model call (`SCORING_VERSION` 3): evidence now counts independent signals, decays with age and aggregates the sibling domains of a company, so strengths can change. The same upgrade applies to older versions, whose `evidence` section is filled with the defaults.
+
+### Version 10 to 11
+
+The profile gains `scoring_agents` with one agent, `score-global` (see `scoring_agents` above), provider `null` (the Synthèse default), weight 5, 1 sample. Stored leads keep the verdict they had, computed by the former confidence formula (`verdict_source` `indicators`), until the scoring agents have scored them: every stored lead becomes due for scoring on the next pass, and is summarised again afterwards because the aggregator now receives the scoring results. Rescoring (`SCORING_VERSION` 4) refreshes the indicators of every stored lead without calling a model. Profiles written in version 11 may declare no scoring agent; their leads then wait with a pending verdict.

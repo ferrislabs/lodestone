@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Detection profile",
-  "description": "Describes one market: what is sold, which agents scan which sources, which qualification agents judge a lead and how an aggregator sums it up, how leads are scored and which contacts to prefer.",
+  "description": "Describes one market: what is sold, which agents scan which sources, which qualification agents judge a lead, which scoring agents decide its score and verdict, how an aggregator sums it up, how signals are weighted and which contacts to prefer.",
   "type": "object",
   "properties": {
     "agents": {
@@ -63,13 +63,21 @@
       }
     },
     "schema_version": {
-      "description": "Profile format version. Must be 10.",
+      "description": "Profile format version. Must be 11.",
       "type": "integer",
       "format": "uint32",
       "minimum": 0
     },
     "scoring": {
       "$ref": "#/$defs/Scoring"
+    },
+    "scoring_agents": {
+      "description": "Scoring agents. Each one decides a score and a verdict for every lead from the reports of the qualification agents, through a contract imposed by the application. The lead score and verdict are the weighted means of their answers. With none enabled, the verdict stays pending.",
+      "type": "array",
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/ScoringAgent"
+      }
     },
     "verdict": {
       "$ref": "#/$defs/VerdictThresholds",
@@ -1059,6 +1067,86 @@
       "additionalProperties": false,
       "required": [
         "factors"
+      ]
+    },
+    "ScoringAgent": {
+      "title": "Scoring agent",
+      "description": "Decides the score and the verdict of every lead from the reports of the qualification agents. The shape of its answer is imposed by the application: criteria choices, a score from 0 to 100, probabilities for each verdict and reasons.",
+      "type": "object",
+      "properties": {
+        "criteria": {
+          "description": "Criteria the agent answers before it scores. Same rules as qualification questions, except that no option can exclude a lead. At least one is required.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Question"
+          },
+          "minItems": 1
+        },
+        "description": {
+          "description": "What this agent evaluates, in one sentence.",
+          "type": "string",
+          "maxLength": 300,
+          "minLength": 1
+        },
+        "enabled": {
+          "description": "A disabled agent is kept but not run.",
+          "type": "boolean",
+          "default": true
+        },
+        "id": {
+          "description": "Unique slug among all agents of the profile, sourcing, qualification and scoring, for example score-global.",
+          "$ref": "#/$defs/AgentId"
+        },
+        "name": {
+          "description": "Display name.",
+          "type": "string"
+        },
+        "provider_id": {
+          "description": "Id of a declared LLM provider. The default provider of the aggregator tier applies when null.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "samples": {
+          "description": "Number of independent model calls per lead, from 1 to 5. The criteria are voted, the score and the verdict probabilities are averaged. Default 1.",
+          "type": "integer",
+          "format": "uint8",
+          "default": 1,
+          "maximum": 5,
+          "minimum": 1
+        },
+        "sampling_temperature": {
+          "description": "Temperature of the calls when samples is above 1, overriding the provider temperature. Default 0.7.",
+          "type": "number",
+          "format": "double",
+          "default": 0.7,
+          "maximum": 1.5,
+          "minimum": 0.0
+        },
+        "system_prompt": {
+          "description": "System prompt given to the model.",
+          "type": "string",
+          "maxLength": 8000,
+          "minLength": 1
+        },
+        "weight": {
+          "description": "Integer weight from 1 to 10 of this agent in the lead score and verdict.",
+          "type": "integer",
+          "format": "uint8",
+          "default": 5,
+          "maximum": 10,
+          "minimum": 1
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "description",
+        "system_prompt",
+        "criteria"
       ]
     },
     "ScoringFactor": {

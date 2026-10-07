@@ -281,7 +281,7 @@ pub struct ExportLeadsParams {
     domain: Option<String>,
     /// Only leads having at least one signal of this kind.
     signal: Option<String>,
-    /// One of confidence_desc (default), confidence_asc, score_desc, score_asc, last_seen_desc, first_seen_desc, domain_asc.
+    /// One of confidence_desc (default), confidence_asc, score_desc, score_asc, llm_score_desc, llm_score_asc, last_seen_desc, first_seen_desc, domain_asc.
     sort: Option<String>,
 }
 

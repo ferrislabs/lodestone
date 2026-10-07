@@ -7,9 +7,9 @@ use lodestone_macros::repository;
 use crate::{
     Lead, LeadId, ProfileId, RevisionNumber,
     domain::qualification::{
-        Completion, EvidenceStrength, Exclusion, Judgement, LeadScoring, QualificationResult,
-        Rescoring, SCORING_MAX_AGE_HOURS, SCORING_VERSION, SUMMARY_ERROR_MAX_CHARS, SummaryState,
-        VerdictReason, ports::QualificationRepository, summary_retry_delay,
+        AWAITING_SCORING_REASON, Completion, EvidenceStrength, Exclusion, LeadScoring,
+        QualificationResult, Rescoring, SCORING_MAX_AGE_HOURS, SCORING_VERSION,
+        SUMMARY_ERROR_MAX_CHARS, SummaryState, ports::QualificationRepository, summary_retry_delay,
     },
     infrastructure::{
         lead::postgres::{model::LeadRow, repository::NOT_SUPPRESSED},
@@ -35,10 +35,6 @@ fn evidence_json(evidence: &EvidenceStrength) -> Result<serde_json::Value, CoreE
 
 fn exclusions_json(exclusions: &[Exclusion]) -> Result<serde_json::Value, CoreError> {
     serde_json::to_value(exclusions).map_err(|error| CoreError::Internal(error.to_string()))
-}
-
-fn reason_text(judgement: &Judgement) -> Option<&'static str> {
-    judgement.reason().map(VerdictReason::as_str)
 }
 
 fn revision_number(revision: RevisionNumber) -> Result<i32, CoreError> {
@@ -80,6 +76,8 @@ const SUMMARY_DUE: &str = r#"
     JOIN lead_qualification_state state ON state.lead_id = leads.id
     WHERE leads.profile_id = $1
       AND state.profile_revision = $2
+      AND state.scoring_revision = state.profile_revision
+      AND state.scoring_for = state.completed_at
       AND state.summarised_at IS NULL
       AND leads.status IN ('new', 'qualified')
 "#;
@@ -120,7 +118,7 @@ impl<'tx> QualificationRepository for PgQualificationRepository<'tx> {
     ) -> Result<Vec<Lead>, CoreError> {
         let revision = revision_number(revision)?;
         let query = format!(
-            "SELECT leads.id, leads.profile_id, leads.domain, leads.status, leads.score, leads.score_breakdown, leads.confidence, leads.verdict, leads.qualified_at, leads.first_seen_at, leads.last_seen_at, leads.updated_at {DUE}{NOT_SUPPRESSED} ORDER BY leads.first_seen_at ASC, leads.id ASC LIMIT $4"
+            "SELECT leads.id, leads.profile_id, leads.domain, leads.status, leads.score, leads.score_breakdown, leads.confidence, leads.verdict, leads.llm_score, leads.qualified_at, leads.first_seen_at, leads.last_seen_at, leads.updated_at {DUE}{NOT_SUPPRESSED} ORDER BY leads.first_seen_at ASC, leads.id ASC LIMIT $4"
         );
         let mut tx = self.tx.lock().await;
         let rows = sqlx::query_as::<_, LeadRow>(&query)
@@ -164,7 +162,7 @@ impl<'tx> QualificationRepository for PgQualificationRepository<'tx> {
     ) -> Result<Vec<Lead>, CoreError> {
         let revision = revision_number(revision)?;
         let query = format!(
-            "SELECT leads.id, leads.profile_id, leads.domain, leads.status, leads.score, leads.score_breakdown, leads.confidence, leads.verdict, leads.qualified_at, leads.first_seen_at, leads.last_seen_at, leads.updated_at {SUMMARY_DUE}{SUMMARY_READY}{NOT_SUPPRESSED} ORDER BY leads.first_seen_at ASC, leads.id ASC LIMIT $3"
+            "SELECT leads.id, leads.profile_id, leads.domain, leads.status, leads.score, leads.score_breakdown, leads.confidence, leads.verdict, leads.llm_score, leads.qualified_at, leads.first_seen_at, leads.last_seen_at, leads.updated_at {SUMMARY_DUE}{SUMMARY_READY}{NOT_SUPPRESSED} ORDER BY leads.first_seen_at ASC, leads.id ASC LIMIT $3"
         );
         let mut tx = self.tx.lock().await;
         let rows = sqlx::query_as::<_, LeadRow>(&query)
@@ -350,9 +348,9 @@ impl<'tx> QualificationRepository for PgQualificationRepository<'tx> {
             INSERT INTO lead_qualification_state (
                 lead_id, profile_revision, sources, completed_at,
                 scoring_version, opinion, evidence, verdict_reason, dossier_at, exclusions,
-                escalated_revision, scored_at
+                escalated_revision, scored_at, indicator_confidence, indicator_cap
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $4)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $12, $8, $9, $10, $4, $11, $13)
             ON CONFLICT (lead_id) DO UPDATE SET
                 profile_revision = EXCLUDED.profile_revision,
                 sources          = EXCLUDED.sources,
@@ -361,7 +359,8 @@ impl<'tx> QualificationRepository for PgQualificationRepository<'tx> {
                 scoring_version  = EXCLUDED.scoring_version,
                 opinion          = EXCLUDED.opinion,
                 evidence         = EXCLUDED.evidence,
-                verdict_reason   = EXCLUDED.verdict_reason,
+                indicator_confidence = EXCLUDED.indicator_confidence,
+                indicator_cap    = EXCLUDED.indicator_cap,
                 dossier_at       = EXCLUDED.dossier_at,
                 exclusions       = EXCLUDED.exclusions,
                 escalated_revision = EXCLUDED.escalated_revision,
@@ -378,23 +377,21 @@ impl<'tx> QualificationRepository for PgQualificationRepository<'tx> {
         .bind(completion.scoring_version)
         .bind(completion.judgement.opinion)
         .bind(evidence_json(&completion.judgement.evidence)?)
-        .bind(reason_text(&completion.judgement))
         .bind(completion.dossier_at)
-        .bind(exclusions_json(&completion.judgement.exclusions)?)
+        .bind(exclusions_json(&completion.exclusions)?)
         .bind(escalated_revision)
-        .execute(&mut ***tx)
-        .await
-        .map_err(map_sqlx_error)?;
-        sqlx::query(
-            "UPDATE leads SET confidence = $2, verdict = $3, qualified_at = $4 WHERE id = $1",
-        )
-        .bind(completion.lead_id.0)
         .bind(completion.judgement.confidence)
-        .bind(completion.judgement.verdict.map(|verdict| verdict.as_str()))
-        .bind(completion.at)
+        .bind(AWAITING_SCORING_REASON)
+        .bind(completion.judgement.cap.map(|cap| cap.as_str()))
         .execute(&mut ***tx)
         .await
         .map_err(map_sqlx_error)?;
+        sqlx::query("UPDATE leads SET qualified_at = $2 WHERE id = $1")
+            .bind(completion.lead_id.0)
+            .bind(completion.at)
+            .execute(&mut ***tx)
+            .await
+            .map_err(map_sqlx_error)?;
         Ok(())
     }
 
@@ -436,7 +433,7 @@ impl<'tx> QualificationRepository for PgQualificationRepository<'tx> {
     ) -> Result<Vec<Lead>, CoreError> {
         let revision = revision_number(revision)?;
         let query = format!(
-            "SELECT leads.id, leads.profile_id, leads.domain, leads.status, leads.score, leads.score_breakdown, leads.confidence, leads.verdict, leads.qualified_at, leads.first_seen_at, leads.last_seen_at, leads.updated_at {STALE}{NOT_SUPPRESSED} ORDER BY state.scored_at ASC NULLS FIRST, leads.first_seen_at ASC, leads.id ASC LIMIT $6"
+            "SELECT leads.id, leads.profile_id, leads.domain, leads.status, leads.score, leads.score_breakdown, leads.confidence, leads.verdict, leads.llm_score, leads.qualified_at, leads.first_seen_at, leads.last_seen_at, leads.updated_at {STALE}{NOT_SUPPRESSED} ORDER BY state.scored_at ASC NULLS FIRST, leads.first_seen_at ASC, leads.id ASC LIMIT $6"
         );
         let mut tx = self.tx.lock().await;
         let rows = sqlx::query_as::<_, LeadRow>(&query)
@@ -477,36 +474,22 @@ impl<'tx> QualificationRepository for PgQualificationRepository<'tx> {
     #[tracing::instrument(skip(self, rescoring), fields(db.system = "postgresql", db.operation = "update", db.table = "lead_qualification_state", lead.id = %rescoring.lead_id), err)]
     async fn rescore(&mut self, rescoring: &Rescoring) -> Result<(), CoreError> {
         let evidence = evidence_json(&rescoring.judgement.evidence)?;
-        let exclusions = exclusions_json(&rescoring.judgement.exclusions)?;
+        let exclusions = exclusions_json(&rescoring.exclusions)?;
         let mut tx = self.tx.lock().await;
         sqlx::query(
-            "UPDATE lead_qualification_state SET scoring_version = $2, opinion = $3, evidence = $4, verdict_reason = $5, exclusions = $6, scored_at = $7 WHERE lead_id = $1",
+            "UPDATE lead_qualification_state SET scoring_version = $2, opinion = $3, evidence = $4, indicator_confidence = $5, indicator_cap = $6, exclusions = $7, scored_at = $8 WHERE lead_id = $1",
         )
         .bind(rescoring.lead_id.0)
         .bind(rescoring.scoring_version)
         .bind(rescoring.judgement.opinion)
         .bind(evidence)
-        .bind(reason_text(&rescoring.judgement))
+        .bind(rescoring.judgement.confidence)
+        .bind(rescoring.judgement.cap.map(|cap| cap.as_str()))
         .bind(exclusions)
         .bind(rescoring.scored_at)
         .execute(&mut ***tx)
         .await
         .map_err(map_sqlx_error)?;
-        sqlx::query(
-            "UPDATE lead_qualification_state SET summarised_at = NULL, summary_attempts = 0, summary_next_attempt_at = NULL, summary_error = NULL WHERE lead_id = $1 AND summarised_at IS NOT NULL AND (SELECT verdict IS DISTINCT FROM $2 FROM leads WHERE id = $1)",
-        )
-        .bind(rescoring.lead_id.0)
-        .bind(rescoring.judgement.verdict.map(|verdict| verdict.as_str()))
-        .execute(&mut ***tx)
-        .await
-        .map_err(map_sqlx_error)?;
-        sqlx::query("UPDATE leads SET confidence = $2, verdict = $3 WHERE id = $1")
-            .bind(rescoring.lead_id.0)
-            .bind(rescoring.judgement.confidence)
-            .bind(rescoring.judgement.verdict.map(|verdict| verdict.as_str()))
-            .execute(&mut ***tx)
-            .await
-            .map_err(map_sqlx_error)?;
         for (result_id, score) in &rescoring.agent_scores {
             sqlx::query("UPDATE qualification_results SET agent_score = $2 WHERE id = $1")
                 .bind(result_id.0)
@@ -529,7 +512,7 @@ impl<'tx> QualificationRepository for PgQualificationRepository<'tx> {
         let ids: Vec<uuid::Uuid> = lead_ids.iter().map(|id| id.0).collect();
         let mut tx = self.tx.lock().await;
         let rows = sqlx::query_as::<_, ScoringRow>(
-            "SELECT lead_id, opinion, evidence, verdict_reason, exclusions FROM lead_qualification_state WHERE lead_id = ANY($1) AND evidence IS NOT NULL",
+            "SELECT lead_id, opinion, evidence, indicator_confidence, indicator_cap, verdict_reason, verdict_source, verdict_probabilities, exclusions FROM lead_qualification_state WHERE lead_id = ANY($1) AND evidence IS NOT NULL",
         )
         .bind(&ids)
         .fetch_all(&mut ***tx)

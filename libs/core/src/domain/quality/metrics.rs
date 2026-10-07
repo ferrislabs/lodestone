@@ -105,8 +105,26 @@ pub struct AgentSeparation {
     pub rejected: u64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum VersionKind {
+    Qualification,
+    Scoring,
+    Aggregator,
+}
+
+impl VersionKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Qualification => "qualification",
+            Self::Scoring => "scoring",
+            Self::Aggregator => "aggregator",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct VersionPrecision {
+    pub kind: VersionKind,
     pub agent_id: Option<String>,
     pub agent_name: Option<String>,
     pub model: String,
@@ -320,30 +338,50 @@ fn version_precision(
     decisions: &[&DecisionLabel],
     agent_names: &BTreeMap<String, String>,
 ) -> Vec<VersionPrecision> {
-    type Key<'a> = (Option<&'a str>, &'a str, &'a str, bool);
+    type Key<'a> = (Option<&'a str>, VersionKind, &'a str, &'a str, bool);
     let mut tallies: BTreeMap<Key<'_>, (u64, u64)> = BTreeMap::new();
     for label in decisions {
         let validated = is_validated(label);
-        let agents = label
+        let qualification = label
             .snapshot
             .agents
             .iter()
             .filter(|(_, snapshot)| snapshot.status == "valid")
             .filter_map(|(agent, snapshot)| {
-                snapshot
-                    .provenance
-                    .as_ref()
-                    .map(|provenance| (Some(agent.as_str()), provenance, snapshot.escalated))
+                snapshot.provenance.as_ref().map(|provenance| {
+                    (
+                        Some(agent.as_str()),
+                        VersionKind::Qualification,
+                        provenance,
+                        snapshot.escalated,
+                    )
+                })
+            });
+        let scoring = label
+            .snapshot
+            .scoring_agents
+            .iter()
+            .filter(|(_, snapshot)| snapshot.status == "valid")
+            .filter_map(|(agent, snapshot)| {
+                snapshot.provenance.as_ref().map(|provenance| {
+                    (
+                        Some(agent.as_str()),
+                        VersionKind::Scoring,
+                        provenance,
+                        false,
+                    )
+                })
             });
         let aggregator = label
             .snapshot
             .aggregator
             .as_ref()
-            .map(|provenance| (None, provenance, false));
-        for (agent, provenance, escalated) in agents.chain(aggregator) {
+            .map(|provenance| (None, VersionKind::Aggregator, provenance, false));
+        for (agent, kind, provenance, escalated) in qualification.chain(scoring).chain(aggregator) {
             let entry = tallies
                 .entry((
                     agent,
+                    kind,
                     provenance.model.as_str(),
                     provenance.prompt_version.as_str(),
                     escalated,
@@ -359,15 +397,18 @@ fn version_precision(
     tallies
         .into_iter()
         .map(
-            |((agent, model, prompt_version, escalated), (validated, rejected))| VersionPrecision {
-                agent_id: agent.map(str::to_owned),
-                agent_name: agent.map(|agent| agent_name(agent_names, agent)),
-                model: model.to_owned(),
-                prompt_version: prompt_version.to_owned(),
-                escalated,
-                validated,
-                rejected,
-                precision: ratio(validated, validated + rejected),
+            |((agent, kind, model, prompt_version, escalated), (validated, rejected))| {
+                VersionPrecision {
+                    kind,
+                    agent_id: agent.map(str::to_owned),
+                    agent_name: agent.map(|agent| agent_name(agent_names, agent)),
+                    model: model.to_owned(),
+                    prompt_version: prompt_version.to_owned(),
+                    escalated,
+                    validated,
+                    rejected,
+                    precision: ratio(validated, validated + rejected),
+                }
             },
         )
         .collect()
@@ -623,11 +664,15 @@ mod tests {
                 decided_at: at(0),
                 snapshot: DecisionSnapshot {
                     confidence,
+                    indicator_confidence: None,
+                    llm_score: None,
+                    verdict_source: None,
                     opinion: None,
                     evidence: None,
                     verdict: verdict.map(str::to_owned),
                     verdict_reason: None,
                     agents: BTreeMap::new(),
+                    scoring_agents: BTreeMap::new(),
                     aggregator: None,
                 },
                 rejection: None,

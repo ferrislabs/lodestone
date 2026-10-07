@@ -18,12 +18,11 @@ fn probability_of(answer: &Answer, option: &str) -> f64 {
         .map_or(0.0, |(_, probability)| *probability)
 }
 
-fn vote_question(question: &Question, samples: &[ValidOutput]) -> Option<Answer> {
+fn vote_question(question: &Question, samples: &[&ValidAnswers]) -> Option<Answer> {
     let picks: Vec<&Answer> = samples
         .iter()
         .filter_map(|sample| {
             sample
-                .answers
                 .0
                 .iter()
                 .find(|answer| answer.question_id == question.id)
@@ -109,12 +108,11 @@ fn vote_question(question: &Question, samples: &[ValidOutput]) -> Option<Answer>
     })
 }
 
-fn agreeing_axes(sample: &ValidOutput, voted: &[Answer]) -> usize {
+fn agreeing_axes(sample: &ValidAnswers, voted: &[Answer]) -> usize {
     voted
         .iter()
         .filter(|answer| {
             sample
-                .answers
                 .0
                 .iter()
                 .any(|own| own.question_id == answer.question_id && own.choice == answer.choice)
@@ -122,40 +120,48 @@ fn agreeing_axes(sample: &ValidOutput, voted: &[Answer]) -> usize {
         .count()
 }
 
-pub fn vote(agent: &QualificationAgent, samples: &[ValidOutput]) -> Option<ValidOutput> {
-    let first = samples.first()?;
-    if samples.len() == 1 {
-        let answers = first
-            .answers
-            .0
-            .iter()
-            .map(|answer| Answer {
-                agreement: Some(1.0),
-                ..answer.clone()
-            })
-            .collect();
-        return Some(ValidOutput {
-            summary: first.summary.clone(),
-            answers: ValidAnswers(answers),
-        });
-    }
-    let answers: Vec<Answer> = agent
-        .questions
-        .iter()
-        .filter_map(|question| vote_question(question, samples))
-        .collect();
-    let mut best = first;
-    let mut best_axes = agreeing_axes(first, &answers);
-    for sample in &samples[1..] {
-        let axes = agreeing_axes(sample, &answers);
-        if axes > best_axes {
-            best = sample;
+pub fn most_agreeing(samples: &[&ValidAnswers], voted: &ValidAnswers) -> usize {
+    let mut best = 0;
+    let mut best_axes = 0;
+    for (index, sample) in samples.iter().enumerate() {
+        let axes = agreeing_axes(sample, &voted.0);
+        if index == 0 || axes > best_axes {
+            best = index;
             best_axes = axes;
         }
     }
+    best
+}
+
+pub fn vote_answers(questions: &[Question], samples: &[&ValidAnswers]) -> Option<ValidAnswers> {
+    let first = samples.first()?;
+    if samples.len() == 1 {
+        return Some(ValidAnswers(
+            first
+                .0
+                .iter()
+                .map(|answer| Answer {
+                    agreement: Some(1.0),
+                    ..answer.clone()
+                })
+                .collect(),
+        ));
+    }
+    Some(ValidAnswers(
+        questions
+            .iter()
+            .filter_map(|question| vote_question(question, samples))
+            .collect(),
+    ))
+}
+
+pub fn vote(agent: &QualificationAgent, samples: &[ValidOutput]) -> Option<ValidOutput> {
+    let answers: Vec<&ValidAnswers> = samples.iter().map(|sample| &sample.answers).collect();
+    let voted = vote_answers(&agent.questions, &answers)?;
+    let best = most_agreeing(&answers, &voted);
     Some(ValidOutput {
-        summary: best.summary.clone(),
-        answers: ValidAnswers(answers),
+        summary: samples[best].summary.clone(),
+        answers: voted,
     })
 }
 

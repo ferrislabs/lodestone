@@ -1,17 +1,10 @@
 import { Badge } from '#/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '#/components/ui/card'
-import { agreementLabel, escalationLabel } from '#/pages/leads/lib/agreement'
+import { escalationLabel } from '#/pages/leads/lib/agreement'
 import { formatDateTime } from '#/pages/leads/lib/format'
-import type {
-	QualificationAnswer,
-	QualificationResult,
-} from '#/pages/leads/lib/types'
-import {
-	formatAgentScore,
-	formatProbability,
-	probabilityWidth,
-} from '#/pages/leads/lib/verdict'
-import { ProvenanceLink } from '#/pages/leads/ui/provenance-link'
+import type { QualificationResult } from '#/pages/leads/lib/types'
+import { formatAgentScore } from '#/pages/leads/lib/verdict'
+import { AnswerMeasure } from '#/pages/leads/ui/answer-measure'
 
 interface QualificationResultsProps {
 	results: readonly QualificationResult[]
@@ -21,100 +14,6 @@ function providerText(result: QualificationResult): string {
 	const name = result.provider_name
 	if (name && result.model) return `${name} (${result.model})`
 	return name ?? (result.model || 'Fournisseur inconnu')
-}
-
-function EvidenceSource({ source }: { source: string }) {
-	if (source === 'lead') {
-		return <span>Faits calculés par le système</span>
-	}
-	return <ProvenanceLink provenance={source} />
-}
-
-function Grounding({ answer }: { answer: QualificationAnswer }) {
-	if (!answer.grounded) {
-		return (
-			<p
-				className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs"
-				data-part="ungrounded"
-			>
-				<Badge variant="outline">Non étayé — ramené à « Inconnu »</Badge>
-				{answer.original_choice_label ? (
-					<span className="text-muted-foreground">
-						Choix initial du modèle : {answer.original_choice_label}
-					</span>
-				) : null}
-			</p>
-		)
-	}
-	if (!answer.evidence) return null
-	return (
-		<div
-			className="flex flex-col gap-0.5 border-l-2 pl-2 text-xs"
-			data-part="evidence"
-		>
-			<p className="italic">« {answer.evidence} »</p>
-			{answer.evidence_source ? (
-				<p className="text-muted-foreground" data-part="evidence-source">
-					Source : <EvidenceSource source={answer.evidence_source} />
-				</p>
-			) : null}
-		</div>
-	)
-}
-
-function Measure({
-	answer,
-	samples,
-}: {
-	answer: QualificationAnswer
-	samples: number
-}) {
-	const agreement = agreementLabel(answer.agreement, samples)
-	return (
-		<li
-			className="flex flex-col gap-1.5 rounded-md bg-muted/30 p-2.5"
-			data-question={answer.question_id}
-		>
-			<div className="flex flex-wrap items-baseline gap-x-2">
-				<p className="text-sm font-medium">{answer.wording}</p>
-				<code className="font-mono text-[11px] text-muted-foreground">
-					{answer.question_id}
-				</code>
-			</div>
-			<p className="text-sm">
-				<span className="text-muted-foreground">Réponse : </span>
-				<span className="font-medium">{answer.choice_label}</span>
-				<span className="text-muted-foreground">
-					{' '}
-					· confiance {formatProbability(answer.confidence)}
-				</span>
-			</p>
-			{agreement ? (
-				<p className="text-xs text-muted-foreground" data-part="agreement">
-					{agreement}
-				</p>
-			) : null}
-			<Grounding answer={answer} />
-			<ul className="flex flex-col gap-1">
-				{answer.probabilities.map((item) => (
-					<li key={item.value} className="flex items-center gap-2 text-xs">
-						<span className="w-28 shrink-0 truncate">{item.label}</span>
-						<div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
-							<div
-								role="presentation"
-								data-probability={item.value}
-								className="h-full rounded-full bg-orange-500"
-								style={{ width: `${probabilityWidth(item.probability)}%` }}
-							/>
-						</div>
-						<span className="w-12 text-right font-mono tabular-nums">
-							{formatProbability(item.probability)}
-						</span>
-					</li>
-				))}
-			</ul>
-		</li>
-	)
 }
 
 function AgentReport({ result }: { result: QualificationResult }) {
@@ -175,7 +74,7 @@ function AgentReport({ result }: { result: QualificationResult }) {
 					</h4>
 					<ul className="flex flex-col gap-2">
 						{result.answers.map((answer) => (
-							<Measure
+							<AnswerMeasure
 								key={answer.question_id}
 								answer={answer}
 								samples={result.provenance.samples}

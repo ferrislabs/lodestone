@@ -97,7 +97,7 @@ impl<P> Loaded<P> {
         )
     }
 
-    fn sampled_provenance(
+    pub(crate) fn sampled_provenance(
         &self,
         model: &str,
         prompt_version: String,
@@ -172,12 +172,12 @@ pub fn render_signal(signal: &Signal) -> String {
     )
 }
 
-struct Providers<P> {
-    entries: Vec<(Option<ProviderId>, Option<Loaded<P>>)>,
+pub(crate) struct Providers<P> {
+    pub(crate) entries: Vec<(Option<ProviderId>, Option<Loaded<P>>)>,
 }
 
 impl<P> Providers<P> {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             entries: Vec::new(),
         }
@@ -186,6 +186,28 @@ impl<P> Providers<P> {
     fn position(&self, wanted: Option<ProviderId>) -> Option<usize> {
         self.entries.iter().position(|(key, _)| *key == wanted)
     }
+}
+
+pub(crate) async fn load_cached<B, S>(
+    usecase: &LodestoneUseCase,
+    builder: &B,
+    cipher: &S,
+    wanted: Option<ProviderId>,
+    tier: Tier,
+    label: &str,
+    providers: &mut Providers<B::Provider>,
+) -> Result<Option<usize>, CoreError>
+where
+    B: ProviderBuilder,
+    S: SecretCipher,
+{
+    if let Some(index) = providers.position(wanted) {
+        return Ok(providers.entries[index].1.is_some().then_some(index));
+    }
+    let loaded = load_provider(usecase, builder, cipher, wanted, tier, label).await?;
+    let available = loaded.is_some();
+    providers.entries.push((wanted, loaded));
+    Ok(available.then(|| providers.entries.len() - 1))
 }
 
 struct Evaluator<'a, B, S, C> {
@@ -260,7 +282,7 @@ struct AgentRun<'a, P> {
     prompt: &'a AgentPrompt,
 }
 
-fn count(value: usize) -> u64 {
+pub(crate) fn count(value: usize) -> u64 {
     u64::try_from(value).unwrap_or(u64::MAX)
 }
 
@@ -357,21 +379,16 @@ where
         label: &str,
         providers: &mut Providers<B::Provider>,
     ) -> Result<Option<usize>, CoreError> {
-        if let Some(index) = providers.position(wanted) {
-            return Ok(providers.entries[index].1.is_some().then_some(index));
-        }
-        let loaded = load_provider(
+        load_cached(
             usecase,
             self.builder,
             self.cipher,
             wanted,
             Tier::Triage,
             label,
+            providers,
         )
-        .await?;
-        let available = loaded.is_some();
-        providers.entries.push((wanted, loaded));
-        Ok(available.then(|| providers.entries.len() - 1))
+        .await
     }
 
     async fn ask(
@@ -771,8 +788,8 @@ where
             lead_id: lead.id,
             profile_revision: revision,
             sources,
-            judgement: judgement
-                .excluding(exclusions(&pass.results, &definition.qualification_agents)),
+            judgement,
+            exclusions: exclusions(&pass.results, &definition.qualification_agents),
             scoring_version: SCORING_VERSION,
             dossier_at: dossier.as_ref().and_then(|dossier| dossier.content_at),
             escalated_revision,

@@ -23,6 +23,7 @@ use lodestone_core::{
         lead::postgres::PgLeadRepository, llm_cache::postgres::PgLlmCache, postgres::with_tx,
     },
     llm::CreateLlmProvider,
+    verdict_for,
 };
 use serde_json::{Value, json};
 use sqlx::PgPool;
@@ -338,6 +339,23 @@ impl Harness {
         self.usecase.lead_detail(lead.id).await.unwrap().scoring
     }
 
+    async fn indicated(&self, profile: ProfileId, host: &str) -> (Option<f64>, Option<Verdict>) {
+        let Some(scoring) = self.scoring(profile, host).await else {
+            return (None, None);
+        };
+        let thresholds = self.active().await.revision.definition.definition().verdict;
+        let confidence = scoring.indicator_confidence;
+        let verdict = if scoring.exclusions.is_empty() {
+            confidence.map(|confidence| match verdict_for(confidence, thresholds) {
+                Verdict::Reliable if scoring.cap.is_some() => Verdict::ToCheck,
+                other => other,
+            })
+        } else {
+            Some(Verdict::Discarded)
+        };
+        (confidence, verdict)
+    }
+
     async fn revise(&self, profile: ProfileId, agents: Vec<Value>) {
         self.usecase
             .revise_profile(ReviseProfileCommand {
@@ -600,8 +618,9 @@ async fn valid_answers_are_stored_scored_and_judged(pool: PgPool) {
     );
     assert!(stored.error.is_none());
     let lead = harness.lead(profile, "acme.com").await;
-    assert_eq!(lead.confidence, Some(100.0));
-    assert_eq!(lead.verdict, Some(Verdict::ToCheck));
+    let indicated = harness.indicated(profile, "acme.com").await;
+    assert_eq!(indicated.0, Some(100.0));
+    assert_eq!(indicated.1, Some(Verdict::ToCheck));
     assert_eq!(lead.qualified_at, Some(at(1_000)));
     let scoring = harness.scoring(profile, "acme.com").await.unwrap();
     assert_eq!(scoring.opinion, Some(1.0));
@@ -647,7 +666,7 @@ async fn the_prompt_carries_the_agent_the_profile_context_the_contract_and_the_l
         &active.revision.definition.definition().qualification_agents[0],
     );
     assert_eq!(call.schema, expected);
-    assert!(harness.lead(profile, "acme.com").await.verdict.is_some());
+    assert!(harness.indicated(profile, "acme.com").await.1.is_some());
 }
 
 #[sqlx::test(migrations = "../../migrations")]
@@ -702,9 +721,9 @@ async fn agent_weights_drive_the_lead_confidence_and_the_verdict(pool: PgPool) {
     let results = harness.results(profile, "acme.com").await;
     assert_eq!(result_of(&results, "light").agent_score, Some(1.0));
     assert_eq!(result_of(&results, "heavy").agent_score, Some(0.0));
-    let lead = harness.lead(profile, "acme.com").await;
-    assert_eq!(lead.confidence, Some(25.0));
-    assert_eq!(lead.verdict, Some(Verdict::Discarded));
+    let indicated = harness.indicated(profile, "acme.com").await;
+    assert_eq!(indicated.0, Some(25.0));
+    assert_eq!(indicated.1, Some(Verdict::Discarded));
 }
 
 fn broken() -> Value {
@@ -822,8 +841,9 @@ async fn two_contract_violations_store_an_invalid_result(pool: PgPool) {
     );
     assert!(results[0].error.as_deref().unwrap().contains("`q`"));
     let lead = harness.lead(profile, "acme.com").await;
-    assert_eq!(lead.confidence, None);
-    assert_eq!(lead.verdict, None);
+    let indicated = harness.indicated(profile, "acme.com").await;
+    assert_eq!(indicated.0, None);
+    assert_eq!(indicated.1, None);
     assert!(lead.qualified_at.is_some());
     let again = harness.step(settings(100, 10)).await;
     assert_eq!(again.leads, 0);
@@ -885,8 +905,8 @@ async fn a_missing_provider_invalidates_one_agent_without_blocking_the_others(po
         assert_eq!(result.error.as_deref(), Some("fournisseur indisponible"));
     }
     assert_eq!(result_of(&results, "fine").status, ResultStatus::Valid);
-    let lead = harness.lead(profile, "acme.com").await;
-    assert_eq!(lead.confidence, Some(100.0));
+    let indicated = harness.indicated(profile, "acme.com").await;
+    assert_eq!(indicated.0, Some(100.0));
 }
 
 #[sqlx::test(migrations = "../../migrations")]
@@ -1002,8 +1022,8 @@ async fn a_step_takes_a_bounded_batch_oldest_first_and_reports_the_backlog(pool:
 
     assert_eq!(first.leads, 10);
     assert_eq!(first.backlog, 2);
-    assert!(harness.lead(profile, "lead-11.com").await.verdict.is_some());
-    assert!(harness.lead(profile, "lead-00.com").await.verdict.is_none());
+    assert!(harness.indicated(profile, "lead-11.com").await.1.is_some());
+    assert!(harness.indicated(profile, "lead-00.com").await.1.is_none());
     let second = harness.step(settings(100, 10)).await;
     assert_eq!(second.leads, 2);
     assert_eq!(second.backlog, 0);
@@ -1134,7 +1154,7 @@ async fn a_single_dev_host_answered_with_certainty_is_calibrated_and_not_reliabl
     let results = harness.results(profile, "luzernrisk.com").await;
     let score = results[0].agent_score.unwrap();
     assert!((score - 1.0 / 1.1).abs() < 1e-9, "{score}");
-    let lead = harness.lead(profile, "luzernrisk.com").await;
+    let indicated = harness.indicated(profile, "luzernrisk.com").await;
     let scoring = harness.scoring(profile, "luzernrisk.com").await.unwrap();
     assert!((scoring.opinion.unwrap() - score).abs() < 1e-9);
     assert!(scoring.evidence.only_non_production);
@@ -1142,9 +1162,9 @@ async fn a_single_dev_host_answered_with_certainty_is_calibrated_and_not_reliabl
     assert_eq!(scoring.evidence.components.environment, 0.0);
     assert_eq!(scoring.evidence.components.diversity, 0.5);
     let expected = scoring.opinion.unwrap() * (0.4 + 0.6 * scoring.evidence.score);
-    assert!((lead.confidence.unwrap() - expected * 100.0).abs() < 0.06);
-    assert!(lead.confidence.unwrap() < 70.0);
-    assert_eq!(lead.verdict, Some(Verdict::ToCheck));
+    assert!((indicated.0.unwrap() - expected * 100.0).abs() < 0.06);
+    assert!(indicated.0.unwrap() < 70.0);
+    assert_eq!(indicated.1, Some(Verdict::ToCheck));
 }
 
 #[sqlx::test(migrations = "../../migrations")]
@@ -1168,9 +1188,9 @@ async fn a_confident_lead_on_a_dev_host_names_the_cap(pool: PgPool) {
 
     harness.step(settings(100, 10)).await;
 
-    let lead = harness.lead(profile, "acme.com").await;
-    assert!(lead.confidence.unwrap() >= 40.0);
-    assert_eq!(lead.verdict, Some(Verdict::ToCheck));
+    let indicated = harness.indicated(profile, "acme.com").await;
+    assert!(indicated.0.unwrap() >= 40.0);
+    assert_eq!(indicated.1, Some(Verdict::ToCheck));
     let scoring = harness.scoring(profile, "acme.com").await.unwrap();
     assert_eq!(scoring.cap, Some(VerdictCap::NonProduction));
 }
@@ -1190,8 +1210,8 @@ async fn two_axes_and_enough_evidence_make_a_lead_reliable(pool: PgPool) {
 
     harness.step(settings(100, 10)).await;
 
-    let lead = harness.lead(profile, "acme.com").await;
-    assert_eq!(lead.verdict, Some(Verdict::Reliable));
+    let indicated = harness.indicated(profile, "acme.com").await;
+    assert_eq!(indicated.1, Some(Verdict::Reliable));
     assert_eq!(
         harness.scoring(profile, "acme.com").await.unwrap().cap,
         None
@@ -1213,8 +1233,8 @@ async fn weak_evidence_caps_an_otherwise_reliable_lead(pool: PgPool) {
 
     harness.step(settings(100, 10)).await;
 
-    let lead = harness.lead(profile, "acme.com").await;
-    assert_eq!(lead.verdict, Some(Verdict::ToCheck));
+    let indicated = harness.indicated(profile, "acme.com").await;
+    assert_eq!(indicated.1, Some(Verdict::ToCheck));
     assert_eq!(
         harness.scoring(profile, "acme.com").await.unwrap().cap,
         Some(VerdictCap::WeakEvidence)
@@ -1259,8 +1279,9 @@ async fn leads_scored_before_the_evidence_rules_are_rescored_without_a_model_cal
     assert_eq!(report.backlog, 0);
     assert_eq!(harness.calls(), calls);
     let rescored = harness.lead(profile, "acme.com").await;
-    assert_ne!(rescored.confidence, Some(100.0));
-    assert_eq!(rescored.verdict, Some(Verdict::ToCheck));
+    let indicated_after = harness.indicated(profile, "acme.com").await;
+    assert_ne!(indicated_after.0, Some(100.0));
+    assert_eq!(indicated_after.1, Some(Verdict::ToCheck));
     assert_eq!(rescored.qualified_at, lead.qualified_at);
     let results = harness.results(profile, "acme.com").await;
     assert!((results[0].agent_score.unwrap() - 1.0 / 1.1).abs() < 1e-9);
@@ -1643,11 +1664,11 @@ async fn a_grounded_exclusion_discards_a_confident_lead_and_keeps_the_confidence
 
     harness.step(settings(100, 10)).await;
 
-    let lead = harness.lead(profile, "acme.com").await;
-    assert_eq!(lead.verdict, Some(Verdict::Discarded));
-    assert!(lead.confidence.unwrap() > 70.0);
+    let indicated = harness.indicated(profile, "acme.com").await;
+    assert_eq!(indicated.1, Some(Verdict::Discarded));
+    assert!(indicated.0.unwrap() > 70.0);
     let scoring = harness.scoring(profile, "acme.com").await.unwrap();
-    assert_eq!(scoring.reason(), Some(VerdictReason::Excluded));
+    assert_eq!(scoring.reason, Some(VerdictReason::AwaitingScoring));
     assert_eq!(scoring.exclusions.len(), 1);
     let exclusion = &scoring.exclusions[0];
     assert_eq!(exclusion.agent_id.as_str(), "exclusions");
@@ -1676,11 +1697,11 @@ async fn an_answer_that_does_not_pick_the_excluding_option_leaves_the_verdict(po
 
     harness.step(settings(100, 10)).await;
 
-    let lead = harness.lead(profile, "acme.com").await;
-    assert_eq!(lead.verdict, Some(Verdict::Reliable));
+    let indicated = harness.indicated(profile, "acme.com").await;
+    assert_eq!(indicated.1, Some(Verdict::Reliable));
     let scoring = harness.scoring(profile, "acme.com").await.unwrap();
     assert!(scoring.exclusions.is_empty());
-    assert_eq!(scoring.reason(), None);
+    assert_eq!(scoring.reason, Some(VerdictReason::AwaitingScoring));
 }
 
 fn ungrounded_exclusion() -> Value {
@@ -1716,8 +1737,8 @@ async fn a_downgraded_exclusion_does_not_exclude(pool: PgPool) {
 
     let results = harness.results(profile, "acme.com").await;
     assert_eq!(results[0].answers["client_actuel"]["grounded"], false);
-    let lead = harness.lead(profile, "acme.com").await;
-    assert_ne!(lead.verdict, Some(Verdict::Discarded));
+    let indicated = harness.indicated(profile, "acme.com").await;
+    assert_ne!(indicated.1, Some(Verdict::Discarded));
     let scoring = harness.scoring(profile, "acme.com").await.unwrap();
     assert!(scoring.exclusions.is_empty());
 }
@@ -1749,10 +1770,13 @@ async fn rescoring_applies_exclusions_to_stored_leads_without_a_model_call(pool:
 
     assert_eq!(report.rescored, 1);
     assert_eq!(harness.calls(), calls);
+    let indicated = harness.indicated(profile, "acme.com").await;
+    assert_eq!(indicated.1, Some(Verdict::Discarded));
+    assert_ne!(indicated.0, Some(100.0));
+    assert!(indicated.0.is_some());
     let lead = harness.lead(profile, "acme.com").await;
     assert_eq!(lead.verdict, Some(Verdict::Discarded));
-    assert_ne!(lead.confidence, Some(100.0));
-    assert!(lead.confidence.is_some());
+    assert_eq!(lead.confidence, Some(100.0));
     let scoring = harness.scoring(profile, "acme.com").await.unwrap();
     assert_eq!(scoring.exclusions.len(), 1);
     assert_eq!(scoring.exclusions[0].option, "oui");
@@ -1980,7 +2004,7 @@ async fn exclusions_read_the_voted_answers(pool: PgPool) {
     assert_eq!(scoring.exclusions.len(), 1);
     assert!((scoring.exclusions[0].probability - 2.0 / 3.0).abs() < 1e-9);
     assert_eq!(
-        harness.lead(profile, "acme.com").await.verdict,
+        harness.indicated(profile, "acme.com").await.1,
         Some(Verdict::Discarded)
     );
 }
@@ -2042,9 +2066,9 @@ async fn a_grey_zone_lead_is_re_evaluated_by_the_escalation_provider(pool: PgPoo
         assert_eq!(result.answers["q"]["choice"], "forte");
         assert_eq!(result.status, ResultStatus::Valid);
     }
-    let lead = harness.lead(profile, "acme.com").await;
-    assert_eq!(lead.confidence, Some(100.0));
-    assert_eq!(lead.verdict, Some(Verdict::Reliable));
+    let indicated = harness.indicated(profile, "acme.com").await;
+    assert_eq!(indicated.0, Some(100.0));
+    assert_eq!(indicated.1, Some(Verdict::Reliable));
 }
 
 #[sqlx::test(migrations = "../../migrations")]
@@ -2094,10 +2118,7 @@ async fn the_band_is_inclusive_below_and_exclusive_above(pool: PgPool) {
 
     harness.step(settings(100, 10)).await;
 
-    assert_eq!(
-        harness.lead(profile, "acme.com").await.confidence,
-        Some(50.0)
-    );
+    assert_eq!(harness.indicated(profile, "acme.com").await.0, Some(50.0));
     assert_eq!(harness.calls_to("model-b"), 0);
 }
 
@@ -2114,8 +2135,8 @@ async fn without_an_escalation_provider_a_grey_zone_lead_stays_as_it_is(pool: Pg
     harness.step(settings(100, 10)).await;
 
     assert_eq!(harness.calls(), 1);
-    let lead = harness.lead(profile, "acme.com").await;
-    assert_eq!(lead.confidence, Some(50.0));
+    let indicated = harness.indicated(profile, "acme.com").await;
+    assert_eq!(indicated.0, Some(50.0));
     assert!(!harness.results(profile, "acme.com").await[0].escalated);
 }
 
@@ -2142,10 +2163,7 @@ async fn a_replayed_evaluation_reuses_the_cached_escalation_without_new_calls(po
     assert_eq!(harness.calls_to("model-a"), 1);
     assert_eq!(harness.calls_to("model-b"), 1);
     assert!(harness.results(profile, "acme.com").await[0].escalated);
-    assert_eq!(
-        harness.lead(profile, "acme.com").await.confidence,
-        Some(100.0)
-    );
+    assert_eq!(harness.indicated(profile, "acme.com").await.0, Some(100.0));
 }
 
 #[sqlx::test(migrations = "../../migrations")]
@@ -2220,10 +2238,7 @@ async fn a_failed_escalation_keeps_the_original_results(pool: PgPool) {
     assert_eq!(results[0].status, ResultStatus::Valid);
     assert!(!results[0].escalated);
     assert_eq!(results[0].provenance.provider_id, Some(local));
-    assert_eq!(
-        harness.lead(profile, "acme.com").await.confidence,
-        Some(50.0)
-    );
+    assert_eq!(harness.indicated(profile, "acme.com").await.0, Some(50.0));
 }
 
 #[sqlx::test(migrations = "../../migrations")]

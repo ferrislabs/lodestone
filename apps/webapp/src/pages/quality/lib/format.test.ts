@@ -12,6 +12,7 @@ import {
 	insufficientMessage,
 	reliableSuggestion,
 	versionAgentLabel,
+	versionKindLabel,
 } from './format'
 import type { ProfileQuality } from './types'
 
@@ -109,5 +110,13 @@ describe('versionAgentLabel', () => {
 			versionAgentLabel({ agent_id: 'fit', agent_name: 'Adéquation' }),
 		).toBe('Adéquation')
 		expect(versionAgentLabel({ agent_id: 'fit', agent_name: null })).toBe('fit')
+	})
+})
+
+describe('versionKindLabel', () => {
+	it('names each kind of agent in French', () => {
+		expect(versionKindLabel('qualification')).toBe('Qualification')
+		expect(versionKindLabel('scoring')).toBe('Scoring')
+		expect(versionKindLabel('aggregator')).toBe('Agrégateur')
 	})
 })

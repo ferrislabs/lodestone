@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT id, profile_id, domain, status, score, score_breakdown, confidence, verdict, qualified_at, first_seen_at, last_seen_at, updated_at\n            FROM leads\n            WHERE domain = $1\n            ORDER BY profile_id\n            ",
+  "query": "\n            UPDATE leads\n            SET score = $2, score_breakdown = $4, updated_at = $3\n            WHERE id = $1\n            RETURNING id, profile_id, domain, status, score, score_breakdown, confidence, verdict, llm_score, qualified_at, first_seen_at, last_seen_at, updated_at\n            ",
   "describe": {
     "columns": [
       {
@@ -45,28 +45,36 @@
       },
       {
         "ordinal": 8,
+        "name": "llm_score",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 9,
         "name": "qualified_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 9,
+        "ordinal": 10,
         "name": "first_seen_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 10,
+        "ordinal": 11,
         "name": "last_seen_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 11,
+        "ordinal": 12,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
-        "Text"
+        "Uuid",
+        "Float8",
+        "Timestamptz",
+        "Jsonb"
       ]
     },
     "nullable": [
@@ -79,10 +87,11 @@
       true,
       true,
       true,
+      true,
       false,
       false,
       false
     ]
   },
-  "hash": "d1d2574c96834d0d82ef5b4116977a184889f24526fb8693265d74660710a500"
+  "hash": "745b01949403a31643006114ff9f69d32a4178604fd4ad3ed76b2fafefc1fbc1"
 }

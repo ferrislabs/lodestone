@@ -80,6 +80,16 @@ export function barHeight(count: number, max: number): number {
 	return max === 0 ? 0 : Math.round((count / max) * 100)
 }
 
+const VERSION_KIND_LABELS: Readonly<Record<string, string>> = {
+	qualification: 'Qualification',
+	scoring: 'Scoring',
+	aggregator: 'Agrégateur',
+}
+
+export function versionKindLabel(kind: VersionPrecision['kind']): string {
+	return VERSION_KIND_LABELS[kind] ?? kind
+}
+
 export function versionAgentLabel(
 	row: Pick<VersionPrecision, 'agent_id' | 'agent_name'>,
 ): string {
