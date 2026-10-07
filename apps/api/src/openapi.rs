@@ -50,6 +50,14 @@ impl Modify for SecurityAddon {
         handlers::quality::quality,
         handlers::calibration::calibration,
         handlers::calibration::run_calibration,
+        handlers::source_providers::list_source_providers,
+        handlers::source_providers::get_source_provider,
+        handlers::source_providers::put_source_provider,
+        handlers::source_providers::test_source_provider,
+        handlers::source_providers::start_source_provider_oauth,
+        handlers::source_providers::source_provider_oauth_callback,
+        handlers::source_providers::disconnect_source_provider,
+        handlers::source_providers::delete_source_provider,
         handlers::llm::list_providers,
         handlers::llm::get_provider,
         handlers::llm::create_provider,
@@ -78,6 +86,8 @@ mod tests {
         "get", "put", "post", "delete", "options", "head", "patch", "trace",
     ];
 
+    const PUBLIC_PATHS: [&str; 1] = ["/api/v1/source-providers/oauth/callback"];
+
     #[test]
     fn every_business_operation_requires_bearer_auth() {
         let spec = serde_json::to_value(ApiDoc::openapi()).expect("serialize spec");
@@ -85,7 +95,9 @@ mod tests {
 
         let business: Vec<_> = paths
             .iter()
-            .filter(|(path, _)| path.starts_with("/api/v1/"))
+            .filter(|(path, _)| {
+                path.starts_with("/api/v1/") && !PUBLIC_PATHS.contains(&path.as_str())
+            })
             .collect();
         assert!(!business.is_empty());
 
@@ -102,6 +114,19 @@ mod tests {
                     .is_some_and(|reqs| reqs.iter().any(|req| req.get("bearer_auth").is_some()));
                 assert!(secured, "{method} {path} lacks the bearer_auth requirement");
             }
+        }
+    }
+
+    #[test]
+    fn public_operations_declare_no_bearer_requirement() {
+        let spec = serde_json::to_value(ApiDoc::openapi()).expect("serialize spec");
+        for path in PUBLIC_PATHS {
+            let operation = &spec["paths"][path]["get"];
+            assert!(operation.is_object(), "{path} is not documented");
+            assert!(
+                operation.get("security").is_none(),
+                "{path} declares security"
+            );
         }
     }
 

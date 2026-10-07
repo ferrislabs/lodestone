@@ -1,10 +1,12 @@
 use common::Config;
+use fetch::{FetchSettings, PoliteFetcher};
 use lodestone_core::{
     LodestoneAuthService, LodestoneRateLimitService, LodestoneUseCase, ProfileId, WebhookPolicy,
     create_service, infrastructure::crypto::AesGcmCipher,
 };
 use rate_limit::Quota;
 use server::errors::ServerError;
+use source_providers::ProviderEngine;
 use std::sync::Arc;
 
 use args::Args;
@@ -18,6 +20,7 @@ pub struct AppState {
     pub rate_limit: LodestoneRateLimitService,
     pub rate_limit_quota: Quota,
     pub cipher: Arc<AesGcmCipher>,
+    pub providers: Arc<ProviderEngine<PoliteFetcher>>,
 }
 
 pub async fn state(args: Arc<Args>) -> Result<AppState, ServerError> {
@@ -26,6 +29,12 @@ pub async fn state(args: Arc<Args>) -> Result<AppState, ServerError> {
 
     let cipher = AesGcmCipher::new(&config.llm.encryption_key)
         .map_err(|e| ServerError::Configuration(e.to_string()))?;
+
+    let fetch_settings = FetchSettings::from_outbound(&config.outbound);
+    let allow_http = fetch_settings.allow_private_targets;
+    let fetcher = PoliteFetcher::new(fetch_settings)
+        .map_err(|e| ServerError::Configuration(e.to_string()))?;
+    let providers = ProviderEngine::new(Arc::new(fetcher)).with_allow_http(allow_http);
 
     let webhooks = args
         .webhook
@@ -51,5 +60,6 @@ pub async fn state(args: Arc<Args>) -> Result<AppState, ServerError> {
         rate_limit: service.rate_limit,
         rate_limit_quota: service.rate_limit_quota,
         cipher: Arc::new(cipher),
+        providers: Arc::new(providers),
     })
 }

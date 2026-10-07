@@ -71,6 +71,8 @@ Common flags / env vars (see `libs/args/src/`):
 | `SERVER_HOST`          | `--server-host`            | `0.0.0.0`                          |
 | `SERVER_PORT`          | `--server-port`            | `3456`                             |
 | `SERVER_INTERNAL_PORT` | `--server-internal-port`   | `3457`                             |
+| `SERVER_PUBLIC_URL`    | `--server-public-url`      | `http://localhost:3456`            |
+| `SERVER_WEBAPP_URL`    | `--server-webapp-url`      | `http://localhost:3000`            |
 | `DATABASE_NAME`        | `--database-name`          | required                           |
 | `ACTIVE_OBSERVABILITY` | `--active-observability`   | `false`                            |
 | `OTLP_ENDPOINT`        | `--otlp-endpoint`          | `http://localhost:4317`            |

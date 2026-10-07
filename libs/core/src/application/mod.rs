@@ -27,6 +27,7 @@ pub mod quality;
 pub mod rescoring;
 pub mod schedule;
 pub mod scoring_agent;
+pub mod source_providers;
 pub mod sources;
 pub mod suppression;
 pub mod triage;

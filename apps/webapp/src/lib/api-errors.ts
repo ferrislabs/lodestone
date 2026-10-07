@@ -73,6 +73,17 @@ const EXACT_MESSAGES: Readonly<Record<string, string>> = {
 		'Doit être `triage` ou `qualification`',
 	'unknown field': 'Champ inconnu',
 	'unknown provider': 'Fournisseur inconnu',
+	'is a secret and cannot be set as a setting':
+		'Secret : à saisir dans son champ masqué',
+	'is not a secret field of this provider':
+		"Ce champ n'est pas un secret de cette source",
+	'must be a boolean': 'Doit être vrai ou faux',
+	'must be an https URL': 'Doit être une URL https',
+	'must be provided again when a URL setting changes':
+		'À ressaisir : une URL a changé, les secrets doivent être fournis à nouveau',
+	'the provider is not configured yet': "La source n'est pas encore configurée",
+	'the provider does not use this authentication mode':
+		"Cette source n'utilise pas ce mode d'authentification",
 	'is required': 'Champ obligatoire',
 	'is required to reject': 'Choisissez une raison de rejet',
 	'is required when the reason is autre':
