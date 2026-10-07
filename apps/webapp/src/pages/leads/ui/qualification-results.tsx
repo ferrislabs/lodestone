@@ -2,12 +2,17 @@ import { Badge } from '#/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '#/components/ui/card'
 import { escalationLabel } from '#/pages/leads/lib/agreement'
 import { formatDateTime } from '#/pages/leads/lib/format'
-import type { QualificationResult } from '#/pages/leads/lib/types'
+import type { AgentFailure, QualificationResult } from '#/pages/leads/lib/types'
 import { formatAgentScore } from '#/pages/leads/lib/verdict'
+import { AgentFailureNotice } from '#/pages/leads/ui/agent-failure-notice'
 import { AnswerMeasure } from '#/pages/leads/ui/answer-measure'
 
 interface QualificationResultsProps {
 	results: readonly QualificationResult[]
+	failure: AgentFailure | null
+	onRetry: () => void
+	retrying: boolean
+	retryError: string | null
 }
 
 function providerText(result: QualificationResult): string {
@@ -87,7 +92,13 @@ function AgentReport({ result }: { result: QualificationResult }) {
 	)
 }
 
-export function QualificationResults({ results }: QualificationResultsProps) {
+export function QualificationResults({
+	results,
+	failure,
+	onRetry,
+	retrying,
+	retryError,
+}: QualificationResultsProps) {
 	return (
 		<Card data-section="agents">
 			<CardHeader>
@@ -97,7 +108,15 @@ export function QualificationResults({ results }: QualificationResultsProps) {
 					observé et ses mesures. La synthèse ci-dessous les résume.
 				</p>
 			</CardHeader>
-			<CardContent>
+			<CardContent className="flex flex-col gap-4">
+				{failure ? (
+					<AgentFailureNotice
+						failure={failure}
+						onRetry={onRetry}
+						retrying={retrying}
+						retryError={retryError}
+					/>
+				) : null}
 				{results.length === 0 ? (
 					<p className="text-sm text-muted-foreground">
 						Aucune qualification pour le moment.

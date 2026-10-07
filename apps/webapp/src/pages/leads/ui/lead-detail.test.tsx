@@ -112,6 +112,7 @@ const detail: LeadDetailData = {
 		qualified_at: '2026-02-01T00:00:00Z',
 	},
 	scoring_results: [],
+	agent_failures: [],
 	qualification_results: [
 		{
 			agent_id: 'pertinence',
@@ -250,6 +251,9 @@ function renderDetail(
 			onRetrySummary={() => {}}
 			retryingSummary={false}
 			retrySummaryError={null}
+			onRetryAgents={() => {}}
+			retryingAgents={false}
+			retryAgentsError={null}
 			onRefreshCompany={() => {}}
 			refreshingCompany={false}
 			refreshCompanyError={null}
@@ -260,7 +264,135 @@ function renderDetail(
 	)
 }
 
+const scoringFailure = {
+	kind: 'scoring' as const,
+	agent_id: 'score-global',
+	agent_name: 'Score global',
+	attempts: 2,
+	failed: false,
+	error:
+		"Échec de l'appel au modèle : llm provider answered with status 400: reasoning_effort is not enabled for this model",
+	next_attempt_at: '2026-02-01T00:05:00Z',
+}
+
+const pendingScoring = {
+	...detail.lead,
+	verdict: null,
+	confidence: null,
+	llm_score: null,
+	verdict_probabilities: null,
+	verdict_reason: 'awaiting_scoring' as const,
+}
+
 describe('LeadDetail', () => {
+	it('shows a scoring call failure with its provider message and the next attempt', () => {
+		const { container } = renderDetail({
+			detail: {
+				...detail,
+				lead: pendingScoring,
+				agent_failures: [scoringFailure],
+			},
+		})
+		const notice = container.querySelector(
+			'[data-section="scoring"] [data-agent-failure="scoring"]',
+		)
+		expect(notice?.getAttribute('data-failed')).toBe('false')
+		expect(notice?.textContent).toContain('Agent « Score global »')
+		expect(notice?.textContent).toContain(
+			'reasoning_effort is not enabled for this model',
+		)
+		expect(
+			notice?.querySelector('[data-part="failure-status"]')?.textContent,
+		).toMatch(/^Nouvelle tentative : /)
+		expect(notice?.querySelector('button')).toBeNull()
+		expect(
+			container.querySelector('[data-part="combined"] [data-verdict-reason]')
+				?.textContent,
+		).toMatch(/^En attente : appel au modèle en échec, nouvelle tentative /)
+	})
+
+	it('offers to retry once the agents are failed', () => {
+		const onRetryAgents = vi.fn()
+		const { container } = renderDetail({
+			onRetryAgents,
+			detail: {
+				...detail,
+				lead: pendingScoring,
+				agent_failures: [
+					{
+						...scoringFailure,
+						attempts: 5,
+						failed: true,
+						next_attempt_at: '2026-02-01T06:00:00Z',
+					},
+				],
+			},
+		})
+		const notice = container.querySelector('[data-agent-failure="scoring"]')
+		expect(notice?.getAttribute('data-failed')).toBe('true')
+		expect(
+			notice?.querySelector('[data-part="failure-status"]')?.textContent,
+		).toBe('En échec après 5 tentatives')
+		expect(
+			container.querySelector('[data-part="combined"] [data-verdict-reason]')
+				?.textContent,
+		).toBe('En attente : appel au modèle en échec après 5 tentatives')
+		fireEvent.click(screen.getByRole('button', { name: 'Réessayer' }))
+		expect(onRetryAgents).toHaveBeenCalled()
+	})
+
+	it('disables the agents retry while it runs and shows its error', () => {
+		renderDetail({
+			retryingAgents: true,
+			retryAgentsError: 'refusé',
+			detail: {
+				...detail,
+				agent_failures: [{ ...scoringFailure, attempts: 5, failed: true }],
+			},
+		})
+		expect(
+			(screen.getByRole('button', { name: 'Réessayer' }) as HTMLButtonElement)
+				.disabled,
+		).toBe(true)
+		expect(screen.getByRole('alert').textContent).toBe('refusé')
+	})
+
+	it('shows a qualification call failure in the qualification section only', () => {
+		const { container } = renderDetail({
+			detail: {
+				...detail,
+				qualification_results: [],
+				agent_failures: [
+					{
+						...scoringFailure,
+						kind: 'qualification',
+						agent_id: 'pertinence',
+						agent_name: 'Pertinence',
+					},
+				],
+			},
+		})
+		expect(
+			container.querySelector(
+				'[data-section="agents"] [data-agent-failure="qualification"]',
+			)?.textContent,
+		).toContain('Agent « Pertinence »')
+		expect(
+			container.querySelector('[data-section="scoring"] [data-agent-failure]'),
+		).toBeNull()
+	})
+
+	it('keeps the usual wording when no call failed', () => {
+		const { container } = renderDetail({
+			detail: { ...detail, lead: pendingScoring },
+		})
+		expect(container.querySelector('[data-agent-failure]')).toBeNull()
+		expect(
+			container.querySelector('[data-part="combined"] [data-verdict-reason]')
+				?.textContent,
+		).toBe("En attente : aucun agent de scoring n'a répondu")
+	})
+
 	it('shows the facts block with its environments, sources, dates and country', () => {
 		const { container } = renderDetail()
 		const facts = container.querySelector('[data-section="facts"]')

@@ -35,6 +35,7 @@ const TEST_ERROR_LABELS: Readonly<Record<string, string>> = {
 	unreachable: 'Injoignable',
 	invalid_response: 'Réponse invalide',
 	reasoning_exhausted: 'Le modèle a consommé tous ses tokens à raisonner',
+	reasoning_unsupported: 'Raisonnement non pris en charge',
 	other: 'Erreur',
 }
 

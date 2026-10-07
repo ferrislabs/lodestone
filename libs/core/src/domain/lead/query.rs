@@ -9,7 +9,7 @@ use crate::domain::{
         Profile, ProfileId, ProfileName, RevisionNumber,
         definition::{QualificationAgent, ScoringAgent},
     },
-    qualification::{LeadScoring, QualificationResult, SummaryState, Verdict},
+    qualification::{AgentFailure, LeadScoring, QualificationResult, SummaryState, Verdict},
     scoring_agent::ScoringResult,
     values::SignalKind,
 };
@@ -142,6 +142,7 @@ pub struct LeadDetail {
     pub scoring_agents: Vec<ScoringAgent>,
     pub calibrations: Calibrations,
     pub summary_state: Option<SummaryState>,
+    pub agent_failures: Vec<AgentFailure>,
     pub scoring: Option<LeadScoring>,
     pub company: Option<CompanyDossier>,
     pub entity: Option<CompanyEntity>,

@@ -382,7 +382,7 @@ impl LodestoneUseCase {
                 warn!(profile = %active.profile.id.0, due = leads.len(), "aggregation skipped, the aggregator has no usable provider");
                 report.failed += u64::try_from(leads.len()).unwrap_or(u64::MAX);
                 for lead in &leads {
-                    self.note_summary_failure(lead, REASON_NO_PROVIDER, clock.now())
+                    self.note_summary_failure(lead, REASON_NO_PROVIDER, None, clock.now())
                         .await?;
                 }
                 continue;
@@ -411,7 +411,7 @@ impl LodestoneUseCase {
                     Outcome::Skipped => {}
                     Outcome::Failed(reason) => {
                         report.failed += 1;
-                        self.note_summary_failure(lead, &reason, clock.now())
+                        self.note_summary_failure(lead, &reason, Some(loaded.id), clock.now())
                             .await?;
                     }
                     Outcome::BudgetExhausted => {
@@ -444,13 +444,14 @@ impl LodestoneUseCase {
         &self,
         lead: &Lead,
         reason: &str,
+        provider_id: Option<ProviderId>,
         at: DateTime<Utc>,
     ) -> Result<(), CoreError> {
         let Some(qualified_at) = lead.qualified_at else {
             return Ok(());
         };
         if let Some(attempts) = self
-            .record_summary_failure(lead.id, qualified_at, reason, at)
+            .record_summary_failure(lead.id, qualified_at, reason, provider_id, at)
             .await?
         {
             warn!(lead_id = %lead.id, attempts, reason, "aggregation failed, next attempt delayed");
@@ -464,10 +465,11 @@ impl LodestoneUseCase {
         lead_id: crate::domain::lead::LeadId,
         qualified_at: DateTime<Utc>,
         reason: &str,
+        provider_id: Option<ProviderId>,
         at: DateTime<Utc>,
     ) -> Result<Option<u32>, CoreError> {
         let mut repo = qualification_repository;
-        repo.record_summary_failure(lead_id, qualified_at, reason, at)
+        repo.record_summary_failure(lead_id, qualified_at, reason, provider_id, at)
             .await
     }
 
@@ -488,6 +490,22 @@ impl LodestoneUseCase {
                 "lead has not been qualified yet".to_owned(),
             ));
         }
+        Ok(lead)
+    }
+
+    #[transactional(lead, suppression, qualification)]
+    pub async fn retry_lead_agents(
+        &self,
+        lead_id: crate::domain::lead::LeadId,
+    ) -> Result<Lead, CoreError> {
+        let mut leads = lead_repository;
+        let mut suppression = suppression_repository;
+        let mut qualification = qualification_repository;
+        let lead = leads.find(lead_id).await?.ok_or(CoreError::NotFound)?;
+        if suppression.is_domain_suppressed(&lead.domain).await? {
+            return Err(CoreError::NotFound);
+        }
+        qualification.retry_agent_failures(lead_id).await?;
         Ok(lead)
     }
 

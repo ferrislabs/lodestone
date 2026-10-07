@@ -14,7 +14,7 @@ const SELECT_CLASS =
 	'h-9 w-full rounded-md border bg-transparent px-3 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50'
 
 const REASONING_HELP =
-	"Pour les modèles qui raisonnent avant de répondre (Ollama, OpenAI o-series…). « Désactivé » accélère les réponses et évite les réponses vides. La réflexion du modèle n'est jamais affichée ni enregistrée : seule la réponse finale est utilisée."
+	"Pour les modèles qui raisonnent avant de répondre (Ollama, OpenAI o-series…). « Désactivé » accélère les réponses et évite les réponses vides. La réflexion du modèle n'est jamais affichée ni enregistrée : seule la réponse finale est utilisée. Laissez « Par défaut (non envoyé) » pour un modèle sans raisonnement réglable (ex. Ministral)."
 
 const GENERATION_INTRO =
 	"Laissés vides, ces paramètres ne sont pas envoyés et le modèle garde ses valeurs par défaut. Anthropic n'utilise que les tokens maximum et la température ; les pénalités concernent les fournisseurs compatibles OpenAI (Ollama, Mistral…)."

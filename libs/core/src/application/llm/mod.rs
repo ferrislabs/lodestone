@@ -16,6 +16,7 @@ use crate::{
             SecretCipher, Tier, TierError, TokenPricing,
         },
     },
+    domain::qualification::ports::QualificationRepository,
 };
 
 #[derive(Debug, Clone)]
@@ -115,13 +116,14 @@ impl LodestoneUseCase {
         Ok(record)
     }
 
-    #[transactional(llm_provider)]
+    #[transactional(llm_provider, qualification)]
     pub async fn update_llm_provider<C: SecretCipher>(
         &self,
         command: UpdateLlmProvider,
         cipher: &C,
     ) -> Result<LlmProviderRecord, CoreError> {
         let mut repo = llm_provider_repository;
+        let mut qualification = qualification_repository;
         check_generation(&command.generation)?;
         let current = repo.find(command.id).await?.ok_or(CoreError::NotFound)?;
         let api_key = match &command.api_key {
@@ -155,6 +157,7 @@ impl LodestoneUseCase {
         if !repo.update(&record).await? {
             return Err(CoreError::NotFound);
         }
+        qualification.reset_provider_backoff(record.id).await?;
         Ok(record)
     }
 

@@ -795,3 +795,169 @@ async fn reasoning_text_never_reaches_the_response_or_the_error() {
         .unwrap();
     assert!(!format!("{response:?}").contains(probe));
 }
+
+fn reasoning_provider(server: &MockServer, model: &str, strict: bool) -> OpenAiCompatibleProvider {
+    let mut definition = definition(
+        ProviderKind::Mistral,
+        &server.base_url(),
+        Some(KEY),
+        Duration::from_secs(5),
+    );
+    definition.model = model.to_owned();
+    definition.reasoning_effort = Some(ReasoningEffort::Medium);
+    let provider = OpenAiCompatibleProvider::new(&definition).unwrap();
+    if strict {
+        provider.without_fallback()
+    } else {
+        provider
+    }
+}
+
+fn body_with_reasoning(request: &HttpMockRequest) -> bool {
+    request.body.as_ref().is_some_and(|body| {
+        serde_json::from_slice::<serde_json::Value>(body)
+            .is_ok_and(|value| value.get("reasoning_effort") == Some(&json!("medium")))
+    })
+}
+
+fn body_without_reasoning(request: &HttpMockRequest) -> bool {
+    request.body.as_ref().is_some_and(|body| {
+        serde_json::from_slice::<serde_json::Value>(body).is_ok_and(|value| {
+            value.get("reasoning_effort").is_none() && value.get("messages").is_some()
+        })
+    })
+}
+
+fn rejecting_mock<'a>(server: &'a MockServer, status: u16, message: &str) -> httpmock::Mock<'a> {
+    server.mock(|when, then| {
+        when.method(POST).matches(body_with_reasoning);
+        then.status(status).json_body(json!({"message": message}));
+    })
+}
+
+fn accepting_mock(server: &MockServer) -> httpmock::Mock<'_> {
+    server.mock(|when, then| {
+        when.method(POST).matches(body_without_reasoning);
+        then.status(200).json_body(success_body());
+    })
+}
+
+#[tokio::test]
+async fn a_reasoning_rejection_is_retried_once_without_the_field() {
+    let server = MockServer::start();
+    let rejected = rejecting_mock(
+        &server,
+        400,
+        "reasoning_effort is not enabled for this model",
+    );
+    let accepted = accepting_mock(&server);
+
+    let response = run(&reasoning_provider(&server, "ministral", false))
+        .await
+        .unwrap();
+
+    assert_eq!(response.output, json!({"ok": true}));
+    rejected.assert_hits(1);
+    accepted.assert_hits(1);
+}
+
+#[tokio::test]
+async fn the_rejection_is_remembered_so_the_next_call_sends_no_field() {
+    let server = MockServer::start();
+    let rejected = rejecting_mock(
+        &server,
+        422,
+        "Extra inputs are not permitted: reasoning_effort",
+    );
+    let accepted = accepting_mock(&server);
+    let provider = reasoning_provider(&server, "ministral", false);
+
+    run(&provider).await.unwrap();
+    run(&provider).await.unwrap();
+    let other = reasoning_provider(&server, "ministral", false);
+    run(&other).await.unwrap();
+
+    rejected.assert_hits(1);
+    accepted.assert_hits(3);
+}
+
+#[tokio::test]
+async fn a_changed_provider_forgets_the_rejection() {
+    let server = MockServer::start();
+    let rejected = rejecting_mock(
+        &server,
+        400,
+        "reasoning_effort is not enabled for this model",
+    );
+    let accepted = accepting_mock(&server);
+
+    run(&reasoning_provider(&server, "ministral-a", false))
+        .await
+        .unwrap();
+    run(&reasoning_provider(&server, "ministral-a", false))
+        .await
+        .unwrap();
+    rejected.assert_hits(1);
+    run(&reasoning_provider(&server, "ministral-b", false))
+        .await
+        .unwrap();
+
+    rejected.assert_hits(2);
+    accepted.assert_hits(3);
+}
+
+#[tokio::test]
+async fn another_bad_request_is_not_retried() {
+    let server = MockServer::start();
+    let mock = server.mock(|when, then| {
+        when.method(POST);
+        then.status(400)
+            .json_body(json!({"message": "response_format is invalid"}));
+    });
+
+    let error = run(&reasoning_provider(&server, "ministral", false))
+        .await
+        .unwrap_err();
+
+    mock.assert_hits(1);
+    assert!(matches!(error, LlmError::Status { status: 400, .. }));
+}
+
+#[tokio::test]
+async fn the_reporting_provider_neither_retries_nor_remembers() {
+    let server = MockServer::start();
+    let rejected = rejecting_mock(
+        &server,
+        400,
+        "reasoning_effort is not enabled for this model",
+    );
+    let accepted = accepting_mock(&server);
+
+    let error = run(&reasoning_provider(&server, "ministral", true))
+        .await
+        .unwrap_err();
+    assert!(error.is_reasoning_rejection());
+    run(&reasoning_provider(&server, "ministral", false))
+        .await
+        .unwrap();
+
+    rejected.assert_hits(2);
+    accepted.assert_hits(1);
+}
+
+#[tokio::test]
+async fn a_rejection_without_a_configured_effort_is_not_retried() {
+    let server = MockServer::start();
+    let mock = server.mock(|when, then| {
+        when.method(POST);
+        then.status(400)
+            .json_body(json!({"message": "reasoning_effort is not enabled for this model"}));
+    });
+
+    let error = run(&provider(ProviderKind::Mistral, &server, Some(KEY)))
+        .await
+        .unwrap_err();
+
+    mock.assert_hits(1);
+    assert!(matches!(error, LlmError::Status { status: 400, .. }));
+}

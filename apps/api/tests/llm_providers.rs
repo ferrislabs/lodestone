@@ -1048,3 +1048,33 @@ fn openapi_documents_every_llm_path_with_bearer_auth() {
         }
     }
 }
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn test_endpoint_explains_a_model_that_rejects_the_reasoning_effort(pool: PgPool) {
+    let api = Api::new(pool).await;
+    let upstream = MockServer::start_async().await;
+    let mock = upstream
+        .mock_async(|when, then| {
+            when.method(POST)
+                .path("/v1/chat/completions")
+                .json_body_partial(r#"{"reasoning_effort": "medium"}"#);
+            then.status(400)
+                .json_body(json!({ "message": "reasoning_effort is not enabled for this model" }));
+        })
+        .await;
+    let mut body = provider("ministral", &upstream.base_url());
+    body["reasoning_effort"] = json!("medium");
+    let id = api.create(body).await;
+
+    let (status, body, raw) = api.test(&id).await;
+
+    assert_eq!(status, StatusCode::OK, "{raw}");
+    assert_eq!(body["data"]["ok"], false);
+    assert_eq!(body["data"]["error"]["kind"], "reasoning_unsupported");
+    assert_eq!(
+        body["data"]["error"]["message"],
+        "Ce modèle n'accepte pas le réglage de raisonnement : choisissez « Par défaut (non envoyé) »."
+    );
+    mock.assert_hits(1);
+    assert!(!raw.contains(KEY), "{raw}");
+}

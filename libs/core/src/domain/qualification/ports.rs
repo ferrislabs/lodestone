@@ -5,8 +5,12 @@ use common::CoreError;
 
 use crate::domain::{
     lead::{Lead, LeadId},
+    llm::provider::ProviderId,
     profile::{ProfileId, RevisionNumber},
-    qualification::{Completion, LeadScoring, QualificationResult, Rescoring, SummaryState},
+    qualification::{
+        AgentCallFailure, AgentFailure, Completion, LeadScoring, QualificationResult, Rescoring,
+        SummaryState,
+    },
 };
 
 #[cfg_attr(test, mockall::automock)]
@@ -17,6 +21,7 @@ pub trait QualificationRepository: Send {
         revision: RevisionNumber,
         limit: u32,
         dossier_gate: Option<DateTime<Utc>>,
+        now: DateTime<Utc>,
     ) -> impl Future<Output = Result<Vec<Lead>, CoreError>> + Send;
 
     fn count_due(
@@ -24,6 +29,7 @@ pub trait QualificationRepository: Send {
         profile_id: ProfileId,
         revision: RevisionNumber,
         dossier_gate: Option<DateTime<Utc>>,
+        now: DateTime<Utc>,
     ) -> impl Future<Output = Result<u64, CoreError>> + Send;
 
     fn due_summaries(
@@ -52,8 +58,30 @@ pub trait QualificationRepository: Send {
         lead_id: LeadId,
         qualified_at: DateTime<Utc>,
         reason: &str,
+        provider_id: Option<ProviderId>,
         at: DateTime<Utc>,
     ) -> impl Future<Output = Result<Option<u32>, CoreError>> + Send;
+
+    fn record_agent_failure(
+        &mut self,
+        failure: &AgentCallFailure,
+        at: DateTime<Utc>,
+    ) -> impl Future<Output = Result<u32, CoreError>> + Send;
+
+    fn agent_failures(
+        &mut self,
+        lead_id: LeadId,
+    ) -> impl Future<Output = Result<Vec<AgentFailure>, CoreError>> + Send;
+
+    fn retry_agent_failures(
+        &mut self,
+        lead_id: LeadId,
+    ) -> impl Future<Output = Result<u64, CoreError>> + Send;
+
+    fn reset_provider_backoff(
+        &mut self,
+        provider_id: ProviderId,
+    ) -> impl Future<Output = Result<u64, CoreError>> + Send;
 
     fn reset_summary(
         &mut self,

@@ -1939,3 +1939,113 @@ async fn the_list_is_flat_by_default_and_rejects_an_unknown_grouping(pool: PgPoo
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert_eq!(flat["data"][0]["grouped_leads"], json!([]));
 }
+
+async fn seed_retry(pool: &PgPool, lead: &str, kind: &str, attempts: i32, error: &str) {
+    sqlx::query(
+        "INSERT INTO lead_agent_retries (lead_id, kind, profile_revision, agent_id, attempts, next_attempt_at, error, updated_at)
+         VALUES ($1::uuid, $2, 1, 'pertinence', $3, now() + interval '6 hours', $4, now())",
+    )
+    .bind(lead)
+    .bind(kind)
+    .bind(attempts)
+    .bind(error)
+    .execute(pool)
+    .await
+    .expect("retry");
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_detail_reports_failing_agents_and_the_retry_resets_the_failed_ones(pool: PgPool) {
+    let seed = Seed { pool: pool.clone() };
+    let profile = seed.qualified_profile("keycloak-ops").await;
+    let lead = seed.lead(&profile, "acme.com", "new", 5.0, 1).await;
+    seed_retry(
+        &pool,
+        &lead,
+        "scoring",
+        5,
+        "Échec de l'appel au modèle : status 400",
+    )
+    .await;
+    seed_retry(
+        &pool,
+        &lead,
+        "qualification",
+        2,
+        "Échec de l'appel au modèle : timeout",
+    )
+    .await;
+    let api = Api::new(pool.clone()).await;
+
+    let (_, body) = api.get(&format!("/api/v1/leads/{lead}")).await;
+    let failures = body["data"]["agent_failures"]
+        .as_array()
+        .unwrap_or_else(|| panic!("{body}"));
+    assert_eq!(failures.len(), 2);
+    let scoring = failures
+        .iter()
+        .find(|f| f["kind"] == "scoring")
+        .expect("scoring");
+    assert_eq!(scoring["attempts"], 5);
+    assert_eq!(scoring["failed"], true);
+    assert_eq!(scoring["agent_id"], "pertinence");
+    assert_eq!(scoring["error"], "Échec de l'appel au modèle : status 400");
+    assert!(scoring["next_attempt_at"].is_string());
+    let qualification = failures
+        .iter()
+        .find(|f| f["kind"] == "qualification")
+        .expect("qualification");
+    assert_eq!(qualification["failed"], false);
+    assert_eq!(qualification["agent_name"], "Pertinence");
+
+    let uri = format!("/api/v1/leads/{lead}/agents/retry");
+    let (status, _, _) = send(api.app(), Method::POST, &uri, Some(&api.bearer), None).await;
+    assert_eq!(status, StatusCode::OK);
+
+    let rows: Vec<(String, i32, Option<chrono::DateTime<chrono::Utc>>)> = sqlx::query_as(
+        "SELECT kind, attempts, next_attempt_at FROM lead_agent_retries ORDER BY kind",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(rows[0].0, "qualification");
+    assert_eq!(rows[0].1, 2);
+    assert!(rows[0].2.is_some());
+    assert_eq!(rows[1].0, "scoring");
+    assert_eq!(rows[1].1, 0);
+    assert!(rows[1].2.is_none());
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_agents_retry_is_for_users_and_for_known_visible_leads_only(pool: PgPool) {
+    let seed = Seed { pool: pool.clone() };
+    let profile = seed.profile("keycloak-ops").await;
+    let lead = seed.lead(&profile, "acme.com", "new", 5.0, 1).await;
+    seed_retry(&pool, &lead, "scoring", 5, "x").await;
+    let api = Api::new(pool.clone()).await;
+    let client = format!("Bearer {}", api.harness.valid_client_token());
+
+    let uri = format!("/api/v1/leads/{lead}/agents/retry");
+    let (forbidden, _, _) = send(api.app(), Method::POST, &uri, Some(&client), None).await;
+    assert_eq!(forbidden, StatusCode::FORBIDDEN);
+    let (anonymous, _, _) = send(api.app(), Method::POST, &uri, None, None).await;
+    assert_eq!(anonymous, StatusCode::UNAUTHORIZED);
+    let attempts: i32 = sqlx::query_scalar("SELECT attempts FROM lead_agent_retries")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(attempts, 5);
+
+    let uri = format!("/api/v1/leads/{}/agents/retry", common::generate_uuid_v7());
+    let (missing, _, _) = send(api.app(), Method::POST, &uri, Some(&api.bearer), None).await;
+    assert_eq!(missing, StatusCode::NOT_FOUND);
+    let (malformed, _, _) = send(
+        api.app(),
+        Method::POST,
+        "/api/v1/leads/nope/agents/retry",
+        Some(&api.bearer),
+        None,
+    )
+    .await;
+    assert_eq!(malformed, StatusCode::BAD_REQUEST);
+}

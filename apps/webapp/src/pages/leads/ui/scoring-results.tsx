@@ -1,6 +1,7 @@
 import { Badge } from '#/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '#/components/ui/card'
 import { cn } from '#/lib/utils'
+import { awaitingFailureLabel } from '#/pages/leads/lib/agent-failure'
 import { verdictReasonLabel } from '#/pages/leads/lib/confidence'
 import { formatDateTime } from '#/pages/leads/lib/format'
 import {
@@ -13,14 +14,24 @@ import {
 	type VerdictProbabilityRow,
 	verdictProbabilityRows,
 } from '#/pages/leads/lib/scoring'
-import type { Lead, ScoringResult, Verdict } from '#/pages/leads/lib/types'
+import type {
+	AgentFailure,
+	Lead,
+	ScoringResult,
+	Verdict,
+} from '#/pages/leads/lib/types'
 import { formatConfidence } from '#/pages/leads/lib/verdict'
+import { AgentFailureNotice } from '#/pages/leads/ui/agent-failure-notice'
 import { AnswerMeasure } from '#/pages/leads/ui/answer-measure'
 import { VerdictBadge } from '#/pages/leads/ui/verdict-badge'
 
 interface ScoringResultsProps {
 	results: readonly ScoringResult[]
 	lead: Lead
+	failure: AgentFailure | null
+	onRetry: () => void
+	retrying: boolean
+	retryError: string | null
 }
 
 const BAR_STYLES: Record<Verdict, string> = {
@@ -178,7 +189,13 @@ function AgentScoring({
 	)
 }
 
-function Combined({ lead }: { lead: Lead }) {
+function Combined({
+	lead,
+	failure,
+}: {
+	lead: Lead
+	failure: AgentFailure | null
+}) {
 	const rows = verdictProbabilityRows(lead.verdict_probabilities)
 	const reason = lead.verdict_reason ?? null
 	return (
@@ -211,14 +228,23 @@ function Combined({ lead }: { lead: Lead }) {
 			{rows.length > 0 ? <VerdictBars rows={rows} /> : null}
 			{reason ? (
 				<p data-verdict-reason={reason} className="text-sm text-amber-700">
-					{verdictReasonLabel(reason)}
+					{reason === 'awaiting_scoring' && failure
+						? awaitingFailureLabel(failure)
+						: verdictReasonLabel(reason)}
 				</p>
 			) : null}
 		</section>
 	)
 }
 
-export function ScoringResults({ results, lead }: ScoringResultsProps) {
+export function ScoringResults({
+	results,
+	lead,
+	failure,
+	onRetry,
+	retrying,
+	retryError,
+}: ScoringResultsProps) {
 	return (
 		<Card data-section="scoring">
 			<CardHeader>
@@ -232,6 +258,14 @@ export function ScoringResults({ results, lead }: ScoringResultsProps) {
 				</p>
 			</CardHeader>
 			<CardContent className="flex flex-col gap-4">
+				{failure ? (
+					<AgentFailureNotice
+						failure={failure}
+						onRetry={onRetry}
+						retrying={retrying}
+						retryError={retryError}
+					/>
+				) : null}
 				{results.length === 0 ? (
 					<p className="text-sm text-muted-foreground">
 						Aucun agent de scoring n'a répondu pour le moment.
@@ -247,7 +281,7 @@ export function ScoringResults({ results, lead }: ScoringResultsProps) {
 						))}
 					</div>
 				)}
-				<Combined lead={lead} />
+				<Combined lead={lead} failure={failure} />
 			</CardContent>
 		</Card>
 	)

@@ -26,13 +26,14 @@ use crate::{
             provider::{ProviderId, SecretCipher, Tier, TierError, TokenPricing},
         },
         profile::{
-            ActiveProfile,
+            ActiveProfile, RevisionNumber,
             contract::contract_schema,
             definition::{ProfileDefinition, QualificationAgent},
         },
         qualification::{
-            AgentOpinion, Completion, EvidenceStrength, Judgement, QualificationResult, ResultId,
-            ResultStatus, SCORING_VERSION, ValidOutput, Violations, exclusions, judge,
+            AgentCallFailure, AgentFailure, AgentKind, AgentOpinion, Completion, EvidenceStrength,
+            Judgement, QualificationResult, ResultId, ResultStatus, SCORING_VERSION, ValidOutput,
+            Violations, exclusions, judge,
             ports::QualificationRepository,
             prompt::{AgentPrompt, build, lead_document, with_ungrounded, with_violations},
             sample_record, validate_answers, vote,
@@ -67,6 +68,7 @@ pub struct EvaluationReport {
     pub valid: u64,
     pub invalid: u64,
     pub rescored: u64,
+    pub deferred: u64,
     pub backlog: u64,
     pub budget_exhausted: bool,
 }
@@ -218,19 +220,55 @@ struct Evaluator<'a, B, S, C> {
     settings: EvaluationSettings,
 }
 
+pub(crate) const CALL_FAILURE_PREFIX: &str = "Échec de l'appel au modèle";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CallFailure {
+    pub(crate) agent_id: String,
+    pub(crate) provider_id: ProviderId,
+    pub(crate) error: String,
+}
+
+impl CallFailure {
+    pub(crate) fn into_record(
+        self,
+        lead_id: LeadId,
+        kind: AgentKind,
+        profile_revision: RevisionNumber,
+    ) -> AgentCallFailure {
+        AgentCallFailure {
+            lead_id,
+            kind,
+            profile_revision,
+            agent_id: self.agent_id,
+            provider_id: Some(self.provider_id),
+            error: self.error,
+        }
+    }
+}
+
 enum AgentOutcome {
     Result(Box<QualificationResult>, Option<AgentOpinion>),
+    CallFailed(CallFailure),
+    BudgetExhausted,
+}
+
+enum PassOutcome {
+    Done(Pass),
+    CallFailed(CallFailure),
     BudgetExhausted,
 }
 
 enum LeadOutcome {
     Done { valid: u64, invalid: u64 },
+    Deferred,
     BudgetExhausted,
 }
 
 enum SampleOutcome {
     Valid { output: ValidOutput, model: String },
     Invalid { error: String },
+    CallFailed { error: String },
     BudgetExhausted,
 }
 
@@ -469,14 +507,19 @@ where
                     if let Some((output, model)) = fallback {
                         return SampleOutcome::Valid { output, model };
                     }
+                    let call_failure = error.is_call_failure();
                     warn!(
                         agent = agent.id.as_str(),
                         %error,
                         provider_message = error.provider_message(),
+                        call_failure,
                         "qualification call failed"
                     );
-                    return SampleOutcome::Invalid {
-                        error: format!("Échec de l'appel au modèle : {error}"),
+                    let error = format!("{CALL_FAILURE_PREFIX} : {error}");
+                    return if call_failure {
+                        SampleOutcome::CallFailed { error }
+                    } else {
+                        SampleOutcome::Invalid { error }
                     };
                 }
             };
@@ -554,9 +597,18 @@ where
         let mut records: Vec<serde_json::Value> = Vec::new();
         let mut model: Option<String> = None;
         let mut first_error: Option<String> = None;
+        let mut call_errors: Vec<String> = Vec::new();
         for sample in 0..plan.samples {
             match self.run_sample(&run, (plan, sample), budget).await {
                 SampleOutcome::BudgetExhausted => return Ok(AgentOutcome::BudgetExhausted),
+                SampleOutcome::CallFailed { error } => {
+                    warn!(
+                        agent = agent.id.as_str(),
+                        sample, "qualification sample dropped, its call failed"
+                    );
+                    records.push(sample_record(sample, Err(&error)));
+                    call_errors.push(error);
+                }
                 SampleOutcome::Valid {
                     output,
                     model: answered,
@@ -574,6 +626,16 @@ where
                     first_error.get_or_insert(error);
                 }
             }
+        }
+        if valid.is_empty()
+            && first_error.is_none()
+            && let Some(error) = call_errors.into_iter().next()
+        {
+            return Ok(AgentOutcome::CallFailed(CallFailure {
+                agent_id: agent.id.as_str().to_owned(),
+                provider_id: loaded.id,
+                error,
+            }));
         }
         let raw_samples = if plan.samples > 1 {
             serde_json::Value::Array(records)
@@ -630,7 +692,7 @@ where
         escalation: Option<ProviderId>,
         providers: &mut Providers<B::Provider>,
         budget: &mut RunBudget,
-    ) -> Result<Option<Pass>, CoreError> {
+    ) -> Result<PassOutcome, CoreError> {
         let mut pass = Pass {
             results: Vec::new(),
             opinions: Vec::new(),
@@ -646,7 +708,8 @@ where
                 .evaluate_agent(usecase, subject, agent, plan, providers, budget)
                 .await?
             {
-                AgentOutcome::BudgetExhausted => return Ok(None),
+                AgentOutcome::BudgetExhausted => return Ok(PassOutcome::BudgetExhausted),
+                AgentOutcome::CallFailed(failure) => return Ok(PassOutcome::CallFailed(failure)),
                 AgentOutcome::Result(result, opinion) => {
                     info!(
                         monotonic_counter.qualification_results = 1u64,
@@ -660,7 +723,7 @@ where
                 }
             }
         }
-        Ok(Some(pass))
+        Ok(PassOutcome::Done(pass))
     }
 
     async fn escalate(
@@ -680,11 +743,21 @@ where
             warn!(lead_id = %subject.lead.id, "escalation skipped, its provider is unavailable");
             return Ok(Some(false));
         }
-        let Some(escalated) = self
+        let escalated = match self
             .run_agents(usecase, subject, Some(provider), providers, budget)
             .await?
-        else {
-            return Ok(None);
+        {
+            PassOutcome::Done(escalated) => escalated,
+            PassOutcome::BudgetExhausted => return Ok(None),
+            PassOutcome::CallFailed(failure) => {
+                warn!(
+                    lead_id = %subject.lead.id,
+                    agent = failure.agent_id,
+                    error = failure.error,
+                    "escalation skipped, its model call failed"
+                );
+                return Ok(Some(false));
+            }
         };
         let mut replaced = false;
         for (index, (result, opinion)) in escalated
@@ -744,13 +817,26 @@ where
             at: clock.now(),
         };
         let at = subject.at;
-        let Some(mut pass) = self
+        let revision = active.revision.number;
+        let mut pass = match self
             .run_agents(usecase, &subject, None, providers, budget)
             .await?
-        else {
-            return Ok(LeadOutcome::BudgetExhausted);
+        {
+            PassOutcome::Done(pass) => pass,
+            PassOutcome::BudgetExhausted => return Ok(LeadOutcome::BudgetExhausted),
+            PassOutcome::CallFailed(failure) => {
+                let record = failure.into_record(lead.id, AgentKind::Qualification, revision);
+                let attempts = usecase.note_agent_failure(&record, at).await?;
+                warn!(
+                    lead_id = %lead.id,
+                    agent = record.agent_id,
+                    attempts,
+                    error = record.error,
+                    "qualification deferred, a model call failed"
+                );
+                return Ok(LeadOutcome::Deferred);
+            }
         };
-        let revision = active.revision.number;
         let mut escalated_revision = None;
         let scored = |pass: &Pass| -> Vec<AgentOpinion> {
             pass.opinions.iter().flatten().copied().collect()
@@ -869,7 +955,7 @@ impl LodestoneUseCase {
             if remaining == 0 {
                 break;
             }
-            let leads = self.due_leads(active, remaining, gate).await?;
+            let leads = self.due_leads(active, remaining, gate, clock.now()).await?;
             for lead in &leads {
                 let outcome = evaluator
                     .evaluate_lead(self, active, lead, &mut providers, &mut budget, clock)
@@ -881,6 +967,10 @@ impl LodestoneUseCase {
                         report.invalid += invalid;
                         remaining = remaining.saturating_sub(1);
                     }
+                    LeadOutcome::Deferred => {
+                        report.deferred += 1;
+                        remaining = remaining.saturating_sub(1);
+                    }
                     LeadOutcome::BudgetExhausted => {
                         report.budget_exhausted = true;
                         warn!("qualification stopped, the run budget is exhausted");
@@ -889,7 +979,7 @@ impl LodestoneUseCase {
                 }
             }
         }
-        report.backlog = self.due_backlog(&profiles, gate).await? + rescoring.backlog;
+        report.backlog = self.due_backlog(&profiles, gate, clock.now()).await? + rescoring.backlog;
         Ok(report)
     }
 
@@ -906,10 +996,11 @@ impl LodestoneUseCase {
         &self,
         profiles: &[ActiveProfile],
         gate: Option<DateTime<Utc>>,
+        now: DateTime<Utc>,
     ) -> Result<u64, CoreError> {
         let mut backlog = 0;
         for active in profiles {
-            backlog += self.count_due_leads(active, gate).await?;
+            backlog += self.count_due_leads(active, gate, now).await?;
         }
         Ok(backlog)
     }
@@ -920,9 +1011,10 @@ impl LodestoneUseCase {
         active: &ActiveProfile,
         limit: u32,
         gate: Option<DateTime<Utc>>,
+        now: DateTime<Utc>,
     ) -> Result<Vec<Lead>, CoreError> {
         let mut repo = qualification_repository;
-        repo.due_leads(active.profile.id, active.revision.number, limit, gate)
+        repo.due_leads(active.profile.id, active.revision.number, limit, gate, now)
             .await
     }
 
@@ -931,10 +1023,30 @@ impl LodestoneUseCase {
         &self,
         active: &ActiveProfile,
         gate: Option<DateTime<Utc>>,
+        now: DateTime<Utc>,
     ) -> Result<u64, CoreError> {
         let mut repo = qualification_repository;
-        repo.count_due(active.profile.id, active.revision.number, gate)
+        repo.count_due(active.profile.id, active.revision.number, gate, now)
             .await
+    }
+
+    #[transactional(qualification)]
+    pub(crate) async fn note_agent_failure(
+        &self,
+        failure: &AgentCallFailure,
+        at: DateTime<Utc>,
+    ) -> Result<u32, CoreError> {
+        let mut repo = qualification_repository;
+        repo.record_agent_failure(failure, at).await
+    }
+
+    #[transactional(qualification)]
+    pub async fn lead_agent_failures(
+        &self,
+        lead_id: LeadId,
+    ) -> Result<Vec<AgentFailure>, CoreError> {
+        let mut repo = qualification_repository;
+        repo.agent_failures(lead_id).await
     }
 
     #[transactional(qualification)]

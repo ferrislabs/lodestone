@@ -6,7 +6,7 @@ use thiserror::Error;
 
 use crate::domain::{
     lead::{LeadId, str_enum, uuid_id},
-    llm::{RunProvenance, UntrustedDocument},
+    llm::{RunProvenance, UntrustedDocument, provider::ProviderId},
     profile::{
         ProfileId, RevisionNumber,
         definition::{AgentId, EVIDENCE_MAX_CHARS, QualificationAgent, Question},
@@ -510,6 +510,51 @@ impl SummaryState {
     pub fn is_failed(&self) -> bool {
         self.attempts >= SUMMARY_FAILED_AFTER
     }
+}
+
+pub const AGENT_FAILED_AFTER: u32 = SUMMARY_FAILED_AFTER;
+pub const AGENT_ERROR_MAX_CHARS: usize = 400;
+
+pub fn agent_retry_delay(attempts: u32) -> chrono::Duration {
+    summary_retry_delay(attempts)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AgentKind {
+    Qualification,
+    Scoring,
+}
+
+str_enum!(AgentKind {
+    Qualification => "qualification",
+    Scoring => "scoring",
+});
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentFailure {
+    pub kind: AgentKind,
+    pub profile_revision: RevisionNumber,
+    pub agent_id: String,
+    pub provider_id: Option<ProviderId>,
+    pub attempts: u32,
+    pub next_attempt_at: Option<DateTime<Utc>>,
+    pub error: String,
+}
+
+impl AgentFailure {
+    pub fn is_failed(&self) -> bool {
+        self.attempts >= AGENT_FAILED_AFTER
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentCallFailure {
+    pub lead_id: LeadId,
+    pub kind: AgentKind,
+    pub profile_revision: RevisionNumber,
+    pub agent_id: String,
+    pub provider_id: Option<ProviderId>,
+    pub error: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]

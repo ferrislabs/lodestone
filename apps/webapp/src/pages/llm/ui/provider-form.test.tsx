@@ -132,6 +132,11 @@ describe('ProviderForm', () => {
 		expect(
 			screen.getByText(/La réflexion du modèle n'est jamais affichée/),
 		).toBeTruthy()
+		expect(
+			screen.getByText(
+				/Laissez « Par défaut \(non envoyé\) » pour un modèle sans raisonnement réglable \(ex\. Ministral\)\./,
+			),
+		).toBeTruthy()
 	})
 
 	it('shows the generation parameters with their French labels and help', () => {

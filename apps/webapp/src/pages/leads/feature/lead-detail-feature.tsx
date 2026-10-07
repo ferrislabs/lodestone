@@ -54,6 +54,15 @@ export function LeadDetailFeature() {
 			}),
 	})
 
+	const retryAgents = useMutation({
+		...lodestoneApi().mutation('post', '/api/v1/leads/{lead_id}/agents/retry')
+			.mutationOptions,
+		onSuccess: () =>
+			queryClient.invalidateQueries({
+				queryKey: [{ _id: '/api/v1/leads/{lead_id}' }],
+			}),
+	})
+
 	const refreshCompany = useMutation({
 		...lodestoneApi().mutation(
 			'post',
@@ -154,6 +163,11 @@ export function LeadDetailFeature() {
 			retryingSummary={retrySummary.isPending}
 			retrySummaryError={
 				retrySummary.isError ? errorMessage(retrySummary.error) : null
+			}
+			onRetryAgents={() => retryAgents.mutate({ path: { lead_id: leadId } })}
+			retryingAgents={retryAgents.isPending}
+			retryAgentsError={
+				retryAgents.isError ? errorMessage(retryAgents.error) : null
 			}
 			onRefreshCompany={() =>
 				refreshCompany.mutate({ path: { lead_id: leadId } })

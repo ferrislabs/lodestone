@@ -13,9 +13,9 @@ use std::{
 use chrono::{DateTime, Utc};
 use common::{EncryptionKey, Secret};
 use lodestone_core::{
-    ActiveProfile, Clock, CreateProfileCommand, GenerationParams, Lead, LeadDetail, LeadRepository,
-    LlmError, LlmProvider, LlmRequest, LlmResponse, LodestoneUseCase, Observation, ProfileId,
-    ProfileName, Provenance, ProviderDefinition, ProviderId, ProviderKind, ResultStatus,
+    ActiveProfile, AgentKind, Clock, CreateProfileCommand, GenerationParams, Lead, LeadDetail,
+    LeadRepository, LlmError, LlmProvider, LlmRequest, LlmResponse, LodestoneUseCase, Observation,
+    ProfileId, ProfileName, Provenance, ProviderDefinition, ProviderId, ProviderKind, ResultStatus,
     ReviseProfileCommand, SignalKind, SourceName, Tier, TokenPricing, TokenUsage, UnitInterval,
     ValidatedProfile, Verdict, VerdictReason, VerdictSource,
     evaluation::{EvaluationSettings, ProviderBuilder},
@@ -23,7 +23,7 @@ use lodestone_core::{
         crypto::AesGcmCipher, lead::postgres::PgLeadRepository, llm_cache::postgres::PgLlmCache,
         postgres::with_tx,
     },
-    llm::CreateLlmProvider,
+    llm::{CreateLlmProvider, KeyChange, UpdateLlmProvider},
 };
 use serde_json::{Value, json};
 use sqlx::PgPool;
@@ -1212,4 +1212,372 @@ async fn a_qualification_summary_stays_groundable(pool: PgPool) {
     assert_eq!(criterion["choice"], "forte");
     assert_eq!(criterion["grounded"], true);
     assert_eq!(criterion["evidence_source"], "qualification:fit");
+}
+
+fn network() -> Reply {
+    Reply::Fail(LlmError::Network("connection failed".to_owned()))
+}
+
+fn sampled_agent(id: &str, samples: u8) -> Value {
+    let mut agent = qualification_agent(id);
+    agent["samples"] = json!(samples);
+    agent
+}
+
+impl Harness {
+    async fn qualify_report(&self) -> lodestone_core::evaluation::EvaluationReport {
+        self.usecase
+            .qualify_due_leads(
+                &self.builder(),
+                &self.cipher,
+                &self.cache(),
+                settings(),
+                &self.clock,
+            )
+            .await
+            .unwrap()
+    }
+
+    async fn failures(&self, profile: ProfileId, host: &str) -> Vec<lodestone_core::AgentFailure> {
+        self.detail(profile, host).await.agent_failures
+    }
+
+    async fn result_rows(&self, table: &str) -> i64 {
+        sqlx::query_scalar(&format!("SELECT COUNT(*) FROM {table}"))
+            .fetch_one(&self.pool)
+            .await
+            .unwrap()
+    }
+
+    async fn sample_flow(&self, qualification: Vec<Value>) -> ProfileId {
+        let profile = self
+            .profile(qualification, vec![scoring_agent("global", 5, None, 1)])
+            .await;
+        self.observe("acme.com", SourceName::HttpProbe, 10).await;
+        profile
+    }
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_scoring_call_failure_keeps_the_lead_due_with_a_backoff_then_succeeds(pool: PgPool) {
+    let harness = Harness::new(pool).await;
+    harness.script("model-synth#scoring", vec![network()]);
+    let profile = harness.sample_flow(vec![qualification_agent("fit")]).await;
+    harness.qualify().await;
+
+    let first = harness.score().await;
+
+    assert_eq!((first.leads, first.deferred), (0, 1));
+    assert_eq!(harness.result_rows("scoring_results").await, 0);
+    let failures = harness.failures(profile, "acme.com").await;
+    assert_eq!(failures.len(), 1);
+    let failure = &failures[0];
+    assert_eq!(failure.kind, AgentKind::Scoring);
+    assert_eq!(failure.agent_id, "global");
+    assert_eq!(failure.attempts, 1);
+    assert!(!failure.is_failed());
+    assert_eq!(failure.next_attempt_at, Some(at(1_060)));
+    assert!(failure.error.starts_with("Échec de l'appel au modèle"));
+    let lead = harness.lead(profile, "acme.com").await;
+    assert_eq!(lead.verdict, None);
+
+    let waiting = harness.score().await;
+    assert_eq!(
+        (waiting.leads, waiting.deferred, waiting.backlog),
+        (0, 0, 0)
+    );
+    assert_eq!(harness.scoring_calls().len(), 1);
+
+    harness.set_time(61);
+    let retried = harness.score().await;
+
+    assert_eq!((retried.leads, retried.deferred), (1, 0));
+    assert!(harness.failures(profile, "acme.com").await.is_empty());
+    let lead = harness.lead(profile, "acme.com").await;
+    assert_eq!(lead.verdict, Some(Verdict::Reliable));
+    assert_eq!(harness.result_rows("scoring_results").await, 1);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_backoff_follows_the_schedule_and_the_agents_fail_after_five_attempts(pool: PgPool) {
+    let harness = Harness::new(pool).await;
+    harness.script("model-synth#scoring", vec![network(); 6]);
+    let profile = harness.sample_flow(vec![qualification_agent("fit")]).await;
+    harness.qualify().await;
+
+    let mut now = 0;
+    for (attempt, delay) in [60, 300, 1_800, 7_200, 21_600].into_iter().enumerate() {
+        harness.set_time(now);
+        harness.score().await;
+        let failure = harness.failures(profile, "acme.com").await.remove(0);
+        assert_eq!(failure.attempts as usize, attempt + 1);
+        assert_eq!(failure.next_attempt_at, Some(at(1_000 + now + delay)));
+        assert_eq!(failure.is_failed(), attempt == 4);
+        now += delay;
+    }
+
+    harness.set_time(now);
+    let waiting = harness.score().await;
+    assert_eq!(waiting.deferred, 1);
+    let failure = harness.failures(profile, "acme.com").await.remove(0);
+    assert_eq!(failure.attempts, 6);
+    assert_eq!(failure.next_attempt_at, Some(at(1_000 + now + 21_600)));
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn retrying_resets_the_failed_agents_only_and_makes_them_due_now(pool: PgPool) {
+    let harness = Harness::new(pool).await;
+    harness.script("model-synth#scoring", vec![network(); 5]);
+    let profile = harness.sample_flow(vec![qualification_agent("fit")]).await;
+    harness.qualify().await;
+    let lead = harness.lead(profile, "acme.com").await;
+    let mut now = 0;
+    for delay in [60, 300, 1_800, 7_200] {
+        harness.set_time(now);
+        harness.score().await;
+        now += delay;
+    }
+
+    harness.usecase.retry_lead_agents(lead.id).await.unwrap();
+    let untouched = harness.failures(profile, "acme.com").await.remove(0);
+    assert_eq!(untouched.attempts, 4);
+
+    harness.set_time(now);
+    harness.score().await;
+    assert!(harness.failures(profile, "acme.com").await[0].is_failed());
+
+    harness.usecase.retry_lead_agents(lead.id).await.unwrap();
+    let reset = harness.failures(profile, "acme.com").await.remove(0);
+    assert_eq!((reset.attempts, reset.next_attempt_at), (0, None));
+
+    let report = harness.score().await;
+    assert_eq!((report.leads, report.deferred), (1, 0));
+    assert!(harness.failures(profile, "acme.com").await.is_empty());
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_contract_violation_after_the_retry_stays_a_final_invalid_result(pool: PgPool) {
+    let harness = Harness::new(pool).await;
+    harness.script(
+        "model-synth#scoring",
+        vec![Reply::Raw(json!({})), Reply::Raw(json!({}))],
+    );
+    let profile = harness.sample_flow(vec![qualification_agent("fit")]).await;
+    harness.qualify().await;
+
+    let report = harness.score().await;
+
+    assert_eq!((report.leads, report.invalid, report.deferred), (1, 1, 0));
+    assert!(harness.failures(profile, "acme.com").await.is_empty());
+    let detail = harness.detail(profile, "acme.com").await;
+    assert_eq!(detail.scoring_results.len(), 1);
+    assert_eq!(detail.scoring_results[0].status, ResultStatus::Invalid);
+    assert!(
+        detail.scoring_results[0]
+            .error
+            .as_deref()
+            .unwrap()
+            .starts_with("Réponse non conforme")
+    );
+    let idle = harness.score().await;
+    assert_eq!((idle.leads, idle.backlog), (0, 0));
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_status_error_is_a_call_failure_but_a_refusal_is_not(pool: PgPool) {
+    let harness = Harness::new(pool).await;
+    harness.script(
+        "model-synth#scoring",
+        vec![Reply::Fail(LlmError::Status {
+            status: 400,
+            message: Some("reasoning_effort is not enabled for this model".to_owned()),
+        })],
+    );
+    let profile = harness.sample_flow(vec![qualification_agent("fit")]).await;
+    harness.qualify().await;
+
+    harness.score().await;
+
+    let failure = harness.failures(profile, "acme.com").await.remove(0);
+    assert!(
+        failure
+            .error
+            .contains("reasoning_effort is not enabled for this model")
+    );
+    assert_eq!(harness.result_rows("scoring_results").await, 0);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn qualification_with_every_sample_call_failed_stays_due_with_a_backoff(pool: PgPool) {
+    let harness = Harness::new(pool).await;
+    harness.script("model-class", vec![network(); 3]);
+    let profile = harness.sample_flow(vec![sampled_agent("fit", 3)]).await;
+
+    let report = harness.qualify_report().await;
+
+    assert_eq!((report.leads, report.deferred), (0, 1));
+    assert_eq!(harness.result_rows("qualification_results").await, 0);
+    let failures = harness.failures(profile, "acme.com").await;
+    assert_eq!(failures.len(), 1);
+    assert_eq!(failures[0].kind, AgentKind::Qualification);
+    assert_eq!(failures[0].agent_id, "fit");
+    assert_eq!(failures[0].next_attempt_at, Some(at(1_060)));
+    assert_eq!(harness.lead(profile, "acme.com").await.qualified_at, None);
+
+    assert_eq!(harness.qualify().await, 0);
+    assert_eq!(harness.kinds().len(), 3);
+
+    harness.set_time(61);
+    assert_eq!(harness.qualify().await, 1);
+    assert!(harness.failures(profile, "acme.com").await.is_empty());
+    let detail = harness.detail(profile, "acme.com").await;
+    assert_eq!(detail.qualification_results[0].status, ResultStatus::Valid);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_partial_sample_call_failure_is_ignored(pool: PgPool) {
+    let harness = Harness::new(pool).await;
+    harness.script("model-class", vec![Reply::Good, network(), Reply::Good]);
+    let profile = harness.sample_flow(vec![sampled_agent("fit", 3)]).await;
+
+    assert_eq!(harness.qualify().await, 1);
+
+    assert!(harness.failures(profile, "acme.com").await.is_empty());
+    let detail = harness.detail(profile, "acme.com").await;
+    let result = &detail.qualification_results[0];
+    assert_eq!(result.status, ResultStatus::Valid);
+    assert_eq!(result.provenance.samples, 2);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_provider_update_resets_the_backoff_of_the_leads_it_failed(pool: PgPool) {
+    let harness = Harness::new(pool).await;
+    harness.script("model-synth#scoring", vec![network()]);
+    harness.script("model-synth#aggregator", vec![network()]);
+    let profile = harness.sample_flow(vec![qualification_agent("fit")]).await;
+    harness.qualify().await;
+    harness.score().await;
+    let provider = harness.failures(profile, "acme.com").await[0]
+        .provider_id
+        .unwrap();
+    harness.set_time(61);
+    harness.score().await;
+    harness.summarise().await;
+    let detail = harness.detail(profile, "acme.com").await;
+    assert_eq!(detail.summary_state.unwrap().attempts, 1);
+    harness.script("model-synth#scoring", vec![network()]);
+    harness.observe("acme.com", SourceName::DnsCname, 20).await;
+    harness.set_time(200);
+    harness.qualify().await;
+    harness.score().await;
+    let before = harness.failures(profile, "acme.com").await.remove(0);
+    assert_eq!(before.attempts, 1);
+    assert!(before.next_attempt_at.is_some());
+
+    harness
+        .usecase
+        .update_llm_provider(
+            UpdateLlmProvider {
+                id: provider,
+                name: "synth-fixed".to_owned(),
+                kind: ProviderKind::OpenAiCompatible,
+                base_url: "https://llm.example/v1".parse().unwrap(),
+                model: SYNTHESIS.to_owned(),
+                timeout: Duration::from_secs(30),
+                max_retries: 0,
+                pricing: TokenPricing {
+                    input_cents_per_mtok: 0,
+                    output_cents_per_mtok: 0,
+                },
+                api_key: KeyChange::Keep,
+                reasoning_effort: None,
+                generation: GenerationParams::default(),
+            },
+            &harness.cipher,
+        )
+        .await
+        .unwrap();
+
+    let after = harness.failures(profile, "acme.com").await.remove(0);
+    assert_eq!((after.attempts, after.next_attempt_at), (0, None));
+    let detail = harness.detail(profile, "acme.com").await;
+    assert_eq!(detail.summary_state.unwrap().attempts, 0);
+    let report = harness.score().await;
+    assert_eq!((report.leads, report.deferred), (1, 0));
+}
+
+const CALL_FAILURE: &str = "Échec de l''appel au modèle : llm provider answered with status 400";
+
+async fn rerun_migration(pool: &PgPool) {
+    sqlx::raw_sql(include_str!(
+        "../../../migrations/20261007000005_add_agent_call_retries.down.sql"
+    ))
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::raw_sql(include_str!(
+        "../../../migrations/20261007000005_add_agent_call_retries.up.sql"
+    ))
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_migration_makes_stored_scoring_call_failures_due_again(pool: PgPool) {
+    let harness = Harness::new(pool.clone()).await;
+    let profile = harness.sample_flow(vec![qualification_agent("fit")]).await;
+    harness.pass().await;
+    sqlx::query(&format!(
+        "UPDATE scoring_results SET status = 'invalid', score = NULL, verdict = NULL, error = '{CALL_FAILURE}'"
+    ))
+    .execute(&pool)
+    .await
+    .unwrap();
+    assert_eq!(harness.score().await.leads, 0);
+
+    rerun_migration(&pool).await;
+
+    let report = harness.score().await;
+    assert_eq!((report.leads, report.valid), (1, 1));
+    let detail = harness.detail(profile, "acme.com").await;
+    assert_eq!(detail.scoring_results[0].status, ResultStatus::Valid);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_migration_leaves_contract_failures_and_valid_results_alone(pool: PgPool) {
+    let harness = Harness::new(pool.clone()).await;
+    harness.sample_flow(vec![qualification_agent("fit")]).await;
+    harness.pass().await;
+    sqlx::query(
+        "UPDATE scoring_results SET status = 'invalid', score = NULL, verdict = NULL, error = 'Réponse non conforme au contrat : x'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    rerun_migration(&pool).await;
+
+    assert_eq!(harness.score().await.leads, 0);
+    assert_eq!(harness.qualify().await, 0);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_migration_makes_stored_qualification_call_failures_due_again(pool: PgPool) {
+    let harness = Harness::new(pool.clone()).await;
+    let profile = harness.sample_flow(vec![qualification_agent("fit")]).await;
+    harness.pass().await;
+    sqlx::query(&format!(
+        "UPDATE qualification_results SET status = 'invalid', agent_score = NULL, error = '{CALL_FAILURE}'"
+    ))
+    .execute(&pool)
+    .await
+    .unwrap();
+    assert_eq!(harness.qualify().await, 0);
+
+    rerun_migration(&pool).await;
+
+    assert_eq!(harness.qualify().await, 1);
+    let detail = harness.detail(profile, "acme.com").await;
+    assert_eq!(detail.qualification_results[0].status, ResultStatus::Valid);
 }
