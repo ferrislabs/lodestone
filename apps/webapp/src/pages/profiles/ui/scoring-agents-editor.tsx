@@ -2,6 +2,11 @@ import { PlusIcon } from 'lucide-react'
 
 import { FieldErrors } from '#/components/schema-form/field-frame'
 import type { JsonValue, Problem } from '#/lib/schema-form'
+import {
+	type CalibrationStates,
+	calibrationKey,
+} from '#/pages/profiles/lib/agent-calibration'
+import { agentField } from '#/pages/profiles/lib/agents'
 import type { ProviderOption } from '#/pages/profiles/lib/qualification'
 import type { ScoringActions } from '#/pages/profiles/lib/qualification-actions'
 import { ScoringAgentCard } from '#/pages/profiles/ui/scoring-agent-card'
@@ -13,6 +18,7 @@ interface ScoringAgentsEditorProps {
 	providers: readonly ProviderOption[]
 	editing: number | null
 	confirmingRemove: number | null
+	calibration: CalibrationStates
 	previewing: boolean
 	actions: ScoringActions
 }
@@ -23,6 +29,7 @@ export function ScoringAgentsEditor({
 	providers,
 	editing,
 	confirmingRemove,
+	calibration,
 	previewing,
 	actions,
 }: ScoringAgentsEditorProps) {
@@ -85,6 +92,11 @@ export function ScoringAgentsEditor({
 					index={editing}
 					problems={problems}
 					providers={providers}
+					calibration={
+						calibration[
+							calibrationKey('scoring', agentField(editingAgent, 'id'))
+						]
+					}
 					previewing={previewing}
 					actions={actions}
 				/>

@@ -9,6 +9,7 @@ import {
 	SheetTitle,
 } from '#/components/ui/sheet'
 import type { JsonValue, Problem } from '#/lib/schema-form'
+import type { AgentCalibrationState } from '#/pages/profiles/lib/agent-calibration'
 import { agentField } from '#/pages/profiles/lib/agents'
 import type { ProviderOption } from '#/pages/profiles/lib/qualification'
 import type { QualificationActions } from '#/pages/profiles/lib/qualification-actions'
@@ -20,6 +21,7 @@ interface QualificationSheetProps {
 	index: number
 	problems: readonly Problem[]
 	providers: readonly ProviderOption[]
+	calibration: AgentCalibrationState | undefined
 	previewing: boolean
 	actions: QualificationActions
 }
@@ -29,6 +31,7 @@ export function QualificationSheet({
 	index,
 	problems,
 	providers,
+	calibration,
 	previewing,
 	actions,
 }: QualificationSheetProps) {
@@ -65,6 +68,7 @@ export function QualificationSheet({
 						index={index}
 						problems={problems}
 						providers={providers}
+						calibration={calibration}
 						previewing={previewing}
 						actions={actions}
 					/>

@@ -79,8 +79,6 @@ impl From<&AgentCalibration> for AgentCalibrationDto {
 pub struct ProfileCalibrationDto {
     pub profile_id: String,
     pub name: String,
-    /// The `calibration.learned` setting of the latest revision.
-    pub learned: bool,
     pub agents: Vec<AgentCalibrationDto>,
 }
 
@@ -89,7 +87,6 @@ impl From<&ProfileCalibration> for ProfileCalibrationDto {
         Self {
             profile_id: profile.profile_id.to_string(),
             name: profile.name.clone(),
-            learned: profile.learned,
             agents: profile
                 .agents
                 .iter()

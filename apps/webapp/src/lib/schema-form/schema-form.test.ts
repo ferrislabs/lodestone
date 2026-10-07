@@ -52,7 +52,7 @@ describe('classify', () => {
 
 	it('classifies every $def of the committed schema', () => {
 		const names = Object.keys(root.$defs ?? {})
-		expect(names.length).toBe(24)
+		expect(names.length).toBe(21)
 		for (const name of names) {
 			const node = classify(root, { $ref: `#/$defs/${name}` })
 			const expected = unions.includes(name)
@@ -96,8 +96,6 @@ describe('classify', () => {
 	})
 
 	it('treats anyOf null and type arrays as nullable', () => {
-		const llm = def('Agent').properties?.llm ?? {}
-		expect(classify(root, llm).kind).toBe('nullable')
 		const value = def('Escalation').properties?.provider ?? {}
 		const node = classify(root, value)
 		expect(node.kind).toBe('nullable')
@@ -142,7 +140,6 @@ describe('defaultValue', () => {
 			agents: [],
 			qualification_agents: [],
 			scoring_agents: [],
-			calibration: { learned: true },
 			aggregator: { system_prompt: DEFAULT_AGGREGATOR_PROMPT },
 			escalation: { band_low: 40, band_high: 70 },
 			verdict: {
@@ -157,11 +154,7 @@ describe('defaultValue', () => {
 				weights: { volume: 1, diversity: 1, environment: 1, strength: 1 },
 			},
 			contact_ranking: { preferred_local_parts: [], guess_local_parts: [] },
-			llm: {
-				qualification_threshold: 50,
-				relevance_criteria: '',
-				language: 'fr',
-			},
+			language: 'fr',
 		})
 		for (const key of root.required ?? []) expect(value).toHaveProperty(key)
 	})
@@ -203,10 +196,17 @@ describe('defaultValue', () => {
 	})
 
 	it('gives an optional section its enabled value', () => {
-		const llm = def('Agent').properties?.llm ?? {}
+		const version = def('Fingerprint').properties?.version ?? {}
 		expect(
-			enabledValue(root, llm, PROFILE_HINTS, ['agents', 0, 'llm']),
-		).toEqual({})
+			enabledValue(root, version, PROFILE_HINTS, [
+				'agents',
+				0,
+				'source',
+				'fingerprints',
+				0,
+				'version',
+			]),
+		).toEqual(expect.objectContaining({ from: 'header' }))
 	})
 })
 

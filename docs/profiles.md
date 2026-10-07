@@ -8,7 +8,7 @@ Profiles live in Postgres. Each edit creates a new revision; earlier revisions a
 
 ## Schema
 
-The JSON Schema is `docs/schemas/profile.v13.schema.json`. It is generated from `ProfileDefinition` and must not be edited by hand. Regenerate it with:
+The JSON Schema is `docs/schemas/profile.v14.schema.json`. It is generated from `ProfileDefinition` and must not be edited by hand. Regenerate it with:
 
 ```
 UPDATE_SCHEMA=1 cargo test -p lodestone-core --test profile_examples
@@ -18,19 +18,19 @@ Without `UPDATE_SCHEMA=1` the same test fails if the committed file is stale. Th
 
 ## Examples
 
-- `docs/examples/profiles/iam-ferriskey.json`: sells FerrisKey and Autharie to organizations running Keycloak or a SaaS IAM. Uses certificate transparency, HTTP probes, CNAME patterns, public tenders and two job agents of the same kind (`ats-fr`, `ats-en`), the second with its own relevance criteria.
+- `docs/examples/profiles/iam-ferriskey.json`: sells FerrisKey and Autharie to organizations running Keycloak or a SaaS IAM. Uses certificate transparency, HTTP probes, CNAME patterns, public tenders and two job agents of the same kind (`ats-fr`, `ats-en`), the second with its own relevance criteria, written in the prompt of the `pertinence` agent.
 - `docs/examples/profiles/ecommerce-replatforming.json`: sells Magento migrations. Uses one HTTP probe with a version extractor, BOAMP and France Travail. It has no IAM-specific field.
 
 ## Sections
 
-- `schema_version`: must be 13. See [Older versions](#older-versions).
+- `schema_version`: must be 14. See [Older versions](#older-versions).
 - `identity`: the offer and the target customer, in free text.
+- `language`: `fr` or `en`, default `fr` (was `llm.language` before 14). The language of every free-text field the LLM writes: the aggregator's summary, verdict narrative, approach angle, draft subject and body, the qualification summaries and the scoring reasons. The system prompts state it (`Write every free-text field (...) in French. Evidence quotes stay in the language of the document they come from.`), so evidence quotes stay in the source language and the verbatim check is unchanged. Changing the language changes the system prompt, hence the LLM cache key: answers are regenerated.
 - `agents`: the detection agents; at least one is required. An agent searches one source with its own settings (see ADR 0005). Several agents of the same kind are allowed.
   - `id`: slug matching `^[a-z0-9][a-z0-9-]{0,62}$`, unique in the profile.
   - `name`: display name, not empty.
   - `enabled`: defaults to `true`. A disabled agent is kept but not run.
   - `source`: an object whose `kind` selects the source; the other fields are that kind's settings (table below).
-  - `llm.relevance_criteria`: optional, not empty when present. Criteria for triaging this agent's candidates; the profile's criteria apply without it. Qualification of a lead always uses the profile's criteria.
 - `qualification_agents`: at least one (ADR 0007). Each agent evaluates every lead of the profile, from every source, from one angle.
   - `id`: slug, unique among all agents of the profile, sourcing and qualification together.
   - `name`: display name, not empty. `enabled`: defaults to `true`.
@@ -41,6 +41,7 @@ Without `UPDATE_SCHEMA=1` the same test fails if the committed file is stale. Th
   - `exclusion_threshold`: from 0.5 to 1, default 0.6, the probability at which an excluding option excludes the lead (see "Exclusions").
   - `samples`: integer from 1 to 5, default 3, the number of independent model calls per lead (see "Sampling and voting").
   - `sampling_temperature`: from 0 to 1.5, default 0.7, the temperature of those calls when `samples` is above 1; it overrides the provider temperature for them.
+  - `learned_calibration`: default `true`. Whether the isotonic map learned for this agent corrects its score (see "Learned calibration"). The fit always runs, so the quality page keeps its figures.
   - `questions`: at least one. A question has an `id` (lowercase letters, digits, `-`, `_`, at most 63 characters, unique in the agent), a `wording`, a `weight` (1 to 10, default 5) and 2 to 11 `options`. An option has a `value` (same identifier rule, unique in the question), a `label`, a `score` from 0 to 1 `is_unknown` (default false) and `excludes` (default false, never together with `is_unknown`). Exactly one option per question is the unknown option (`is_unknown: true`, default value `inconnu`, label `Inconnu`, score 0.5): the model picks it when nothing in the documents supports an answer. Its score is editable, it cannot be removed, and the editor pins it last as `Option « inconnu »`. A question without exactly one unknown option is rejected (`UnknownOptionCount`, path `...options`).
   - Validation paths include the indexes, for example `qualification_agents[1].questions[0].options[2].score`.
   - Ready-made templates (editor, "Ajouter un agent de qualification"; French prompts and labels, higher score = better lead for the offer; the operator adjusts scores and weights):
@@ -53,12 +54,12 @@ Without `UPDATE_SCHEMA=1` the same test fails if the committed file is stale. Th
     - `Recherche entreprise`: what the company does and its size, from its dossier.
     - `Exclusions`: weight 1. Axes `editeur_integrateur`, `hebergeur_agence` (the signal concerns a customer of the company), `domaine_inactif` (`parque_ou_inactif`, `actif`, `inconnu`), `client_actuel` and `concurrent`; the other four have `oui` (excludes, score 0), `non` (score 1) and `inconnu` (score 0.5). The prompt holds three operator-editable lists in French, `Clients actuels :`, `Concurrents :` and `Éditeurs et intégrateurs du domaine :`, with short IAM-oriented defaults.
     - The IAM example (`docs/examples/profiles/iam-ferriskey.json`) enables all of them.
-- `calibration`: `learned` (default `true`). Switches the learned calibration on or off for the profile (see "Learned calibration"). The whole section and the field are optional.
 - `scoring_agents`: zero or more (ADR 0009). Each agent *decides* a score and a verdict for every lead from the reports of the qualification agents, through a contract imposed by the application. With none enabled the verdict stays pending (`en_attente`, reason `awaiting_scoring`).
   - `id`: slug, unique among all agents of the profile (sourcing, qualification and scoring). `name`, `enabled` (default `true`), `description` (1 to 300 characters), `provider_id` (`null` for the Synthèse default provider, the one of the aggregator), `system_prompt` (not empty, at most 8000 characters).
   - `weight`: integer from 1 to 10, default 5, the agent's weight in the lead score and verdict.
   - `criteria`: at least one. Same rules as qualification `questions` (identifier, `wording`, `weight`, 2 to 11 options with a score from 0 to 1, exactly one unknown option), except that no option can exclude a lead (`CriterionCannotExclude`, path `scoring_agents[i].criteria[j].options[k].excludes`).
   - `samples`: integer from 1 to 5, default 1. `sampling_temperature`: from 0 to 1.5, default 0.7, used when `samples` is above 1.
+  - `learned_calibration`: default `true`. Whether the isotonic map learned for this agent corrects its verdict probabilities (see "Learned calibration").
   - Default agent given to every profile of an older version on upgrade (and carried by both examples): `score-global`, "Score global", weight 5, 1 sample, provider `null`, a French description and prompt, and three criteria (`adequation_offre` forte/moyenne/faible, `solidite_preuves` solide/partielle/fragile, `priorite_commerciale` haute/normale/basse), each with an unknown option.
 - `aggregator`: `provider_id` (or `null` for the synthesis default) and a `system_prompt` (not empty, at most 8000 characters). Once every enabled qualification agent has a result for a lead, it writes the lead summary and a message draft (see "Qualification and summary").
 - `escalation`: `provider` (id of a declared LLM provider, `null` by default which disables escalation), `band_low` (0 to 100, default 40) and `band_high` (0 to 100, default 70) with `band_high > band_low` (see "Escalation"). The whole section and each field are optional.
@@ -132,9 +133,9 @@ so `r' + d' = 1 - c`, the three still sum to 1, `r' + 0.5 c'` equals `g` wheneve
 
 **Thresholds.** A map is fitted and applied only with at least 50 observations and at least 10 of each class. Below, the row keeps `n`, `positives` and `brier_before`, `points` is `[]`, `enabled` is `false`, and the identity applies.
 
-**Storage.** `calibrations (profile_id, kind scoring|qualification, agent_id, points, n, positives, brier_before, brier_after, reliability, fitted_at, enabled)`, primary key `(profile_id, kind, agent_id)`. `brier_before` is the mean squared error of the raw `x` against the outcomes, `brier_after` the same for the calibrated values on the same observations (in-sample, hence optimistic). `reliability` holds the ten-bin reliability curve of the raw predictions (non-empty bins `{n, predicted, observed}`). `enabled` means the thresholds were met; the profile setting `calibration.learned` decides whether an enabled map is applied (`false`: raw probabilities, state "Désactivée").
+**Storage.** `calibrations (profile_id, kind scoring|qualification, agent_id, points, n, positives, brier_before, brier_after, reliability, fitted_at, enabled)`, primary key `(profile_id, kind, agent_id)`. `brier_before` is the mean squared error of the raw `x` against the outcomes, `brier_after` the same for the calibrated values on the same observations (in-sample, hence optimistic). `reliability` holds the ten-bin reliability curve of the raw predictions (non-empty bins `{n, predicted, observed}`). `enabled` means the thresholds were met; the `learned_calibration` flag of the agent decides whether an enabled map is applied to it (`false`: raw probabilities for that agent, state "Désactivée"; the fit still runs and keeps `n` and the Brier scores).
 
-**Job `quality.calibrate`.** A daily recurring job in the Postgres queue (payload `{"recurring": true}`, dedup key `quality:calibrate`, first run at startup then rescheduled 24 hours after each run, 3 attempts). It refits every profile from its latest revision and writes the rows with an upsert, so it is idempotent and safe to run twice. When an applied map changed (and `calibration.learned` is `true`), it sets `lead_qualification_state.scored_at` to `NULL` for the leads of the profile: the rescoring loop then recombines the stored results with the new maps, without any model call. `POST /api/v1/quality/calibration/run` (users only) enqueues a one-shot run (payload `{"recurring": false}`, dedup key `quality:calibrate:manual`, answer 202 `{queued}`, `queued` false when one is already waiting). `GET /api/v1/quality/calibration` gives the state of every agent of every profile.
+**Job `quality.calibrate`.** A daily recurring job in the Postgres queue (payload `{"recurring": true}`, dedup key `quality:calibrate`, first run at startup then rescheduled 24 hours after each run, 3 attempts). It refits every profile from its latest revision and writes the rows with an upsert, so it is idempotent and safe to run twice. When an applied map changed for an agent whose `learned_calibration` is `true`, it sets `lead_qualification_state.scored_at` to `NULL` for the leads of the profile: the rescoring loop then recombines the stored results with the new maps, without any model call. `POST /api/v1/quality/calibration/run` (users only) enqueues a one-shot run (payload `{"recurring": false}`, dedup key `quality:calibrate:manual`, answer 202 `{queued}`, `queued` false when one is already waiting). `GET /api/v1/quality/calibration` gives the state of every agent of every profile.
 
 **Display.** The Qualité page has a "Calibration" card per profile (n, validated, Brier before and after, state "Active", "Pas assez de décisions (n/50)" or "Désactivée", reliability curve with the diagonal as reference, button "Recalculer maintenant"). The lead page shows "Calibré (n = ...)" on a scoring agent card with its raw and calibrated verdict probabilities.
 
@@ -215,8 +216,8 @@ A qualification agent answers, and only answers, with one object per question:
 `contract_schema(&QualificationAgent)` (`libs/core/src/domain/profile/contract.rs`) builds the JSON Schema of this contract from the agent's questions: every question required, `choice` limited to the option values, `confidence` and every probability a number from 0 to 1, `probabilities` holding exactly the option keys, no additional property. Contract v3 adds `evidence`, a required string of at most 300 characters: the sentence of the documents that justifies the choice, copied verbatim. It may be empty only when the choice is the unknown option. The editor shows it read-only as "Aperçu du JSON contractuel".
 
 - There is no `scoring` section since schema 13 and no `evidence.reference_score`: the strength of the signals comes only from the sources (see "Signal strength"). A document that still carries them is rejected, an older one is upgraded and they are discarded.
-- `contact_ranking`: preferred email local parts, most preferred first.
-- `llm`: the qualification threshold, the relevance criteria and the answer language given to the model. `language` (`llm.language`, `fr` or `en`, default `fr` when absent) is the language of every free-text field the LLM writes: the aggregator's summary, verdict narrative, approach angle, draft subject and body. The aggregator's system prompt states it (`Write every free-text field (...) in French. Evidence quotes stay in the language of the document they come from.`), so evidence quotes stay in the source language and the verbatim check is unchanged. Changing the language changes the system prompt, hence the LLM cache key: answers are regenerated. Profiles without the field answer in French without a new revision. `qualification_threshold` is a percentage, an integer from 0 to 100 (`llm.qualification_threshold`). It is kept for older profiles and no longer gates anything: since ADR 0007 every lead with a signal goes through the qualification agents, whatever its score.
+- `contact_ranking`: `preferred_local_parts`, the email local parts to keep first among the addresses found, most preferred first, and `guess_local_parts`, the local parts to guess when no address is found (each must also be listed in `preferred_local_parts`).
+- There is no `llm` section since schema 14: the relevance criteria live in the system prompts of the qualification agents, the answer language is `language`, and the qualification threshold is gone (it gated nothing since ADR 0007). A document that still carries `llm`, `calibration` or an agent `llm` block is rejected, an older one is upgraded.
 
 ## Qualification and summary
 
@@ -270,7 +271,7 @@ Example: a lead with a Keycloak fingerprint (strength 0.9) and a job offer accep
 
 `accept_min_keywords` (default 2, at least 1) is the number of distinct keywords from which a candidate is accepted without the LLM, provided no exclusion matches.
 
-Validation paths include the agent index, for example `agents[1].source.keywords[0]` or `agents[0].llm.relevance_criteria`.
+Validation paths include the agent index, for example `agents[1].source.keywords[0]` or `contact_ranking.guess_local_parts[1]`.
 
 ## Dependencies between kinds
 
@@ -307,12 +308,10 @@ Version 1 listed sources as optional fields of a `sources` object. Parsing upgra
 
 ### Version 2 to 3
 
-Versions 1 and 2 had free number weights and a threshold in points. The upgrade, applied to both:
+Versions 1 and 2 had free number weights and a threshold in points. Both are discarded by the upgrade to the current version (the weights since 13, the threshold since 14), whatever their value.
 
-- Weights: when every weight is an integer from 1 to 10 they are kept. Otherwise each becomes `max(1, round(w × 10 / largest weight))`.
-- Threshold: `clamp(round(old threshold / old maximum × 100), 0, 100)`, with the old maximum computed from the old weights by the same formula. When the old maximum is not positive the threshold becomes 50.
-
-For the IAM v1 and v2 examples the weights 30, 15, 10, 25, 20, 5, 5 become 10, 5, 3, 8, 7, 2, 2, and a threshold of 50 points out of 135 becomes 37 %.
+- Weights: ignored, see "Version 12 to 13".
+- Threshold: converted to a percentage of the old maximum in that version, then dropped with the weights since schema 13 and 14. The old fields are read and ignored.
 
 ### Version 3 to 4
 
@@ -358,4 +357,13 @@ The profile gains `calibration` with `learned` `true`. Nothing is learned until 
 
 ### Version 12 to 13
 
-The `scoring` section (weighted factors) and `evidence.reference_score` are removed: the scoring agents decide, and the strength of the signals comes only from the sources (see "Signal strength"). The upgrade discards both. `leads.score` changes meaning, from a weighted sum in points to the signal strength from 0 to 100, and every stored lead gets its new value when it is next rescored; the per-factor breakdown column is dropped. `llm.qualification_threshold` is kept as is.
+The `scoring` section (weighted factors) and `evidence.reference_score` are removed: the scoring agents decide, and the strength of the signals comes only from the sources (see "Signal strength"). The upgrade discards both. `leads.score` changes meaning, from a weighted sum in points to the signal strength from 0 to 100, and every stored lead gets its new value when it is next rescored; the per-factor breakdown column is dropped. `llm.qualification_threshold` is kept as is until version 14.
+
+### Version 13 to 14
+
+`llm` and `calibration` disappear, and the agents no longer carry an `llm` block:
+
+- `llm.language` becomes the top-level `language`.
+- `llm.qualification_threshold` is dropped: it gated nothing since ADR 0007.
+- `llm.relevance_criteria` and the per-agent `agents[].llm.relevance_criteria` are moved into the system prompt of the first qualification agent, in this order: the profile criteria as `Critères de pertinence : <text>`, then each sourcing agent's criteria, in agent order, as `Critères de l'agent « <agent name> » : <text>`. A text is appended after a blank line, trimmed, unless it is empty or already contained in the prompt (comparison on lowercased text with the white space collapsed), so a profile upgraded from version 3 or less, or one that already holds its criteria in the prompt, is not duplicated, and two identical criteria are appended once. The appended text is cut so that the prompt stays within 8000 characters; when the remaining room does not even hold the label, the criteria is dropped. A profile with no qualification agent drops them.
+- `calibration.learned` is copied to the new `learned_calibration` of every qualification agent and every scoring agent (`true` when the section was absent). Calibration is now chosen per agent: an agent applies its learned map only when its own flag is `true`, and a changed map only marks leads for rescoring when it belongs to such an agent. `GET /api/v1/quality/calibration` lost the profile-level `learned`; the state of an agent is its `status` (`disabled` when its flag is `false`).

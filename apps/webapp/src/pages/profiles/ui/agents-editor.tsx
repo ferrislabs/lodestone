@@ -32,7 +32,6 @@ interface AgentsEditorProps {
 	onEnabled: (index: number, enabled: boolean) => void
 	onName: (index: number, name: string) => void
 	onId: (index: number, id: string) => void
-	onCriteria: (index: number, criteria: string) => void
 	onRequestRemove: (index: number) => void
 	onConfirmRemove: (index: number) => void
 	onCancelRemove: () => void
@@ -56,7 +55,6 @@ export function AgentsEditor({
 	onEnabled,
 	onName,
 	onId,
-	onCriteria,
 	onRequestRemove,
 	onConfirmRemove,
 	onCancelRemove,
@@ -133,7 +131,6 @@ export function AgentsEditor({
 					onEnabled={(enabled) => onEnabled(editing, enabled)}
 					onName={(name) => onName(editing, name)}
 					onId={(id) => onId(editing, id)}
-					onCriteria={(criteria) => onCriteria(editing, criteria)}
 				/>
 			) : null}
 		</div>

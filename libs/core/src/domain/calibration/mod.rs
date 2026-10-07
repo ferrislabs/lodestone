@@ -123,20 +123,43 @@ impl Calibration {
     }
 }
 
-pub fn effect_changed(before: &[Calibration], after: &[Calibration]) -> bool {
+pub fn agent_learns(
+    definition: &ProfileDefinition,
+    kind: CalibrationKind,
+    agent: &AgentId,
+) -> bool {
+    match kind {
+        CalibrationKind::Scoring => definition
+            .scoring_agents
+            .iter()
+            .any(|item| &item.id == agent && item.learned_calibration),
+        CalibrationKind::Qualification => definition
+            .qualification_agents
+            .iter()
+            .any(|item| &item.id == agent && item.learned_calibration),
+    }
+}
+
+pub fn effect_changed(
+    definition: &ProfileDefinition,
+    before: &[Calibration],
+    after: &[Calibration],
+) -> bool {
     let matching = |known: &[Calibration], wanted: &Calibration| {
         known
             .iter()
             .find(|item| item.kind == wanted.kind && item.agent_id == wanted.agent_id)
             .is_some_and(|item| item.same_effect(wanted))
     };
+    let counts =
+        |item: &&Calibration| item.applies() && agent_learns(definition, item.kind, &item.agent_id);
     let lost = before
         .iter()
-        .filter(|item| item.applies())
+        .filter(counts)
         .any(|item| !matching(after, item));
     let gained = after
         .iter()
-        .filter(|item| item.applies())
+        .filter(counts)
         .any(|item| !matching(before, item));
     lost || gained
 }
@@ -149,6 +172,17 @@ pub struct Calibrations {
 impl Calibrations {
     pub fn none() -> Self {
         Self::default()
+    }
+
+    pub fn for_definition(stored: Vec<Calibration>, definition: &ProfileDefinition) -> Self {
+        Self {
+            applied: stored
+                .into_iter()
+                .filter(|item| {
+                    item.applies() && agent_learns(definition, item.kind, &item.agent_id)
+                })
+                .collect(),
+        }
     }
 
     pub fn applied(stored: Vec<Calibration>, learned: bool) -> Self {
@@ -424,7 +458,6 @@ pub struct AgentCalibration {
 pub struct ProfileCalibration {
     pub profile_id: ProfileId,
     pub name: String,
-    pub learned: bool,
     pub agents: Vec<AgentCalibration>,
 }
 
@@ -434,8 +467,7 @@ pub fn profile_report(
     definition: &ProfileDefinition,
     stored: &[Calibration],
 ) -> ProfileCalibration {
-    let learned = definition.calibration.learned;
-    let entry = |kind: CalibrationKind, id: &AgentId, label: &str| {
+    let entry = |kind: CalibrationKind, id: &AgentId, label: &str, learned: bool| {
         let found = stored
             .iter()
             .find(|item| item.kind == kind && &item.agent_id == id);
@@ -464,18 +496,26 @@ pub fn profile_report(
     let agents = definition
         .scoring_agents
         .iter()
-        .map(|agent| entry(CalibrationKind::Scoring, &agent.id, &agent.name))
-        .chain(
-            definition
-                .qualification_agents
-                .iter()
-                .map(|agent| entry(CalibrationKind::Qualification, &agent.id, &agent.name)),
-        )
+        .map(|agent| {
+            entry(
+                CalibrationKind::Scoring,
+                &agent.id,
+                &agent.name,
+                agent.learned_calibration,
+            )
+        })
+        .chain(definition.qualification_agents.iter().map(|agent| {
+            entry(
+                CalibrationKind::Qualification,
+                &agent.id,
+                &agent.name,
+                agent.learned_calibration,
+            )
+        }))
         .collect();
     ProfileCalibration {
         profile_id,
         name: name.to_owned(),
-        learned,
         agents,
     }
 }

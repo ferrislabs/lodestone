@@ -71,8 +71,8 @@ describe('curvePoints', () => {
 
 describe('visibleProfiles', () => {
 	const profiles: ProfileCalibration[] = [
-		{ profile_id: 'a', name: 'A', learned: true, agents: [] },
-		{ profile_id: 'b', name: 'B', learned: false, agents: [] },
+		{ profile_id: 'a', name: 'A', agents: [] },
+		{ profile_id: 'b', name: 'B', agents: [] },
 	]
 
 	it('keeps every profile without a selection and the chosen one otherwise', () => {

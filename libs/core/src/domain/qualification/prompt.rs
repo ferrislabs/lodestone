@@ -36,14 +36,14 @@ pub(crate) fn identity_context(definition: &ProfileDefinition) -> String {
 pub(crate) fn language_line(definition: &ProfileDefinition) -> String {
     format!(
         "Write any free text in {}. Option values stay exactly as listed.",
-        definition.llm.language.name()
+        definition.language.name()
     )
 }
 
 fn contract_rules(definition: &ProfileDefinition, schema: &Value) -> String {
     format!(
         "Answer only with one JSON object that follows this contract and nothing else. `summary` is 2 to 4 sentences, at most 600 characters, written in {}, on what you observed for the aspect you evaluate, based only on the documents. Every question has an entry under `answers` with `type` set to \"choice\", `choice` set to one option value, `evidence` set to the sentence of the documents that justifies the choice, copied verbatim and at most 300 characters, `confidence` between 0 and 1, and `probabilities` giving a probability between 0 and 1 for every option value, summing to 1. Quote exactly, never paraphrase or translate. Every question has one unknown option, marked in the list of options: choose it, with an empty `evidence`, when nothing in the documents supports an answer. Any other choice without a verbatim quote is replaced by the unknown option.\n\nContract JSON schema:\n{schema}",
-        definition.llm.language.name()
+        definition.language.name()
     )
 }
 

@@ -37,8 +37,9 @@ export function AgentsHelp({ collapsed, onToggle }: AgentsHelpProps) {
 				</ul>
 			</div>
 			<p className="text-xs text-muted-foreground">
-				Les critères LLM propres à un agent ne s'appliquent qu'aux sources par
-				mots-clés.
+				Les adresses de contact à privilégier et à deviner se règlent en bas de
+				cet onglet. Les critères de pertinence se règlent dans le prompt des
+				agents de qualification.
 			</p>
 		</HelpPanel>
 	)

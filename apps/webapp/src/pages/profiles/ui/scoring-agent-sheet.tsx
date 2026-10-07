@@ -9,6 +9,7 @@ import {
 	SheetTitle,
 } from '#/components/ui/sheet'
 import type { JsonValue, Problem } from '#/lib/schema-form'
+import type { AgentCalibrationState } from '#/pages/profiles/lib/agent-calibration'
 import { agentField } from '#/pages/profiles/lib/agents'
 import type { ProviderOption } from '#/pages/profiles/lib/qualification'
 import type { ScoringActions } from '#/pages/profiles/lib/qualification-actions'
@@ -20,6 +21,7 @@ interface ScoringAgentSheetProps {
 	index: number
 	problems: readonly Problem[]
 	providers: readonly ProviderOption[]
+	calibration: AgentCalibrationState | undefined
 	previewing: boolean
 	actions: ScoringActions
 }
@@ -29,6 +31,7 @@ export function ScoringAgentSheet({
 	index,
 	problems,
 	providers,
+	calibration,
 	previewing,
 	actions,
 }: ScoringAgentSheetProps) {
@@ -65,6 +68,7 @@ export function ScoringAgentSheet({
 						index={index}
 						problems={problems}
 						providers={providers}
+						calibration={calibration}
 						previewing={previewing}
 						actions={actions}
 					/>

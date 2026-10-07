@@ -7,7 +7,6 @@ export const EDITOR_TABS = [
 	'sourcing',
 	'qualification',
 	'scoring',
-	'settings',
 ] as const
 
 export type EditorTab = (typeof EDITOR_TABS)[number]
@@ -18,12 +17,12 @@ export const TAB_LABELS: Record<ProfileTab, string> = {
 	sourcing: 'Sourcing',
 	qualification: 'Qualification',
 	scoring: 'Scoring',
-	settings: 'Réglages',
 	history: 'Historique des révisions',
 }
 
 const LEGACY_TABS: Readonly<Record<string, ProfileTab>> = {
 	agents: 'sourcing',
+	settings: 'identity',
 }
 
 export const tabSearchSchema = z.object({
@@ -49,8 +48,12 @@ function belongsTo(path: string, root: string): boolean {
 }
 
 export function tabOfPath(path: string): EditorTab | null {
-	if (belongsTo(path, 'identity')) return 'identity'
-	if (belongsTo(path, 'agents')) return 'sourcing'
+	if (belongsTo(path, 'identity') || belongsTo(path, 'language')) {
+		return 'identity'
+	}
+	if (belongsTo(path, 'agents') || belongsTo(path, 'contact_ranking')) {
+		return 'sourcing'
+	}
 	if (
 		belongsTo(path, 'qualification_agents') ||
 		belongsTo(path, 'aggregator') ||
@@ -61,13 +64,6 @@ export function tabOfPath(path: string): EditorTab | null {
 	}
 	if (belongsTo(path, 'scoring_agents')) {
 		return 'scoring'
-	}
-	if (
-		belongsTo(path, 'llm') ||
-		belongsTo(path, 'contact_ranking') ||
-		belongsTo(path, 'calibration')
-	) {
-		return 'settings'
 	}
 	return null
 }
@@ -80,7 +76,6 @@ export function problemCounts(
 		sourcing: 0,
 		qualification: 0,
 		scoring: 0,
-		settings: 0,
 	}
 	for (const problem of problems) {
 		const tab = tabOfPath(problem.path)

@@ -18,20 +18,40 @@ fn now() -> DateTime<Utc> {
 }
 
 fn definition(learned: Option<bool>) -> Value {
+    definition_per_agent(learned, learned)
+}
+
+fn definition_per_agent(scoring: Option<bool>, qualification: Option<bool>) -> Value {
     let value: Value = serde_json::from_str(MINIMAL_PROFILE).unwrap();
     let mut value = ValidatedProfile::parse(value).unwrap().to_json();
-    if let Some(learned) = learned {
-        value["calibration"] = json!({"learned": learned});
+    for (key, learned) in [
+        ("scoring_agents", scoring),
+        ("qualification_agents", qualification),
+    ] {
+        if let Some(learned) = learned {
+            for agent in value[key].as_array_mut().unwrap() {
+                agent["learned_calibration"] = json!(learned);
+            }
+        }
     }
     value
 }
 
 async fn profile(pool: &PgPool, learned: Option<bool>) -> (LodestoneUseCase, ProfileId) {
+    profile_per_agent(pool, learned, learned).await
+}
+
+async fn profile_per_agent(
+    pool: &PgPool,
+    scoring: Option<bool>,
+    qualification: Option<bool>,
+) -> (LodestoneUseCase, ProfileId) {
     let usecase = LodestoneUseCase::new(pool.clone());
     let id = usecase
         .create_profile(CreateProfileCommand {
             name: ProfileName::parse("iam").unwrap(),
-            definition: ValidatedProfile::parse(definition(learned)).unwrap(),
+            definition: ValidatedProfile::parse(definition_per_agent(scoring, qualification))
+                .unwrap(),
             created_by: None,
         })
         .await
@@ -491,12 +511,83 @@ async fn a_profile_that_does_not_learn_is_fitted_but_never_applied(pool: PgPool)
     assert!((probabilities.reliable - 0.9).abs() < 1e-9);
     assert!(detail.calibrations.is_empty());
     let summary = usecase.calibration_report().await.unwrap();
-    assert!(!summary[0].learned);
     assert!(
         summary[0]
             .agents
             .iter()
             .all(|agent| agent.status == CalibrationStatus::Disabled)
+    );
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn each_agent_applies_its_own_map_only_when_its_flag_is_set(pool: PgPool) {
+    let (usecase, profile) = profile_per_agent(&pool, Some(false), Some(true)).await;
+    overconfident(&pool, profile, 30, 30).await;
+    let probe = lead_by_host(&pool, profile, "high0.com").await;
+
+    let report = usecase.calibrate_profiles(now()).await.unwrap();
+
+    assert!(report.rescored > 0);
+    let stored = rows(&pool).await;
+    assert_eq!(row(&stored, "scoring").2, 60);
+    assert_eq!(row(&stored, "qualification").2, 60);
+    usecase.rescore_stale_leads(500, now()).await.unwrap();
+    let detail = usecase.lead_detail(probe).await.unwrap();
+    let probabilities = detail.scoring.unwrap().probabilities.unwrap();
+    assert!((probabilities.reliable - 0.9).abs() < 1e-9);
+    assert!(
+        detail
+            .calibrations
+            .scoring(&detail.scoring_results[0].agent_id)
+            .is_none()
+    );
+    assert!(
+        detail
+            .calibrations
+            .qualification(&detail.qualification_results[0].agent_id)
+            .is_some()
+    );
+    let summary = usecase.calibration_report().await.unwrap();
+    let status_of = |kind: CalibrationKind| {
+        summary[0]
+            .agents
+            .iter()
+            .find(|agent| agent.kind == kind)
+            .unwrap()
+            .status
+    };
+    assert_eq!(
+        status_of(CalibrationKind::Scoring),
+        CalibrationStatus::Disabled
+    );
+    assert_eq!(
+        status_of(CalibrationKind::Qualification),
+        CalibrationStatus::Active
+    );
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn only_the_maps_of_learning_agents_mark_leads_stale(pool: PgPool) {
+    let (usecase, profile) = profile_per_agent(&pool, Some(true), Some(false)).await;
+    overconfident(&pool, profile, 30, 30).await;
+    let probe = lead_by_host(&pool, profile, "high0.com").await;
+
+    let first = usecase.calibrate_profiles(now()).await.unwrap();
+
+    assert!(first.rescored > 0);
+    usecase.rescore_stale_leads(500, now()).await.unwrap();
+    let detail = usecase.lead_detail(probe).await.unwrap();
+    assert!(
+        detail
+            .calibrations
+            .scoring(&detail.scoring_results[0].agent_id)
+            .is_some()
+    );
+    assert!(
+        detail
+            .calibrations
+            .qualification(&detail.qualification_results[0].agent_id)
+            .is_none()
     );
 }
 

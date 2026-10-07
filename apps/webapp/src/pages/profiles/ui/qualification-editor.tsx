@@ -3,6 +3,11 @@ import { PlusIcon } from 'lucide-react'
 import { FieldErrors } from '#/components/schema-form/field-frame'
 import type { JsonObject, JsonValue, Problem } from '#/lib/schema-form'
 import {
+	type CalibrationStates,
+	calibrationKey,
+} from '#/pages/profiles/lib/agent-calibration'
+import { agentField } from '#/pages/profiles/lib/agents'
+import {
 	escalationOf,
 	evidenceSettingsOf,
 	type ProviderOption,
@@ -24,6 +29,7 @@ interface QualificationEditorProps {
 	editing: number | null
 	confirmingRemove: number | null
 	picking: boolean
+	calibration: CalibrationStates
 	previewing: boolean
 	actions: QualificationActions
 }
@@ -36,6 +42,7 @@ export function QualificationEditor({
 	editing,
 	confirmingRemove,
 	picking,
+	calibration,
 	previewing,
 	actions,
 }: QualificationEditorProps) {
@@ -122,6 +129,11 @@ export function QualificationEditor({
 					index={editing}
 					problems={problems}
 					providers={providers}
+					calibration={
+						calibration[
+							calibrationKey('qualification', agentField(editingAgent, 'id'))
+						]
+					}
 					previewing={previewing}
 					actions={actions}
 				/>

@@ -78,7 +78,6 @@ const CALIBRATION: Calibration = {
 		{
 			profile_id: 'p1',
 			name: 'Fintech',
-			learned: true,
 			agents: [
 				{
 					kind: 'scoring',

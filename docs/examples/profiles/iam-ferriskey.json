@@ -1,9 +1,10 @@
 {
-  "schema_version": 13,
+  "schema_version": 14,
   "identity": {
     "offer": "FerrisKey (open source IAM/CIAM in Rust) and Autharie (managed IAM), both by Ferrislabs",
     "target_customer": "Organizations running self-hosted Keycloak or a similar IAM, or paying for a SaaS IAM"
   },
+  "language": "fr",
   "agents": [
     {
       "id": "certificate-transparency",
@@ -149,9 +150,6 @@
       "source": {
         "kind": "ats",
         "keywords": ["identity and access management", "IAM", "SSO", "single sign-on", "Keycloak", "Okta migration"]
-      },
-      "llm": {
-        "relevance_criteria": "The job offer is for an engineer, architect or administrator who builds or runs the organization's own identity infrastructure, for example Keycloak, or who migrates it from a SaaS IAM. Offers that only require using SSO as an end user, or roles in physical access control, are not relevant."
       }
     }
   ],
@@ -162,7 +160,7 @@
       "description": "La pertinence du lead pour l'offre : le prospect exploite-t-il ou prépare-t-il ce que le profil cible ?",
       "enabled": true,
       "provider_id": null,
-      "system_prompt": "You judge whether a company is a relevant prospect for the offer, using the relevance criteria. Base your answers only on what the documents state.\n\nRelevance criteria: The organization operates its own identity infrastructure, such as a self-hosted Keycloak, or pays for a SaaS IAM, and shows signs of migration, staffing or procurement around it. Physical access control and unrelated directories are not relevant.",
+      "system_prompt": "You judge whether a company is a relevant prospect for the offer, using the relevance criteria. Base your answers only on what the documents state.\n\nRelevance criteria: The organization operates its own identity infrastructure, such as a self-hosted Keycloak, or pays for a SaaS IAM, and shows signs of migration, staffing or procurement around it. Physical access control and unrelated directories are not relevant.\n\nCriteria of the agent Job offers (English): The job offer is for an engineer, architect or administrator who builds or runs the organization's own identity infrastructure, for example Keycloak, or who migrates it from a SaaS IAM. Offers that only require using SSO as an end user, or roles in physical access control, are not relevant.",
       "weight": 5,
       "exclusion_threshold": 0.6,
       "samples": 3,
@@ -1000,16 +998,8 @@
       "saas_provider": 365
     }
   },
-  "calibration": {
-    "learned": true
-  },
   "contact_ranking": {
     "preferred_local_parts": ["security", "it", "dsi", "tech", "contact", "info"],
     "guess_local_parts": ["contact", "info"]
-  },
-  "llm": {
-    "qualification_threshold": 40,
-    "relevance_criteria": "The organization operates its own identity infrastructure, such as a self-hosted Keycloak, or pays for a SaaS IAM, and shows signs of migration, staffing or procurement around it. Physical access control and unrelated directories are not relevant.",
-    "language": "fr"
   }
 }

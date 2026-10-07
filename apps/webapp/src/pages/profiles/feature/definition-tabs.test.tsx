@@ -120,15 +120,13 @@ describe('definition tabs', () => {
 	it('shows only the subtree of the selected tab', () => {
 		render(<Harness />)
 		expect(screen.getByLabelText(/Offre/)).toBeTruthy()
-		expect(screen.queryByLabelText(/Seuil de qualification/)).toBeNull()
-		fireEvent.click(screen.getByRole('tab', { name: TAB_LABELS.settings }))
-		expect(screen.getByLabelText(/Seuil de qualification/)).toBeTruthy()
-		expect(screen.queryByLabelText(/Offre/)).toBeNull()
+		expect(screen.getByLabelText('Langue des réponses')).toBeTruthy()
+		expect(screen.queryByLabelText('Adresses à privilégier')).toBeNull()
 		fireEvent.click(screen.getByRole('tab', { name: TAB_LABELS.scoring }))
 		expect(
 			screen.getByRole('button', { name: 'Ajouter un agent de scoring' }),
 		).toBeTruthy()
-		expect(screen.queryByLabelText(/Seuil de qualification/)).toBeNull()
+		expect(screen.queryByLabelText(/Offre/)).toBeNull()
 		fireEvent.click(screen.getByRole('tab', { name: TAB_LABELS.sourcing }))
 		expect(
 			screen.getByRole('button', { name: 'Ajouter un agent' }),
@@ -210,7 +208,7 @@ describe('definition tabs', () => {
 			)
 			expect(
 				scoped.queryAllByText('Critères LLM propres à cet agent').length,
-			).toBe(KIND_META[kind].triaged ? 1 : 0)
+			).toBe(0)
 			const has = (text: string) => scoped.queryAllByText(text).length > 0
 			if (kind === 'certificate_transparency') {
 				expect(has('Libellés')).toBe(true)
@@ -459,19 +457,17 @@ describe('definition tabs', () => {
 		).toBeTruthy()
 	})
 
-	it('stores agent criteria and drops them when emptied', () => {
-		render(<Harness startTab="sourcing" />)
-		addAgent('ats')
-		const field = screen.getByLabelText('Critères LLM propres à cet agent')
-		fireEvent.change(field, { target: { value: 'only devs' } })
-		expect(field).toHaveProperty('value', 'only devs')
-		fireEvent.change(field, { target: { value: '' } })
-		expect(field).toHaveProperty('value', '')
+	it('has no Réglages tab', () => {
+		render(<Harness />)
+		expect(screen.queryByRole('tab', { name: 'Réglages' })).toBeNull()
+		expect(
+			screen.getAllByRole('tab').map((tab) => tab.textContent?.trim()),
+		).toEqual(['Identité', 'Sourcing', 'Qualification', 'Scoring'])
 	})
 
-	it('offers the LLM answer language as a french select', () => {
-		render(<Harness startTab="settings" />)
-		const select = screen.getByLabelText('Langue des réponses du LLM')
+	it('offers the LLM answer language as a french select in the identity tab', () => {
+		render(<Harness />)
+		const select = screen.getByLabelText('Langue des réponses')
 		expect(select).toHaveProperty('value', 'fr')
 		expect(
 			within(select)
@@ -482,15 +478,36 @@ describe('definition tabs', () => {
 		expect(select).toHaveProperty('value', 'en')
 	})
 
-	it('lets the learned calibration be switched off in the settings tab', () => {
-		render(<Harness startTab="settings" />)
-		const toggle = () =>
-			screen
-				.getByLabelText('Calibration apprise activée')
-				.getAttribute('aria-checked')
-		expect(toggle()).toBe('true')
-		fireEvent.click(screen.getByLabelText('Calibration apprise activée'))
-		expect(toggle()).toBe('false')
+	it('puts the contact ranking in a Contacts section at the bottom of the sourcing tab', () => {
+		render(<Harness startTab="sourcing" />)
+		expect(screen.getByRole('heading', { name: 'Contacts' })).toBeTruthy()
+		expect(screen.getByText('Adresses à privilégier')).toBeTruthy()
+		expect(screen.getByText('Adresses à deviner')).toBeTruthy()
+		expect(
+			screen.getByText(/la partie avant le @, par exemple security ou contact/),
+		).toBeTruthy()
+		const add = screen.getByRole('button', { name: 'Ajouter un agent' })
+		const contacts = screen.getByRole('heading', { name: 'Contacts' })
+		expect(
+			add.compareDocumentPosition(contacts) & Node.DOCUMENT_POSITION_FOLLOWING,
+		).toBeTruthy()
+	})
+
+	it('keeps no calibration or threshold field in any tab', () => {
+		render(<Harness />)
+		for (const tab of [
+			'identity',
+			'sourcing',
+			'qualification',
+			'scoring',
+		] as const) {
+			fireEvent.click(
+				screen.getByRole('tab', { name: new RegExp(TAB_LABELS[tab]) }),
+			)
+			expect(screen.queryByLabelText('Seuil de qualification')).toBeNull()
+			expect(screen.queryByLabelText(/Critères de pertinence/)).toBeNull()
+			expect(screen.queryByLabelText('Calibration apprise')).toBeNull()
+		}
 	})
 
 	it('never renders a JSON editor', () => {
@@ -499,7 +516,6 @@ describe('definition tabs', () => {
 			'sourcing',
 			'qualification',
 			'scoring',
-			'settings',
 		]
 		render(
 			<Harness

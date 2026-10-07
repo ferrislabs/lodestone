@@ -78,12 +78,7 @@ export namespace Schemas {
     summary: string;
   };
   export type AssignTierRequest = { provider_id: string };
-  export type ProfileCalibrationDto = {
-    agents: Array<AgentCalibrationDto>;
-    learned: boolean;
-    name: string;
-    profile_id: string;
-  };
+  export type ProfileCalibrationDto = { agents: Array<AgentCalibrationDto>; name: string; profile_id: string };
   export type CalibrationDto = { profiles: Array<ProfileCalibrationDto>; required: number; required_per_class: number };
   export type CalibrationRunDto = { queued: boolean };
   export type RejectionReasonDto =

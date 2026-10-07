@@ -219,6 +219,7 @@ mod tests {
             exclusion_threshold: 0.6,
             samples: 3,
             sampling_temperature: 0.7,
+            learned_calibration: true,
             questions: ids.iter().map(|id| question(id)).collect(),
         }
     }

@@ -64,11 +64,11 @@ describe('agents', () => {
 
 	it('refuses to save without agents', () => {
 		const attempt = prepareSave({
-			schema_version: 6,
+			schema_version: 14,
 			identity: { offer: 'o', target_customer: 't' },
 			agents: [],
 			contact_ranking: { preferred_local_parts: [] },
-			llm: { qualification_threshold: 50, relevance_criteria: 'c' },
+			language: 'fr',
 		})
 		expect(attempt.ok).toBe(false)
 	})
@@ -77,15 +77,15 @@ describe('agents', () => {
 		expect(
 			problemCounts([
 				{ path: 'agents[1].source.keywords[0]', message: 'x' },
-				{ path: 'llm.relevance_criteria', message: 'x' },
+				{ path: 'contact_ranking.preferred_local_parts[0]', message: 'x' },
+				{ path: 'language', message: 'x' },
 				{ path: '$', message: 'x' },
 			]),
 		).toEqual({
-			identity: 0,
-			sourcing: 1,
+			identity: 1,
+			sourcing: 2,
 			qualification: 0,
 			scoring: 0,
-			settings: 1,
 		})
 	})
 })
