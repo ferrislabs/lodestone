@@ -1,6 +1,6 @@
 use std::{sync::Arc, time::Duration};
 
-use chrono::Utc;
+use chrono::{Duration as Delta, Utc};
 use common::CoreError;
 use fetch::PoliteFetcher;
 use lodestone_core::{
@@ -22,30 +22,32 @@ use sources::{
 };
 use tracing::info;
 
-use crate::webhook::{WebhookSink, run_webhook_job};
+use crate::{
+    providers::{CatalogAccess, NOT_READY_RECHECK, blocking_provider},
+    webhook::{WebhookSink, run_webhook_job},
+};
 
-pub const WIRED_SOURCES: [SourceName; 4] = [
+pub const WIRED_SOURCES: [SourceName; 5] = [
     SourceName::Boamp,
     SourceName::Decp,
     SourceName::Ted,
+    SourceName::FranceTravail,
     SourceName::Ats,
 ];
-
-pub const FRANCE_TRAVAIL_SOURCE: SourceName = SourceName::FranceTravail;
 
 pub const REMOVED_QUALIFICATION_JOB_KIND: &str = "llm.qualify";
 
 pub type Boamp = BoampSource<PoliteFetcher>;
 pub type Decp = DecpSource<PoliteFetcher>;
 pub type Ted = TedSource<PoliteFetcher>;
-pub type FranceTravail = FranceTravailSource<PoliteFetcher>;
+pub type FranceTravail = FranceTravailSource<PoliteFetcher, CatalogAccess>;
 pub type Ats = AtsSource<PoliteFetcher, PgAtsTargets>;
 
 pub struct WiredSources {
     pub boamp: Boamp,
     pub decp: Decp,
     pub ted: Ted,
-    pub france_travail: Option<FranceTravail>,
+    pub france_travail: FranceTravail,
     pub ats: Ats,
 }
 
@@ -109,11 +111,9 @@ impl JobRouter {
     }
 
     async fn run_france_travail(&self) -> Result<(u64, u64), SourceRunError> {
-        let Some(source) = &self.sources.france_travail else {
-            info!("france travail source is disabled, the stale job completes without work");
-            return Ok((0, 0));
-        };
-        let report = self.triage_source(source, "france_travail").await?;
+        let report = self
+            .triage_source(&self.sources.france_travail, "france_travail")
+            .await?;
         Ok((report.candidates, report.accepted()))
     }
 
@@ -188,6 +188,19 @@ impl JobRouter {
                 "source `{source}` listens continuously and has no recurring job"
             )));
         }
+        let interval = match source {
+            SourceName::Decp => self.intervals.decp,
+            _ => self.intervals.other_sources,
+        };
+        if let Some(provider) = blocking_provider(&self.usecase, source.as_str())
+            .await
+            .map_err(|error| JobError::Retryable(error.to_string()))?
+        {
+            info!(%source, provider, "provider not ready, the source run is skipped");
+            return Ok(JobOutcome::RescheduleAt(
+                SystemClock.now() + recheck_delay(interval),
+            ));
+        }
         let result = match source {
             SourceName::Boamp => self.run_boamp().await,
             SourceName::Decp => self.run_decp().await,
@@ -200,12 +213,7 @@ impl JobRouter {
                 )));
             }
         };
-        let interval = match source {
-            SourceName::Decp => self.intervals.decp,
-            _ => self.intervals.other_sources,
-        };
-        let next_run = SystemClock.now()
-            + chrono::Duration::from_std(interval).unwrap_or(chrono::Duration::hours(1));
+        let next_run = SystemClock.now() + delay_of(interval);
         match result {
             Ok((items, signals)) => {
                 info!(%source, items, signals, "source run finished");
@@ -218,6 +226,14 @@ impl JobRouter {
             Err(error) => Err(error.into()),
         }
     }
+}
+
+fn delay_of(interval: Duration) -> Delta {
+    Delta::from_std(interval).unwrap_or(Delta::hours(1))
+}
+
+pub fn recheck_delay(interval: Duration) -> Delta {
+    delay_of(interval.min(NOT_READY_RECHECK))
 }
 
 pub fn removed_job_reason(kind: &str) -> Option<&'static str> {
@@ -242,25 +258,13 @@ impl JobHandler for JobRouter {
     }
 }
 
-pub fn scheduled_sources(france_travail_enabled: bool) -> Vec<SourceName> {
-    let mut sources = WIRED_SOURCES.to_vec();
-    if france_travail_enabled {
-        sources.push(FRANCE_TRAVAIL_SOURCE);
-    }
-    sources
+pub fn scheduled_sources() -> Vec<SourceName> {
+    WIRED_SOURCES.to_vec()
 }
 
-pub async fn schedule_wired_sources(
-    queue: &Arc<PgJobQueue>,
-    france_travail_enabled: bool,
-) -> Result<(), CoreError> {
+pub async fn schedule_wired_sources(queue: &Arc<PgJobQueue>) -> Result<(), CoreError> {
     let now = Utc::now();
-    if !france_travail_enabled {
-        info!(
-            "france travail source disabled, set FRANCE_TRAVAIL_CLIENT_ID and FRANCE_TRAVAIL_CLIENT_SECRET to enable it"
-        );
-    }
-    for source in scheduled_sources(france_travail_enabled) {
+    for source in scheduled_sources() {
         if queue
             .enqueue(&source_job(source, now)?, now)
             .await?
@@ -294,7 +298,7 @@ mod tests {
     fn continuous_sources_are_never_scheduled() {
         for source in CONTINUOUS_SOURCES {
             assert!(!WIRED_SOURCES.contains(&source));
-            assert!(!scheduled_sources(true).contains(&source));
+            assert!(!scheduled_sources().contains(&source));
         }
     }
 
@@ -308,7 +312,7 @@ mod tests {
     #[test]
     fn no_recurring_qualification_job_is_scheduled() {
         assert!(
-            !scheduled_sources(true)
+            !scheduled_sources()
                 .iter()
                 .any(|source| source.as_str().contains("qualif"))
         );
@@ -328,9 +332,9 @@ mod tests {
         );
         assert_eq!(manual.payload["recurring"], false);
         assert_ne!(recurring.dedup_key, manual.dedup_key);
-        assert_eq!(next_calibration(now) - now, chrono::Duration::hours(24));
+        assert_eq!(next_calibration(now) - now, Delta::hours(24));
         assert!(
-            !scheduled_sources(true)
+            !scheduled_sources()
                 .iter()
                 .any(|source| source.as_str().contains("calibrat"))
         );
@@ -363,20 +367,28 @@ mod tests {
     #[test]
     fn the_ats_source_job_is_wired_and_deduplicated() {
         assert!(WIRED_SOURCES.contains(&SourceName::Ats));
-        assert!(scheduled_sources(false).contains(&SourceName::Ats));
+        assert!(scheduled_sources().contains(&SourceName::Ats));
         let job = source_job(SourceName::Ats, Utc::now()).unwrap();
         assert_eq!(job.dedup_key.as_deref(), Some("source:ats"));
         assert_eq!(job.payload["source"], "ats");
     }
 
     #[test]
-    fn the_france_travail_job_is_scheduled_only_with_credentials() {
-        assert!(!WIRED_SOURCES.contains(&SourceName::FranceTravail));
-        assert!(!scheduled_sources(false).contains(&SourceName::FranceTravail));
-        assert!(scheduled_sources(true).contains(&SourceName::FranceTravail));
-        assert_eq!(scheduled_sources(true).len(), WIRED_SOURCES.len() + 1);
+    fn the_france_travail_job_is_scheduled_and_gated_by_its_provider() {
+        assert!(WIRED_SOURCES.contains(&SourceName::FranceTravail));
+        assert!(scheduled_sources().contains(&SourceName::FranceTravail));
+        assert_eq!(scheduled_sources().len(), WIRED_SOURCES.len());
         let job = source_job(SourceName::FranceTravail, Utc::now()).unwrap();
         assert_eq!(job.dedup_key.as_deref(), Some("source:france_travail"));
         assert_eq!(job.payload["source"], "france_travail");
+    }
+
+    #[test]
+    fn a_blocked_source_is_rechecked_sooner_than_its_interval() {
+        assert_eq!(
+            recheck_delay(Duration::from_secs(6 * 3600)),
+            Delta::minutes(5)
+        );
+        assert_eq!(recheck_delay(Duration::from_secs(60)), Delta::minutes(1));
     }
 }

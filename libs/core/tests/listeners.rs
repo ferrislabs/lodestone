@@ -22,7 +22,7 @@ use lodestone_core::{
 };
 use sqlx::PgPool;
 use support::{at, create_profile};
-use tokio::sync::watch;
+use tokio::{sync::watch, time::sleep};
 
 fn settings(idle: Duration) -> ListenerSettings {
     ListenerSettings {
@@ -38,6 +38,7 @@ fn settings(idle: Duration) -> ListenerSettings {
 struct ScriptedStep {
     name: &'static str,
     active: AtomicBool,
+    blocked_by: Option<&'static str>,
     runs: Arc<AtomicU64>,
     script: Mutex<VecDeque<Result<StepOutcome, String>>>,
 }
@@ -47,6 +48,7 @@ impl ScriptedStep {
         Self {
             name,
             active: AtomicBool::new(true),
+            blocked_by: None,
             runs: Arc::new(AtomicU64::new(0)),
             script: Mutex::new(script.into()),
         }
@@ -60,6 +62,10 @@ impl ListenerStep for ScriptedStep {
 
     async fn is_active(&self) -> Result<bool, CoreError> {
         Ok(self.active.load(Ordering::SeqCst))
+    }
+
+    async fn blocking_provider(&self) -> Result<Option<&'static str>, CoreError> {
+        Ok(self.blocked_by)
     }
 
     async fn run_once(&self) -> Result<StepOutcome, SourceRunError> {
@@ -93,7 +99,7 @@ where
         if check().await {
             return;
         }
-        tokio::time::sleep(Duration::from_millis(25)).await;
+        sleep(Duration::from_millis(25)).await;
     }
     panic!("condition not reached in time");
 }
@@ -276,6 +282,35 @@ async fn a_listener_without_work_to_listen_for_is_idle_no_agent(pool: PgPool) {
 }
 
 #[sqlx::test(migrations = "../../migrations")]
+async fn a_listener_whose_provider_is_not_ready_never_runs_its_step(pool: PgPool) {
+    let mut step = ScriptedStep::new("dns_cname", Vec::new());
+    step.blocked_by = Some("dns_cname");
+    let runs = Arc::clone(&step.runs);
+    let (shutdown, _) = watch::channel(false);
+    let handle = spawn(
+        Listener::new(
+            step,
+            pool.clone(),
+            "node-a".to_owned(),
+            settings(Duration::from_millis(40)),
+        ),
+        &shutdown,
+    );
+
+    eventually(|| async {
+        status(&pool, "dns_cname")
+            .await
+            .is_some_and(|s| s.state == ListenerState::Idle)
+    })
+    .await;
+    sleep(Duration::from_millis(150)).await;
+    assert_eq!(runs.load(Ordering::SeqCst), 0);
+
+    shutdown.send_replace(true);
+    handle.await.unwrap();
+}
+
+#[sqlx::test(migrations = "../../migrations")]
 async fn one_replica_holds_a_listener_and_another_takes_over_when_it_stops(pool: PgPool) {
     let first = ScriptedStep::new("role_guess", Vec::new());
     let second = ScriptedStep::new("role_guess", Vec::new());
@@ -304,7 +339,7 @@ async fn one_replica_holds_a_listener_and_another_takes_over_when_it_stops(pool:
         &second_stop,
     );
 
-    tokio::time::sleep(Duration::from_millis(300)).await;
+    sleep(Duration::from_millis(300)).await;
     assert_eq!(second_runs.load(Ordering::SeqCst), 0);
     assert_eq!(
         status(&pool, "role_guess").await.unwrap().holder.as_deref(),
@@ -397,7 +432,7 @@ async fn newly_discovered_hosts_are_handled_without_waiting_for_an_interval(pool
         ),
         &shutdown,
     );
-    tokio::time::sleep(Duration::from_millis(150)).await;
+    sleep(Duration::from_millis(150)).await;
     assert_eq!(handled.load(Ordering::SeqCst), 0);
 
     let fresh: Vec<CandidateHost> = ["sso.acme.com", "auth.beta.io", "id.gamma.fr"]

@@ -1,4 +1,7 @@
-use std::time::Duration;
+use std::{
+    sync::atomic::{AtomicBool, Ordering},
+    time::Duration,
+};
 
 use chrono::Utc;
 use common::CoreError;
@@ -22,6 +25,12 @@ pub trait ListenerStep: Send + Sync {
     fn name(&self) -> &str;
 
     fn is_active(&self) -> impl Future<Output = Result<bool, CoreError>> + Send;
+
+    fn blocking_provider(
+        &self,
+    ) -> impl Future<Output = Result<Option<&'static str>, CoreError>> + Send {
+        async { Ok(None) }
+    }
 
     fn run_once(&self) -> impl Future<Output = Result<StepOutcome, SourceRunError>> + Send;
 }
@@ -56,6 +65,7 @@ pub struct Listener<S: ListenerStep> {
     pool: PgPool,
     instance: String,
     settings: ListenerSettings,
+    blocked: AtomicBool,
 }
 
 async fn pause(shutdown: &mut watch::Receiver<bool>, duration: Duration) -> bool {
@@ -72,6 +82,7 @@ impl<S: ListenerStep> Listener<S> {
             pool,
             instance,
             settings,
+            blocked: AtomicBool::new(false),
         }
     }
 
@@ -161,6 +172,26 @@ impl<S: ListenerStep> Listener<S> {
             )
             .await;
             return Some(self.settings.idle);
+        }
+        match self.step.blocking_provider().await {
+            Ok(None) => {
+                self.blocked.store(false, Ordering::Relaxed);
+            }
+            Ok(Some(provider)) => {
+                if !self.blocked.swap(true, Ordering::Relaxed) {
+                    info!(
+                        listener = name,
+                        provider, "provider not ready, the listener waits"
+                    );
+                }
+                *failures = 0;
+                self.record(statuses, ListenerState::Idle, StepOutcome::default(), None)
+                    .await;
+                return Some(self.settings.idle);
+            }
+            Err(error) => {
+                return Some(self.fail(statuses, failures, &error.to_string()).await);
+            }
         }
         if let Err(error) = statuses
             .record_started(name, &self.instance, Utc::now())

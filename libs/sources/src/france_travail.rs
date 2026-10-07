@@ -1,8 +1,4 @@
-use std::{
-    collections::HashSet,
-    sync::{Arc, Mutex},
-    time::{Duration as StdDuration, Instant},
-};
+use std::{collections::HashSet, sync::Arc, time::Duration as StdDuration};
 
 use chrono::{DateTime, Utc};
 use common::Secret;
@@ -21,10 +17,7 @@ use crate::buyer_domain::{domain_of_email, domain_of_url};
 pub const PAGE_SIZE: usize = 150;
 pub const LAST_INDEX_CAP: usize = 3149;
 pub const TEXT_MAX_CHARS: usize = 4000;
-pub const SCOPE: &str = "api_offresdemploiv2 o2dsoffre";
-pub const TOKEN_EXPIRY_MARGIN: StdDuration = StdDuration::from_secs(60);
 const ALLOWED_PUBLISHED_SINCE: [u32; 5] = [1, 3, 7, 14, 31];
-const DEFAULT_EXPIRES_IN: u64 = 1499;
 const MAX_RATE_LIMIT_WAIT: StdDuration = StdDuration::from_secs(75);
 const MAX_THROTTLE_RETRIES: u8 = 2;
 const DEFAULT_RETRY_AFTER: StdDuration = StdDuration::from_secs(60);
@@ -32,12 +25,20 @@ const OFFER_URL: &str = "https://candidat.francetravail.fr/offres/recherche/deta
 
 #[derive(Debug, Clone)]
 pub struct FranceTravailSettings {
-    pub token_url: Url,
-    pub api_base_url: Url,
-    pub client_id: Secret,
-    pub client_secret: Secret,
     pub published_since_days: u32,
     pub max_pages: u32,
+}
+
+#[derive(Debug, Clone)]
+pub struct FranceTravailAccess {
+    pub token: Secret,
+    pub api_base_url: Url,
+}
+
+pub trait AccessProvider: Send + Sync {
+    fn access(&self) -> impl Future<Output = Result<FranceTravailAccess, SourceError>> + Send;
+
+    fn invalidate(&self);
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -58,11 +59,6 @@ pub enum Skip {
     NoDomain,
 }
 
-struct CachedToken {
-    value: Secret,
-    expires_at: Instant,
-}
-
 enum Page {
     Offers {
         offers: Vec<Value>,
@@ -71,10 +67,10 @@ enum Page {
     Empty,
 }
 
-pub struct FranceTravailSource<F: ApiFetcher> {
+pub struct FranceTravailSource<F: ApiFetcher, A: AccessProvider> {
     fetcher: Arc<F>,
+    access: A,
     settings: FranceTravailSettings,
-    token: Mutex<Option<CachedToken>>,
 }
 
 pub fn closest_published_since(days: u32) -> u32 {
@@ -186,12 +182,12 @@ fn retry_after(response: &FetchResponse) -> StdDuration {
         .map_or(DEFAULT_RETRY_AFTER, StdDuration::from_secs)
 }
 
-impl<F: ApiFetcher> FranceTravailSource<F> {
-    pub fn new(fetcher: Arc<F>, settings: FranceTravailSettings) -> Self {
+impl<F: ApiFetcher, A: AccessProvider> FranceTravailSource<F, A> {
+    pub fn new(fetcher: Arc<F>, access: A, settings: FranceTravailSettings) -> Self {
         Self {
             fetcher,
+            access,
             settings,
-            token: Mutex::new(None),
         }
     }
 
@@ -211,71 +207,8 @@ impl<F: ApiFetcher> FranceTravailSource<F> {
         }
     }
 
-    fn cached_token(&self) -> Option<Secret> {
-        let guard = self.token.lock().ok()?;
-        let cached = guard.as_ref()?;
-        let deadline = Instant::now().checked_add(TOKEN_EXPIRY_MARGIN)?;
-        (cached.expires_at > deadline).then(|| cached.value.clone())
-    }
-
-    fn forget_token(&self) {
-        if let Ok(mut guard) = self.token.lock() {
-            *guard = None;
-        }
-    }
-
-    async fn token(&self) -> Result<Secret, SourceError> {
-        if let Some(token) = self.cached_token() {
-            return Ok(token);
-        }
-        let request = ApiRequest {
-            url: self.settings.token_url.clone(),
-            source: SourceName::FranceTravail,
-            bearer: None,
-            headers: Vec::new(),
-            form: Some(vec![
-                ("grant_type".to_owned(), Secret::new("client_credentials")),
-                ("client_id".to_owned(), self.settings.client_id.clone()),
-                (
-                    "client_secret".to_owned(),
-                    self.settings.client_secret.clone(),
-                ),
-                ("scope".to_owned(), Secret::new(SCOPE)),
-            ]),
-        };
-        let response = self.call(&request).await?;
-        if response.status != 200 {
-            return Err(upstream(format!(
-                "france travail token endpoint answered {}",
-                response.status
-            )));
-        }
-        let body: Value = serde_json::from_slice(&response.body)
-            .map_err(|_| upstream("france travail token response is not json"))?;
-        let value = body
-            .get("access_token")
-            .and_then(Value::as_str)
-            .filter(|token| !token.is_empty())
-            .ok_or_else(|| upstream("france travail token response has no access_token"))?;
-        let lifetime = body
-            .get("expires_in")
-            .and_then(Value::as_u64)
-            .unwrap_or(DEFAULT_EXPIRES_IN);
-        let token = Secret::new(value);
-        let expires_at = Instant::now()
-            .checked_add(StdDuration::from_secs(lifetime))
-            .unwrap_or_else(Instant::now);
-        if let Ok(mut guard) = self.token.lock() {
-            *guard = Some(CachedToken {
-                value: token.clone(),
-                expires_at,
-            });
-        }
-        Ok(token)
-    }
-
-    fn search_url(&self, keyword: &str, first: usize) -> Result<Url, SourceError> {
-        let mut url = self.settings.api_base_url.clone();
+    fn search_url(&self, base: &Url, keyword: &str, first: usize) -> Result<Url, SourceError> {
+        let mut url = base.clone();
         url.path_segments_mut()
             .map_err(|_| upstream("france travail api base url cannot carry a path"))?
             .pop_if_empty()
@@ -293,14 +226,14 @@ impl<F: ApiFetcher> FranceTravailSource<F> {
     }
 
     async fn fetch_page(&self, keyword: &str, first: usize) -> Result<Page, SourceError> {
-        let url = self.search_url(keyword, first)?;
         let mut refreshed = false;
         let mut throttled: u8 = 0;
         loop {
+            let access = self.access.access().await?;
             let request = ApiRequest {
-                url: url.clone(),
+                url: self.search_url(&access.api_base_url, keyword, first)?,
                 source: SourceName::FranceTravail,
-                bearer: Some(self.token().await?),
+                bearer: Some(access.token),
                 headers: Vec::new(),
                 form: None,
             };
@@ -325,7 +258,7 @@ impl<F: ApiFetcher> FranceTravailSource<F> {
                 204 => return Ok(Page::Empty),
                 401 if !refreshed => {
                     refreshed = true;
-                    self.forget_token();
+                    self.access.invalidate();
                 }
                 429 => {
                     let wait = retry_after(&response);
@@ -410,7 +343,7 @@ impl<F: ApiFetcher> FranceTravailSource<F> {
     }
 }
 
-impl<F: ApiFetcher> CandidateSource for FranceTravailSource<F> {
+impl<F: ApiFetcher, A: AccessProvider> CandidateSource for FranceTravailSource<F, A> {
     fn name(&self) -> SourceName {
         SourceName::FranceTravail
     }

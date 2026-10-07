@@ -1,13 +1,20 @@
-use std::{num::NonZeroU32, sync::Arc, time::Duration};
+use std::{
+    num::NonZeroU32,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 
 use chrono::{TimeZone, Utc};
 use common::Secret;
-use fetch::{FetchSettings, PoliteFetcher};
+use fetch::{ApiFetcher, ApiRequest, FetchSettings, PoliteFetcher};
 use lodestone_core::{
     ActiveProfile, Profile, ProfileId, ProfileName, ProfileRevision, RevisionNumber, Route,
-    ValidatedProfile, route,
+    SourceError, SourceName, ValidatedProfile, route,
 };
-use sources::france_travail::{FranceTravailSettings, FranceTravailSource};
+use serde_json::Value;
+use sources::france_travail::{
+    AccessProvider, FranceTravailAccess, FranceTravailSettings, FranceTravailSource,
+};
 use url::Url;
 use uuid::Uuid;
 
@@ -34,6 +41,57 @@ fn iam_profile() -> ActiveProfile {
             created_by: None,
             created_at: epoch,
         },
+    }
+}
+
+struct LiveAccess {
+    fetcher: Arc<PoliteFetcher>,
+    client_id: String,
+    client_secret: String,
+    token: Mutex<Option<Secret>>,
+}
+
+impl AccessProvider for LiveAccess {
+    async fn access(&self) -> Result<FranceTravailAccess, SourceError> {
+        let cached = self.token.lock().ok().and_then(|guard| guard.clone());
+        let token = match cached {
+            Some(token) => token,
+            None => {
+                let request = ApiRequest {
+                    url: Url::parse(TOKEN_URL).unwrap(),
+                    source: SourceName::FranceTravail,
+                    bearer: None,
+                    headers: Vec::new(),
+                    form: Some(vec![
+                        ("grant_type".to_owned(), Secret::new("client_credentials")),
+                        ("client_id".to_owned(), Secret::new(&self.client_id)),
+                        ("client_secret".to_owned(), Secret::new(&self.client_secret)),
+                        (
+                            "scope".to_owned(),
+                            Secret::new("api_offresdemploiv2 o2dsoffre"),
+                        ),
+                    ]),
+                };
+                let response = self.fetcher.call(&request).await?;
+                let body: Value = serde_json::from_slice(&response.body)
+                    .map_err(|_| SourceError::Upstream("token response is not json".to_owned()))?;
+                let token = Secret::new(body["access_token"].as_str().unwrap_or_default());
+                if let Ok(mut guard) = self.token.lock() {
+                    *guard = Some(token.clone());
+                }
+                token
+            }
+        };
+        Ok(FranceTravailAccess {
+            token,
+            api_base_url: Url::parse(API_BASE_URL).unwrap(),
+        })
+    }
+
+    fn invalidate(&self) {
+        if let Ok(mut guard) = self.token.lock() {
+            *guard = None;
+        }
     }
 }
 
@@ -74,13 +132,16 @@ async fn iam_profile_against_the_real_france_travail_api() {
         })
         .unwrap(),
     );
+    let access = LiveAccess {
+        fetcher: Arc::clone(&fetcher),
+        client_id,
+        client_secret,
+        token: Mutex::new(None),
+    };
     let source = FranceTravailSource::new(
         fetcher,
+        access,
         FranceTravailSettings {
-            token_url: Url::parse(TOKEN_URL).unwrap(),
-            api_base_url: Url::parse(API_BASE_URL).unwrap(),
-            client_id: Secret::new(client_id),
-            client_secret: Secret::new(client_secret),
             published_since_days: 7,
             max_pages: 5,
         },
@@ -90,7 +151,7 @@ async fn iam_profile_against_the_real_france_travail_api() {
         .revision
         .definition
         .definition()
-        .enabled_keyword_rules(lodestone_core::SourceName::FranceTravail)
+        .enabled_keyword_rules(SourceName::FranceTravail)
         .next()
         .cloned()
         .unwrap();

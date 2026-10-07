@@ -6,6 +6,7 @@ use api::{
     jobs::{Intervals, JobRouter, WiredSources, schedule_calibration, schedule_wired_sources},
     listeners::{CompanyStep, ContactStep, CtStep, HostStep, QualificationStep},
     logger::init_tracing_and_logging,
+    providers::{CatalogAccess, ProviderSeed, provision_providers},
     router::router,
     webhook::WebhookSink,
 };
@@ -119,26 +120,22 @@ async fn main() -> Result<(), Box<dyn Error>> {
             buyer_countries: args.ted.buyer_countries.clone(),
         },
     );
-    let france_travail = match args.france_travail.credentials() {
-        Some((client_id, client_secret)) => {
-            let mut france_travail_fetch = FetchSettings::from_outbound(&outbound_config);
-            france_travail_fetch.max_body_bytes = FRANCE_TRAVAIL_MAX_BODY_BYTES;
-            france_travail_fetch.requests_per_host_per_minute =
-                NonZeroU32::new(FRANCE_TRAVAIL_REQUESTS_PER_MINUTE).unwrap_or(NonZeroU32::MIN);
-            Some(FranceTravailSource::new(
-                Arc::new(PoliteFetcher::new(france_travail_fetch)?),
-                FranceTravailSettings {
-                    token_url: args.france_travail.token_url.clone(),
-                    api_base_url: args.france_travail.api_base_url.clone(),
-                    client_id: client_id.clone(),
-                    client_secret: client_secret.clone(),
-                    published_since_days: args.france_travail.published_since_days.get(),
-                    max_pages: args.france_travail.max_pages.get(),
-                },
-            ))
-        }
-        None => None,
-    };
+    let mut france_travail_fetch = FetchSettings::from_outbound(&outbound_config);
+    france_travail_fetch.max_body_bytes = FRANCE_TRAVAIL_MAX_BODY_BYTES;
+    france_travail_fetch.requests_per_host_per_minute =
+        NonZeroU32::new(FRANCE_TRAVAIL_REQUESTS_PER_MINUTE).unwrap_or(NonZeroU32::MIN);
+    let france_travail = FranceTravailSource::new(
+        Arc::new(PoliteFetcher::new(france_travail_fetch)?),
+        CatalogAccess::new(
+            app_state.usecase.clone(),
+            Arc::clone(&app_state.providers),
+            Arc::clone(&app_state.cipher),
+        ),
+        FranceTravailSettings {
+            published_since_days: args.france_travail.published_since_days.get(),
+            max_pages: args.france_travail.max_pages.get(),
+        },
+    );
     let mut ats_fetch = FetchSettings::from_outbound(&outbound_config);
     ats_fetch.max_body_bytes = ATS_MAX_BODY_BYTES;
     let ats = AtsSource::new(
@@ -255,7 +252,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
         },
     )
     .with_webhook(webhook);
-    schedule_wired_sources(&queue, args.france_travail.credentials().is_some()).await?;
+    provision_providers(
+        &app_state.usecase,
+        &app_state.providers,
+        &app_state.cipher,
+        &ProviderSeed::from_args(&args),
+    )
+    .await?;
+    schedule_wired_sources(&queue).await?;
     schedule_calibration(&queue).await?;
 
     let usecase = app_state.usecase.clone();

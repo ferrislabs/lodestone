@@ -64,7 +64,7 @@ const SOURCES: Source[] = [
 	}),
 	source('france_travail', {
 		status: 'unavailable',
-		unavailable_reason: 'missing_credentials',
+		unavailable_reason: 'not_scheduled',
 		next_run_at: null,
 	}),
 ]
@@ -125,6 +125,7 @@ function renderPage(
 		pending: new Set<string>(),
 		errors: {},
 		onRun: vi.fn(),
+		onOpenProvider: vi.fn(),
 		...overrides,
 	}
 	render(<SourcesPage {...props} />)
@@ -183,8 +184,34 @@ describe('SourcesPage', () => {
 		expect(row('DECP').getByText('La source est déjà en cours')).toBeTruthy()
 		expect(
 			row('France Travail').getByText(
-				'Identifiants manquants : la source est désactivée',
+				"Aucune tâche n'est planifiée pour cette source",
 			),
+		).toBeTruthy()
+	})
+
+	it('flags a source whose provider is not ready with a link to its catalog page', () => {
+		const props = renderPage({
+			sources: [
+				source('boamp', {
+					provider: { key: 'boamp', name: 'BOAMP', status: 'failing' },
+				}),
+				source('decp', {
+					provider: { key: 'decp', name: 'DECP', status: 'ready' },
+				}),
+			],
+		})
+		expect(row('BOAMP').getByText('Provider non prêt')).toBeTruthy()
+		expect(row('DECP').queryByText('Provider non prêt')).toBeNull()
+		fireEvent.click(
+			row('BOAMP').getByRole('button', {
+				name: 'Ouvrir BOAMP dans le catalogue',
+			}),
+		)
+		expect(props.onOpenProvider).toHaveBeenCalledWith('boamp')
+		const run = row('BOAMP').getByRole('button', { name: 'Lancer maintenant' })
+		expect((run as HTMLButtonElement).disabled).toBe(true)
+		expect(
+			row('BOAMP').getByText('Le fournisseur doit être prêt dans le catalogue'),
 		).toBeTruthy()
 	})
 
@@ -298,6 +325,30 @@ describe('SourcesPage', () => {
 					/dernière mise à jour il y a 10 minutes\. L'instance qui écoutait ne répond plus ; une autre prendra le relais\./,
 				),
 			).toBeTruthy()
+		})
+
+		it('flags a listener whose provider is not ready', () => {
+			const props = renderPage({
+				sources: [
+					listening('dns_cname', {
+						state: 'idle',
+					}),
+				].map((listener) => ({
+					...listener,
+					provider: {
+						key: 'dns_cname',
+						name: 'DNS CNAME',
+						status: 'not_configured',
+					},
+				})),
+			})
+			expect(row('DNS CNAME').getByText('Provider non prêt')).toBeTruthy()
+			fireEvent.click(
+				row('DNS CNAME').getByRole('button', {
+					name: 'Ouvrir DNS CNAME dans le catalogue',
+				}),
+			)
+			expect(props.onOpenProvider).toHaveBeenCalledWith('dns_cname')
 		})
 
 		it('shows the totals', () => {

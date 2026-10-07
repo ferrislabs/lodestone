@@ -6,7 +6,10 @@ pub mod ports;
 pub mod probe;
 pub mod validation;
 
-pub use catalog::{catalog, descriptor};
+pub use catalog::{
+    ATS, BOAMP, CERTIFICATE_TRANSPARENCY, COMPANY_RESEARCH, CONTACTS, DECP, DNS_CNAME,
+    FRANCE_TRAVAIL, HTTP_PROBE, TED, catalog, descriptor, provider_key_of_source,
+};
 pub use configuration::{
     ConnectedAccount, ProviderConfiguration, ProviderStatus, TOKEN_ACCESS, TOKEN_REFRESH,
     mask_secret, secret_context,

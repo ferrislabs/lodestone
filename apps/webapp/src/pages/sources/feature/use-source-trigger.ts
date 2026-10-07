@@ -7,6 +7,8 @@ import { invalidateSources } from '#/pages/sources/feature/invalidate'
 import { RESULT_CLEAR_MS } from '#/pages/sources/lib/state'
 import type { TriggerResult } from '#/pages/sources/lib/types'
 
+const ALREADY_RUNNING = 'La source est déjà en cours'
+
 export interface SourceTrigger {
 	trigger: (source: string) => void
 	results: Readonly<Record<string, TriggerResult>>
@@ -61,7 +63,7 @@ export function useSourceTrigger(): SourceTrigger {
 			})
 			settle(
 				source,
-				parsed.status === 409
+				parsed.status === 409 && parsed.message === ALREADY_RUNNING
 					? { kind: 'running' }
 					: { kind: 'error', message: parsed.message },
 			)

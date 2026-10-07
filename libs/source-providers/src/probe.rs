@@ -1,6 +1,7 @@
 use fetch::{ApiFetcher, ApiRequest};
 use lodestone_core::{
-    Credential, FetchError, ProbeContext, ProbeOutcome, ProviderProbe, SourceName,
+    ATS, CERTIFICATE_TRANSPARENCY, COMPANY_RESEARCH, CONTACTS, Credential, DECP, DNS_CNAME,
+    FetchError, HTTP_PROBE, ProbeContext, ProbeOutcome, ProviderProbe, SourceName, TED,
     provider_descriptor,
 };
 use serde_json::Value;
@@ -8,13 +9,18 @@ use url::Url;
 
 use crate::error::fetch_reason;
 
-pub const BOAMP: &str = "boamp";
-pub const FRANCE_TRAVAIL: &str = "france_travail";
+pub use lodestone_core::{BOAMP, FRANCE_TRAVAIL};
 
 pub fn fetch_source(key: &str) -> SourceName {
     match key {
         BOAMP => SourceName::Boamp,
         FRANCE_TRAVAIL => SourceName::FranceTravail,
+        DECP => SourceName::Decp,
+        TED => SourceName::Ted,
+        ATS => SourceName::Ats,
+        CERTIFICATE_TRANSPARENCY => SourceName::CertificateTransparency,
+        DNS_CNAME => SourceName::DnsCname,
+        HTTP_PROBE => SourceName::HttpProbe,
         _ => SourceName::PublicPage,
     }
 }
@@ -111,9 +117,69 @@ impl<F: ApiFetcher> ProviderProbe for FranceTravailProbe<'_, F> {
     }
 }
 
+pub struct EndpointProbe<'f, F: ApiFetcher> {
+    fetcher: &'f F,
+    provider: &'static str,
+    field: &'static str,
+    service: &'static str,
+    source: SourceName,
+    query: &'static [(&'static str, &'static str)],
+    any_answer: bool,
+}
+
+impl<F: ApiFetcher> ProviderProbe for EndpointProbe<'_, F> {
+    async fn probe(&self, context: &ProbeContext<'_>) -> ProbeOutcome {
+        let Some(mut url) =
+            setting(context, self.provider, self.field).and_then(|raw| Url::parse(raw).ok())
+        else {
+            return ProbeOutcome::failure(format!("L'URL de {} est invalide.", self.service));
+        };
+        if !self.query.is_empty() {
+            url.query_pairs_mut().extend_pairs(self.query);
+        }
+        let request = ApiRequest {
+            url,
+            source: self.source,
+            bearer: None,
+            headers: Vec::new(),
+            form: None,
+        };
+        match self.fetcher.call(&request).await {
+            Ok(response)
+                if (200..300).contains(&response.status)
+                    || (self.any_answer && response.status < 500) =>
+            {
+                ProbeOutcome::success(format!("{} répond.", self.service))
+            }
+            Ok(response) => ProbeOutcome::failure(format!(
+                "{} a répondu HTTP {}.",
+                self.service, response.status
+            )),
+            Err(error) => failure_of(self.service, &error),
+        }
+    }
+}
+
+pub struct OfflineProbe {
+    message: &'static str,
+}
+
+impl ProviderProbe for OfflineProbe {
+    async fn probe(&self, _context: &ProbeContext<'_>) -> ProbeOutcome {
+        ProbeOutcome::success(self.message)
+    }
+}
+
+const CRAWLER_MESSAGE: &str = "Cette source lit des pages publiques sur les sites des entreprises : aucun point d'accès externe à tester.";
+const DNS_MESSAGE: &str =
+    "Cette source interroge le DNS public : aucun point d'accès externe à tester.";
+const COMPANY_QUERY: &[(&str, &str)] = &[("q", "ferrislabs"), ("per_page", "1")];
+
 pub enum Probe<'f, F: ApiFetcher> {
     Boamp(BoampProbe<'f, F>),
     FranceTravail(FranceTravailProbe<'f, F>),
+    Endpoint(EndpointProbe<'f, F>),
+    Offline(OfflineProbe),
 }
 
 impl<'f, F: ApiFetcher> Probe<'f, F> {
@@ -121,8 +187,72 @@ impl<'f, F: ApiFetcher> Probe<'f, F> {
         match key {
             BOAMP => Some(Self::Boamp(BoampProbe { fetcher })),
             FRANCE_TRAVAIL => Some(Self::FranceTravail(FranceTravailProbe { fetcher })),
+            DECP => Some(Self::endpoint(
+                fetcher,
+                DECP,
+                "dataset_api_url",
+                "L'API data.gouv.fr des DECP",
+                SourceName::Decp,
+                &[],
+                false,
+            )),
+            TED => Some(Self::endpoint(
+                fetcher,
+                TED,
+                "base_url",
+                "L'API TED",
+                SourceName::Ted,
+                &[],
+                true,
+            )),
+            CERTIFICATE_TRANSPARENCY => Some(Self::endpoint(
+                fetcher,
+                CERTIFICATE_TRANSPARENCY,
+                "log_list_url",
+                "La liste des journaux Certificate Transparency",
+                SourceName::CertificateTransparency,
+                &[],
+                false,
+            )),
+            COMPANY_RESEARCH => Some(Self::endpoint(
+                fetcher,
+                COMPANY_RESEARCH,
+                "entreprises_url",
+                "L'API Recherche d'entreprises",
+                SourceName::PublicPage,
+                COMPANY_QUERY,
+                false,
+            )),
+            ATS | HTTP_PROBE | CONTACTS => Some(Self::Offline(OfflineProbe {
+                message: CRAWLER_MESSAGE,
+            })),
+            DNS_CNAME => Some(Self::Offline(OfflineProbe {
+                message: DNS_MESSAGE,
+            })),
             _ => None,
         }
+    }
+}
+
+impl<'f, F: ApiFetcher> Probe<'f, F> {
+    fn endpoint(
+        fetcher: &'f F,
+        provider: &'static str,
+        field: &'static str,
+        service: &'static str,
+        source: SourceName,
+        query: &'static [(&'static str, &'static str)],
+        any_answer: bool,
+    ) -> Self {
+        Self::Endpoint(EndpointProbe {
+            fetcher,
+            provider,
+            field,
+            service,
+            source,
+            query,
+            any_answer,
+        })
     }
 }
 
@@ -131,6 +261,8 @@ impl<F: ApiFetcher> ProviderProbe for Probe<'_, F> {
         match self {
             Self::Boamp(probe) => probe.probe(context).await,
             Self::FranceTravail(probe) => probe.probe(context).await,
+            Self::Endpoint(probe) => probe.probe(context).await,
+            Self::Offline(probe) => probe.probe(context).await,
         }
     }
 }

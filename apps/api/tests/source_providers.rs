@@ -135,7 +135,21 @@ async fn the_catalog_lists_every_provider_as_not_configured(pool: PgPool) {
         .iter()
         .map(|provider| provider["key"].as_str().expect("key"))
         .collect();
-    assert_eq!(keys, vec!["boamp", "france_travail"]);
+    assert_eq!(
+        keys,
+        vec![
+            "boamp",
+            "france_travail",
+            "decp",
+            "ted",
+            "ats",
+            "certificate_transparency",
+            "dns_cname",
+            "http_probe",
+            "contacts",
+            "company_research"
+        ]
+    );
     for provider in providers {
         assert_eq!(provider["status"], "not_configured");
     }
