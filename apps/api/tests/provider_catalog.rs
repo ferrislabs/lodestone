@@ -19,9 +19,9 @@ use httpmock::{
     Mock, MockServer,
 };
 use lodestone_core::{
-    ActiveProfile, BOAMP, CERTIFICATE_TRANSPARENCY, COMPANY_RESEARCH, DECP, Job, JobId, JobKind,
-    JobStatus, Profile, ProfileId, ProfileName, ProfileRevision, ProviderStatus, RevisionNumber,
-    TED, ValidatedProfile,
+    ActiveProfile, BOAMP, CERTIFICATE_TRANSPARENCY, COMPANY_RESEARCH, DECP, HACKER_NEWS_HIRING,
+    Job, JobId, JobKind, JobStatus, Profile, ProfileId, ProfileName, ProfileRevision,
+    ProviderStatus, RevisionNumber, TED, ValidatedProfile,
     infrastructure::contact_target::postgres::PgAtsTargets,
     jobs::{JobHandler, JobOutcome},
     provider_descriptor,
@@ -34,6 +34,7 @@ use sources::{
     decp::{DecpSettings, DecpSource},
     endpoint::Endpoint,
     france_travail::{FranceTravailSettings, FranceTravailSource},
+    hacker_news::{HackerNewsSettings, HackerNewsSource},
     ted::{TedSettings, TedSource},
 };
 use sqlx::PgPool;
@@ -61,6 +62,10 @@ fn public_seed(server: &MockServer) -> ProviderSeed {
     );
     seed.settings
         .insert("ted", object(json!({"base_url": server.url("/ted")})));
+    seed.settings.insert(
+        "hacker_news_hiring",
+        object(json!({"base_url": server.url("/hn/")})),
+    );
     seed.settings.insert(
         "certificate_transparency",
         object(json!({"log_list_url": server.url("/ct")})),
@@ -90,6 +95,7 @@ fn france_travail_seed(server: &MockServer, client_id: &str) -> ProviderSeed {
 }
 
 async fn public_upstreams(server: &MockServer) {
+    hacker_news_upstream(server, "/hn").await;
     for (path, status) in [
         ("/boamp", 200),
         ("/decp", 200),
@@ -104,6 +110,21 @@ async fn public_upstreams(server: &MockServer) {
             })
             .await;
     }
+}
+
+fn hiring_threads() -> Value {
+    json!({"hits": [
+        {"objectID": "4001", "title": "Ask HN: Who is hiring? (October 2026)", "created_at_i": 1_790_000_000}
+    ]})
+}
+
+async fn hacker_news_upstream(server: &MockServer, base: &str) {
+    server
+        .mock_async(|when, then| {
+            when.method(GET).path(format!("{base}/search_by_date"));
+            then.status(200).json_body(hiring_threads());
+        })
+        .await;
 }
 
 async fn france_travail_upstream(server: &MockServer) -> (Mock<'_>, Mock<'_>) {
@@ -162,6 +183,7 @@ async fn public_providers_are_created_and_tested_on_first_start(pool: PgPool) {
         "decp",
         "ted",
         "ats",
+        "hacker_news_hiring",
         "certificate_transparency",
         "dns_cname",
         "http_probe",
@@ -484,6 +506,13 @@ fn router(harness: &Harness, pool: &PgPool, upstream: &MockServer) -> JobRouter 
                     max_pages: 1,
                 },
             ),
+            hacker_news: HackerNewsSource::new(
+                Arc::clone(&fetcher),
+                HackerNewsSettings {
+                    base_url: url("/hn/").into(),
+                    max_pages: 1,
+                },
+            ),
             ats: AtsSource::new(
                 fetcher,
                 PgAtsTargets::new(pool.clone()),
@@ -498,6 +527,7 @@ fn router(harness: &Harness, pool: &PgPool, upstream: &MockServer) -> JobRouter 
         Intervals {
             other_sources: Duration::from_secs(6 * 3600),
             decp: Duration::from_secs(6 * 3600),
+            hacker_news: Duration::from_secs(24 * 3600),
         },
     )
 }
@@ -580,6 +610,95 @@ async fn france_travail_does_not_run_without_a_ready_catalog_configuration(pool:
     let outcome = router.handle(&source_job("france_travail")).await.unwrap();
 
     assert!(rescheduled(outcome) <= Utc::now() + Delta::minutes(6));
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn hacker_news_does_not_run_until_its_provider_is_ready_then_runs_daily(pool: PgPool) {
+    let harness = Harness::new(pool.clone()).await;
+    let upstream = MockServer::start_async().await;
+    let threads = upstream
+        .mock_async(|when, then| {
+            when.method(GET).path("/hn/search_by_date");
+            then.status(200).json_body(hiring_threads());
+        })
+        .await;
+    let router = router(&harness, &pool, &upstream);
+    let before = Utc::now();
+
+    let blocked = router
+        .handle(&source_job("hacker_news_hiring"))
+        .await
+        .unwrap();
+
+    assert!(rescheduled(blocked) <= Utc::now() + Delta::minutes(6));
+    threads.assert_hits_async(0).await;
+    assert_eq!(
+        blocking_provider(&harness.state.usecase, "hacker_news_hiring")
+            .await
+            .unwrap(),
+        Some("hacker_news_hiring")
+    );
+
+    provision(&harness, &public_seed(&upstream)).await;
+    let ran = router
+        .handle(&source_job("hacker_news_hiring"))
+        .await
+        .unwrap();
+
+    assert!(rescheduled(ran) >= before + Delta::hours(23));
+    assert_eq!(
+        blocking_provider(&harness.state.usecase, "hacker_news_hiring")
+            .await
+            .unwrap(),
+        None
+    );
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn hacker_news_reads_its_url_from_the_catalog_on_every_run(pool: PgPool) {
+    let harness = Harness::new(pool).await;
+    let server = MockServer::start_async().await;
+    public_upstreams(&server).await;
+    provision(&harness, &public_seed(&server)).await;
+    let listing = |path: &'static str| {
+        server.mock(move |when, then| {
+            when.method(GET).path(path);
+            then.status(200).json_body(hiring_threads());
+        })
+    };
+    let from_env = listing("/env-hn/search_by_date");
+    let moved = listing("/moved-hn/search_by_date");
+    server.mock(|when, then| {
+        when.method(GET).path("/moved-hn/search");
+        then.status(200)
+            .json_body(json!({"hits": [], "nbPages": 1}));
+    });
+    let source = HackerNewsSource::new(
+        polite(true),
+        HackerNewsSettings {
+            base_url: catalog_endpoint(
+                &harness,
+                HACKER_NEWS_HIRING,
+                "base_url",
+                &server.url("/env-hn/"),
+            ),
+            max_pages: 1,
+        },
+    );
+    reconfigure(
+        &harness,
+        "hacker_news_hiring",
+        json!({"base_url": server.url("/moved-hn/")}),
+    )
+    .await;
+
+    source
+        .collect_with_stats(&[search_profile(&["hacker_news_hiring"])])
+        .await
+        .unwrap();
+
+    moved.assert_hits(1);
+    from_env.assert_hits(0);
 }
 
 async fn reconfigure(harness: &Harness, key: &'static str, settings: Value) {

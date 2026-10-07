@@ -1,10 +1,10 @@
 use fetch::{ApiFetcher, ApiRequest};
 use lodestone_core::{
     ATS, CERTIFICATE_TRANSPARENCY, COMPANY_RESEARCH, CONTACTS, Credential, DECP, DNS_CNAME,
-    FetchError, HTTP_PROBE, ProbeContext, ProbeOutcome, ProviderProbe, SourceName, TED,
-    provider_descriptor,
+    FetchError, HACKER_NEWS_HIRING, HACKER_NEWS_THREAD_TITLE, HTTP_PROBE, ProbeContext,
+    ProbeOutcome, ProviderProbe, SourceName, TED, provider_descriptor,
 };
-use serde_json::Value;
+use serde_json::{Value, from_slice};
 use url::Url;
 
 use crate::error::fetch_reason;
@@ -18,6 +18,7 @@ pub fn fetch_source(key: &str) -> SourceName {
         DECP => SourceName::Decp,
         TED => SourceName::Ted,
         ATS => SourceName::Ats,
+        HACKER_NEWS_HIRING => SourceName::HackerNewsHiring,
         CERTIFICATE_TRANSPARENCY => SourceName::CertificateTransparency,
         DNS_CNAME => SourceName::DnsCname,
         HTTP_PROBE => SourceName::HttpProbe,
@@ -117,6 +118,67 @@ impl<F: ApiFetcher> ProviderProbe for FranceTravailProbe<'_, F> {
     }
 }
 
+pub struct HackerNewsProbe<'f, F: ApiFetcher> {
+    fetcher: &'f F,
+}
+
+fn has_hiring_thread(body: &[u8]) -> bool {
+    let prefix = HACKER_NEWS_THREAD_TITLE.to_lowercase();
+    from_slice::<Value>(body)
+        .ok()
+        .and_then(|list| list.get("hits").and_then(Value::as_array).cloned())
+        .is_some_and(|hits| {
+            hits.iter().any(|hit| {
+                hit.get("title")
+                    .and_then(Value::as_str)
+                    .is_some_and(|title| title.to_lowercase().starts_with(&prefix))
+            })
+        })
+}
+
+impl<F: ApiFetcher> ProviderProbe for HackerNewsProbe<'_, F> {
+    async fn probe(&self, context: &ProbeContext<'_>) -> ProbeOutcome {
+        let Some(mut url) =
+            setting(context, HACKER_NEWS_HIRING, "base_url").and_then(|raw| Url::parse(raw).ok())
+        else {
+            return ProbeOutcome::failure("L'URL de l'API de Hacker News est invalide.");
+        };
+        let Ok(mut segments) = url.path_segments_mut() else {
+            return ProbeOutcome::failure("L'URL de l'API de Hacker News est invalide.");
+        };
+        segments.pop_if_empty().push("search_by_date");
+        drop(segments);
+        url.query_pairs_mut()
+            .append_pair("tags", "story,author_whoishiring")
+            .append_pair("hitsPerPage", "10");
+        let request = ApiRequest {
+            url,
+            source: SourceName::HackerNewsHiring,
+            bearer: None,
+            headers: Vec::new(),
+            form: None,
+        };
+        match self.fetcher.call(&request).await {
+            Ok(response) if (200..300).contains(&response.status) => {
+                if has_hiring_thread(&response.body) {
+                    ProbeOutcome::success(
+                        "L'API de Hacker News répond et le fil « Who is hiring? » est trouvé.",
+                    )
+                } else {
+                    ProbeOutcome::failure(
+                        "L'API de Hacker News répond mais aucun fil « Who is hiring? » n'a été trouvé.",
+                    )
+                }
+            }
+            Ok(response) => ProbeOutcome::failure(format!(
+                "L'API de Hacker News a répondu HTTP {}.",
+                response.status
+            )),
+            Err(error) => failure_of("L'API de Hacker News", &error),
+        }
+    }
+}
+
 pub struct EndpointProbe<'f, F: ApiFetcher> {
     fetcher: &'f F,
     provider: &'static str,
@@ -178,6 +240,7 @@ const COMPANY_QUERY: &[(&str, &str)] = &[("q", "ferrislabs"), ("per_page", "1")]
 pub enum Probe<'f, F: ApiFetcher> {
     Boamp(BoampProbe<'f, F>),
     FranceTravail(FranceTravailProbe<'f, F>),
+    HackerNews(HackerNewsProbe<'f, F>),
     Endpoint(EndpointProbe<'f, F>),
     Offline(OfflineProbe),
 }
@@ -187,6 +250,7 @@ impl<'f, F: ApiFetcher> Probe<'f, F> {
         match key {
             BOAMP => Some(Self::Boamp(BoampProbe { fetcher })),
             FRANCE_TRAVAIL => Some(Self::FranceTravail(FranceTravailProbe { fetcher })),
+            HACKER_NEWS_HIRING => Some(Self::HackerNews(HackerNewsProbe { fetcher })),
             DECP => Some(Self::endpoint(
                 fetcher,
                 DECP,
@@ -261,6 +325,7 @@ impl<F: ApiFetcher> ProviderProbe for Probe<'_, F> {
         match self {
             Self::Boamp(probe) => probe.probe(context).await,
             Self::FranceTravail(probe) => probe.probe(context).await,
+            Self::HackerNews(probe) => probe.probe(context).await,
             Self::Endpoint(probe) => probe.probe(context).await,
             Self::Offline(probe) => probe.probe(context).await,
         }

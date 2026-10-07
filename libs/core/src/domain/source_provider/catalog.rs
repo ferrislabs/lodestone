@@ -12,6 +12,8 @@ pub const DNS_CNAME: &str = "dns_cname";
 pub const HTTP_PROBE: &str = "http_probe";
 pub const CONTACTS: &str = "contacts";
 pub const COMPANY_RESEARCH: &str = "company_research";
+pub const HACKER_NEWS_HIRING: &str = "hacker_news_hiring";
+pub const HACKER_NEWS_THREAD_TITLE: &str = "Ask HN: Who is hiring?";
 
 const BOAMP_DEFAULT_URL: &str =
     "https://boamp-datadila.opendatasoft.com/api/explore/v2.1/catalog/datasets/boamp/records";
@@ -22,6 +24,7 @@ const DECP_DEFAULT_URL: &str = "https://www.data.gouv.fr/api/1/datasets/donnees-
 const TED_DEFAULT_URL: &str = "https://api.ted.europa.eu/v3/notices/search";
 const CT_DEFAULT_URL: &str = "https://www.gstatic.com/ct/log_list/v3/log_list.json";
 const COMPANY_DEFAULT_URL: &str = "https://recherche-entreprises.api.gouv.fr/search";
+const HACKER_NEWS_DEFAULT_URL: &str = "https://hn.algolia.com/api/v1/";
 const URL_HELP: &str = "Lue à chaque collecte et pour tester la connexion ; la variable d'environnement ne sert qu'à l'initialiser.";
 
 const BOAMP_FIELDS: &[FieldSpec] = &[FieldSpec::url("base_url", "URL de l'API", false)
@@ -56,6 +59,10 @@ const COMPANY_FIELDS: &[FieldSpec] = &[FieldSpec::url("entreprises_url", "URL de
     .with_default(COMPANY_DEFAULT_URL)
     .with_help(URL_HELP)];
 
+const HACKER_NEWS_FIELDS: &[FieldSpec] = &[FieldSpec::url("base_url", "URL de l'API", false)
+    .with_default(HACKER_NEWS_DEFAULT_URL)
+    .with_help("Racine de l'API de recherche Algolia de Hacker News.")];
+
 const NO_FILTERS: FilterSupport = FilterSupport {
     remote: false,
     countries: false,
@@ -67,7 +74,7 @@ const NO_SEARCH: Capabilities = Capabilities {
     filters: NO_FILTERS,
 };
 
-static CATALOG: [SourceProviderDescriptor; 10] = [
+static CATALOG: [SourceProviderDescriptor; 11] = [
     SourceProviderDescriptor {
         key: BOAMP,
         name: "BOAMP",
@@ -157,6 +164,21 @@ static CATALOG: [SourceProviderDescriptor; 10] = [
         ),
     },
     SourceProviderDescriptor {
+        key: HACKER_NEWS_HIRING,
+        name: "Hacker News — Who is hiring?",
+        description: "Annonces du fil mensuel « Ask HN: Who is hiring? » de Hacker News, lues par mot-clé.",
+        category: ProviderCategory::JobsAndMissions,
+        auth: AuthSpec::None,
+        fields: HACKER_NEWS_FIELDS,
+        capabilities: Capabilities {
+            keyword_search: true,
+            filters: NO_FILTERS,
+        },
+        terms_note: Some(
+            "API officielle de Hacker News (licence MIT, sans compte requis) et son moteur de recherche Algolia ; une collecte par jour, débit limité.",
+        ),
+    },
+    SourceProviderDescriptor {
         key: CERTIFICATE_TRANSPARENCY,
         name: "Certificate Transparency",
         description: "Nouveaux certificats TLS lus dans les journaux publics de transparence des certificats.",
@@ -221,6 +243,7 @@ pub fn provider_key_of_source(source: &str) -> Option<&'static str> {
         "decp" => Some(DECP),
         "ted" => Some(TED),
         "ats" => Some(ATS),
+        "hacker_news_hiring" => Some(HACKER_NEWS_HIRING),
         "certificate_transparency" => Some(CERTIFICATE_TRANSPARENCY),
         "dns_cname" => Some(DNS_CNAME),
         "http_probe" => Some(HTTP_PROBE),
@@ -286,6 +309,7 @@ mod tests {
             "decp",
             "ted",
             "ats",
+            "hacker_news_hiring",
             "certificate_transparency",
             "dns_cname",
             "http_probe",

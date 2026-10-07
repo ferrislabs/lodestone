@@ -9,7 +9,7 @@
 | lead | A company, identified by profile and normalized domain, that may buy the profile's product. | prospect, account |
 | lead status | One of new, uncertain, qualified, validated, rejected, contacted. A lead whose LLM evidence cannot be verified twice becomes uncertain and never reaches validation. | stage |
 | signal | One observed fact about a lead, with source, type, raw data, date, provenance URL and strength. | event, hit |
-| source | An adapter that fetches external data: CT, HTTP probe, DNS, BOAMP, DECP, TED, France Travail, ATS. | connector, provider |
+| source | An adapter that fetches external data: CT, HTTP probe, DNS, BOAMP, DECP, TED, France Travail, Hacker News, ATS. | connector, provider |
 | run | One execution of a source for one profile, with start, end, volume and errors. | crawl, batch |
 | job | A unit of background work in the Postgres queue, claimed by a worker under a lease. | task |
 | lease | The time a worker holds a job before another worker may reclaim it. | lock |

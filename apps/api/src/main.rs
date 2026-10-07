@@ -20,7 +20,7 @@ use dotenvy::dotenv;
 use fetch::{FetchSettings, PoliteFetcher};
 use handlers::state;
 use lodestone_core::{
-    BOAMP, CERTIFICATE_TRANSPARENCY, COMPANY_RESEARCH, DECP, RetryPolicy, TED,
+    BOAMP, CERTIFICATE_TRANSPARENCY, COMPANY_RESEARCH, DECP, HACKER_NEWS_HIRING, RetryPolicy, TED,
     company::CompanyRunSettings,
     contacts::ContactRunSettings,
     infrastructure::{
@@ -45,6 +45,7 @@ use sources::{
     dns_cname::{DnsCnameSettings, DnsCnameSource},
     endpoint::Endpoint,
     france_travail::{FranceTravailSettings, FranceTravailSource},
+    hacker_news::{HackerNewsSettings, HackerNewsSource},
     http_probe::{HttpProbeSettings, HttpProbeSource, ProbeScheme},
     role_guess::RoleGuessFinder,
     security_txt::SecurityTxtFinder,
@@ -62,6 +63,8 @@ const TED_MAX_BODY_BYTES: usize = 16 * 1024 * 1024;
 const TED_REQUESTS_PER_MINUTE: u32 = 30;
 const FRANCE_TRAVAIL_MAX_BODY_BYTES: usize = 16 * 1024 * 1024;
 const FRANCE_TRAVAIL_REQUESTS_PER_MINUTE: u32 = 180;
+const HACKER_NEWS_MAX_BODY_BYTES: usize = 8 * 1024 * 1024;
+const HACKER_NEWS_REQUESTS_PER_MINUTE: u32 = 30;
 const ATS_MAX_BODY_BYTES: usize = 16 * 1024 * 1024;
 const ATS_MAX_RATE_LIMIT_WAIT: Duration = Duration::from_secs(75);
 const DECP_REQUESTS_PER_MINUTE: u32 = 120;
@@ -145,6 +148,23 @@ async fn main() -> Result<(), Box<dyn Error>> {
         FranceTravailSettings {
             published_since_days: args.france_travail.published_since_days.get(),
             max_pages: args.france_travail.max_pages.get(),
+        },
+    );
+    let mut hacker_news_fetch = FetchSettings::from_outbound(&outbound_config);
+    hacker_news_fetch.max_body_bytes = HACKER_NEWS_MAX_BODY_BYTES;
+    hacker_news_fetch.requests_per_host_per_minute = hacker_news_fetch
+        .requests_per_host_per_minute
+        .max(NonZeroU32::new(HACKER_NEWS_REQUESTS_PER_MINUTE).unwrap_or(NonZeroU32::MIN));
+    let hacker_news = HackerNewsSource::new(
+        Arc::new(PoliteFetcher::new(hacker_news_fetch)?),
+        HackerNewsSettings {
+            base_url: Endpoint::catalog(
+                app_state.usecase.clone(),
+                HACKER_NEWS_HIRING,
+                "base_url",
+                args.hacker_news.base_url.clone(),
+            ),
+            max_pages: args.hacker_news.max_pages.get(),
         },
     );
     let mut ats_fetch = FetchSettings::from_outbound(&outbound_config);
@@ -276,10 +296,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
             ted,
             france_travail,
             ats,
+            hacker_news,
         },
         Intervals {
             other_sources: jobs_config.source_interval,
             decp: args.decp.interval(),
+            hacker_news: args.hacker_news.interval(),
         },
     )
     .with_webhook(webhook);

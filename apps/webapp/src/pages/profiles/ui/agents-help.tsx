@@ -9,7 +9,7 @@ const FAMILIES: readonly { title: string; sources: string }[] = [
 	{
 		title: 'Recherche',
 		sources:
-			'Mots-clés, exclusions et filtres définis une fois, traduits par chaque fournisseur du catalogue (BOAMP, DECP, TED, France Travail, pages carrières)',
+			'Mots-clés, exclusions et filtres définis une fois, traduits par chaque fournisseur du catalogue (BOAMP, DECP, TED, France Travail, Hacker News, pages carrières)',
 	},
 	{
 		title: 'Signal',

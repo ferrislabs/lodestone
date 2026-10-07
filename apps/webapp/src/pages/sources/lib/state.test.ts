@@ -62,6 +62,20 @@ describe('groupedSources', () => {
 		])
 	})
 
+	it('lists Hacker News with the job offer sources', () => {
+		const groups = groupedSources([
+			source('ats'),
+			source('hacker_news_hiring'),
+			source('france_travail'),
+		])
+		expect(groups.map((group) => group.title)).toEqual(["Offres d'emploi"])
+		expect(groups[0]?.sources.map((item) => item.source)).toEqual([
+			'france_travail',
+			'hacker_news_hiring',
+			'ats',
+		])
+	})
+
 	it('keeps an unknown source in a trailing group', () => {
 		const groups = groupedSources([source('mystery')])
 		expect(groups).toEqual([

@@ -25,7 +25,10 @@ export const SOURCE_GROUPS: readonly {
 		sources: ['certificate_transparency', 'dns_cname', 'http_probe'],
 	},
 	{ title: 'Marchés publics', sources: ['boamp', 'decp', 'ted'] },
-	{ title: "Offres d'emploi", sources: ['france_travail', 'ats'] },
+	{
+		title: "Offres d'emploi",
+		sources: ['france_travail', 'hacker_news_hiring', 'ats'],
+	},
 	{
 		title: 'Contacts',
 		sources: ['public_page', 'security_txt', 'role_guess'],
