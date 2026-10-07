@@ -4,13 +4,17 @@ use chrono::{DateTime, Duration, NaiveDate, Utc};
 use fetch::{PostFetcher, PostRequest};
 use lodestone_core::{
     ActiveProfile, Candidate, NormalizedDomain, Provenance, SignalKind, SourceError, SourceName,
-    triage::CandidateSource,
+    alpha3_of, definition::SearchAgent, triage::CandidateSource,
 };
 use serde_json::{Value, json};
 use tracing::{debug, info};
 use url::Url;
 
-use crate::buyer_domain::domain_of_url;
+use crate::{
+    buyer_domain::domain_of_url,
+    endpoint::Endpoint,
+    search::{self, query_groups},
+};
 
 pub const PAGE_SIZE: usize = 100;
 pub const WINDOW_CAP: usize = 15_000;
@@ -31,9 +35,9 @@ const FIELDS: [&str; 10] = [
     "buyer-country",
 ];
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct TedSettings {
-    pub base_url: Url,
+    pub base_url: Endpoint,
     pub lookback_days: u32,
     pub max_pages: u32,
     pub buyer_countries: Vec<String>,
@@ -55,23 +59,24 @@ pub struct TedSource<F: PostFetcher> {
 }
 
 pub fn keyword_union(profiles: &[ActiveProfile]) -> Vec<String> {
-    let mut seen: HashSet<String> = HashSet::new();
-    let mut union = Vec::new();
-    for rules in profiles.iter().flat_map(|active| {
-        active
-            .revision
-            .definition
-            .definition()
-            .enabled_keyword_rules(SourceName::Ted)
-    }) {
-        for keyword in &rules.keywords {
-            let keyword = keyword.trim();
-            if !keyword.is_empty() && seen.insert(keyword.to_lowercase()) {
-                union.push(keyword.to_owned());
-            }
+    search::keyword_union(profiles, SourceName::Ted)
+}
+
+pub fn native_countries(agent: &SearchAgent, defaults: &[String]) -> Vec<String> {
+    if agent.filters.countries.is_empty() {
+        return valid_countries(defaults);
+    }
+    let mut codes: Vec<String> = Vec::new();
+    for country in &agent.filters.countries {
+        let Some(code) = alpha3_of(country.as_str()) else {
+            return Vec::new();
+        };
+        if !codes.iter().any(|known| known == code) {
+            codes.push(code.to_owned());
         }
     }
-    union
+    codes.sort();
+    codes
 }
 
 fn quoted(keyword: &str) -> String {
@@ -289,11 +294,16 @@ impl<F: PostFetcher> TedSource<F> {
         Self { fetcher, settings }
     }
 
-    async fn fetch_page(&self, query: &str, page: usize) -> Result<(Vec<Value>, u64), SourceError> {
+    async fn fetch_page(
+        &self,
+        url: &Url,
+        query: &str,
+        page: usize,
+    ) -> Result<(Vec<Value>, u64), SourceError> {
         let body = serde_json::to_vec(&page_body(query, page))
             .map_err(|error| upstream(format!("ted request is not serializable: {error}")))?;
         let request = PostRequest {
-            url: self.settings.base_url.clone(),
+            url: url.clone(),
             body,
             source: SourceName::Ted,
         };
@@ -322,54 +332,61 @@ impl<F: PostFetcher> TedSource<F> {
         now: DateTime<Utc>,
     ) -> Result<(Vec<Candidate>, TedStats), SourceError> {
         let mut stats = TedStats::default();
-        let keywords = keyword_union(profiles);
-        if keywords.is_empty() {
+        let groups = query_groups(profiles, SourceName::Ted, |agent| {
+            native_countries(agent, &self.settings.buyer_countries)
+        });
+        if groups.is_empty() {
             return Ok((Vec::new(), stats));
         }
-        let query = expert_query(
-            &keywords,
-            &self.settings.buyer_countries,
-            now,
-            self.settings.lookback_days,
-        );
+        let url = self.settings.base_url.resolve().await?;
         let mut seen: HashSet<String> = HashSet::new();
         let mut candidates = Vec::new();
-        for page in 1..=self.settings.max_pages {
-            let page = usize::try_from(page).unwrap_or(usize::MAX);
-            if page.saturating_mul(PAGE_SIZE) > WINDOW_CAP {
-                break;
-            }
-            let (notices, total) = self.fetch_page(&query, page).await?;
-            stats.pages += 1;
-            stats.total_matching = total;
-            let fetched = notices.len();
-            for notice in &notices {
-                stats.records += 1;
-                let number = notice
-                    .get("publication-number")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default();
-                if !number.is_empty() && !seen.insert(number.to_owned()) {
-                    continue;
+        for group in &groups {
+            let query = expert_query(
+                &group.keywords,
+                &group.native,
+                now,
+                self.settings.lookback_days,
+            );
+            for page in 1..=self.settings.max_pages {
+                let page = usize::try_from(page).unwrap_or(usize::MAX);
+                if page.saturating_mul(PAGE_SIZE) > WINDOW_CAP {
+                    break;
                 }
-                match parse_notice(notice) {
-                    Ok(candidate) => {
-                        stats.candidates += 1;
-                        candidates.push(candidate);
+                let (notices, total) = self.fetch_page(&url, &query, page).await?;
+                stats.pages += 1;
+                if page == 1 {
+                    stats.total_matching += total;
+                }
+                let fetched = notices.len();
+                for notice in &notices {
+                    stats.records += 1;
+                    let number = notice
+                        .get("publication-number")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default();
+                    if !number.is_empty() && !seen.insert(number.to_owned()) {
+                        continue;
                     }
-                    Err(Skip::NoDomain) => {
-                        stats.skipped_no_domain += 1;
-                        debug!(number, "ted notice skipped, no buyer domain");
-                    }
-                    Err(Skip::Malformed) => {
-                        stats.skipped_malformed += 1;
-                        debug!(number, "ted notice skipped, malformed record");
+                    match parse_notice(notice) {
+                        Ok(candidate) => {
+                            stats.candidates += 1;
+                            candidates.push(candidate);
+                        }
+                        Err(Skip::NoDomain) => {
+                            stats.skipped_no_domain += 1;
+                            debug!(number, "ted notice skipped, no buyer domain");
+                        }
+                        Err(Skip::Malformed) => {
+                            stats.skipped_malformed += 1;
+                            debug!(number, "ted notice skipped, malformed record");
+                        }
                     }
                 }
-            }
-            let reached = page.saturating_mul(PAGE_SIZE);
-            if fetched < PAGE_SIZE || u64::try_from(reached).unwrap_or(u64::MAX) >= total {
-                break;
+                let reached = page.saturating_mul(PAGE_SIZE);
+                if fetched < PAGE_SIZE || u64::try_from(reached).unwrap_or(u64::MAX) >= total {
+                    break;
+                }
             }
         }
         info!(

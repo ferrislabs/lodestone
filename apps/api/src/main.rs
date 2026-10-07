@@ -20,7 +20,7 @@ use dotenvy::dotenv;
 use fetch::{FetchSettings, PoliteFetcher};
 use handlers::state;
 use lodestone_core::{
-    RetryPolicy,
+    BOAMP, CERTIFICATE_TRANSPARENCY, COMPANY_RESEARCH, DECP, RetryPolicy, TED,
     company::CompanyRunSettings,
     contacts::ContactRunSettings,
     infrastructure::{
@@ -43,6 +43,7 @@ use sources::{
     ct::{CtSettings, CtSource},
     decp::{DecpSettings, DecpSource},
     dns_cname::{DnsCnameSettings, DnsCnameSource},
+    endpoint::Endpoint,
     france_travail::{FranceTravailSettings, FranceTravailSource},
     http_probe::{HttpProbeSettings, HttpProbeSource, ProbeScheme},
     role_guess::RoleGuessFinder,
@@ -101,7 +102,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let boamp = BoampSource::new(
         Arc::new(PoliteFetcher::new(boamp_fetch)?),
         BoampSettings {
-            base_url: args.boamp.base_url.clone(),
+            base_url: Endpoint::catalog(
+                app_state.usecase.clone(),
+                BOAMP,
+                "base_url",
+                args.boamp.base_url.clone(),
+            ),
             lookback_days: args.boamp.lookback_days.get(),
             max_pages: args.boamp.max_pages.get(),
         },
@@ -114,7 +120,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let ted = TedSource::new(
         Arc::new(PoliteFetcher::new(ted_fetch)?),
         TedSettings {
-            base_url: args.ted.base_url.clone(),
+            base_url: Endpoint::catalog(
+                app_state.usecase.clone(),
+                TED,
+                "base_url",
+                args.ted.base_url.clone(),
+            ),
             lookback_days: args.ted.lookback_days.get(),
             max_pages: args.ted.max_pages.get(),
             buyer_countries: args.ted.buyer_countries.clone(),
@@ -157,9 +168,19 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let decp = DecpSource::new(
         Arc::new(PoliteFetcher::new(decp_fetch)?),
         DecpSettings {
-            dataset_api_url: args.decp.dataset_api_url.clone(),
+            dataset_api_url: Endpoint::catalog(
+                app_state.usecase.clone(),
+                DECP,
+                "dataset_api_url",
+                args.decp.dataset_api_url.clone(),
+            ),
             annuaire_url: args.decp.annuaire_url.clone(),
-            entreprises_url: args.decp.entreprises_url.clone(),
+            entreprises_url: Endpoint::catalog(
+                app_state.usecase.clone(),
+                COMPANY_RESEARCH,
+                "entreprises_url",
+                args.decp.entreprises_url.clone(),
+            ),
             lookback_days: args.decp.lookback_days.get(),
             notified_within_days: args.decp.notified_within_days.get(),
             max_body_bytes: args.decp.max_body_bytes(),
@@ -175,7 +196,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
         Arc::new(PgCandidateHosts::new(pool.clone())),
         Arc::new(PgCtCursors::new(pool.clone())),
         CtSettings {
-            log_list_url: args.ct.log_list_url.clone(),
+            log_list_url: Endpoint::catalog(
+                app_state.usecase.clone(),
+                CERTIFICATE_TRANSPARENCY,
+                "log_list_url",
+                args.ct.log_list_url.clone(),
+            ),
             log_list_ttl: CT_LOG_LIST_TTL,
             max_logs: args.ct.max_logs,
             tiles_per_log: args.ct.tiles_per_run.get(),
@@ -197,7 +223,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let company_research = CompanyResearch::new(
         Arc::clone(&fetcher),
         CompanySettings {
-            entreprises_url: args.decp.entreprises_url.clone(),
+            entreprises_url: Endpoint::catalog(
+                app_state.usecase.clone(),
+                COMPANY_RESEARCH,
+                "entreprises_url",
+                args.decp.entreprises_url.clone(),
+            ),
             max_pages: args.company.max_pages.get(),
             max_rate_limit_wait: args.contacts.max_rate_limit_wait(),
             origin: None,

@@ -88,17 +88,21 @@ describe('SchemaForm', () => {
 			['agents'],
 			[
 				{
+					type: 'search',
 					id: 'a',
 					name: 'A',
 					enabled: true,
-					source: { kind: 'ats', keywords: ['x', 'y'], exclusions: [] },
+					providers: [],
+					keywords: ['x', 'y'],
+					exclusions: [],
 				},
 				{
+					type: 'signal',
 					id: 'b',
 					name: 'B',
 					enabled: true,
 					source: {
-						kind: 'dns_cname',
+						provider: 'dns_cname',
 						patterns: [{ provider: 'Okta', target_suffix: 'okta.com' }],
 					},
 				},
@@ -127,10 +131,13 @@ describe('SchemaForm', () => {
 			['agents'],
 			[
 				{
+					type: 'search',
 					id: 'a',
 					name: 'A',
 					enabled: true,
-					source: { kind: 'ats', keywords: ['a', 'b', ''], exclusions: [] },
+					providers: [],
+					keywords: ['a', 'b', ''],
+					exclusions: [],
 				},
 			],
 		)
@@ -139,7 +146,7 @@ describe('SchemaForm', () => {
 				initial={initial}
 				problems={[
 					{
-						path: 'agents[0].source.keywords[2]',
+						path: 'agents[0].keywords[2]',
 						message: 'Ne doit pas être vide',
 					},
 				]}
@@ -169,11 +176,12 @@ describe('SchemaForm', () => {
 			['agents'],
 			[
 				{
+					type: 'signal',
 					id: 'a',
 					name: 'A',
 					enabled: true,
 					source: {
-						kind: 'http_probe',
+						provider: 'http_probe',
 						fingerprints: [
 							{
 								id: 'f',
@@ -212,11 +220,12 @@ describe('SchemaForm', () => {
 			['agents'],
 			[
 				{
+					type: 'signal',
 					id: 'a',
 					name: 'A',
 					enabled: true,
 					source: {
-						kind: 'http_probe',
+						provider: 'http_probe',
 						fingerprints: [
 							{
 								id: 'a',

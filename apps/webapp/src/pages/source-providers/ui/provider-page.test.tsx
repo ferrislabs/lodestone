@@ -149,6 +149,53 @@ describe('ProviderPage', () => {
 		).toContain('text-destructive')
 	})
 
+	it('has no test button for a provider without authentication and keeps the last result read-only', () => {
+		renderPage(
+			detail(
+				{ last_test_message: 'API accessible.' },
+				{ auth_kind: 'none', status: 'ready' },
+			),
+		)
+		expect(
+			screen.queryByRole('button', { name: 'Tester la connexion' }),
+		).toBeNull()
+		expect(screen.getByText('API accessible.')).toBeTruthy()
+		expect(screen.getByText(/Dernier test :/)).toBeTruthy()
+		expect(
+			screen.queryByText(
+				'Testé automatiquement au démarrage et à chaque enregistrement.',
+			),
+		).toBeNull()
+	})
+
+	it('explains a failing automatic test of a provider without authentication', () => {
+		renderPage(
+			detail(
+				{ last_test_message: 'Le service a répondu 503.' },
+				{ auth_kind: 'none', status: 'failing' },
+			),
+		)
+		expect(
+			screen.queryByRole('button', { name: 'Tester la connexion' }),
+		).toBeNull()
+		expect(screen.getByText('Le service a répondu 503.')).toBeTruthy()
+		expect(
+			screen.getByText(
+				'Testé automatiquement au démarrage et à chaque enregistrement.',
+			),
+		).toBeTruthy()
+	})
+
+	it('keeps the test button for API key and client credentials providers', () => {
+		for (const auth of ['api_key', 'oauth2_client_credentials']) {
+			cleanup()
+			renderPage(detail({}, { auth_kind: auth }))
+			expect(
+				screen.getByRole('button', { name: 'Tester la connexion' }),
+			).toBeTruthy()
+		}
+	})
+
 	it('cannot test an unconfigured provider', () => {
 		renderPage(
 			detail(

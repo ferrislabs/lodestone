@@ -12,6 +12,7 @@ import {
 import { invalidateProfiles } from '#/pages/profiles/feature/invalidate'
 import { useDefinitionEditor } from '#/pages/profiles/feature/use-definition-editor'
 import { useProviderOptions } from '#/pages/profiles/feature/use-provider-options'
+import { useSourceCatalog } from '#/pages/profiles/feature/use-source-catalog'
 import { agentList } from '#/pages/profiles/lib/agents'
 import { PROFILE_HINTS } from '#/pages/profiles/lib/form-hints'
 import {
@@ -37,6 +38,7 @@ export function ProfileNewFeature() {
 	const tab = asEditorTab(search.tab)
 	const queryClient = useQueryClient()
 	const providers = useProviderOptions()
+	const catalog = useSourceCatalog()
 	const [name, setName] = useState('')
 	const [initial] = useState(() =>
 		withQualification(
@@ -118,6 +120,13 @@ export function ProfileNewFeature() {
 							value={editor.value}
 							problems={problems}
 							providers={providers}
+							catalog={catalog}
+							onOpenProvider={(key) =>
+								void navigate({
+									to: '/sources/providers/$key',
+									params: { key },
+								})
+							}
 							onChange={(next) => {
 								if (create.isError) create.reset()
 								setLocalProblems([])

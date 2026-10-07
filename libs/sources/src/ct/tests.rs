@@ -31,7 +31,7 @@ fn agent_of(profile: &ActiveProfile, kind: SourceName) -> Agent {
         .definition()
         .agents
         .iter()
-        .find(|agent| agent.source.source_name() == kind)
+        .find(|agent| agent.serves(kind))
         .cloned()
         .unwrap()
 }
@@ -208,7 +208,9 @@ impl CtCursors for FakeCursors {
 
 fn settings(tiles_per_log: u64, max_lag_tiles: u64) -> CtSettings {
     CtSettings {
-        log_list_url: Url::parse("https://lists.example.test/log_list.json").unwrap(),
+        log_list_url: Url::parse("https://lists.example.test/log_list.json")
+            .unwrap()
+            .into(),
         log_list_ttl: Duration::from_secs(3600),
         max_logs: 4,
         tiles_per_log,

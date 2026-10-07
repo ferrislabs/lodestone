@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest'
 
 import {
 	AGENT_KINDS,
+	agentKind,
+	agentProviders,
 	agentSummary,
+	agentTypeLabel,
 	dependencyNote,
 	newAgent,
 	renameAgent,
@@ -14,26 +17,40 @@ import { problemCounts } from '#/pages/profiles/lib/tabs'
 
 describe('agents', () => {
 	it('suffixes ids that are taken', () => {
-		const first = newAgent('ats', [])
-		const second = newAgent('ats', [first])
-		const third = newAgent('ats', [first, second])
-		expect([first.id, second.id, third.id]).toEqual(['ats', 'ats-2', 'ats-3'])
+		const first = newAgent('search', [])
+		const second = newAgent('search', [first])
+		const third = newAgent('search', [first, second])
+		expect([first.id, second.id, third.id]).toEqual([
+			'recherche',
+			'recherche-2',
+			'recherche-3',
+		])
 	})
 
 	it('builds a default agent for every kind', () => {
-		for (const kind of AGENT_KINDS) {
+		expect(newAgent('search', [], ['boamp', 'ted'])).toMatchObject({
+			type: 'search',
+			enabled: true,
+			providers: ['boamp', 'ted'],
+			keywords: [],
+			exclusions: [],
+			filters: { remote: 'any', countries: [], contracts: [] },
+			accept_min_keywords: 2,
+		})
+		for (const kind of AGENT_KINDS.filter((kind) => kind !== 'search')) {
 			expect(newAgent(kind, [])).toMatchObject({
+				type: 'signal',
 				enabled: true,
-				source: { kind },
+				source: { provider: kind },
 			})
 		}
 	})
 
 	it('derives the id from the name until it is edited', () => {
-		const agents = [newAgent('boamp', [])]
+		const agents = [newAgent('search', [])]
 		const renamed = renameAgent(agents, 0, 'Public Tenders é')
 		expect(renamed[0]).toMatchObject({ id: 'public-tenders-e' })
-		const edited = [{ ...newAgent('boamp', []), id: 'mine' }]
+		const edited = [{ ...newAgent('search', []), id: 'mine' }]
 		expect(renameAgent(edited, 0, 'Other')[0]).toMatchObject({ id: 'mine' })
 	})
 
@@ -45,21 +62,35 @@ describe('agents', () => {
 		expect(validateAgents({ agents: [] })).toEqual([
 			{ path: 'agents', message: 'Doit contenir au moins un agent' },
 		])
-		const a = { ...newAgent('ats', []), id: 'Bad Id' }
-		const b = newAgent('ats', [])
-		const c = newAgent('ats', [])
+		const a = { ...newAgent('search', [], ['ted']), id: 'Bad Id' }
+		const b = newAgent('search', [], ['ted'])
+		const c = newAgent('search', [], ['ted'])
 		const paths = validateAgents({ agents: [a, b, c] }).map(
 			(problem) => problem.path,
 		)
 		expect(paths).toEqual(['agents[0].id', 'agents[2].id'])
 	})
 
+	it('requires a provider on a search agent', () => {
+		const empty = newAgent('search', [])
+		expect(validateAgents({ agents: [empty] })).toEqual([
+			{
+				path: 'agents[0].providers',
+				message: 'Choisir au moins un fournisseur',
+			},
+		])
+	})
+
 	it('flags a missing dependency', () => {
 		const probe = newAgent('http_probe', [])
-		expect(dependencyNote('http_probe', [probe])?.warn).toBe(true)
+		expect(dependencyNote(probe, [probe])?.warn).toBe(true)
 		const ct = newAgent('certificate_transparency', [])
-		expect(dependencyNote('http_probe', [probe, ct])?.warn).toBe(false)
-		expect(dependencyNote('boamp', [probe])).toBeNull()
+		expect(dependencyNote(probe, [probe, ct])?.warn).toBe(false)
+		const boamp = newAgent('search', [], ['boamp'])
+		expect(dependencyNote(boamp, [probe])).toBeNull()
+		const careers = newAgent('search', [], ['ats'])
+		expect(dependencyNote(careers, [careers])?.warn).toBe(true)
+		expect(dependencyNote(careers, [careers, probe])?.warn).toBe(false)
 	})
 
 	it('refuses to save without agents', () => {
@@ -91,48 +122,75 @@ describe('agents', () => {
 })
 
 describe('agentSummary', () => {
-	it('summarizes keyword sources', () => {
+	it('summarizes search agents', () => {
 		expect(
 			agentSummary({
-				source: {
-					kind: 'ats',
-					keywords: ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'],
-					exclusions: ['x', 'y', 'z'],
-				},
+				type: 'search',
+				providers: ['ats'],
+				keywords: ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'],
+				exclusions: ['x', 'y', 'z'],
 			}),
 		).toBe('8 mots-clés · 3 exclusions')
 		expect(
 			agentSummary({
-				source: { kind: 'ted', keywords: ['a'], exclusions: [] },
+				type: 'search',
+				providers: ['ted'],
+				keywords: ['a'],
+				exclusions: [],
 			}),
 		).toBe('1 mot-clé')
 	})
 
-	it('summarizes infrastructure sources', () => {
+	it('summarizes signal agents', () => {
 		expect(
 			agentSummary({
-				source: { kind: 'certificate_transparency', labels: ['a', 'b'] },
+				type: 'signal',
+				source: { provider: 'certificate_transparency', labels: ['a', 'b'] },
 			}),
 		).toBe('2 labels')
 		expect(
-			agentSummary({ source: { kind: 'dns_cname', patterns: [{}, {}, {}] } }),
+			agentSummary({
+				type: 'signal',
+				source: { provider: 'dns_cname', patterns: [{}, {}, {}] },
+			}),
 		).toBe('3 motifs CNAME')
 		expect(
 			agentSummary({
+				type: 'signal',
 				source: {
-					kind: 'http_probe',
+					provider: 'http_probe',
 					fingerprints: [{}, {}, {}, {}, {}],
 					excluded_products: ['mine'],
 				},
 			}),
 		).toBe('5 empreintes · 1 produit exclu')
 		expect(
-			agentSummary({ source: { kind: 'http_probe', fingerprints: [{}] } }),
+			agentSummary({
+				type: 'signal',
+				source: { provider: 'http_probe', fingerprints: [{}] },
+			}),
 		).toBe('1 empreinte')
 	})
 
-	it('is empty for an unknown source', () => {
-		expect(agentSummary({ source: { kind: 'nope' } })).toBe('')
+	it('is empty for an unknown agent', () => {
+		expect(agentSummary({ type: 'signal', source: { provider: 'nope' } })).toBe(
+			'',
+		)
 		expect(agentSummary(undefined)).toBe('')
+	})
+})
+
+describe('agent types', () => {
+	it('names the type and the providers of an agent', () => {
+		const search = newAgent('search', [], ['boamp', 'decp'])
+		expect(agentKind(search)).toBe('search')
+		expect(agentTypeLabel(search)).toBe('Recherche')
+		expect(agentProviders(search)).toEqual(['boamp', 'decp'])
+		const probe = newAgent('http_probe', [])
+		expect(agentKind(probe)).toBe('http_probe')
+		expect(agentTypeLabel(probe)).toBe('Signal')
+		expect(agentProviders(probe)).toEqual(['http_probe'])
+		expect(agentKind({ type: 'search' })).toBe('search')
+		expect(agentKind({ source: { kind: 'ats' } })).toBeNull()
 	})
 })

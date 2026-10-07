@@ -33,7 +33,7 @@ export const PROFILE_HINTS: UiHints = {
 	variants: VARIANT_TITLES,
 	messages: FORM_MESSAGES,
 	layout: {
-		'agents.source': { row: ['keywords', 'exclusions'] },
+		agents: { row: ['keywords', 'exclusions'] },
 		'agents.source.fingerprints': {
 			row: ['id', 'path', 'product'],
 			collapsed: {
@@ -46,6 +46,6 @@ export const PROFILE_HINTS: UiHints = {
 		language: { fr: 'Français', en: 'English' },
 	},
 	choices: {
-		'agents.source.accept_min_keywords': { min: 1, max: 5 },
+		'agents.accept_min_keywords': { min: 1, max: 5 },
 	},
 }

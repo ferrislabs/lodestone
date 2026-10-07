@@ -51,7 +51,7 @@ import {
 
 function profile(): JsonObject {
 	return {
-		agents: [newAgent('ats', [])],
+		agents: [newAgent('search', [])],
 		qualification_agents: [newQualificationAgent('pertinence', new Set())],
 		aggregator: { provider_id: null, system_prompt: DEFAULT_AGGREGATOR_PROMPT },
 		verdict: { reliable_from: 70, discard_below: 30 },
@@ -324,7 +324,7 @@ describe('templates', () => {
 	it('keeps ids unique across sourcing and qualification agents', () => {
 		const value = profile()
 		const taken = allAgentIds(value)
-		expect(taken).toEqual(new Set(['ats', 'pertinence']))
+		expect(taken).toEqual(new Set(['recherche', 'pertinence']))
 		const second = newQualificationAgent('pertinence', taken)
 		expect(second.id).toBe('pertinence-2')
 		const clash = newQualificationAgent('vide', new Set(['nouvel-agent']))
@@ -352,7 +352,7 @@ describe('agent and question edits', () => {
 	it('does not reuse the id of a sourcing agent', () => {
 		const value = {
 			...profile(),
-			agents: [{ ...newAgent('ats', []), id: 'autre' }],
+			agents: [{ ...newAgent('search', []), id: 'autre' }],
 		}
 		const renamed = renameQualificationAgent(value, 0, 'Autre')
 		expect(qualificationList(renamed)[0]).toMatchObject({ id: 'autre-2' })
@@ -719,7 +719,7 @@ describe('validateQualification', () => {
 
 	it('requires ids unique across both agent lists', () => {
 		const value = withQualification(profile(), [
-			{ ...newQualificationAgent('pertinence', new Set()), id: 'ats' },
+			{ ...newQualificationAgent('pertinence', new Set()), id: 'recherche' },
 		])
 		expect(paths(value)).toEqual(['qualification_agents[0].id'])
 	})

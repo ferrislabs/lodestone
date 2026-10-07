@@ -4,7 +4,7 @@ use chrono::{TimeZone, Utc};
 use fetch::{FetchSettings, PoliteFetcher};
 use lodestone_core::{
     ActiveProfile, Profile, ProfileId, ProfileName, ProfileRevision, RevisionNumber, Route,
-    ValidatedProfile, route,
+    SourceName, ValidatedProfile, route,
 };
 use sources::boamp::{BoampSettings, BoampSource};
 use url::Url;
@@ -59,7 +59,7 @@ async fn iam_profile_against_the_real_boamp_api() {
     let source = BoampSource::new(
         fetcher,
         BoampSettings {
-            base_url: Url::parse(ENDPOINT).unwrap(),
+            base_url: Url::parse(ENDPOINT).unwrap().into(),
             lookback_days: 7,
             max_pages: 20,
         },
@@ -69,7 +69,7 @@ async fn iam_profile_against_the_real_boamp_api() {
         .revision
         .definition
         .definition()
-        .enabled_keyword_rules(lodestone_core::SourceName::Boamp)
+        .enabled_search_agents(SourceName::Boamp)
         .next()
         .cloned()
         .unwrap();

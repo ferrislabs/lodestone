@@ -151,7 +151,7 @@ async fn iam_profile_against_the_real_france_travail_api() {
         .revision
         .definition
         .definition()
-        .enabled_keyword_rules(SourceName::FranceTravail)
+        .enabled_search_agents(SourceName::FranceTravail)
         .next()
         .cloned()
         .unwrap();

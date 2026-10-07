@@ -11,6 +11,7 @@ import {
 import { AgentCard } from '#/pages/profiles/ui/agent-card'
 import { AgentPicker } from '#/pages/profiles/ui/agent-picker'
 import { AgentSheet } from '#/pages/profiles/ui/agent-sheet'
+import type { SearchActions } from '#/pages/profiles/ui/search-agent-fields'
 import type { SourceTrigger } from '#/pages/sources/feature/use-source-trigger'
 import type { ListenerSummary } from '#/pages/sources/lib/types'
 
@@ -21,6 +22,7 @@ interface AgentsEditorProps {
 	editing: number | null
 	confirmingRemove: number | null
 	picking: boolean
+	search: SearchActions
 	sourceTrigger?: SourceTrigger
 	listeners?: Readonly<Record<string, ListenerSummary>>
 	now?: number
@@ -44,6 +46,7 @@ export function AgentsEditor({
 	editing,
 	confirmingRemove,
 	picking,
+	search,
 	sourceTrigger,
 	listeners,
 	now,
@@ -83,20 +86,13 @@ export function AgentsEditor({
 							agent={agent ?? null}
 							index={index}
 							problems={problems}
-							note={dependencyNote(agentKind(agent), agents)}
+							note={dependencyNote(agent, agents)}
 							editing={editing === index}
 							confirmingRemove={confirmingRemove === index}
-							runPending={
-								kind !== null && sourceTrigger?.pending.has(kind) === true
-							}
-							runResult={
-								kind === null ? null : (sourceTrigger?.results[kind] ?? null)
-							}
-							onRunSource={
-								sourceTrigger && kind
-									? () => sourceTrigger.trigger(kind)
-									: undefined
-							}
+							catalog={search.catalog}
+							runPending={sourceTrigger?.pending}
+							runResults={sourceTrigger?.results}
+							onRunSource={sourceTrigger?.trigger}
 							listener={kind ? listeners?.[kind] : undefined}
 							now={now}
 							onEdit={() => onEdit(index)}
@@ -126,7 +122,8 @@ export function AgentsEditor({
 					agent={editingAgent}
 					index={editing}
 					problems={problems}
-					note={dependencyNote(agentKind(editingAgent), agents)}
+					note={dependencyNote(editingAgent, agents)}
+					search={search}
 					onClose={onCloseEdit}
 					onEnabled={(enabled) => onEnabled(editing, enabled)}
 					onName={(name) => onName(editing, name)}

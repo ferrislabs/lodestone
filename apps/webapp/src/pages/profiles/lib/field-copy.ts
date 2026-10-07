@@ -44,7 +44,8 @@ export const FIELD_COPY: Readonly<Record<string, FieldCopy>> = {
 	},
 	'agents[]': {
 		label: 'Agent',
-		description: 'Recherche une source avec ses propres réglages.',
+		description:
+			'Un agent de recherche interroge des fournisseurs du catalogue, un agent de signal lit un fournisseur technique.',
 	},
 	'agents[].id': {
 		label: 'Identifiant',
@@ -161,16 +162,41 @@ export const FIELD_COPY: Readonly<Record<string, FieldCopy>> = {
 		label: 'Produits exclus',
 		description: 'Produits à ignorer, par exemple les vôtres.',
 	},
-	'agents[].source.keywords': {
+	'agents[].filters': {
+		label: 'Filtres',
+		description:
+			"Critères communs à tous les fournisseurs de l'agent. Chaque fournisseur filtre ce que son API permet, le reste est appliqué après la collecte.",
+	},
+	'agents[].filters.remote': {
+		label: 'Télétravail',
+		description:
+			"Indifférent, full remote uniquement, ou remote et hybride. Ne concerne que les offres d'emploi.",
+	},
+	'agents[].filters.contracts': {
+		label: 'Contrat',
+		description:
+			'Types de contrat acceptés. Sans choix, ou avec « Tous les contrats », aucun filtre.',
+	},
+	'agents[].providers': {
+		label: 'Fournisseurs',
+		description:
+			'Fournisseurs du catalogue interrogés par cet agent. Au moins un est requis.',
+	},
+	'agents[].filters.countries': {
+		label: 'Pays',
+		description:
+			'Codes pays ISO à deux lettres en majuscules, par exemple FR. Vide : tous les pays.',
+	},
+	'agents[].keywords': {
 		label: 'Mots-clés',
 		description: 'Mots-clés à rechercher.',
 	},
-	'agents[].source.accept_min_keywords': {
+	'agents[].accept_min_keywords': {
 		label: 'Mots-clés distincts pour accepter sans LLM',
 		description:
 			"Nombre de mots-clés distincts requis pour accepter un candidat sans le LLM. En dessous, ou en présence d'une exclusion, il passe au tri par le LLM.",
 	},
-	'agents[].source.exclusions': {
+	'agents[].exclusions': {
 		label: 'Exclusions',
 		description:
 			"Mots-clés qui envoient un candidat au tri par le LLM lorsqu'ils sont présents.",
@@ -510,6 +536,8 @@ export const FIELD_COPY: Readonly<Record<string, FieldCopy>> = {
 }
 
 export const VARIANT_TITLES: Readonly<Record<string, string>> = {
+	search: 'Recherche',
+	signal: 'Signal',
 	certificate_transparency: 'Transparence des certificats',
 	dns_cname: 'DNS CNAME',
 	http_probe: 'Sonde HTTP',

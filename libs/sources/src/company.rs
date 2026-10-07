@@ -10,14 +10,14 @@ use serde::Deserialize;
 use tracing::debug;
 use url::Url;
 
-use crate::ats::jobs::html_to_text;
+use crate::{ats::jobs::html_to_text, endpoint::Endpoint};
 
 const FETCH_ATTEMPTS: usize = 3;
 const SIREN_LABEL_WINDOW: usize = 40;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct CompanySettings {
-    pub entreprises_url: Url,
+    pub entreprises_url: Endpoint,
     pub max_pages: usize,
     pub max_rate_limit_wait: Duration,
     pub origin: Option<Url>,
@@ -384,7 +384,7 @@ impl<F: Fetcher> CompanyResearch<F> {
     }
 
     async fn lookup(&self, siren: &Siren) -> Result<Option<OfficialData>, SourceError> {
-        let mut url = self.settings.entreprises_url.clone();
+        let mut url = self.settings.entreprises_url.resolve().await?;
         url.query_pairs_mut()
             .append_pair("q", siren.as_str())
             .append_pair("per_page", "1");

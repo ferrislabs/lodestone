@@ -13,13 +13,11 @@ interface AgentPickerProps {
 export function AgentPicker({ onPick, onCancel }: AgentPickerProps) {
 	return (
 		<section
-			aria-label="Choisir une source"
+			aria-label="Choisir un type d'agent"
 			className="flex flex-col gap-4 rounded-md border bg-muted/20 p-3"
 		>
 			<div className="flex items-center justify-between">
-				<p className="text-sm font-semibold">
-					Quelle source doit-il interroger ?
-				</p>
+				<p className="text-sm font-semibold">Quel type d'agent ajouter ?</p>
 				<Button type="button" variant="ghost" size="sm" onClick={onCancel}>
 					Annuler
 				</Button>

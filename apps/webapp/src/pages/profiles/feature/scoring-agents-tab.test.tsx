@@ -61,7 +61,7 @@ function base(): JsonObject {
 	return {
 		schema_version: 15,
 		identity: { offer: 'o', target_customer: 't' },
-		agents: [newAgent('ats', [])],
+		agents: [newAgent('search', [])],
 		qualification_agents: [
 			newQualificationAgent('pertinence', new Set(['ats'])),
 		],

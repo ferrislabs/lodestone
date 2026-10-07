@@ -7,13 +7,10 @@ use crate::{
     application::{LodestoneUseCase, sources::SourceRunError},
     domain::{
         job::ports::Clock,
-        profile::{
-            ActiveProfile,
-            definition::{Agent, KeywordSource},
-        },
+        profile::{ActiveProfile, definition::SearchAgent},
         run::{Run, RunId, RunOutcome, ports::RunRepository},
         source::{Observation, SourceError},
-        triage::{Candidate, Route, route},
+        triage::{Candidate, Route, passes_filters, route},
         values::{SourceName, UnitInterval},
     },
 };
@@ -38,6 +35,7 @@ pub struct TriageReport {
     pub accepted_by_rules: u64,
     pub accepted_ambiguous: u64,
     pub rejected_by_rules: u64,
+    pub rejected_by_filters: u64,
 }
 
 impl TriageReport {
@@ -64,7 +62,7 @@ fn candidate_text(candidate: &Candidate) -> String {
 
 fn observation(
     candidate: &Candidate,
-    agent: &Agent,
+    agent: &SearchAgent,
     matched: &[String],
     excluded: Option<&[String]>,
     route: &str,
@@ -92,14 +90,17 @@ fn observation(
 }
 
 fn decide(
-    agent: &Agent,
-    rules: &KeywordSource,
+    agent: &SearchAgent,
     candidates: &[Candidate],
     report: &mut TriageReport,
 ) -> Result<Vec<Observation>, CoreError> {
     let mut observations = Vec::new();
     for candidate in candidates {
-        match route(&candidate_text(candidate), rules) {
+        if !passes_filters(&agent.filters, candidate) {
+            report.rejected_by_filters += 1;
+            continue;
+        }
+        match route(&candidate_text(candidate), agent) {
             Route::Reject => report.rejected_by_rules += 1,
             Route::Accept { matched } => {
                 report.accepted_by_rules += 1;
@@ -148,25 +149,20 @@ impl LodestoneUseCase {
                     .revision
                     .definition
                     .definition()
-                    .enabled_keyword_rules(name)
+                    .enabled_search_agents(name)
                     .next()
                     .is_some()
             })
             .collect();
-        let targets: Vec<(&ActiveProfile, &Agent, &KeywordSource)> = profiles
+        let targets: Vec<(&ActiveProfile, &SearchAgent)> = profiles
             .iter()
             .flat_map(|active| {
                 active
                     .revision
                     .definition
                     .definition()
-                    .enabled_agents(name)
-                    .filter_map(move |agent| {
-                        agent
-                            .source
-                            .keyword_rules()
-                            .map(|rules| (active, agent, rules))
-                    })
+                    .enabled_search_agents(name)
+                    .map(move |agent| (active, agent))
             })
             .collect();
         if targets.is_empty() {
@@ -176,7 +172,7 @@ impl LodestoneUseCase {
         let started_at = clock.now();
         let runs: Vec<Run> = targets
             .iter()
-            .map(|(active, agent, _)| {
+            .map(|(active, agent)| {
                 Run::start(
                     RunId(generate_uuid_v7()),
                     active.profile.id,
@@ -210,8 +206,8 @@ impl LodestoneUseCase {
             ..TriageReport::default()
         };
         let mut first_error: Option<CoreError> = None;
-        for ((active, agent, rules), run) in targets.iter().zip(&runs) {
-            let observations = match decide(agent, rules, &candidates, &mut report) {
+        for ((active, agent), run) in targets.iter().zip(&runs) {
+            let observations = match decide(agent, &candidates, &mut report) {
                 Ok(observations) => observations,
                 Err(error) => {
                     let outcome = RunOutcome::Failed {

@@ -161,7 +161,7 @@ impl LodestoneUseCase {
                     RunId(generate_uuid_v7()),
                     active.profile.id,
                     name,
-                    Some(agent.id.clone()),
+                    Some(agent.id().clone()),
                     started_at,
                 )
             })
@@ -210,7 +210,7 @@ impl LodestoneUseCase {
                 .iter()
                 .flat_map(|item| source.evaluate(item, active, agent))
                 .map(|observation| Observation {
-                    agent: Some(agent.id.clone()),
+                    agent: Some(agent.id().clone()),
                     ..observation
                 })
                 .collect();

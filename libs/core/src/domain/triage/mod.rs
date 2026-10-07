@@ -2,9 +2,14 @@ use chrono::{DateTime, Utc};
 
 use crate::domain::{
     NormalizedDomain,
-    profile::definition::KeywordSource,
+    profile::definition::SearchAgent,
     values::{Provenance, SignalKind, SourceName},
 };
+
+pub mod countries;
+pub mod filters;
+
+pub use filters::passes as passes_filters;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Candidate {
@@ -64,7 +69,7 @@ fn matching(haystack: &str, terms: &[String]) -> Vec<String> {
     found
 }
 
-pub fn route(candidate_text: &str, rules: &KeywordSource) -> Route {
+pub fn route(candidate_text: &str, rules: &SearchAgent) -> Route {
     let haystack = normalize(candidate_text);
     let matched = matching(&haystack, &rules.keywords);
     if matched.is_empty() {
@@ -83,12 +88,22 @@ mod tests {
     use proptest::prelude::*;
 
     use super::*;
+    use crate::domain::profile::definition::AgentId;
 
-    fn rules(keywords: &[&str], exclusions: &[&str], min: u8) -> KeywordSource {
-        KeywordSource {
-            keywords: keywords.iter().map(|k| (*k).to_owned()).collect(),
-            exclusions: exclusions.iter().map(|k| (*k).to_owned()).collect(),
+    fn empty_agent() -> SearchAgent {
+        SearchAgent::new(AgentId::new("rules"), "Rules", &["boamp"], &[], &[])
+    }
+
+    fn rules(keywords: &[&str], exclusions: &[&str], min: u8) -> SearchAgent {
+        SearchAgent {
             accept_min_keywords: min,
+            ..SearchAgent::new(
+                AgentId::new("rules"),
+                "Rules",
+                &["boamp"],
+                keywords,
+                exclusions,
+            )
         }
     }
 
@@ -194,10 +209,11 @@ mod tests {
             exclusions in proptest::collection::vec("\\PC{0,12}", 0..5),
             min in 0u8..5,
         ) {
-            let rules = KeywordSource {
+            let rules = SearchAgent {
                 keywords,
                 exclusions,
                 accept_min_keywords: min,
+                ..empty_agent()
             };
             let _ = route(&text, &rules);
         }
@@ -210,10 +226,11 @@ mod tests {
             extra in "[a-c]{1,3}",
             min in 1u8..4,
         ) {
-            let base = KeywordSource {
+            let base = SearchAgent {
                 keywords,
                 exclusions: exclusions.clone(),
                 accept_min_keywords: min,
+                ..empty_agent()
             };
             let mut stricter = base.clone();
             stricter.exclusions.push(extra);

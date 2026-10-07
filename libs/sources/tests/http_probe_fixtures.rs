@@ -187,7 +187,6 @@ fn probe_paths(profile: &ActiveProfile) -> Vec<String> {
         .enabled_agents(SourceName::HttpProbe)
         .next()
         .unwrap()
-        .source
         .http_probe()
         .unwrap()
         .fingerprints

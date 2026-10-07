@@ -90,6 +90,7 @@ impl JobRouter {
             accepted_by_rules = report.accepted_by_rules,
             accepted_ambiguous = report.accepted_ambiguous,
             rejected_by_rules = report.rejected_by_rules,
+            rejected_by_filters = report.rejected_by_filters,
             "keyword sourcing finished"
         );
         Ok(report)
@@ -128,7 +129,7 @@ impl JobRouter {
                     .revision
                     .definition
                     .definition()
-                    .enabled_keyword_rules(SourceName::Decp)
+                    .enabled_search_agents(SourceName::Decp)
                 {
                     for award in partner_awards(rules, &contracts) {
                         if !awards.iter().any(|known| {

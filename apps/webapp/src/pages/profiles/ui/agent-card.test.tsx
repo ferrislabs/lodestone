@@ -15,7 +15,7 @@ function renderCard(
 	} = {},
 ) {
 	const { kind, ...rest } = overrides
-	const agent: JsonValue = newAgent(kind ?? 'boamp', [])
+	const agent: JsonValue = newAgent(kind ?? 'search', [], ['boamp'])
 	const props = {
 		agent,
 		index: 0,
@@ -50,29 +50,37 @@ describe('AgentCard run action', () => {
 		const onRunSource = vi.fn()
 		renderCard({ onRunSource })
 		fireEvent.click(screen.getByRole('button', { name: /Lancer la source/ }))
-		expect(onRunSource).toHaveBeenCalledTimes(1)
+		expect(onRunSource).toHaveBeenCalledWith('boamp')
 	})
 
 	it('disables the action while the request is pending', () => {
-		renderCard({ onRunSource: vi.fn(), runPending: true })
+		renderCard({ onRunSource: vi.fn(), runPending: new Set(['boamp']) })
 		const button = screen.getByRole('button', { name: /Lancer la source/ })
 		expect((button as HTMLButtonElement).disabled).toBe(true)
 	})
 
 	it('shows the scheduled and already running results inline', () => {
-		renderCard({ onRunSource: vi.fn(), runResult: { kind: 'scheduled' } })
+		renderCard({
+			onRunSource: vi.fn(),
+			runResults: { boamp: { kind: 'scheduled' } },
+		})
 		expect(screen.getByRole('status').textContent).toBe('Planifié')
 		cleanup()
-		renderCard({ onRunSource: vi.fn(), runResult: { kind: 'running' } })
+		renderCard({
+			onRunSource: vi.fn(),
+			runResults: { boamp: { kind: 'running' } },
+		})
 		expect(screen.getByRole('status').textContent).toBe('Déjà en cours')
 	})
 
 	it('shows an error result', () => {
 		renderCard({
 			onRunSource: vi.fn(),
-			runResult: {
-				kind: 'error',
-				message: "La source n'a pas de tâche planifiée",
+			runResults: {
+				boamp: {
+					kind: 'error',
+					message: "La source n'a pas de tâche planifiée",
+				},
 			},
 		})
 		expect(screen.getByRole('status').textContent).toBe(
@@ -137,7 +145,7 @@ describe('AgentCard continuous kinds', () => {
 	})
 
 	it('keeps the run button on scheduled kinds', () => {
-		renderCard({ kind: 'boamp', onRunSource: vi.fn(), now: NOW })
+		renderCard({ onRunSource: vi.fn(), now: NOW })
 		expect(
 			screen.getByRole('button', { name: /Lancer la source/ }),
 		).toBeTruthy()

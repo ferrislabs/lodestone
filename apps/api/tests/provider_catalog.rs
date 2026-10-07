@@ -19,16 +19,20 @@ use httpmock::{
     Mock, MockServer,
 };
 use lodestone_core::{
-    ActiveProfile, Job, JobId, JobKind, JobStatus, Profile, ProfileId, ProfileName,
-    ProfileRevision, ProviderStatus, RevisionNumber, ValidatedProfile,
+    ActiveProfile, BOAMP, CERTIFICATE_TRANSPARENCY, COMPANY_RESEARCH, DECP, Job, JobId, JobKind,
+    JobStatus, Profile, ProfileId, ProfileName, ProfileRevision, ProviderStatus, RevisionNumber,
+    TED, ValidatedProfile,
     infrastructure::contact_target::postgres::PgAtsTargets,
     jobs::{JobHandler, JobOutcome},
+    provider_descriptor,
+    source_providers::SaveProviderConfiguration,
 };
 use serde_json::{Map, Value, json};
 use sources::{
     ats::{AtsSettings, AtsSource},
     boamp::{BoampSettings, BoampSource},
     decp::{DecpSettings, DecpSource},
+    endpoint::Endpoint,
     france_travail::{FranceTravailSettings, FranceTravailSource},
     ted::{TedSettings, TedSource},
 };
@@ -336,14 +340,29 @@ fn polite(allow_private: bool) -> Arc<PoliteFetcher> {
 }
 
 fn iam_profile() -> ActiveProfile {
-    let value = json!({
+    profile_of(json!({
         "schema_version": 1,
         "identity": {"offer": "Managed IAM", "target_customer": "Companies"},
         "sources": {"france_travail": {"keywords": ["iam"]}},
         "scoring": {"factors": [{"signal": "saas_provider", "weight": 10.0}]},
         "contact_ranking": {"preferred_local_parts": ["security"]},
         "llm": {"qualification_threshold": 50.0, "relevance_criteria": "Uses an IAM"}
-    });
+    }))
+}
+
+fn search_profile(providers: &[&str]) -> ActiveProfile {
+    let mut value = iam_profile().revision.definition.to_json();
+    value["agents"] = json!([{
+        "type": "search",
+        "id": "marches",
+        "name": "Marchés",
+        "providers": providers,
+        "keywords": ["iam"],
+    }]);
+    profile_of(value)
+}
+
+fn profile_of(value: Value) -> ActiveProfile {
     let profile_id = ProfileId(Uuid::from_u128(1));
     let epoch = Utc.timestamp_opt(0, 0).unwrap();
     ActiveProfile {
@@ -427,7 +446,7 @@ fn router(harness: &Harness, pool: &PgPool, upstream: &MockServer) -> JobRouter 
             boamp: BoampSource::new(
                 Arc::clone(&fetcher),
                 BoampSettings {
-                    base_url: url("/boamp"),
+                    base_url: url("/boamp").into(),
                     lookback_days: 7,
                     max_pages: 1,
                 },
@@ -435,9 +454,9 @@ fn router(harness: &Harness, pool: &PgPool, upstream: &MockServer) -> JobRouter 
             decp: DecpSource::new(
                 Arc::clone(&fetcher),
                 DecpSettings {
-                    dataset_api_url: url("/decp"),
+                    dataset_api_url: url("/decp").into(),
                     annuaire_url: url("/annuaire"),
-                    entreprises_url: url("/company"),
+                    entreprises_url: url("/company").into(),
                     lookback_days: 7,
                     notified_within_days: 7,
                     max_body_bytes: 1024 * 1024,
@@ -447,7 +466,7 @@ fn router(harness: &Harness, pool: &PgPool, upstream: &MockServer) -> JobRouter 
             ted: TedSource::new(
                 Arc::clone(&fetcher),
                 TedSettings {
-                    base_url: url("/ted"),
+                    base_url: url("/ted").into(),
                     lookback_days: 7,
                     max_pages: 1,
                     buyer_countries: Vec::new(),
@@ -561,4 +580,257 @@ async fn france_travail_does_not_run_without_a_ready_catalog_configuration(pool:
     let outcome = router.handle(&source_job("france_travail")).await.unwrap();
 
     assert!(rescheduled(outcome) <= Utc::now() + Delta::minutes(6));
+}
+
+async fn reconfigure(harness: &Harness, key: &'static str, settings: Value) {
+    harness
+        .state
+        .usecase
+        .save_provider_configuration(
+            provider_descriptor(key).unwrap(),
+            SaveProviderConfiguration {
+                settings: object(settings),
+                secrets: BTreeMap::new(),
+            },
+            harness.state.providers.allows_http(),
+            harness.state.cipher.as_ref(),
+        )
+        .await
+        .unwrap();
+}
+
+fn catalog_endpoint(
+    harness: &Harness,
+    key: &'static str,
+    field: &'static str,
+    fallback: &str,
+) -> Endpoint {
+    Endpoint::catalog(
+        harness.state.usecase.clone(),
+        key,
+        field,
+        Url::parse(fallback).unwrap(),
+    )
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn boamp_reads_its_url_from_the_catalog_on_every_run(pool: PgPool) {
+    let harness = Harness::new(pool).await;
+    let server = MockServer::start_async().await;
+    public_upstreams(&server).await;
+    let mock_path = |path: &'static str| {
+        server.mock(move |when, then| {
+            when.method(GET).path(path);
+            then.status(200).json_body(json!({"results": []}));
+        })
+    };
+    let from_catalog = mock_path("/catalog-boamp");
+    let mut seed = public_seed(&server);
+    seed.settings.insert(
+        "boamp",
+        object(json!({"base_url": server.url("/catalog-boamp")})),
+    );
+    provision(&harness, &seed).await;
+    let from_env = mock_path("/env-boamp");
+    let moved = mock_path("/moved-boamp");
+    let source = BoampSource::new(
+        polite(true),
+        BoampSettings {
+            base_url: catalog_endpoint(&harness, BOAMP, "base_url", &server.url("/env-boamp")),
+            lookback_days: 7,
+            max_pages: 1,
+        },
+    );
+    let profiles = [search_profile(&["boamp"])];
+    let probed = from_catalog.hits();
+
+    source
+        .collect_with_stats(&profiles, Utc::now())
+        .await
+        .unwrap();
+
+    from_catalog.assert_hits(probed + 1);
+    from_env.assert_hits(0);
+    reconfigure(
+        &harness,
+        "boamp",
+        json!({"base_url": server.url("/moved-boamp")}),
+    )
+    .await;
+
+    source
+        .collect_with_stats(&profiles, Utc::now())
+        .await
+        .unwrap();
+
+    moved.assert_hits(1);
+    from_catalog.assert_hits(probed + 1);
+    from_env.assert_hits(0);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn ted_reads_its_url_from_the_catalog_on_every_run(pool: PgPool) {
+    let harness = Harness::new(pool).await;
+    let server = MockServer::start_async().await;
+    public_upstreams(&server).await;
+    provision(&harness, &public_seed(&server)).await;
+    let post = |path: &'static str| {
+        server.mock(move |when, then| {
+            when.method(POST).path(path);
+            then.status(200)
+                .json_body(json!({"notices": [], "totalNoticeCount": 0}));
+        })
+    };
+    let from_env = post("/env-ted");
+    let moved = post("/moved-ted");
+    let source = TedSource::new(
+        polite(true),
+        TedSettings {
+            base_url: catalog_endpoint(&harness, TED, "base_url", &server.url("/env-ted")),
+            lookback_days: 7,
+            max_pages: 1,
+            buyer_countries: Vec::new(),
+        },
+    );
+    let profile = search_profile(&["ted"]);
+    reconfigure(
+        &harness,
+        "ted",
+        json!({"base_url": server.url("/moved-ted")}),
+    )
+    .await;
+
+    source
+        .collect_with_stats(&[profile], Utc::now())
+        .await
+        .unwrap();
+
+    moved.assert_hits(1);
+    from_env.assert_hits(0);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn decp_reads_its_dataset_url_from_the_catalog_on_every_run(pool: PgPool) {
+    let harness = Harness::new(pool).await;
+    let server = MockServer::start_async().await;
+    public_upstreams(&server).await;
+    provision(&harness, &public_seed(&server)).await;
+    let listing = |path: &'static str| {
+        server.mock(move |when, then| {
+            when.method(GET).path(path);
+            then.status(200).json_body(json!({"resources": []}));
+        })
+    };
+    let from_env = listing("/env-decp");
+    let moved = listing("/moved-decp");
+    reconfigure(
+        &harness,
+        "decp",
+        json!({"dataset_api_url": server.url("/moved-decp")}),
+    )
+    .await;
+    let source = DecpSource::new(
+        polite(true),
+        DecpSettings {
+            dataset_api_url: catalog_endpoint(
+                &harness,
+                DECP,
+                "dataset_api_url",
+                &server.url("/env-decp"),
+            ),
+            annuaire_url: Url::parse(&server.url("/annuaire")).unwrap(),
+            entreprises_url: catalog_endpoint(
+                &harness,
+                COMPANY_RESEARCH,
+                "entreprises_url",
+                &server.url("/env-company"),
+            ),
+            lookback_days: 7,
+            notified_within_days: 7,
+            max_body_bytes: 1024 * 1024,
+            max_rate_limit_wait: Duration::from_secs(1),
+        },
+    );
+
+    let error = source
+        .collect_with_stats(&[search_profile(&["decp"])], Utc::now())
+        .await
+        .unwrap_err();
+
+    assert!(error.to_string().contains("no decp monthly file"));
+    moved.assert_hits(1);
+    from_env.assert_hits(0);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn catalog_endpoints_follow_the_settings_and_fall_back_to_the_seed(pool: PgPool) {
+    let harness = Harness::new(pool).await;
+    let server = MockServer::start_async().await;
+    public_upstreams(&server).await;
+    let fallback = server.url("/seed");
+    let log_list = catalog_endpoint(
+        &harness,
+        CERTIFICATE_TRANSPARENCY,
+        "log_list_url",
+        &fallback,
+    );
+    let company = catalog_endpoint(&harness, COMPANY_RESEARCH, "entreprises_url", &fallback);
+
+    assert_eq!(log_list.resolve().await.unwrap().as_str(), fallback);
+
+    provision(&harness, &public_seed(&server)).await;
+    assert_eq!(
+        log_list.resolve().await.unwrap().as_str(),
+        server.url("/ct")
+    );
+    assert_eq!(
+        company.resolve().await.unwrap().as_str(),
+        server.url("/company")
+    );
+
+    reconfigure(
+        &harness,
+        "certificate_transparency",
+        json!({"log_list_url": server.url("/ct-moved")}),
+    )
+    .await;
+    reconfigure(
+        &harness,
+        "company_research",
+        json!({"entreprises_url": server.url("/company-moved")}),
+    )
+    .await;
+    assert_eq!(
+        log_list.resolve().await.unwrap().as_str(),
+        server.url("/ct-moved")
+    );
+    assert_eq!(
+        company.resolve().await.unwrap().as_str(),
+        server.url("/company-moved")
+    );
+
+    reconfigure(&harness, "certificate_transparency", json!({})).await;
+    assert_eq!(
+        log_list.resolve().await.unwrap().as_str(),
+        "https://www.gstatic.com/ct/log_list/v3/log_list.json"
+    );
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_search_agent_over_a_not_ready_provider_is_skipped_and_the_ready_one_runs(pool: PgPool) {
+    let harness = Harness::new(pool.clone()).await;
+    let upstream = MockServer::start_async().await;
+    public_upstreams(&upstream).await;
+    provision(&harness, &public_seed(&upstream)).await;
+    let usecase = &harness.state.usecase;
+    assert!(usecase.is_provider_usable("boamp").await.unwrap());
+    assert!(!usecase.is_provider_usable("france_travail").await.unwrap());
+    let router = router(&harness, &pool, &upstream);
+    let before = Utc::now();
+
+    let blocked = router.handle(&source_job("france_travail")).await.unwrap();
+    let ready = router.handle(&source_job("boamp")).await.unwrap();
+
+    assert!(rescheduled(blocked) <= before + Delta::minutes(6));
+    assert!(rescheduled(ready) >= before + Delta::hours(5));
 }

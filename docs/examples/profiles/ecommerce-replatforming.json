@@ -1,5 +1,5 @@
 {
-  "schema_version": 15,
+  "schema_version": 16,
   "identity": {
     "offer": "Migration of Magento 1 and Magento 2 shops to a modern e-commerce platform, by a web agency",
     "target_customer": "Merchants and organizations running an outdated Magento storefront"
@@ -7,11 +7,12 @@
   "language": "fr",
   "agents": [
     {
+      "type": "signal",
       "id": "http-probe",
       "name": "HTTP probe",
       "enabled": true,
       "source": {
-        "kind": "http_probe",
+        "provider": "http_probe",
         "fingerprints": [
           {
             "id": "magento-version",
@@ -33,22 +34,20 @@
       }
     },
     {
+      "type": "search",
       "id": "boamp",
       "name": "BOAMP",
       "enabled": true,
-      "source": {
-        "kind": "boamp",
-        "keywords": ["site e-commerce", "Magento", "refonte de site marchand", "boutique en ligne", "plateforme de vente en ligne"]
-      }
+      "providers": ["boamp"],
+      "keywords": ["site e-commerce", "Magento", "refonte de site marchand", "boutique en ligne", "plateforme de vente en ligne"]
     },
     {
+      "type": "search",
       "id": "france-travail",
       "name": "France Travail",
       "enabled": true,
-      "source": {
-        "kind": "france_travail",
-        "keywords": ["Magento", "développeur Magento", "e-commerce", "refonte de site marchand", "migration Magento"]
-      }
+      "providers": ["france_travail"],
+      "keywords": ["Magento", "développeur Magento", "e-commerce", "refonte de site marchand", "migration Magento"]
     }
   ],
   "qualification_agents": [

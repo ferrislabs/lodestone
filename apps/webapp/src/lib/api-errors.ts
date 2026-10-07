@@ -20,6 +20,9 @@ export interface ParsedApiError {
 const EXACT_MESSAGES: Readonly<Record<string, string>> = {
 	'must not be empty': 'Ne doit pas être vide',
 	'at least one agent is required': 'Au moins un agent est requis',
+	'at least one provider is required': 'Au moins un fournisseur est requis',
+	'must be an ISO 3166-1 alpha-2 country code in uppercase':
+		'Doit être un code pays ISO à deux lettres en majuscules',
 	'at least one qualification agent is required':
 		'Au moins un agent de qualification est requis',
 	'must be lowercase letters, digits, hyphens and underscores, at most 63 characters':
@@ -196,6 +199,15 @@ const RULES: readonly Rule[] = [
 		/^unsupported schema version (\d+), expected 1, 2 or (\d+)$/,
 		(m) =>
 			`Version de schéma ${m[1]} non prise en charge, attendu : 1, 2 ou ${m[2]}`,
+	],
+	[
+		/^unknown source provider `(.*)`$/,
+		(m) => `Fournisseur inconnu : \`${m[1]}\``,
+	],
+	[
+		/^provider `(.*)` does not support keyword search$/,
+		(m) =>
+			`Le fournisseur \`${m[1]}\` ne prend pas en charge la recherche par mots-clés`,
 	],
 	[/^duplicate value `(.*)`$/, (m) => `Valeur en double : \`${m[1]}\``],
 	[

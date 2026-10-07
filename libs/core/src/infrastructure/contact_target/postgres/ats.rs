@@ -51,7 +51,13 @@ impl AtsTargets for PgAtsTargets {
                     jsonb_typeof(r.definition #> '{sources,ats}') = 'object'
                     OR EXISTS (
                         SELECT 1 FROM jsonb_array_elements(COALESCE(r.definition -> 'agents', '[]'::jsonb)) agent
-                        WHERE agent #>> '{source,kind}' = 'ats'
+                        WHERE (
+                            agent #>> '{source,kind}' = 'ats'
+                            OR (
+                                agent ->> 'type' = 'search'
+                                AND COALESCE(agent -> 'providers', '[]'::jsonb) @> '"ats"'::jsonb
+                            )
+                        )
                           AND COALESCE((agent ->> 'enabled')::boolean, true)
                     )
                 )

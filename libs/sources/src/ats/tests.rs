@@ -2,7 +2,11 @@ use std::{collections::HashMap, sync::Mutex};
 
 use chrono::TimeZone;
 use common::CoreError;
-use lodestone_core::{Route, definition::KeywordSource, route};
+use lodestone_core::{
+    Route,
+    definition::{AgentId, SearchAgent},
+    route,
+};
 
 use super::{
     discover::{Board, Vendor, careers_links, extract_boards},
@@ -38,15 +42,15 @@ fn json(raw: &str) -> Value {
     serde_json::from_str(raw).unwrap()
 }
 
-fn iam_rules() -> KeywordSource {
-    KeywordSource {
-        keywords: ["Keycloak", "IAM", "ingénieur IAM", "gestion des identités"]
-            .iter()
-            .map(|word| (*word).to_owned())
-            .collect(),
-        exclusions: Vec::new(),
+fn rules(keywords: &[&str]) -> SearchAgent {
+    SearchAgent {
         accept_min_keywords: 1,
+        ..SearchAgent::new(AgentId::new("jobs"), "Jobs", &["ats"], keywords, &[])
     }
+}
+
+fn iam_rules() -> SearchAgent {
+    rules(&["Keycloak", "IAM", "ingénieur IAM", "gestion des identités"])
 }
 
 #[test]
@@ -204,11 +208,7 @@ fn greenhouse_jobs_parse_with_stripped_html() {
     assert!(job.text.chars().count() <= 4000);
     assert!(job.observed_at < now());
     let content = format!("{}\n\n{}", job.title, job.text);
-    let rules = KeywordSource {
-        keywords: vec!["identity and access management".to_owned()],
-        exclusions: Vec::new(),
-        accept_min_keywords: 1,
-    };
+    let rules = rules(&["identity and access management"]);
     assert!(matches!(route(&content, &rules), Route::Accept { .. }));
     assert_eq!(route(&content, &iam_rules()), Route::Reject);
 }

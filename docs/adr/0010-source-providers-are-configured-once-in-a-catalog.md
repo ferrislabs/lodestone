@@ -47,3 +47,7 @@ Agents use configured providers. Issue 190 delivered the machinery with two prov
 - The OAuth callback is reachable without a bearer token. Its protection is the unguessable single-use state with a short expiry; it exposes no data and always answers with a redirect.
 - Token caches are per process: with several API replicas each fetches its own client credentials token, and a refresh token that the provider rotates is stored by whichever replica refreshed it.
 - Adding a provider requires a descriptor and a probe in code, which keeps field validation, secret handling and the UI form generic.
+
+## Update: agents over providers, URLs read at run time
+
+A `search` agent (schema 16) lists the catalog providers it searches and defines keywords, exclusions and filters once; each provider translates the filters it supports and the rest is applied after collection (`docs/profiles.md`, "Search agents"). Signal agents name their provider. The URL settings of the catalog are read at each run; the environment only seeds them.

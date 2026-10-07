@@ -182,7 +182,7 @@ where
         _profile: &ActiveProfile,
         agent: &Agent,
     ) -> Vec<Observation> {
-        let Some(config) = agent.source.dns_cname() else {
+        let Some(config) = agent.dns_cname() else {
             return Vec::new();
         };
         let Ok(kind) = SignalKind::parse(SIGNAL_KIND) else {

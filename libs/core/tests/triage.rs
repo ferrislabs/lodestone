@@ -200,9 +200,10 @@ async fn profiles_route_the_same_candidate_with_their_own_rules(pool: PgPool) {
         .as_array_mut()
         .unwrap()
         .iter_mut()
-        .find(|agent| agent["source"]["kind"] == "boamp")
+        .find(|agent| agent["id"] == "marches-publics")
         .unwrap();
-    boamp["source"] = json!({"kind": "boamp", "keywords": ["SSO"], "accept_min_keywords": 1});
+    boamp["keywords"] = json!(["SSO"]);
+    boamp["accept_min_keywords"] = json!(1);
     let lenient = activate(&pool, "lenient", lenient_definition).await;
     let source = FakeSource {
         candidates: vec![candidate("ville.fr", "Projet SSO pour la ville")],
@@ -221,13 +222,20 @@ async fn profiles_route_the_same_candidate_with_their_own_rules(pool: PgPool) {
     assert_eq!(runs(&pool).await.len(), 2);
 }
 
-fn boamp_agent(id: &str, enabled: bool, keywords: &[&str], min: u8) -> Value {
+fn search_agent(id: &str, enabled: bool, providers: &[&str], keywords: &[&str], min: u8) -> Value {
     json!({
+        "type": "search",
         "id": id,
         "name": id,
         "enabled": enabled,
-        "source": {"kind": "boamp", "keywords": keywords, "accept_min_keywords": min},
+        "providers": providers,
+        "keywords": keywords,
+        "accept_min_keywords": min,
     })
+}
+
+fn boamp_agent(id: &str, enabled: bool, keywords: &[&str], min: u8) -> Value {
+    search_agent(id, enabled, &["boamp"], keywords, min)
 }
 
 async fn boamp_profile(pool: &PgPool, agents: Vec<Value>) -> ProfileId {
@@ -307,4 +315,87 @@ async fn a_profile_without_an_enabled_agent_of_the_kind_gets_no_run(pool: PgPool
 
     assert_eq!(report.candidates, 0);
     assert!(runs(&pool).await.is_empty());
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn an_agent_over_several_providers_runs_once_per_provider_source(pool: PgPool) {
+    let profile = boamp_profile(
+        &pool,
+        vec![search_agent(
+            "marches",
+            true,
+            &["boamp", "ted", "decp"],
+            &["SSO"],
+            1,
+        )],
+    )
+    .await;
+    let source = FakeSource {
+        candidates: vec![candidate("ville.fr", "Projet SSO pour la ville")],
+    };
+
+    let report = run_triage(&pool, &source).await;
+
+    assert_eq!(report.accepted_by_rules, 1);
+    let recorded = signals(&pool, profile, "ville.fr").await;
+    assert_eq!(recorded.len(), 1);
+    assert_eq!(recorded[0].source, SourceName::Boamp);
+    assert_eq!(recorded[0].agent, Some(AgentId::new("marches")));
+    assert_eq!(agent_ids(&runs(&pool).await), ["marches"]);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn an_agent_not_attached_to_the_provider_is_not_run(pool: PgPool) {
+    boamp_profile(
+        &pool,
+        vec![search_agent(
+            "jobs",
+            true,
+            &["ats", "france_travail"],
+            &["SSO"],
+            1,
+        )],
+    )
+    .await;
+    let source = FakeSource {
+        candidates: vec![candidate("ville.fr", "Projet SSO pour la ville")],
+    };
+
+    let report = run_triage(&pool, &source).await;
+
+    assert_eq!(report.candidates, 0);
+    assert!(runs(&pool).await.is_empty());
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn filters_drop_candidates_per_agent_after_collection(pool: PgPool) {
+    let mut freelance = search_agent("freelance", true, &["boamp"], &["IAM"], 1);
+    freelance["filters"] = json!({"contracts": ["freelance"], "remote": "remote_or_hybrid"});
+    let open = search_agent("open", true, &["boamp"], &["IAM"], 1);
+    let profile = boamp_profile(&pool, vec![freelance, open]).await;
+    let mut offer = candidate("remote.fr", "Mission freelance IAM, full remote");
+    offer.kind = SignalKind::parse("job_offer").unwrap();
+    let mut onsite = candidate("onsite.fr", "Poste IAM en CDI, sur site");
+    onsite.kind = SignalKind::parse("job_offer").unwrap();
+    let source = FakeSource {
+        candidates: vec![offer, onsite],
+    };
+
+    let report = run_triage(&pool, &source).await;
+
+    assert_eq!(report.rejected_by_filters, 1);
+    assert_eq!(report.accepted_by_rules, 3);
+    let remote = signals(&pool, profile, "remote.fr").await;
+    let mut agents: Vec<_> = remote
+        .iter()
+        .filter_map(|signal| signal.agent.as_ref().map(|agent| agent.as_str().to_owned()))
+        .collect();
+    agents.sort();
+    assert_eq!(agents, ["freelance"]);
+    let onsite = signals(&pool, profile, "onsite.fr").await;
+    assert_eq!(onsite.len(), 1);
+    assert_eq!(onsite[0].agent, Some(AgentId::new("open")));
+    for run in runs(&pool).await {
+        assert_eq!(run.volume, 2);
+    }
 }

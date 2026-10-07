@@ -22,7 +22,7 @@ const DECP_DEFAULT_URL: &str = "https://www.data.gouv.fr/api/1/datasets/donnees-
 const TED_DEFAULT_URL: &str = "https://api.ted.europa.eu/v3/notices/search";
 const CT_DEFAULT_URL: &str = "https://www.gstatic.com/ct/log_list/v3/log_list.json";
 const COMPANY_DEFAULT_URL: &str = "https://recherche-entreprises.api.gouv.fr/search";
-const URL_HELP: &str = "Utilisée pour tester la connexion ; les collectes lisent la variable d'environnement correspondante.";
+const URL_HELP: &str = "Lue à chaque collecte et pour tester la connexion ; la variable d'environnement ne sert qu'à l'initialiser.";
 
 const BOAMP_FIELDS: &[FieldSpec] = &[FieldSpec::url("base_url", "URL de l'API", false)
     .with_default(BOAMP_DEFAULT_URL)

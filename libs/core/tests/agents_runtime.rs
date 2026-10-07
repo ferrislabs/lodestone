@@ -56,7 +56,7 @@ impl Source for AgentSource {
     }
 
     fn serves(&self, item: &Self::Item, agent: &Agent) -> bool {
-        agent.id.as_str() != "probe-b" || item.contains("beta")
+        agent.id().as_str() != "probe-b" || item.contains("beta")
     }
 
     fn evaluate(
@@ -80,11 +80,12 @@ impl Source for AgentSource {
 
 fn probe_agent(id: &str, enabled: bool) -> Value {
     json!({
+        "type": "signal",
         "id": id,
         "name": id,
         "enabled": enabled,
         "source": {
-            "kind": "http_probe",
+            "provider": "http_probe",
             "fingerprints": [{
                 "id": "kc",
                 "path": "/realms/master",

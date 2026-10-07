@@ -1,5 +1,5 @@
 {
-  "schema_version": 15,
+  "schema_version": 16,
   "identity": {
     "offer": "FerrisKey (open source IAM/CIAM in Rust) and Autharie (managed IAM), both by Ferrislabs",
     "target_customer": "Organizations running self-hosted Keycloak or a similar IAM, or paying for a SaaS IAM"
@@ -7,20 +7,22 @@
   "language": "fr",
   "agents": [
     {
+      "type": "signal",
       "id": "certificate-transparency",
       "name": "Certificate transparency",
       "enabled": true,
       "source": {
-        "kind": "certificate_transparency",
+        "provider": "certificate_transparency",
         "labels": ["auth", "sso", "login", "iam", "keycloak", "id", "accounts", "identity", "idp"]
       }
     },
     {
+      "type": "signal",
       "id": "http-probe",
       "name": "HTTP probe",
       "enabled": true,
       "source": {
-        "kind": "http_probe",
+        "provider": "http_probe",
         "fingerprints": [
           {
             "id": "keycloak-realm",
@@ -81,11 +83,12 @@
       }
     },
     {
+      "type": "signal",
       "id": "dns-cname",
       "name": "DNS CNAME",
       "enabled": true,
       "source": {
-        "kind": "dns_cname",
+        "provider": "dns_cname",
         "patterns": [
           { "provider": "auth0", "target_suffix": "auth0.com" },
           { "provider": "okta", "target_suffix": "okta.com" },
@@ -96,61 +99,37 @@
       }
     },
     {
-      "id": "boamp",
-      "name": "BOAMP",
+      "type": "search",
+      "id": "marches-publics",
+      "name": "Marchés publics",
       "enabled": true,
-      "source": {
-        "kind": "boamp",
-        "keywords": ["SSO", "IAM", "gestion des identités et des accès", "fédération d'identité", "annuaire", "MFA", "Keycloak", "authentification"],
-        "exclusions": ["badge", "contrôle d'accès physique", "annuaire téléphonique"]
-      }
+      "providers": ["boamp", "decp", "ted"],
+      "keywords": ["SSO", "IAM", "gestion des identités et des accès", "fédération d'identité", "annuaire", "MFA", "Keycloak", "authentification"],
+      "exclusions": ["badge", "contrôle d'accès physique", "annuaire téléphonique"]
     },
     {
-      "id": "decp",
-      "name": "DECP",
-      "enabled": true,
-      "source": {
-        "kind": "decp",
-        "keywords": ["SSO", "IAM", "gestion des identités et des accès", "fédération d'identité", "annuaire", "MFA", "Keycloak", "authentification"],
-        "exclusions": ["badge", "contrôle d'accès physique", "annuaire téléphonique"]
-      }
-    },
-    {
-      "id": "ted",
-      "name": "TED",
-      "enabled": true,
-      "source": {
-        "kind": "ted",
-        "keywords": ["SSO", "IAM", "gestion des identités et des accès", "fédération d'identité", "annuaire", "MFA", "Keycloak", "authentification"],
-        "exclusions": ["badge", "contrôle d'accès physique", "annuaire téléphonique"]
-      }
-    },
-    {
+      "type": "search",
       "id": "france-travail",
       "name": "France Travail",
       "enabled": true,
-      "source": {
-        "kind": "france_travail",
-        "keywords": ["Keycloak", "IAM", "ingénieur IAM", "migration Okta", "migration Auth0", "gestion des identités"]
-      }
+      "providers": ["france_travail"],
+      "keywords": ["Keycloak", "IAM", "ingénieur IAM", "migration Okta", "migration Auth0", "gestion des identités"]
     },
     {
+      "type": "search",
       "id": "ats-fr",
       "name": "Job offers (French)",
       "enabled": true,
-      "source": {
-        "kind": "ats",
-        "keywords": ["Keycloak", "IAM", "ingénieur IAM", "migration Okta", "migration Auth0", "gestion des identités"]
-      }
+      "providers": ["ats"],
+      "keywords": ["Keycloak", "IAM", "ingénieur IAM", "migration Okta", "migration Auth0", "gestion des identités"]
     },
     {
+      "type": "search",
       "id": "ats-en",
       "name": "Job offers (English)",
       "enabled": true,
-      "source": {
-        "kind": "ats",
-        "keywords": ["identity and access management", "IAM", "SSO", "single sign-on", "Keycloak", "Okta migration"]
-      }
+      "providers": ["ats"],
+      "keywords": ["identity and access management", "IAM", "SSO", "single sign-on", "Keycloak", "Okta migration"]
     }
   ],
   "qualification_agents": [

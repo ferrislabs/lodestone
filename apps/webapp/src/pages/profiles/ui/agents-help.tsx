@@ -7,19 +7,23 @@ interface AgentsHelpProps {
 
 const FAMILIES: readonly { title: string; sources: string }[] = [
 	{
-		title: 'Infrastructure',
+		title: 'Recherche',
+		sources:
+			'Mots-clés, exclusions et filtres définis une fois, traduits par chaque fournisseur du catalogue (BOAMP, DECP, TED, France Travail, pages carrières)',
+	},
+	{
+		title: 'Signal',
 		sources: 'Transparence des certificats, DNS CNAME, Sonde HTTP',
 	},
-	{ title: 'Marchés publics', sources: 'BOAMP, DECP, TED' },
-	{ title: "Offres d'emploi", sources: 'France Travail, ATS' },
 ]
 
 export function AgentsHelp({ collapsed, onToggle }: AgentsHelpProps) {
 	return (
 		<HelpPanel title="Agents" collapsed={collapsed} onToggle={onToggle}>
 			<p>
-				Un agent interroge une source avec ses propres réglages. Il est possible
-				d'avoir plusieurs agents du même type.
+				Un agent de recherche interroge un ou plusieurs fournisseurs du
+				catalogue avec les mêmes critères. Un agent de signal lit un fournisseur
+				technique avec ses propres réglages.
 			</p>
 			<dl className="flex flex-col gap-1.5">
 				{FAMILIES.map((family) => (
@@ -33,7 +37,7 @@ export function AgentsHelp({ collapsed, onToggle }: AgentsHelpProps) {
 				<p className="font-medium">Dépendances</p>
 				<ul className="flex list-disc flex-col gap-1 pl-4 text-xs">
 					<li>Sonde HTTP ← Transparence des certificats</li>
-					<li>ATS ← entreprises déjà détectées</li>
+					<li>Pages carrières ← entreprises déjà détectées</li>
 				</ul>
 			</div>
 			<p className="text-xs text-muted-foreground">

@@ -24,7 +24,7 @@ describe('prepareSave', () => {
 		const filled = {
 			schema_version: 14,
 			identity: { offer: 'o', target_customer: 't' },
-			agents: [newAgent('ats', [])],
+			agents: [newAgent('search', [], ['boamp'])],
 			qualification_agents: [newQualificationAgent('pertinence', new Set())],
 			aggregator: { provider_id: null, system_prompt: 'p' },
 			verdict: { reliable_from: 70, discard_below: 30 },
@@ -38,7 +38,7 @@ describe('prepareSave', () => {
 		const filled = {
 			schema_version: 14,
 			identity: { offer: 'o', target_customer: 't' },
-			agents: [newAgent('ats', [])],
+			agents: [newAgent('search', [], ['boamp'])],
 			qualification_agents: [newQualificationAgent('pertinence', new Set())],
 			scoring_agents: [
 				{ ...newScoringAgent(new Set(['ats'])), id: 'pertinence' },
