@@ -28,7 +28,6 @@ import {
 	qualificationList,
 	qualificationSummary,
 	questionsOf,
-	REFERENCE_SCORE_ERROR,
 	removeOption,
 	removeQuestion,
 	renameQualificationAgent,
@@ -566,7 +565,6 @@ describe('evidence settings', () => {
 			calibrationFloor: 5,
 			minEvidence: 50,
 			influence: 60,
-			referenceScore: 50,
 			weights: { volume: 1, diversity: 1, environment: 1, strength: 1 },
 			halfLives: DEFAULT_HALF_LIVES,
 		})
@@ -578,7 +576,6 @@ describe('evidence settings', () => {
 			verdict: { calibration_floor: 0.1, min_evidence: 0.7 },
 			evidence: {
 				influence: 0.25,
-				reference_score: 30,
 				weights: { volume: 3, diversity: 0, environment: 2, strength: 1 },
 				half_life_days: { job_offer: 30, default: 60 },
 			},
@@ -587,7 +584,6 @@ describe('evidence settings', () => {
 			calibrationFloor: 10,
 			minEvidence: 70,
 			influence: 25,
-			referenceScore: 30,
 			weights: { volume: 3, diversity: 0, environment: 2, strength: 1 },
 			halfLives: { ...DEFAULT_HALF_LIVES, job_offer: 30, default: 60 },
 		})
@@ -653,17 +649,15 @@ describe('evidence settings', () => {
 		).toEqual([])
 	})
 
-	it('rejects a floor above 20 %, an empty percentage and a small reference', () => {
+	it('rejects a floor above 20 % and an empty percentage', () => {
 		const settings = {
 			...evidenceSettingsOf({}),
 			calibrationFloor: 25,
 			minEvidence: null,
-			referenceScore: 0,
 		}
 		expect(evidenceProblems(settings)).toEqual([
 			{ path: 'verdict.calibration_floor', message: FLOOR_ERROR },
 			{ path: 'verdict.min_evidence', message: PERCENT_ERROR },
-			{ path: 'evidence.reference_score', message: REFERENCE_SCORE_ERROR },
 		])
 	})
 

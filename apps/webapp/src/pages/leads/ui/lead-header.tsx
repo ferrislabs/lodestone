@@ -1,5 +1,5 @@
 import { Button } from '#/components/ui/button'
-import { formatScore } from '#/pages/leads/lib/format'
+import { formatSignalStrength } from '#/pages/leads/lib/format'
 import { leadStatusLabel } from '#/pages/leads/lib/labels'
 import type { Company, Lead, LeadStatus } from '#/pages/leads/lib/types'
 import { CompanyLine } from './company-line'
@@ -39,8 +39,8 @@ export function LeadHeader({
 					<dd>{lead.profile.name}</dd>
 				</div>
 				<div>
-					<dt className="text-muted-foreground">Score des signaux</dt>
-					<dd className="font-mono">{formatScore(lead.score)}</dd>
+					<dt className="text-muted-foreground">Force des signaux</dt>
+					<dd className="font-mono">{formatSignalStrength(lead.score)}</dd>
 				</div>
 				<LeadConfidence lead={lead} />
 				<CompanyLine

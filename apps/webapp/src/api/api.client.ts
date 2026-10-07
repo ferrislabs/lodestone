@@ -336,13 +336,6 @@ export namespace Schemas {
     status: string;
     summary?: (string | null) | undefined;
   };
-  export type ScoreContributionDto = {
-    contribution: number;
-    measure: number;
-    signal: string;
-    value?: (string | null) | undefined;
-    weight: number;
-  };
   export type ScoringCalibrationDto = { n: number; probabilities: VerdictProbabilitiesDto };
   export type ScoringVerdictDto = {
     choice: VerdictDto;
@@ -394,7 +387,6 @@ export namespace Schemas {
       facts: LeadFactsDto;
       lead: LeadDto;
       qualification_results: Array<QualificationResultDto>;
-      score_breakdown: Array<ScoreContributionDto>;
       scoring_results: Array<ScoringResultDto>;
       signals: Array<SignalDto>;
       summary_state?: (null | SummaryStateDto) | undefined;
@@ -728,7 +720,6 @@ export namespace Schemas {
     facts: LeadFactsDto;
     lead: LeadDto;
     qualification_results: Array<QualificationResultDto>;
-    score_breakdown: Array<ScoreContributionDto>;
     scoring_results: Array<ScoringResultDto>;
     signals: Array<SignalDto>;
     summary_state?: (null | SummaryStateDto) | undefined;
@@ -750,7 +741,6 @@ export namespace Schemas {
     lead_id: string;
     profile: ProfileRecord;
     score: number;
-    score_breakdown: Array<Record<string, unknown>>;
     signals: Array<SignalRecord>;
     status: string;
   };

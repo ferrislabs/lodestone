@@ -49,7 +49,6 @@ const DETAIL: LeadDetailData = {
 		source_count: 0,
 		sources: [],
 	},
-	score_breakdown: [],
 	signals: [],
 	contacts: [],
 }

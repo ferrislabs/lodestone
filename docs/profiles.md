@@ -8,7 +8,7 @@ Profiles live in Postgres. Each edit creates a new revision; earlier revisions a
 
 ## Schema
 
-The JSON Schema is `docs/schemas/profile.v12.schema.json`. It is generated from `ProfileDefinition` and must not be edited by hand. Regenerate it with:
+The JSON Schema is `docs/schemas/profile.v13.schema.json`. It is generated from `ProfileDefinition` and must not be edited by hand. Regenerate it with:
 
 ```
 UPDATE_SCHEMA=1 cargo test -p lodestone-core --test profile_examples
@@ -23,7 +23,7 @@ Without `UPDATE_SCHEMA=1` the same test fails if the committed file is stale. Th
 
 ## Sections
 
-- `schema_version`: must be 11. See [Older versions](#older-versions).
+- `schema_version`: must be 13. See [Older versions](#older-versions).
 - `identity`: the offer and the target customer, in free text.
 - `agents`: the detection agents; at least one is required. An agent searches one source with its own settings (see ADR 0005). Several agents of the same kind are allowed.
   - `id`: slug matching `^[a-z0-9][a-z0-9-]{0,62}$`, unique in the profile.
@@ -63,7 +63,7 @@ Without `UPDATE_SCHEMA=1` the same test fails if the committed file is stale. Th
 - `aggregator`: `provider_id` (or `null` for the synthesis default) and a `system_prompt` (not empty, at most 8000 characters). Once every enabled qualification agent has a result for a lead, it writes the lead summary and a message draft (see "Qualification and summary").
 - `escalation`: `provider` (id of a declared LLM provider, `null` by default which disables escalation), `band_low` (0 to 100, default 40) and `band_high` (0 to 100, default 70) with `band_high > band_low` (see "Escalation"). The whole section and each field are optional.
 - `verdict`: `reliable_from` (0 to 100, default 70) and `discard_below` (0 to 100, default 30), with `reliable_from > discard_below`. Percentages of the lead confidence: reliable from the first (and only when the two conditions below hold), to check between the two, discarded below the second. `calibration_floor` (0 to 0.2, default 0.05, 0 disables) clamps every answer probability to `[floor, 1 - floor]` before scoring, then renormalises. `min_evidence` (0 to 1, default 0.5) is the evidence strength a lead needs to be reliable.
-- `evidence`: how the strength of the evidence weighs on the confidence (ADR 0007, "Evidence and calibration"). `influence` (0 to 1, default 0.6), `reference_score` (at least 1, default 50) and `weights` (`volume`, `diversity`, `environment`, `strength`, integers from 0 to 10, default 1, at least one above 0). `half_life_days` maps a signal kind to its half-life in days (see "Evidence indicators"). The whole section and each field are optional.
+- `evidence`: how the strength of the evidence weighs on the confidence (ADR 0007, "Evidence and calibration"). `influence` (0 to 1, default 0.6) and `weights` (`volume`, `diversity`, `environment`, `strength`, integers from 0 to 10, default 1, at least one above 0). `half_life_days` maps a signal kind to its half-life in days (see "Evidence indicators"). The whole section and each field are optional.
 
 ### Scoring agents
 
@@ -153,12 +153,12 @@ The strength of the evidence is computed in code (ADR 0007, "Evidence and calibr
 - `volume = 1 - exp(-decayed / 3)`.
 - `diversity = min(1, (sources + 0.5 x (kinds - 1)) / 2)` with `sources` the distinct sources and `kinds` the distinct signal kinds (at least one kind counts as zero extra).
 - `environment`: share of production hosts among the hosts carrying signals, 0.5 when none.
-- `strength = clamp(signal_score x (decayed / n) / reference_score, 0, 1)`, the signal score of the lead weighted by the mean freshness of its independent signals (1 when there is no signal).
+- `strength` = the mean of the three highest `s_i x decay_i` among the independent signals, with `s_i` the strength (0 to 1) the source gave the signal (fewer signals: the mean of those there are; 0 when there is none). It needs no profile setting. The strength of an independent signal is the one of its freshest observation, and signals of the siblings count as for the other components.
 - `score = weighted mean of the four components` with `evidence.weights`.
 
 **Half-lives.** `evidence.half_life_days` is an object of integers from 1 to 3650, keyed by signal kind (lowercase snake case) plus `default`. Defaults: `job_offer` 90, `public_tender` 180, `awarded_contract` 365, `saas_provider` 365, `product_detected` 365, `debt_marker` 365, `contact` 365, `role_contact_found` 365, `default` 180. A kind absent from the object falls back to its default above, then to `default`, then to 180. The editor shows one field per kind in "Demi-vie des signaux (jours)".
 
-**API.** The lead page shows `facts.independent_signals`, `facts.sibling_domains` and, in `evidence`, `independent_signals`, `decayed_signals`, `source_count` and `kind_count`. The lead list accepts `group_by=company`: one row per company and profile, the lead with the best confidence (then score) standing for the others, which are returned in `grouped_leads`; the other filters apply before grouping, and `total` counts rows. Default is `none`. The webapp groups by default ("Regrouper par entreprise") and shows a "+N domaines" badge that expands the sibling domains.
+**API.** The lead page shows `facts.independent_signals`, `facts.sibling_domains` and, in `evidence`, `independent_signals`, `decayed_signals`, `source_count` and `kind_count`. The lead list accepts `group_by=company`: one row per company and profile, the lead with the best confidence (then signal strength) standing for the others, which are returned in `grouped_leads`; the other filters apply before grouping, and `total` counts rows. Default is `none`. The webapp groups by default ("Regrouper par entreprise") and shows a "+N domaines" badge that expands the sibling domains.
 
 **Rescoring.** `SCORING_VERSION` 3 (v10 counting rules) rescored every stored lead without calling a model; version 4 (v11) refreshes the indicators of every stored lead the same way. A lead is rescored whenever the number of signals it aggregates changes, including signals of a sibling. Decay is evaluated at each scoring; it does not run on its own.
 
@@ -214,10 +214,9 @@ A qualification agent answers, and only answers, with one object per question:
 
 `contract_schema(&QualificationAgent)` (`libs/core/src/domain/profile/contract.rs`) builds the JSON Schema of this contract from the agent's questions: every question required, `choice` limited to the option values, `confidence` and every probability a number from 0 to 1, `probabilities` holding exactly the option keys, no additional property. Contract v3 adds `evidence`, a required string of at most 300 characters: the sentence of the documents that justifies the choice, copied verbatim. It may be empty only when the choice is the unknown option. The editor shows it read-only as "Aperçu du JSON contractuel".
 
-- `scoring`: weighted factors, each made of a signal, an optional value and a weight. The weight is an integer from 1 to 10, validated by the server (`scoring.factors[i].weight`). A lead's score is the sum, over factors, of `weight × measure`. For a normal factor the measure is the highest strength (0 to 1) among the lead's signals of that kind, and of that value when one is set; several matching signals count once. The reserved factor `distinct_signals` measures the number of distinct signal kinds on the lead. The score and its per-factor breakdown are recomputed whenever the lead's signals change, and stored on the lead. Scores stay in points.
-
-  The maximum possible score is the sum, over factors, of `weight × cap`. The cap is 1 for a normal factor; for `distinct_signals` it is the number of distinct signal kinds among the profile's other factors (values are ignored: two `product_detected` factors count one kind). `ProfileDefinition::max_score()` computes it. Example: the IAM example has weights 10, 5, 3, 8, 7, 2 on six kinds plus `distinct_signals` at 2, so its maximum is 35 + 2 × 6 = 47.- `contact_ranking`: preferred email local parts, most preferred first.
-- `llm`: the qualification threshold, the relevance criteria and the answer language given to the model. `language` (`llm.language`, `fr` or `en`, default `fr` when absent) is the language of every free-text field the LLM writes: the aggregator's summary, verdict narrative, approach angle, draft subject and body. The aggregator's system prompt states it (`Write every free-text field (...) in French. Evidence quotes stay in the language of the document they come from.`), so evidence quotes stay in the source language and the verbatim check is unchanged. Changing the language changes the system prompt, hence the LLM cache key: answers are regenerated. Profiles without the field answer in French without a new revision. `qualification_threshold` is a percentage, an integer from 0 to 100 (`llm.qualification_threshold`), of the maximum possible score. It is kept for older profiles and no longer gates anything: since ADR 0007 every lead with a signal goes through the qualification agents, whatever its score.
+- There is no `scoring` section since schema 13 and no `evidence.reference_score`: the strength of the signals comes only from the sources (see "Signal strength"). A document that still carries them is rejected, an older one is upgraded and they are discarded.
+- `contact_ranking`: preferred email local parts, most preferred first.
+- `llm`: the qualification threshold, the relevance criteria and the answer language given to the model. `language` (`llm.language`, `fr` or `en`, default `fr` when absent) is the language of every free-text field the LLM writes: the aggregator's summary, verdict narrative, approach angle, draft subject and body. The aggregator's system prompt states it (`Write every free-text field (...) in French. Evidence quotes stay in the language of the document they come from.`), so evidence quotes stay in the source language and the verbatim check is unchanged. Changing the language changes the system prompt, hence the LLM cache key: answers are regenerated. Profiles without the field answer in French without a new revision. `qualification_threshold` is a percentage, an integer from 0 to 100 (`llm.qualification_threshold`). It is kept for older profiles and no longer gates anything: since ADR 0007 every lead with a signal goes through the qualification agents, whatever its score.
 
 ## Qualification and summary
 
@@ -234,15 +233,16 @@ Qualification runs in the `qualification` listener (ADR 0006, ADR 0007), not in 
 
 The assessment is stored in `assessments` (`prompt_version` is `aggregator@` plus a hash of the system prompt, `verdict_narrative`, `evidence_verified`).
 
-The leads list (`GET /api/v1/profiles/{profile_id}/leads`) accepts `verdict` (comma-separated `fiable`, `a_verifier`, `ecarte`, `en_attente`), `min_confidence` and `sort` (`confidence_desc`, the default, `confidence_asc`, `score_desc`, ...); each lead carries `confidence`, `verdict`, `opinion` (agents' opinion in percent), `evidence` (strength in percent with its four components, signal count, signal score, `only_non_production`), `verdict_reason` (`single_angle`, `weak_evidence` or `non_production` when a confident lead was capped at `a_verifier`) and the latest `summary`. The Leads screen hides `ecarte` by default and sorts by confidence. The queue (`GET /api/v1/drafts`) is sorted by lead confidence and filtered by the same `verdict` parameter; the Brouillons screen also hides `ecarte` by default.
+The leads list (`GET /api/v1/profiles/{profile_id}/leads`) accepts `verdict` (comma-separated `fiable`, `a_verifier`, `ecarte`, `en_attente`), `min_confidence` and `sort` (`confidence_desc`, the default, `confidence_asc`, `score_desc`, `score_asc` (signal strength), ...); each lead carries `confidence`, `verdict`, `opinion` (agents' opinion in percent), `evidence` (strength in percent with its four components, signal count, signal strength in `signal_score`, `only_non_production`), `verdict_reason` (`single_angle`, `weak_evidence` or `non_production` when a confident lead was capped at `a_verifier`) and the latest `summary`. The Leads screen hides `ecarte` by default and sorts by confidence. The queue (`GET /api/v1/drafts`) is sorted by lead confidence and filtered by the same `verdict` parameter; the Brouillons screen also hides `ecarte` by default.
 
-## How scoring works
+## Signal strength
 
-Each factor looks for one signal kind, optionally one value. Its contribution is `weight × strength` of the strongest matching signal on the lead (strength from 0 to 1, set by the source). No matching signal gives 0. The `distinct_signals` factor contributes `weight × number of distinct signal kinds` on the lead, which rewards leads seen by several agents.
+Each signal carries a `strength` from 0 to 1 set by its source. The strength of the signals of a lead is computed in code, with no profile setting:
 
-- Lead score = sum of the contributions, in points.
-- Max score = sum of the weights, with `distinct_signals` counted as `weight × number of distinct signal kinds among the other factors`.
-- The score is a secondary indicator. Qualification no longer depends on it: every lead with a signal is evaluated by the qualification agents, and its confidence and verdict come from their answers (see "Qualification and summary").
+- For every independent signal of the lead and of its siblings of the same profile, `s_i x decay_i`, the strength set by the source times the age decay of its kind (see "Evidence indicators").
+- Strength = the mean of the three highest of these values (fewer when the lead has fewer signals, 0 when it has none), from 0 to 1. It is the `strength` component of the evidence.
+- `leads.score` = round(strength x 100, 1): the "Force des signaux", from 0 to 100. It is recomputed whenever a source or the contact finder records signals, and by the rescoring loop, because decay changes it with the days. The leads list `min_score` filter, the `score_desc` and `score_asc` sorts, the `score` field of the exports and of the webhook, and the lead page all use it. It orders the leads found by the sourcing; it does not decide the verdict, the scoring agents do (`llm_score`).
+- Since schema 13 a lead no longer carries a per-factor breakdown (`score_breakdown` is gone from the API, the exports and the webhook payload).
 
 Strengths set by the sources:
 
@@ -256,7 +256,7 @@ Strengths set by the sources:
 | Address extracted by the LLM | `role_contact_found` | 0.5 |
 | Address guessed from a role | `role_contact_found` | 0.2 |
 
-Example with the IAM weights: a lead with a Keycloak fingerprint (strength 0.9) and a job offer accepted by the rules (strength 0.7) scores `10 × 0.9 + 8 × 0.7 = 14.6` points.
+Example: a lead with a Keycloak fingerprint (strength 0.9) and a job offer accepted by the rules (strength 0.7), both observed today, has a strength of `(0.9 + 0.7) / 2 = 0.8`, a score of 80. A third signal of 0.3 brings it to `(0.9 + 0.7 + 0.3) / 3 = 0.63`.
 
 ## Agent kinds
 
@@ -355,3 +355,7 @@ The profile gains `scoring_agents` with one agent, `score-global` (see `scoring_
 ### Version 11 to 12
 
 The profile gains `calibration` with `learned` `true`. Nothing is learned until 50 leads are labelled with 10 of each class, so a stored profile behaves as before until then; the first run of the `quality.calibrate` job happens at startup.
+
+### Version 12 to 13
+
+The `scoring` section (weighted factors) and `evidence.reference_score` are removed: the scoring agents decide, and the strength of the signals comes only from the sources (see "Signal strength"). The upgrade discards both. `leads.score` changes meaning, from a weighted sum in points to the signal strength from 0 to 100, and every stored lead gets its new value when it is next rescored; the per-factor breakdown column is dropped. `llm.qualification_threshold` is kept as is.

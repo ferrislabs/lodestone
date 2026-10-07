@@ -67,7 +67,6 @@ export interface QualificationActions extends AxisActions {
 	setCalibrationFloor: (percent: number | null) => void
 	setMinEvidence: (percent: number | null) => void
 	setInfluence: (percent: number | null) => void
-	setReferenceScore: (score: number | null) => void
 	setEvidenceWeight: (key: EvidenceWeightKey, weight: number | null) => void
 	setHalfLife: (key: HalfLifeKey, days: number | null) => void
 }

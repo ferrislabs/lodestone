@@ -16,8 +16,8 @@ const SORT_LABELS: Record<(typeof LEAD_SORTS)[number], string> = {
 	confidence_asc: 'Confiance croissante',
 	llm_score_desc: 'Score décroissant',
 	llm_score_asc: 'Score croissant',
-	score_desc: 'Score des signaux décroissant',
-	score_asc: 'Score des signaux croissant',
+	score_desc: 'Force des signaux décroissante',
+	score_asc: 'Force des signaux croissante',
 	last_seen_desc: 'Dernière détection, la plus récente',
 	first_seen_desc: 'Première détection, la plus récente',
 	domain_asc: 'Domaine, de A à Z',
@@ -114,12 +114,15 @@ export function LeadFiltersForm({
 					/>
 				</div>
 				<div className="flex flex-col gap-1.5">
-					<Label htmlFor="min_score">Score minimum</Label>
+					<Label htmlFor="min_score">
+						Force des signaux minimale (0 à 100)
+					</Label>
 					<Input
 						id="min_score"
 						name="min_score"
 						type="number"
 						min={0}
+						max={100}
 						step="any"
 						defaultValue={filters.minScore}
 					/>

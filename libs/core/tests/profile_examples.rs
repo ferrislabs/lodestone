@@ -20,6 +20,10 @@ fn parse(raw: &str) -> ValidatedProfile {
     }
 }
 
+fn legacy_scoring() -> serde_json::Value {
+    serde_json::json!({"factors": [{"signal": "job_offer", "weight": 8}]})
+}
+
 fn agent_ids(profile: &ValidatedProfile) -> Vec<&str> {
     profile
         .definition()
@@ -117,7 +121,7 @@ fn parse_value(value: serde_json::Value) -> ValidatedProfile {
 fn version_one_iam_fixture_is_upgraded_to_the_current_example() {
     let upgraded = parse(IAM_V1);
     let current = parse(IAM);
-    assert_eq!(upgraded.definition().schema_version, 12);
+    assert_eq!(upgraded.definition().schema_version, 13);
     assert_eq!(
         agent_ids(&upgraded),
         [
@@ -177,41 +181,17 @@ fn version_one_iam_fixture_is_upgraded_to_the_current_example() {
         upgraded.definition().llm.relevance_criteria,
         current.definition().llm.relevance_criteria
     );
-    assert_eq!(upgraded.definition().scoring, current.definition().scoring);
     assert_eq!(upgraded.definition().llm.qualification_threshold, 37);
-}
-
-fn iam_weights(profile: &ValidatedProfile) -> Vec<(&str, u8)> {
-    profile
-        .definition()
-        .scoring
-        .factors
-        .iter()
-        .map(|factor| (factor.signal.as_str(), factor.weight))
-        .collect()
 }
 
 #[test]
 fn version_two_iam_fixture_is_upgraded_to_version_six() {
     let upgraded = parse(IAM_V2);
     let definition = upgraded.definition();
-    assert_eq!(definition.schema_version, 12);
-    assert_eq!(
-        iam_weights(&upgraded),
-        [
-            ("product_detected", 10),
-            ("debt_marker", 5),
-            ("saas_provider", 3),
-            ("job_offer", 8),
-            ("public_tender", 7),
-            ("role_contact_found", 2),
-            ("distinct_signals", 2),
-        ]
-    );
+    assert_eq!(definition.schema_version, 13);
     assert_eq!(definition.llm.qualification_threshold, 37);
-    assert_eq!(definition.max_score(), 47.0);
-    assert_eq!(upgraded.to_json()["schema_version"], 12);
-    assert_eq!(parse(IAM_V1).definition().scoring, definition.scoring);
+    assert_eq!(upgraded.to_json()["schema_version"], 13);
+    assert!(upgraded.to_json().get("scoring").is_none());
 }
 
 fn qualification_agent(profile: &ValidatedProfile, id: &str) -> Vec<(String, f64)> {
@@ -325,6 +305,7 @@ fn upgraded_iam_fixtures_get_the_default_qualification_agent() {
 fn the_current_example_upgrades_from_its_version_three_form() {
     let mut value: serde_json::Value = serde_json::from_str(IAM).expect("json");
     value["schema_version"] = 3.into();
+    value["scoring"] = legacy_scoring();
     for key in [
         "qualification_agents",
         "aggregator",
@@ -337,7 +318,7 @@ fn the_current_example_upgrades_from_its_version_three_form() {
         value.as_object_mut().expect("object").remove(key);
     }
     let upgraded = parse(&value.to_string());
-    assert_eq!(upgraded.definition().schema_version, 12);
+    assert_eq!(upgraded.definition().schema_version, 13);
     assert_eq!(upgraded.definition().agents, parse(IAM).definition().agents);
     assert_eq!(upgraded.definition().qualification_agents.len(), 1);
 }
@@ -400,6 +381,7 @@ fn current_without_exclusions_agent() -> ValidatedProfile {
 fn the_current_example_upgrades_from_its_version_nine_form() {
     let mut value: serde_json::Value = serde_json::from_str(IAM).expect("json");
     value["schema_version"] = 9.into();
+    value["scoring"] = legacy_scoring();
     value
         .as_object_mut()
         .expect("object")
@@ -412,7 +394,7 @@ fn the_current_example_upgrades_from_its_version_nine_form() {
     let upgraded = parse(&value.to_string());
     assert_eq!(upgraded, parse(IAM));
     let evidence = &upgraded.definition().evidence;
-    assert_eq!(upgraded.definition().schema_version, 12);
+    assert_eq!(upgraded.definition().schema_version, 13);
     assert_eq!(evidence.half_life_days_for("job_offer"), 90);
     assert_eq!(evidence.half_life_days_for("public_tender"), 180);
     assert_eq!(evidence.half_life_days_for("saas_provider"), 365);
@@ -422,12 +404,36 @@ fn the_current_example_upgrades_from_its_version_nine_form() {
 fn the_current_example_upgrades_from_its_version_eleven_form() {
     let mut value: serde_json::Value = serde_json::from_str(IAM).expect("json");
     value["schema_version"] = 11.into();
+    value["scoring"] = legacy_scoring();
     value.as_object_mut().expect("object").remove("calibration");
     let upgraded = parse(&value.to_string());
     assert_eq!(upgraded, parse(IAM));
-    assert_eq!(upgraded.definition().schema_version, 12);
+    assert_eq!(upgraded.definition().schema_version, 13);
     assert!(upgraded.definition().calibration.learned);
     assert_eq!(upgraded.to_json()["calibration"]["learned"], true);
+}
+
+#[test]
+fn the_current_example_upgrades_from_its_version_twelve_form() {
+    let mut value: serde_json::Value = serde_json::from_str(IAM).expect("json");
+    value["schema_version"] = 12.into();
+    value["scoring"] = legacy_scoring();
+    value["evidence"]["reference_score"] = 50.into();
+    let upgraded = parse(&value.to_string());
+    assert_eq!(upgraded, parse(IAM));
+    assert_eq!(upgraded.definition().schema_version, 13);
+    let json = upgraded.to_json();
+    assert!(json.get("scoring").is_none());
+    assert!(json["evidence"].get("reference_score").is_none());
+}
+
+#[test]
+fn the_examples_carry_neither_signal_weights_nor_a_reference_score() {
+    for raw in [IAM, ECOMMERCE] {
+        let value: serde_json::Value = serde_json::from_str(raw).expect("json");
+        assert!(value.get("scoring").is_none());
+        assert!(value["evidence"].get("reference_score").is_none());
+    }
 }
 
 #[test]
@@ -442,6 +448,7 @@ fn the_examples_declare_the_learned_calibration() {
 fn the_current_example_upgrades_from_its_version_ten_form() {
     let mut value: serde_json::Value = serde_json::from_str(IAM).expect("json");
     value["schema_version"] = 10.into();
+    value["scoring"] = legacy_scoring();
     value
         .as_object_mut()
         .expect("object")
@@ -450,7 +457,7 @@ fn the_current_example_upgrades_from_its_version_ten_form() {
     let upgraded = parse(&value.to_string());
     assert_eq!(upgraded, parse(IAM));
     let definition = upgraded.definition();
-    assert_eq!(definition.schema_version, 12);
+    assert_eq!(definition.schema_version, 13);
     assert_eq!(definition.scoring_agents.len(), 1);
     let agent = &definition.scoring_agents[0];
     assert_eq!(agent.id.as_str(), "score-global");
@@ -487,11 +494,12 @@ fn the_examples_carry_the_default_scoring_agent() {
 fn the_current_example_upgrades_from_its_version_eight_form() {
     let mut value: serde_json::Value = serde_json::from_str(IAM).expect("json");
     value["schema_version"] = 8.into();
+    value["scoring"] = legacy_scoring();
     without_sampling_fields(&mut value);
     let upgraded = parse(&value.to_string());
     assert_eq!(upgraded, parse(IAM));
     let definition = upgraded.definition();
-    assert_eq!(definition.schema_version, 12);
+    assert_eq!(definition.schema_version, 13);
     assert_eq!(definition.escalation, Escalation::default());
     assert_eq!(definition.escalation.provider, None);
     assert_eq!(
@@ -511,6 +519,7 @@ fn the_current_example_upgrades_from_its_version_eight_form() {
 fn the_current_example_upgrades_from_its_version_seven_form() {
     let mut value: serde_json::Value = serde_json::from_str(IAM).expect("json");
     value["schema_version"] = 7.into();
+    value["scoring"] = legacy_scoring();
     without_exclusion_fields(&mut value);
     let upgraded = parse(&value.to_string());
     assert_eq!(upgraded, current_without_exclusions_agent());
@@ -579,6 +588,7 @@ fn the_iam_example_has_an_enabled_exclusions_agent() {
 fn the_current_example_upgrades_from_its_version_six_form() {
     let mut value: serde_json::Value = serde_json::from_str(IAM).expect("json");
     value["schema_version"] = 6.into();
+    value["scoring"] = legacy_scoring();
     without_unknown_flags(&mut value);
     let upgraded = parse(&value.to_string());
     assert_eq!(upgraded, current_without_exclusions_agent());
@@ -600,6 +610,7 @@ fn the_current_example_upgrades_from_its_version_six_form() {
 fn the_current_example_upgrades_from_its_version_four_form() {
     let mut value: serde_json::Value = serde_json::from_str(IAM).expect("json");
     value["schema_version"] = 4.into();
+    value["scoring"] = legacy_scoring();
     without_unknown_flags(&mut value);
     value.as_object_mut().expect("object").remove("evidence");
     for agent in value["qualification_agents"].as_array_mut().expect("array") {
@@ -607,7 +618,7 @@ fn the_current_example_upgrades_from_its_version_four_form() {
     }
     let upgraded = parse(&value.to_string());
     let current = current_without_exclusions_agent();
-    assert_eq!(upgraded.definition().schema_version, 12);
+    assert_eq!(upgraded.definition().schema_version, 13);
     for (old, new) in upgraded
         .definition()
         .qualification_agents
@@ -625,12 +636,13 @@ fn the_current_example_upgrades_from_its_version_four_form() {
 fn the_current_example_upgrades_from_its_version_five_form() {
     let mut value: serde_json::Value = serde_json::from_str(IAM).expect("json");
     value["schema_version"] = 5.into();
+    value["scoring"] = legacy_scoring();
     without_unknown_flags(&mut value);
     value.as_object_mut().expect("object").remove("evidence");
     value["verdict"] = serde_json::json!({"reliable_from": 70, "discard_below": 30});
     let upgraded = parse(&value.to_string());
     let current = current_without_exclusions_agent();
-    assert_eq!(upgraded.definition().schema_version, 12);
+    assert_eq!(upgraded.definition().schema_version, 13);
     assert_eq!(upgraded, current);
 }
 
@@ -647,19 +659,12 @@ fn contract_schema_follows_the_example_questions() {
 }
 
 #[test]
-fn iam_example_max_score_and_threshold_points() {
-    let profile = parse(IAM);
-    assert_eq!(profile.definition().max_score(), 47.0);
-    assert!((profile.definition().qualification_points() - 18.8).abs() < 1e-9);
-}
-
-#[test]
 fn committed_schema_matches_definition() {
     let mut generated =
         serde_json::to_string_pretty(&schema_for!(ProfileDefinition)).expect("schema serializes");
     generated.push('\n');
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../docs/schemas/profile.v12.schema.json");
+        .join("../../docs/schemas/profile.v13.schema.json");
     if std::env::var("UPDATE_SCHEMA").as_deref() == Ok("1") {
         fs::write(&path, &generated).expect("schema file is writable");
         return;
@@ -668,6 +673,6 @@ fn committed_schema_matches_definition() {
         fs::read_to_string(&path).expect("schema file exists, regenerate with UPDATE_SCHEMA=1");
     assert!(
         committed == generated,
-        "docs/schemas/profile.v12.schema.json is stale, regenerate with UPDATE_SCHEMA=1"
+        "docs/schemas/profile.v13.schema.json is stale, regenerate with UPDATE_SCHEMA=1"
     );
 }

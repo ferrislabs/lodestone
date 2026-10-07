@@ -22,8 +22,8 @@ async fn profile(pool: &PgPool, name: &str) -> String {
 async fn lead(pool: &PgPool, profile: &str, domain: &str, status: &str) -> String {
     let id = common::generate_uuid_v7();
     sqlx::query(
-        "INSERT INTO leads (id, profile_id, domain, status, score, score_breakdown, first_seen_at, last_seen_at, updated_at)
-         VALUES ($1, $2::uuid, $3, $4, 1, '[]'::jsonb, now(), now(), now())",
+        "INSERT INTO leads (id, profile_id, domain, status, score, first_seen_at, last_seen_at, updated_at)
+         VALUES ($1, $2::uuid, $3, $4, 1, now(), now(), now())",
     )
     .bind(id)
     .bind(profile)

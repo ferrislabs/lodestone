@@ -8,7 +8,7 @@ describe('PROFILE_SCHEMA', () => {
 	it('equals the committed docs schema', () => {
 		const committed: unknown = JSON.parse(
 			readFileSync(
-				resolve(process.cwd(), '../../docs/schemas/profile.v12.schema.json'),
+				resolve(process.cwd(), '../../docs/schemas/profile.v13.schema.json'),
 				'utf8',
 			),
 		)

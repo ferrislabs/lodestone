@@ -1,7 +1,7 @@
 {
 	"$schema": "https://json-schema.org/draft/2020-12/schema",
 	"title": "Detection profile",
-	"description": "Describes one market: what is sold, which agents scan which sources, which qualification agents judge a lead, which scoring agents decide its score and verdict, how an aggregator sums it up, how signals are weighted and which contacts to prefer.",
+	"description": "Describes one market: what is sold, which agents scan which sources, which qualification agents judge a lead, which scoring agents decide its score and verdict, how an aggregator sums it up and which contacts to prefer.",
 	"type": "object",
 	"properties": {
 		"agents": {
@@ -46,7 +46,6 @@
 					"saas_provider": 365
 				},
 				"influence": 0.6,
-				"reference_score": 50.0,
 				"weights": {
 					"diversity": 1,
 					"environment": 1,
@@ -69,13 +68,10 @@
 			}
 		},
 		"schema_version": {
-			"description": "Profile format version. Must be 12.",
+			"description": "Profile format version. Must be 13.",
 			"type": "integer",
 			"format": "uint32",
 			"minimum": 0
-		},
-		"scoring": {
-			"$ref": "#/$defs/Scoring"
 		},
 		"scoring_agents": {
 			"description": "Scoring agents. Each one decides a score and a verdict for every lead from the reports of the qualification agents, through a contract imposed by the application. The lead score and verdict are the weighted means of their answers. With none enabled, the verdict stays pending.",
@@ -102,7 +98,6 @@
 		"agents",
 		"qualification_agents",
 		"aggregator",
-		"scoring",
 		"contact_ranking",
 		"llm"
 	],
@@ -609,13 +604,6 @@
 					"maximum": 1.0,
 					"minimum": 0.0
 				},
-				"reference_score": {
-					"description": "Signal score at which the signal strength component reaches 1.",
-					"type": "number",
-					"format": "double",
-					"default": 50.0,
-					"minimum": 1.0
-				},
 				"weights": {
 					"$ref": "#/$defs/EvidenceWeights",
 					"default": {
@@ -650,7 +638,7 @@
 					"minimum": 0
 				},
 				"strength": {
-					"description": "Signal score of the lead, weighted by the freshness of its signals, against the reference score.",
+					"description": "Mean of the three strongest independent signals, each strength given by its source and decayed by its age.",
 					"type": "integer",
 					"format": "uint8",
 					"default": 1,
@@ -976,22 +964,6 @@
 			"additionalProperties": false,
 			"required": ["value", "label", "score"]
 		},
-		"Scoring": {
-			"title": "Scoring",
-			"description": "Weighted factors. A lead score is the sum of weight times measure over the factors.",
-			"type": "object",
-			"properties": {
-				"factors": {
-					"description": "Weighted factors.",
-					"type": "array",
-					"items": {
-						"$ref": "#/$defs/ScoringFactor"
-					}
-				}
-			},
-			"additionalProperties": false,
-			"required": ["factors"]
-		},
 		"ScoringAgent": {
 			"title": "Scoring agent",
 			"description": "Decides the score and the verdict of every lead from the reports of the qualification agents. The shape of its answer is imposed by the application: criteria choices, a score from 0 to 100, probabilities for each verdict and reasons.",
@@ -1062,30 +1034,6 @@
 			},
 			"additionalProperties": false,
 			"required": ["id", "name", "description", "system_prompt", "criteria"]
-		},
-		"ScoringFactor": {
-			"title": "Scoring factor",
-			"description": "One weighted signal kind.",
-			"type": "object",
-			"properties": {
-				"signal": {
-					"description": "Signal kind. The reserved distinct_signals measures how many distinct signal kinds a lead has.",
-					"type": "string"
-				},
-				"value": {
-					"description": "Signal value to match. Any value when absent.",
-					"type": ["string", "null"]
-				},
-				"weight": {
-					"description": "Integer weight from 1 to 10 applied to the measure of the signal.",
-					"type": "integer",
-					"format": "uint8",
-					"maximum": 10,
-					"minimum": 1
-				}
-			},
-			"additionalProperties": false,
-			"required": ["signal", "weight"]
 		},
 		"VerdictThresholds": {
 			"title": "Verdict thresholds",

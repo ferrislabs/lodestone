@@ -12,7 +12,6 @@ import { LeadFacts } from './lead-facts'
 import { LeadHeader } from './lead-header'
 import { LeadSummary } from './lead-summary'
 import { QualificationResults } from './qualification-results'
-import { ScoreBreakdown } from './score-breakdown'
 import { ScoringResults } from './scoring-results'
 import { SignalsList } from './signals-list'
 
@@ -104,7 +103,6 @@ export function LeadDetail({
 						retrying={retryingSummary}
 						retryError={retrySummaryError}
 					/>
-					<ScoreBreakdown contributions={detail.score_breakdown} />
 					<SignalsList signals={detail.signals} />
 					<ContactsList contacts={detail.contacts} />
 					{detail.assessments.length > 1 ? (

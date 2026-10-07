@@ -17,7 +17,7 @@ import type {
 	PaginationMeta,
 	ProfileSummary,
 } from '#/pages/drafts/lib/types'
-import { formatDateTime } from '#/pages/leads/lib/format'
+import { formatDateTime, MAX_SIGNAL_STRENGTH } from '#/pages/leads/lib/format'
 import {
 	VERDICT_KEYS,
 	type VerdictKey,
@@ -60,10 +60,6 @@ export function DraftsList({
 	onPageChange,
 	onOpen,
 }: DraftsListProps) {
-	const maxScore = entries.reduce(
-		(max, entry) => Math.max(max, entry.lead.score),
-		0,
-	)
 	return (
 		<div className="flex flex-col gap-4 p-4 md:p-8">
 			<div className="flex flex-col gap-1">
@@ -123,7 +119,7 @@ export function DraftsList({
 							<TableHead>Profil</TableHead>
 							<TableHead>Verdict</TableHead>
 							<TableHead>Confiance</TableHead>
-							<TableHead>Score</TableHead>
+							<TableHead>Force des signaux</TableHead>
 							<TableHead>Objet</TableHead>
 							<TableHead>Contact</TableHead>
 							<TableHead>Créé le</TableHead>
@@ -184,7 +180,10 @@ export function DraftsList({
 											<ConfidenceBar confidence={entry.lead.confidence} />
 										</TableCell>
 										<TableCell>
-											<ScoreBar score={entry.lead.score} max={maxScore} />
+											<ScoreBar
+												score={entry.lead.score}
+												max={MAX_SIGNAL_STRENGTH}
+											/>
 										</TableCell>
 										<TableCell className="max-w-xs truncate">
 											{previewText(entry.draft.subject, 80)}

@@ -1,4 +1,6 @@
+import { formatNumber } from '#/lib/format'
 import { SCORING_CONTRACT_EXAMPLE } from '#/pages/profiles/lib/scoring-agents'
+import { STRENGTH_ROWS } from '#/pages/profiles/lib/scoring-explain'
 import { HelpPanel } from '#/pages/profiles/ui/help-panel'
 
 interface ScoringHelpProps {
@@ -29,6 +31,28 @@ export function ScoringHelp({ collapsed, onToggle }: ScoringHelpProps) {
 				coexister : chacun pèse de 1 à 10 dans le score et le verdict du lead.
 				Sans agent de scoring actif, le verdict reste « en attente du scoring ».
 			</p>
+			<p>
+				La force des signaux (0 à 100) ordonne la liste des leads. C'est la
+				moyenne des trois signaux indépendants les plus forts, chacun avec la
+				force donnée par sa source et diminué selon son âge. Elle ne décide pas
+				du verdict et ne se règle pas dans le profil.
+			</p>
+			<div className="flex flex-col gap-1 text-xs">
+				<p className="font-medium text-sm">Force du signal selon l'origine</p>
+				<dl className="flex flex-col gap-1">
+					{STRENGTH_ROWS.map((row) => (
+						<div
+							key={`${row.origin}-${row.signal}-${row.strength}`}
+							className="flex justify-between gap-2"
+						>
+							<dt className="text-muted-foreground">
+								{row.origin} · {row.signal}
+							</dt>
+							<dd className="font-mono">→ {formatNumber(row.strength)}</dd>
+						</div>
+					))}
+				</dl>
+			</div>
 			<div className="flex flex-col gap-1">
 				<p className="font-medium">JSON contractuel</p>
 				<p className="text-xs text-muted-foreground">

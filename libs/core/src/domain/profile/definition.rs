@@ -6,16 +6,16 @@ use uuid::Uuid;
 
 use crate::domain::values::SourceName;
 
-pub const PROFILE_SCHEMA_VERSION: u32 = 12;
+pub const PROFILE_SCHEMA_VERSION: u32 = 13;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[schemars(
     title = "Detection profile",
-    description = "Describes one market: what is sold, which agents scan which sources, which qualification agents judge a lead, which scoring agents decide its score and verdict, how an aggregator sums it up, how signals are weighted and which contacts to prefer."
+    description = "Describes one market: what is sold, which agents scan which sources, which qualification agents judge a lead, which scoring agents decide its score and verdict, how an aggregator sums it up and which contacts to prefer."
 )]
 pub struct ProfileDefinition {
-    #[schemars(description = "Profile format version. Must be 12.")]
+    #[schemars(description = "Profile format version. Must be 13.")]
     pub schema_version: u32,
     pub identity: Identity,
     #[schemars(description = "Detection agents. At least one is required.")]
@@ -38,7 +38,6 @@ pub struct ProfileDefinition {
     pub evidence: EvidenceSettings,
     #[serde(default)]
     pub calibration: CalibrationSettings,
-    pub scoring: Scoring,
     pub contact_ranking: ContactRanking,
     pub llm: LlmSettings,
 }
@@ -511,7 +510,7 @@ pub struct EvidenceWeights {
     #[serde(default = "default_evidence_weight")]
     #[schemars(
         range(min = 0, max = 10),
-        description = "Signal score of the lead, weighted by the freshness of its signals, against the reference score."
+        description = "Mean of the three strongest independent signals, each strength given by its source and decayed by its age."
     )]
     pub strength: u8,
 }
@@ -548,7 +547,7 @@ const BUILT_IN_HALF_LIVES: [(&str, u32); 9] = [
     (DEFAULT_HALF_LIFE_KEY, FALLBACK_HALF_LIFE_DAYS),
 ];
 
-fn default_half_life_days() -> BTreeMap<String, u32> {
+pub(super) fn default_half_life_days() -> BTreeMap<String, u32> {
     BUILT_IN_HALF_LIVES
         .iter()
         .map(|(kind, days)| ((*kind).to_owned(), *days))
@@ -568,12 +567,6 @@ pub struct EvidenceSettings {
         description = "Confidence = agents opinion x ((1 - influence) + influence x evidence strength). 0 ignores the evidence, 1 multiplies the opinion by it."
     )]
     pub influence: f64,
-    #[serde(default = "default_reference_score")]
-    #[schemars(
-        range(min = 1.0),
-        description = "Signal score at which the signal strength component reaches 1."
-    )]
-    pub reference_score: f64,
     #[serde(default)]
     pub weights: EvidenceWeights,
     #[serde(default = "default_half_life_days")]
@@ -600,19 +593,14 @@ impl EvidenceSettings {
     }
 }
 
-fn default_influence() -> f64 {
+pub(super) fn default_influence() -> f64 {
     0.6
-}
-
-fn default_reference_score() -> f64 {
-    50.0
 }
 
 impl Default for EvidenceSettings {
     fn default() -> Self {
         Self {
             influence: default_influence(),
-            reference_score: default_reference_score(),
             weights: EvidenceWeights::default(),
             half_life_days: default_half_life_days(),
         }
@@ -911,35 +899,6 @@ fn default_accept_min_keywords() -> u8 {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[schemars(
-    title = "Scoring",
-    description = "Weighted factors. A lead score is the sum of weight times measure over the factors."
-)]
-pub struct Scoring {
-    #[schemars(description = "Weighted factors.")]
-    pub factors: Vec<ScoringFactor>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-#[schemars(title = "Scoring factor", description = "One weighted signal kind.")]
-pub struct ScoringFactor {
-    #[schemars(
-        description = "Signal kind. The reserved distinct_signals measures how many distinct signal kinds a lead has."
-    )]
-    pub signal: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(description = "Signal value to match. Any value when absent.")]
-    pub value: Option<String>,
-    #[schemars(
-        range(min = 1, max = 10),
-        description = "Integer weight from 1 to 10 applied to the measure of the signal."
-    )]
-    pub weight: u8,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-#[schemars(
     title = "Contact ranking",
     description = "Preferred email local parts, most preferred first."
 )]
@@ -991,14 +950,6 @@ impl Language {
 }
 
 impl ProfileDefinition {
-    pub fn max_score(&self) -> f64 {
-        crate::domain::scoring::max_score(&self.scoring)
-    }
-
-    pub fn qualification_points(&self) -> f64 {
-        f64::from(self.llm.qualification_threshold) * self.max_score() / 100.0
-    }
-
     pub fn enabled_scoring_agents(&self) -> impl Iterator<Item = &ScoringAgent> {
         self.scoring_agents.iter().filter(|agent| agent.enabled)
     }

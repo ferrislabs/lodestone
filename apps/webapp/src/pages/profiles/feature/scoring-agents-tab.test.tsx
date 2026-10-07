@@ -58,7 +58,7 @@ const PROVIDERS: ProviderOption[] = [
 function base(): JsonObject {
 	const taken = new Set(['ats', 'pertinence'])
 	return {
-		schema_version: 12,
+		schema_version: 13,
 		identity: { offer: 'o', target_customer: 't' },
 		agents: [newAgent('ats', [])],
 		qualification_agents: [
@@ -67,7 +67,6 @@ function base(): JsonObject {
 		scoring_agents: [newScoringAgent(taken)],
 		aggregator: { provider_id: null, system_prompt: DEFAULT_AGGREGATOR_PROMPT },
 		verdict: { reliable_from: 70, discard_below: 30 },
-		scoring: { factors: [] },
 		contact_ranking: { preferred_local_parts: [] },
 		llm: { qualification_threshold: 50, relevance_criteria: 'r' },
 	}
@@ -116,23 +115,14 @@ function openFirst() {
 }
 
 describe('scoring tab', () => {
-	it('keeps Scoring as a tab and lists the agents above the signal weights', () => {
+	it('keeps Scoring as a tab that lists the agents and no signal weights', () => {
 		render(<Harness />)
 		expect(screen.getByRole('tab', { name: TAB_LABELS.scoring })).toBeTruthy()
-		const agents = screen.getByRole('region', { name: 'Agents de scoring' })
-		const weights = screen.getByRole('region', {
-			name: 'Poids des signaux (sourcing)',
-		})
 		expect(
-			agents.compareDocumentPosition(weights) &
-				Node.DOCUMENT_POSITION_FOLLOWING,
+			screen.getByRole('region', { name: 'Agents de scoring' }),
 		).toBeTruthy()
-		expect(
-			within(weights).getByRole('heading', {
-				name: 'Poids des signaux (sourcing)',
-			}),
-		).toBeTruthy()
-		expect(within(weights).getByLabelText('Facteurs de scoring')).toBeTruthy()
+		expect(screen.queryByText('Poids des signaux (sourcing)')).toBeNull()
+		expect(screen.queryByLabelText('Facteurs de scoring')).toBeNull()
 	})
 
 	it('lays the cards three per row with the help panel on the right', () => {
@@ -145,7 +135,7 @@ describe('scoring tab', () => {
 		expect(grid?.className).toContain('xl:grid-cols-3')
 		const panel = screen.getAllByTestId('help-panel')[0]
 		expect(panel?.getAttribute('aria-label')).toBe('Scoring')
-		expect(panel?.parentElement?.className).toContain('lg:col-span-1')
+		expect(panel?.className).toContain('lg:col-span-1')
 		expect(layout.contains(panel ?? null)).toBe(true)
 	})
 

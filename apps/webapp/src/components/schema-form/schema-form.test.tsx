@@ -154,12 +154,12 @@ describe('SchemaForm', () => {
 	it('adds a card for lists of objects', () => {
 		const seen = vi.fn()
 		render(<Harness onValue={seen} />)
-		fireEvent.click(screen.getByLabelText('Ajouter : Facteurs'))
-		expect(screen.getByText('Facteur 1')).toBeTruthy()
-		const last = seen.mock.calls.at(-1)?.[0]
-		expect(last).toMatchObject({
-			scoring: { factors: [{ signal: '', weight: 5 }] },
-		})
+		fireEvent.click(screen.getByLabelText('Ajouter : Agents de scoring'))
+		expect(screen.getByText('Agent de scoring 1')).toBeTruthy()
+		const last = seen.mock.calls.at(-1)?.[0] as {
+			scoring_agents: unknown[]
+		}
+		expect(last.scoring_agents).toHaveLength(1)
 	})
 
 	it('toggles optional sections and omits the key when off', () => {
@@ -239,20 +239,12 @@ describe('SchemaForm', () => {
 	})
 
 	it('shows a server error under the faulty field', () => {
-		const initial = setIn(
-			defaultValue(root, root, PROFILE_HINTS),
-			['scoring', 'factors'],
-			[{ signal: 's', weight: 1 }],
-		)
 		render(
 			<Harness
-				initial={initial}
-				problems={[
-					{ path: 'scoring.factors[0].weight', message: 'must be positive' },
-				]}
+				problems={[{ path: 'evidence.influence', message: 'must be positive' }]}
 			/>,
 		)
-		const weight = screen.getByLabelText(/Poids/)
+		const weight = screen.getByLabelText(/Influence des preuves/)
 		const message = screen.getByText('must be positive')
 		expect(weight.getAttribute('aria-invalid')).toBe('true')
 		expect(weight.getAttribute('aria-describedby')).toBe(

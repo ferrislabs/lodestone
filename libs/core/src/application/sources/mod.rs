@@ -9,6 +9,7 @@ use crate::{
     application::{LodestoneUseCase, jobs::JobError},
     domain::{
         NormalizedDomain,
+        facts::independent_signals,
         job::{Job, JobKind, NewJob, ports::Clock},
         lead::{
             LeadId, Signal, SignalId,
@@ -16,10 +17,10 @@ use crate::{
         },
         profile::{
             ActiveProfile,
-            definition::{Agent, Scoring},
+            definition::{Agent, EvidenceSettings},
         },
         run::{Run, RunId, RunOutcome, ports::RunRepository},
-        scoring::score,
+        scoring::{signal_strength, strength_score},
         source::{Observation, Source, SourceError},
         suppression::ports::SuppressionRepository,
         values::SourceName,
@@ -214,7 +215,9 @@ impl LodestoneUseCase {
                 })
                 .collect();
             let signals = count(observations.len());
-            let recorded = self.record_observations(active, name, &observations).await;
+            let recorded = self
+                .record_observations_at(active, name, &observations, clock.now())
+                .await;
             let outcome = match &recorded {
                 Ok(()) => RunOutcome::Succeeded { volume, signals },
                 Err(error) => RunOutcome::Failed {
@@ -256,12 +259,23 @@ impl LodestoneUseCase {
         Ok(())
     }
 
-    #[transactional(lead, signal, suppression)]
     pub async fn record_observations(
         &self,
         active: &ActiveProfile,
         source: SourceName,
         observations: &[Observation],
+    ) -> Result<(), CoreError> {
+        self.record_observations_at(active, source, observations, Utc::now())
+            .await
+    }
+
+    #[transactional(lead, signal, suppression)]
+    pub async fn record_observations_at(
+        &self,
+        active: &ActiveProfile,
+        source: SourceName,
+        observations: &[Observation],
+        now: DateTime<Utc>,
     ) -> Result<(), CoreError> {
         let mut leads = lead_repository;
         let mut signals = signal_repository;
@@ -310,9 +324,9 @@ impl LodestoneUseCase {
                 })
                 .await?;
         }
-        let scoring = &active.revision.definition.definition().scoring;
+        let evidence = &active.revision.definition.definition().evidence;
         for lead_id in touched {
-            rescore(&mut leads, &mut signals, lead_id, scoring, Utc::now()).await?;
+            rescore(&mut leads, &mut signals, lead_id, evidence, now).await?;
         }
         Ok(())
     }
@@ -322,7 +336,7 @@ pub(crate) async fn rescore<L, S>(
     leads: &mut L,
     signals: &mut S,
     lead_id: LeadId,
-    scoring: &Scoring,
+    evidence: &EvidenceSettings,
     at: DateTime<Utc>,
 ) -> Result<(), CoreError>
 where
@@ -330,8 +344,9 @@ where
     S: SignalRepository,
 {
     let current = signals.list_for_lead(lead_id).await?;
+    let strength = signal_strength(&independent_signals(current.iter()), evidence, at);
     leads
-        .update_score(lead_id, &score(&current, scoring), at)
+        .update_score(lead_id, strength_score(strength), at)
         .await?;
     Ok(())
 }

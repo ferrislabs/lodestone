@@ -2,8 +2,8 @@ mod support;
 
 use lodestone_core::{
     LeadQuery, LeadRepository, LeadSort, LeadStatus, LodestoneUseCase, ProfileId, Provenance,
-    Score, ScoreBreakdown, Signal, SignalId, SignalKind, SignalRepository, SourceName,
-    SuppressionTarget, UnitInterval, VerdictFilter,
+    Score, Signal, SignalId, SignalKind, SignalRepository, SourceName, SuppressionTarget,
+    UnitInterval, VerdictFilter,
     infrastructure::{
         lead::postgres::PgLeadRepository, postgres::with_tx, signal::postgres::PgSignalRepository,
     },
@@ -15,15 +15,8 @@ async fn seed(pool: &PgPool, profile: ProfileId, host: &str, score: f64, seen: i
     with_tx(pool, async |shared| {
         let mut repo = PgLeadRepository::new(&shared);
         let lead = repo.record_seen(profile, &domain(host), at(seen)).await?;
-        repo.update_score(
-            lead.id,
-            &ScoreBreakdown {
-                total: Score::new(score).unwrap(),
-                contributions: Vec::new(),
-            },
-            at(seen),
-        )
-        .await?;
+        repo.update_score(lead.id, Score::new(score).unwrap(), at(seen))
+            .await?;
         Ok(())
     })
     .await

@@ -28,7 +28,6 @@ describe('prepareSave', () => {
 			qualification_agents: [newQualificationAgent('pertinence', new Set())],
 			aggregator: { provider_id: null, system_prompt: 'p' },
 			verdict: { reliable_from: 70, discard_below: 30 },
-			scoring: { factors: [] },
 			contact_ranking: { preferred_local_parts: [] },
 			llm: { qualification_threshold: 50, relevance_criteria: 'r' },
 		}
@@ -37,7 +36,7 @@ describe('prepareSave', () => {
 
 	it('blocks a scoring agent that breaks the rules the server enforces', () => {
 		const filled = {
-			schema_version: 12,
+			schema_version: 13,
 			identity: { offer: 'o', target_customer: 't' },
 			agents: [newAgent('ats', [])],
 			qualification_agents: [newQualificationAgent('pertinence', new Set())],
@@ -46,7 +45,6 @@ describe('prepareSave', () => {
 			],
 			aggregator: { provider_id: null, system_prompt: 'p' },
 			verdict: { reliable_from: 70, discard_below: 30 },
-			scoring: { factors: [] },
 			contact_ranking: { preferred_local_parts: [] },
 			llm: { qualification_threshold: 50, relevance_criteria: 'r' },
 		}

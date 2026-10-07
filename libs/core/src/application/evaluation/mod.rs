@@ -356,14 +356,13 @@ fn succeeded(
 
 fn judgement_of(
     definition: &ProfileDefinition,
-    lead: &Lead,
     facts: &LeadFacts,
     opinions: &[AgentOpinion],
     at: DateTime<Utc>,
 ) -> Judgement {
     judge(
         opinions,
-        EvidenceStrength::compute(facts, lead.score.get(), &definition.evidence, at),
+        EvidenceStrength::compute(facts, &definition.evidence, at),
         definition.verdict,
         &definition.evidence,
     )
@@ -751,7 +750,7 @@ where
         let scored = |pass: &Pass| -> Vec<AgentOpinion> {
             pass.opinions.iter().flatten().copied().collect()
         };
-        let mut judgement = judgement_of(definition, lead, &facts, &scored(&pass), at);
+        let mut judgement = judgement_of(definition, &facts, &scored(&pass), at);
         if escalated_revision.is_none()
             && let (Some(provider), Some(confidence)) =
                 (definition.escalation.provider, judgement.confidence)
@@ -772,7 +771,7 @@ where
                 None => return Ok(LeadOutcome::BudgetExhausted),
                 Some(true) => {
                     escalated_revision = Some(revision);
-                    judgement = judgement_of(definition, lead, &facts, &scored(&pass), at);
+                    judgement = judgement_of(definition, &facts, &scored(&pass), at);
                     info!(
                         monotonic_counter.qualification_escalations = 1u64,
                         "lead escalated"

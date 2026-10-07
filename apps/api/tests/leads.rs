@@ -42,15 +42,14 @@ impl Seed {
     ) -> String {
         let id = common::generate_uuid_v7();
         sqlx::query(
-            "INSERT INTO leads (id, profile_id, domain, status, score, score_breakdown, first_seen_at, last_seen_at, updated_at)
-             VALUES ($1, $2::uuid, $3, $4, $5, $6, now() - make_interval(days => $7 + 10), now() - make_interval(days => $7), now())",
+            "INSERT INTO leads (id, profile_id, domain, status, score, first_seen_at, last_seen_at, updated_at)
+             VALUES ($1, $2::uuid, $3, $4, $5, now() - make_interval(days => $6 + 10), now() - make_interval(days => $6), now())",
         )
         .bind(id)
         .bind(profile)
         .bind(domain)
         .bind(status)
         .bind(score)
-        .bind(json!([{"signal": "product_detected", "value": "keycloak", "weight": 10.0, "measure": 0.8, "contribution": 8.0}]))
         .bind(seen_day)
         .execute(&self.pool)
         .await
@@ -406,9 +405,7 @@ async fn detail_carries_profile_signals_contacts_assessments_and_breakdown(pool:
     assert_eq!(data["lead"]["profile"]["id"], profile);
     assert_eq!(data["lead"]["profile"]["name"], "keycloak-ops");
 
-    assert_eq!(data["score_breakdown"][0]["signal"], "product_detected");
-    assert_eq!(data["score_breakdown"][0]["value"], "keycloak");
-    assert_eq!(data["score_breakdown"][0]["contribution"], 8.0);
+    assert!(data.get("score_breakdown").is_none());
 
     let signal = &data["signals"][0];
     assert_eq!(signal["kind"], "product_detected");

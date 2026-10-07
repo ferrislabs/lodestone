@@ -28,8 +28,8 @@ impl Seed {
     async fn lead(&self, profile: &str, domain: &str, status: &str, score: f64) -> String {
         let id = common::generate_uuid_v7();
         sqlx::query(
-            "INSERT INTO leads (id, profile_id, domain, status, score, score_breakdown, first_seen_at, last_seen_at, updated_at)
-             VALUES ($1, $2::uuid, $3, $4, $5, '[]'::jsonb, now(), now(), now())",
+            "INSERT INTO leads (id, profile_id, domain, status, score, first_seen_at, last_seen_at, updated_at)
+             VALUES ($1, $2::uuid, $3, $4, $5, now(), now(), now())",
         )
         .bind(id)
         .bind(profile)

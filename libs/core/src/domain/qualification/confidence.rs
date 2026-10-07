@@ -7,6 +7,7 @@ use crate::domain::{
     facts::LeadFacts,
     lead::str_enum,
     profile::definition::{EvidenceSettings, EvidenceWeights, VerdictThresholds},
+    scoring::{signal_strength, strength_score},
 };
 
 pub const SCORING_VERSION: i32 = 4;
@@ -90,7 +91,7 @@ pub fn decay(age_days: f64, half_life_days: f64) -> f64 {
     0.5_f64.powf(age_days.max(0.0) / half_life_days)
 }
 
-fn age_days(observed_at: DateTime<Utc>, now: DateTime<Utc>) -> f64 {
+pub(crate) fn age_days(observed_at: DateTime<Utc>, now: DateTime<Utc>) -> f64 {
     (now - observed_at)
         .to_std()
         .map_or(0.0, |age| age.as_secs_f64() / SECONDS_PER_DAY)
@@ -121,12 +122,7 @@ fn weighted_mean(components: &EvidenceComponents, weights: &EvidenceWeights) -> 
 }
 
 impl EvidenceStrength {
-    pub fn compute(
-        facts: &LeadFacts,
-        signal_score: f64,
-        settings: &EvidenceSettings,
-        now: DateTime<Utc>,
-    ) -> Self {
+    pub fn compute(facts: &LeadFacts, settings: &EvidenceSettings, now: DateTime<Utc>) -> Self {
         let decayed: f64 = facts
             .independent
             .iter()
@@ -138,22 +134,18 @@ impl EvidenceStrength {
             })
             .sum();
         let independent = facts.independent_signals();
-        let freshness = if independent == 0 {
-            1.0
-        } else {
-            decayed / count(independent)
-        };
+        let strength = signal_strength(&facts.independent, settings, now);
         let components = EvidenceComponents {
             volume: 1.0 - (-decayed / VOLUME_SCALE).exp(),
             diversity: diversity(facts.sources.len(), facts.kinds.len()),
             environment: facts.production_share().unwrap_or(UNKNOWN_ENVIRONMENT),
-            strength: (signal_score * freshness / settings.reference_score).clamp(0.0, 1.0),
+            strength,
         };
         Self {
             score: weighted_mean(&components, &settings.weights).clamp(0.0, 1.0),
             components,
             signal_count: facts.signal_count,
-            signal_score,
+            signal_score: strength_score(strength).get(),
             only_non_production: facts.only_non_production(),
             independent_signals: independent,
             decayed_signals: decayed,
@@ -308,6 +300,7 @@ mod tests {
     use super::*;
     use crate::domain::{
         NormalizedDomain,
+        facts::SiblingSignals,
         lead::{Lead, LeadId, LeadStatus, Score, Signal, SignalId},
         profile::ProfileId,
         values::{Provenance, SignalKind, SourceName, UnitInterval},
@@ -328,8 +321,7 @@ mod tests {
             profile_id: ProfileId(uuid::Uuid::nil()),
             domain: NormalizedDomain::from_host("luzernrisk.com").unwrap(),
             status: LeadStatus::New,
-            score: Score::new(12.1).unwrap(),
-            score_breakdown: Vec::new(),
+            score: Score::default(),
             confidence: None,
             verdict: None,
             llm_score: None,
@@ -364,9 +356,12 @@ mod tests {
     }
 
     fn luzern_evidence() -> EvidenceStrength {
-        let signals = [signal("login.dev.luzernrisk.com", SourceName::DnsCname)];
+        let signals = [Signal {
+            strength: UnitInterval::new(0.242).unwrap(),
+            ..signal("login.dev.luzernrisk.com", SourceName::DnsCname)
+        }];
         let facts = LeadFacts::compute(&lead(), &signals, &[]);
-        EvidenceStrength::compute(&facts, 12.1, &settings(), now())
+        EvidenceStrength::compute(&facts, &settings(), now())
     }
 
     fn strong_evidence() -> EvidenceStrength {
@@ -453,6 +448,7 @@ mod tests {
         assert_eq!(evidence.components.diversity, 0.5);
         assert_eq!(evidence.components.environment, 0.0);
         assert!((evidence.components.strength - 0.242).abs() < 1e-12);
+        assert_eq!(evidence.signal_score, 24.2);
         let expected = ((1.0 - (-1.0f64 / 3.0).exp()) + 0.5 + 0.0 + 0.242) / 4.0;
         assert!((evidence.score - expected).abs() < 1e-12);
     }
@@ -460,14 +456,14 @@ mod tests {
     #[test]
     fn evidence_without_known_hosts_is_neutral_on_environment() {
         let facts = LeadFacts::compute(&lead(), &[], &[]);
-        let evidence = EvidenceStrength::compute(&facts, 0.0, &settings(), now());
+        let evidence = EvidenceStrength::compute(&facts, &settings(), now());
         assert_eq!(evidence.components.environment, 0.5);
         assert_eq!(evidence.components.volume, 0.0);
         assert!(!evidence.only_non_production);
     }
 
     #[test]
-    fn evidence_weights_and_reference_score_are_applied() {
+    fn evidence_weights_are_applied() {
         let signals = [signal("login.dev.luzernrisk.com", SourceName::DnsCname)];
         let facts = LeadFacts::compute(&lead(), &signals, &[]);
         let only_diversity = EvidenceSettings {
@@ -480,18 +476,8 @@ mod tests {
             ..settings()
         };
         assert_eq!(
-            EvidenceStrength::compute(&facts, 12.1, &only_diversity, now()).score,
+            EvidenceStrength::compute(&facts, &only_diversity, now()).score,
             0.5
-        );
-        let low_reference = EvidenceSettings {
-            reference_score: 10.0,
-            ..settings()
-        };
-        assert_eq!(
-            EvidenceStrength::compute(&facts, 12.1, &low_reference, now())
-                .components
-                .strength,
-            1.0
         );
     }
 
@@ -655,9 +641,9 @@ mod tests {
         }
     }
 
-    fn evidence_of(signals: &[Signal], score: f64) -> EvidenceStrength {
+    fn evidence_of(signals: &[Signal]) -> EvidenceStrength {
         let facts = LeadFacts::compute(&lead(), signals, &[]);
-        EvidenceStrength::compute(&facts, score, &settings(), now())
+        EvidenceStrength::compute(&facts, &settings(), now())
     }
 
     #[test]
@@ -667,7 +653,7 @@ mod tests {
             dated("saas_provider", " Auth0 ", SourceName::DnsCname, 0),
             dated("saas_provider", "auth0", SourceName::DnsCname, 0),
         ];
-        let evidence = evidence_of(&repeated, 0.0);
+        let evidence = evidence_of(&repeated);
         assert_eq!(evidence.signal_count, 3);
         assert_eq!(evidence.independent_signals, 1);
         assert!((evidence.decayed_signals - 1.0).abs() < 1e-12);
@@ -682,7 +668,7 @@ mod tests {
             dated("product_detected", "auth0", SourceName::DnsCname, 0),
             dated("saas_provider", "auth0", SourceName::HttpProbe, 0),
         ];
-        assert_eq!(evidence_of(&signals, 0.0).independent_signals, 4);
+        assert_eq!(evidence_of(&signals).independent_signals, 4);
     }
 
     #[test]
@@ -691,7 +677,7 @@ mod tests {
             dated("job_offer", "devops", SourceName::Ats, 90),
             dated("job_offer", "devops", SourceName::Ats, 0),
         ];
-        let evidence = evidence_of(&signals, 0.0);
+        let evidence = evidence_of(&signals);
         assert_eq!(evidence.independent_signals, 1);
         assert!((evidence.decayed_signals - 1.0).abs() < 1e-12);
     }
@@ -708,7 +694,7 @@ mod tests {
             dated("saas_provider", "auth0", SourceName::DnsCname, 0),
             dated("product_detected", "keycloak", SourceName::DnsCname, 0),
         ];
-        let evidence = evidence_of(&signals, 0.0);
+        let evidence = evidence_of(&signals);
         assert_eq!(evidence.source_count, 1);
         assert_eq!(evidence.kind_count, 2);
         assert_eq!(evidence.components.diversity, 0.75);
@@ -716,14 +702,14 @@ mod tests {
 
     #[test]
     fn a_signal_of_today_does_not_decay() {
-        let evidence = evidence_of(&[dated("job_offer", "a", SourceName::Ats, 0)], 25.0);
+        let evidence = evidence_of(&[dated("job_offer", "a", SourceName::Ats, 0)]);
         assert!((evidence.decayed_signals - 1.0).abs() < 1e-12);
         assert!((evidence.components.strength - 0.5).abs() < 1e-12);
     }
 
     #[test]
     fn a_signal_of_one_half_life_counts_for_half() {
-        let evidence = evidence_of(&[dated("job_offer", "a", SourceName::Ats, 90)], 25.0);
+        let evidence = evidence_of(&[dated("job_offer", "a", SourceName::Ats, 90)]);
         assert!((evidence.decayed_signals - 0.5).abs() < 1e-9);
         assert!((evidence.components.volume - (1.0 - (-0.5f64 / 3.0).exp())).abs() < 1e-9);
         assert!((evidence.components.strength - 0.25).abs() < 1e-9);
@@ -732,7 +718,7 @@ mod tests {
     #[test]
     fn the_half_life_depends_on_the_signal_kind() {
         let at = |kind: &str, days: i64| {
-            evidence_of(&[dated(kind, "a", SourceName::Ats, days)], 0.0).decayed_signals
+            evidence_of(&[dated(kind, "a", SourceName::Ats, days)]).decayed_signals
         };
         assert!((at("job_offer", 90) - 0.5).abs() < 1e-9);
         assert!((at("public_tender", 180) - 0.5).abs() < 1e-9);
@@ -754,13 +740,13 @@ mod tests {
             dated("something_new", "b", SourceName::Ats, 60),
         ];
         let facts = LeadFacts::compute(&lead(), &signals, &[]);
-        let evidence = EvidenceStrength::compute(&facts, 0.0, &custom, now());
+        let evidence = EvidenceStrength::compute(&facts, &custom, now());
         assert!((evidence.decayed_signals - 1.0).abs() < 1e-9);
     }
 
     #[test]
     fn a_signal_from_the_future_does_not_grow_the_volume() {
-        let evidence = evidence_of(&[dated("job_offer", "a", SourceName::Ats, -10)], 0.0);
+        let evidence = evidence_of(&[dated("job_offer", "a", SourceName::Ats, -10)]);
         assert!((evidence.decayed_signals - 1.0).abs() < 1e-12);
     }
 
@@ -776,6 +762,27 @@ mod tests {
         let evidence: EvidenceStrength = serde_json::from_value(stored).unwrap();
         assert_eq!(evidence.independent_signals, 0);
         assert_eq!(evidence.signal_count, 2);
+    }
+
+    #[test]
+    fn the_strength_averages_the_three_strongest_signals_of_the_lead_and_its_siblings() {
+        let strong = |value: &str, strength: f64| Signal {
+            strength: UnitInterval::new(strength).unwrap(),
+            ..dated("saas_provider", value, SourceName::DnsCname, 0)
+        };
+        let own = [strong("a", 0.9), strong("b", 0.2)];
+        let others = [strong("c", 0.7), strong("d", 0.1)];
+        let domain = NormalizedDomain::from_host("luzernrisk.fr").unwrap();
+        let siblings = [SiblingSignals {
+            domain: &domain,
+            signals: &others,
+        }];
+        let facts = LeadFacts::compute_aggregated(&lead(), &own, &[], &siblings);
+        let evidence = EvidenceStrength::compute(&facts, &settings(), now());
+        assert!((evidence.components.strength - 0.6).abs() < 1e-9);
+        assert_eq!(evidence.signal_score, 60.0);
+        let alone = evidence_of(&own);
+        assert!((alone.components.strength - 0.55).abs() < 1e-9);
     }
 
     #[test]

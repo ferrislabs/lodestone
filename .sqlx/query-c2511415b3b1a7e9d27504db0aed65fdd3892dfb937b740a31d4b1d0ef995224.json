@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT id, profile_id, domain, status, score, score_breakdown, confidence, verdict, llm_score, qualified_at, first_seen_at, last_seen_at, updated_at\n            FROM leads\n            WHERE profile_id = $1\n            ORDER BY score DESC, domain ASC\n            ",
+  "query": "\n            SELECT id, profile_id, domain, status, score, confidence, verdict, llm_score, qualified_at, first_seen_at, last_seen_at, updated_at\n            FROM leads\n            WHERE id = $1\n            ",
   "describe": {
     "columns": [
       {
@@ -30,41 +30,36 @@
       },
       {
         "ordinal": 5,
-        "name": "score_breakdown",
-        "type_info": "Jsonb"
-      },
-      {
-        "ordinal": 6,
         "name": "confidence",
         "type_info": "Float8"
       },
       {
-        "ordinal": 7,
+        "ordinal": 6,
         "name": "verdict",
         "type_info": "Text"
       },
       {
-        "ordinal": 8,
+        "ordinal": 7,
         "name": "llm_score",
         "type_info": "Int2"
       },
       {
-        "ordinal": 9,
+        "ordinal": 8,
         "name": "qualified_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 10,
+        "ordinal": 9,
         "name": "first_seen_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 11,
+        "ordinal": 10,
         "name": "last_seen_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 12,
+        "ordinal": 11,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
@@ -80,7 +75,6 @@
       false,
       false,
       false,
-      false,
       true,
       true,
       true,
@@ -90,5 +84,5 @@
       false
     ]
   },
-  "hash": "898485218d7e37d470dcf27f32228bda26a2588878aba929f8b846586d9060a2"
+  "hash": "c2511415b3b1a7e9d27504db0aed65fdd3892dfb937b740a31d4b1d0ef995224"
 }

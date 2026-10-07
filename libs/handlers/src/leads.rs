@@ -8,9 +8,9 @@ use lodestone_core::{
     Assessment, Calibrations, ContactEmail, DraftMessage, DraftReview, DraftStatus, Exclusion,
     Lead, LeadDetail, LeadFacts, LeadId, LeadQuery, LeadScoring, LeadSort, LeadStatus,
     LlmProviderRecord, Profile, ProfileId, QualificationResult, Rejection, RejectionProblem,
-    ResultStatus, RunProvenance, SUMMARY_FAILED_AFTER, ScoreContribution, ScoringResult, Signal,
-    SignalKind, SummaryState, Verdict, VerdictAnswer, VerdictCap, VerdictFilter,
-    VerdictProbabilities, VerdictReason, VerdictSource, calibrate_verdict,
+    ResultStatus, RunProvenance, SUMMARY_FAILED_AFTER, ScoringResult, Signal, SignalKind,
+    SummaryState, Verdict, VerdictAnswer, VerdictCap, VerdictFilter, VerdictProbabilities,
+    VerdictReason, VerdictSource, calibrate_verdict,
     definition::{QualificationAgent, Question, ScoringAgent},
     signal_sentence,
 };
@@ -187,11 +187,11 @@ pub struct EvidenceComponentsDto {
     pub diversity: f64,
     /// Share of production hosts among the hosts carrying signals; 50 when no signal names a host.
     pub environment: f64,
-    /// Signal score, weighted by the mean freshness of the independent signals, against the profile reference score, capped at 100.
+    /// Signal strength: mean of the three strongest independent signals, each given by its source and decayed by its age, in percent from 0 to 100.
     pub strength: f64,
 }
 
-/// Strength of the evidence behind a lead, computed in code from its facts and signal score.
+/// Strength of the evidence behind a lead, computed in code from its facts and the strength of its signals.
 #[derive(Debug, Serialize, PartialEq, ToSchema)]
 pub struct EvidenceStrengthDto {
     /// Weighted mean of the components, in percent from 0 to 100.
@@ -205,6 +205,7 @@ pub struct EvidenceStrengthDto {
     pub decayed_signals: f64,
     pub source_count: u32,
     pub kind_count: u32,
+    /// Signal strength of the lead in percent from 0 to 100, as stored in `score` when the evidence was computed.
     pub signal_score: f64,
     pub only_non_production: bool,
 }
@@ -237,6 +238,7 @@ pub struct LeadDto {
     pub profile: ProfileRefDto,
     pub domain: String,
     pub status: LeadStatusDto,
+    /// Signal strength in percent from 0 to 100: mean of the three strongest independent signals, each given by its source and decayed by its age. Not a verdict score, see `llm_score`.
     pub score: f64,
     /// Confidence of the verdict in percent from 0 to 100: the probability of the winning verdict in the weighted mean of the scoring agents, 100 when a qualification agent excluded the lead. Absent while the verdict is pending.
     pub confidence: Option<f64>,
@@ -582,27 +584,6 @@ impl From<&Assessment> for AssessmentDto {
                 .as_ref()
                 .map(|draft| DraftDto::new(draft, assessment.draft_review.as_ref())),
             created_at: assessment.created_at.to_rfc3339(),
-        }
-    }
-}
-
-#[derive(Debug, Serialize, PartialEq, ToSchema)]
-pub struct ScoreContributionDto {
-    pub signal: String,
-    pub value: Option<String>,
-    pub weight: f64,
-    pub measure: f64,
-    pub contribution: f64,
-}
-
-impl From<&ScoreContribution> for ScoreContributionDto {
-    fn from(contribution: &ScoreContribution) -> Self {
-        Self {
-            signal: contribution.signal.clone(),
-            value: contribution.value.clone(),
-            weight: contribution.weight,
-            measure: contribution.measure,
-            contribution: contribution.contribution,
         }
     }
 }
@@ -1029,7 +1010,6 @@ impl From<&LeadFacts> for LeadFactsDto {
 pub struct LeadDetailDto {
     pub lead: LeadDto,
     pub facts: LeadFactsDto,
-    pub score_breakdown: Vec<ScoreContributionDto>,
     pub signals: Vec<SignalDto>,
     pub contacts: Vec<ContactDto>,
     pub assessments: Vec<AssessmentDto>,
@@ -1103,12 +1083,6 @@ impl LeadDetailDto {
                     .map(|assessment| assessment.summary.as_str()),
                 detail.scoring.as_ref(),
             ),
-            score_breakdown: detail
-                .lead
-                .score_breakdown
-                .iter()
-                .map(ScoreContributionDto::from)
-                .collect(),
             facts: LeadFactsDto::from(&detail.facts),
             signals: detail.signals.iter().map(SignalDto::from).collect(),
             contacts: detail.contacts.iter().map(ContactDto::from).collect(),
@@ -1128,7 +1102,7 @@ pub struct ListLeadsParams {
     /// Minimum confidence in percent, inclusive. Leads without a confidence are left out.
     #[param(value_type = Option<f64>, minimum = 0, maximum = 100)]
     pub(crate) min_confidence: Option<String>,
-    /// Minimum score, inclusive. Must be a non-negative number.
+    /// Minimum signal strength from 0 to 100, inclusive. Must be a non-negative number.
     #[param(value_type = Option<f64>, minimum = 0)]
     pub(crate) min_score: Option<String>,
     /// Case-insensitive substring of the lead domain.
@@ -1137,7 +1111,7 @@ pub struct ListLeadsParams {
     pub(crate) signal: Option<String>,
     /// `company` to show one row per company, the best-confidence lead standing for its sibling domains; `none` (default) lists every lead.
     pub(crate) group_by: Option<String>,
-    /// One of confidence_desc (default), confidence_asc, score_desc, score_asc (signal score), llm_score_desc, llm_score_asc (score decided by the scoring agents, leads without one last), last_seen_desc, first_seen_desc, domain_asc.
+    /// One of confidence_desc (default), confidence_asc, score_desc, score_asc (signal strength), llm_score_desc, llm_score_asc (score decided by the scoring agents, leads without one last), last_seen_desc, first_seen_desc, domain_asc.
     pub(crate) sort: Option<String>,
     /// Page number, starting at 1.
     #[param(value_type = Option<u64>, minimum = 1)]
@@ -1387,7 +1361,7 @@ pub async fn list_leads(
     security(("bearer_auth" = [])),
     params(("lead_id" = String, Path, description = "Lead identifier (UUID)")),
     responses(
-        (status = 200, description = "The lead with its profile, signals, contacts, assessments and score breakdown", body = crate::response::DataEnvelope<LeadDetailDto>),
+        (status = 200, description = "The lead with its profile, signals, contacts, and assessments", body = crate::response::DataEnvelope<LeadDetailDto>),
         (status = 400, description = "Malformed lead identifier"),
         (status = 401, description = "Missing, malformed, invalid or expired bearer token"),
         (status = 404, description = "Unknown lead, or its domain is suppressed"),

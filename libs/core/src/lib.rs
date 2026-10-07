@@ -117,7 +117,7 @@ pub use domain::{
         ports::DecisionRepository,
     },
     run::{Run, RunId, RunOutcome, RunStatus, ports::RunRepository},
-    scoring::{DISTINCT_SIGNALS_FACTOR, ScoreBreakdown, ScoreContribution, score},
+    scoring::{STRONGEST_SIGNALS, signal_strength, strength_score},
     scoring_agent::{
         AgentDecision, Decision, ScoringOutput, ScoringResult, ScoringResultId, ScoringViolation,
         ScoringViolations, VerdictAnswer, VerdictProbabilities, combine, decide,
