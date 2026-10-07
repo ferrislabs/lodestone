@@ -1361,6 +1361,27 @@ async fn a_failed_summary_keeps_retrying_every_six_hours_until_it_succeeds(pool:
 }
 
 #[sqlx::test(migrations = "../../migrations")]
+async fn a_rejected_aggregation_call_stores_the_provider_message(pool: PgPool) {
+    let harness = Harness::new(pool);
+    harness.defaults().await;
+    let profile = harness.profile(vec![agent("solo", 5, None)], None).await;
+    harness.observe("acme.com", SourceName::HttpProbe, 10).await;
+    harness.script(
+        SYNTHESIS,
+        vec![Reply::Fail(LlmError::Status {
+            status: 400,
+            message: Some("Extra inputs are not permitted".to_owned()),
+        })],
+    );
+    harness.pass().await;
+    let state = harness.summary_state(profile, "acme.com").await.unwrap();
+    assert_eq!(
+        state.error.as_deref(),
+        Some("échec de l'appel au modèle : Extra inputs are not permitted")
+    );
+}
+
+#[sqlx::test(migrations = "../../migrations")]
 async fn retrying_resets_the_counter_and_makes_the_lead_due_at_once(pool: PgPool) {
     let harness = Harness::new(pool);
     harness.defaults().await;

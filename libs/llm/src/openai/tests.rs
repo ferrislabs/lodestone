@@ -285,7 +285,34 @@ async fn rate_limit_without_header_has_no_delay() {
 }
 
 #[tokio::test]
-async fn server_error_is_status_without_body() {
+async fn non_success_keeps_the_provider_message() {
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST);
+        then.status(400).json_body(json!({
+            "object": "error",
+            "message": {"detail": [{"loc": ["body", "reasoning_effort"], "msg": "Extra inputs are not permitted"}]},
+            "type": "invalid_request_error"
+        }));
+    });
+    let error = run(&provider(ProviderKind::Mistral, &server, Some(KEY)))
+        .await
+        .unwrap_err();
+    assert_eq!(
+        error,
+        LlmError::Status {
+            status: 400,
+            message: Some("reasoning_effort: Extra inputs are not permitted".to_owned()),
+        }
+    );
+    assert_eq!(
+        error.to_string(),
+        "llm provider answered with status 400: reasoning_effort: Extra inputs are not permitted"
+    );
+}
+
+#[tokio::test]
+async fn plain_text_body_is_the_message() {
     let server = MockServer::start();
     server.mock(|when, then| {
         when.method(POST);
@@ -294,8 +321,74 @@ async fn server_error_is_status_without_body() {
     let error = run(&provider(ProviderKind::Mistral, &server, Some(KEY)))
         .await
         .unwrap_err();
-    assert_eq!(error, LlmError::Status { status: 500 });
-    assert!(!format!("{error}").contains("leak"));
+    assert_eq!(
+        error,
+        LlmError::Status {
+            status: 500,
+            message: Some("internal leak".to_owned()),
+        }
+    );
+}
+
+#[tokio::test]
+async fn empty_body_has_no_message() {
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST);
+        then.status(400);
+    });
+    let error = run(&provider(ProviderKind::Mistral, &server, Some(KEY)))
+        .await
+        .unwrap_err();
+    assert_eq!(
+        error,
+        LlmError::Status {
+            status: 400,
+            message: None,
+        }
+    );
+    assert_eq!(error.to_string(), "llm provider answered with status 400");
+}
+
+#[tokio::test]
+async fn oversize_body_is_bounded() {
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST);
+        then.status(400).body("z".repeat(200_000));
+    });
+    let error = run(&provider(ProviderKind::Mistral, &server, Some(KEY)))
+        .await
+        .unwrap_err();
+    let LlmError::Status {
+        message: Some(message),
+        ..
+    } = error
+    else {
+        panic!("expected a message");
+    };
+    assert_eq!(message.chars().count(), 300);
+}
+
+#[tokio::test]
+async fn body_echoing_the_key_is_redacted() {
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST);
+        then.status(401)
+            .json_body(json!({"error": {"message": format!("Incorrect API key provided: {KEY}")}}));
+    });
+    let error = run(&provider(ProviderKind::Mistral, &server, Some(KEY)))
+        .await
+        .unwrap_err();
+    assert_eq!(
+        error,
+        LlmError::Status {
+            status: 401,
+            message: Some("Incorrect API key provided: [redacted]".to_owned()),
+        }
+    );
+    assert!(!format!("{error:?}").contains(KEY));
 }
 
 #[tokio::test]

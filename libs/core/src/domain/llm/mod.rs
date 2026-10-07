@@ -194,8 +194,14 @@ pub enum LlmError {
     Refused,
     #[error("llm output was cut at the token limit")]
     Truncated,
-    #[error("llm provider answered with status {status}")]
-    Status { status: u16 },
+    #[error(
+        "llm provider answered with status {status}{}",
+        .message.as_deref().map_or_else(String::new, |text| format!(": {text}"))
+    )]
+    Status {
+        status: u16,
+        message: Option<String>,
+    },
     #[error("llm output is not valid: {0}")]
     InvalidOutput(String),
     #[error(
@@ -246,6 +252,23 @@ pub fn render_user_content(request: &LlmRequest<'_>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn status_display_includes_the_provider_message_when_present() {
+        let with = LlmError::Status {
+            status: 400,
+            message: Some("Extra inputs are not permitted".to_owned()),
+        };
+        let without = LlmError::Status {
+            status: 502,
+            message: None,
+        };
+        assert_eq!(
+            with.to_string(),
+            "llm provider answered with status 400: Extra inputs are not permitted"
+        );
+        assert_eq!(without.to_string(), "llm provider answered with status 502");
+    }
 
     fn request<'a>(
         documents: &'a [UntrustedDocument<'a>],

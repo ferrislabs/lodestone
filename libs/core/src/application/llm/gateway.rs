@@ -89,6 +89,18 @@ pub enum LlmCallError {
     Schema(String),
 }
 
+impl LlmCallError {
+    pub fn provider_message(&self) -> Option<&str> {
+        match self {
+            Self::Provider(LlmError::Status {
+                message: Some(message),
+                ..
+            }) => Some(message),
+            _ => None,
+        }
+    }
+}
+
 pub fn output_schema<T: JsonSchema>() -> Result<serde_json::Value, LlmCallError> {
     serde_json::to_value(schemars::schema_for!(T)).map_err(|e| LlmCallError::Schema(e.to_string()))
 }
@@ -99,7 +111,7 @@ fn is_retryable(error: &LlmError) -> bool {
         | LlmError::RateLimited { .. }
         | LlmError::Network(_)
         | LlmError::InvalidOutput(_) => true,
-        LlmError::Status { status } => *status >= 500,
+        LlmError::Status { status, .. } => *status >= 500,
         LlmError::Refused
         | LlmError::Truncated
         | LlmError::ReasoningExhausted
@@ -461,7 +473,10 @@ mod tests {
                 .lock()
                 .unwrap()
                 .pop_front()
-                .unwrap_or(Err(LlmError::Status { status: 500 }));
+                .unwrap_or(Err(LlmError::Status {
+                    status: 500,
+                    message: None,
+                }));
             reply.map(|output| LlmResponse {
                 output,
                 model: "test-model".to_owned(),
@@ -564,7 +579,10 @@ mod tests {
         for error in [
             LlmError::Refused,
             LlmError::Truncated,
-            LlmError::Status { status: 400 },
+            LlmError::Status {
+                status: 400,
+                message: None,
+            },
         ] {
             let provider = Scripted::new(vec![Err(error.clone()), Ok(valid())]);
             let mut budget = budget(10);

@@ -1599,6 +1599,7 @@ dependencies = [
  "codspeed-divan-compat",
  "common",
  "http 1.4.0",
+ "httpmock",
  "itoa",
  "llm",
  "lodestone-core",
