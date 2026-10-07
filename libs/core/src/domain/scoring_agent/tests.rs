@@ -3,6 +3,7 @@ use serde_json::{Value, json};
 
 use super::*;
 use crate::domain::{
+    calibration::{Calibrations, calibrate_verdict},
     llm::RunProvenance,
     profile::{ValidatedProfile, fixtures::MINIMAL_PROFILE},
     qualification::{Exclusion, VerdictReason},
@@ -467,7 +468,7 @@ fn the_lead_score_is_the_weighted_mean_of_the_agent_scores() {
         result_for(&heavy, 80, (0.1, 0.8, 0.1)),
         result_for(&light, 20, (0.1, 0.8, 0.1)),
     ];
-    let decision = decide(&[heavy, light], &results, Vec::new());
+    let decision = decide(&[heavy, light], &results, &Calibrations::none(), Vec::new());
     assert_eq!(decision.score, Some(74));
     assert_eq!(decision.contributors, 2);
 }
@@ -480,7 +481,7 @@ fn the_verdict_is_the_argmax_of_the_weighted_mean_of_the_probabilities() {
         result_for(&heavy, 80, (0.7, 0.2, 0.1)),
         result_for(&light, 20, (0.1, 0.2, 0.7)),
     ];
-    let decision = decide(&[heavy, light], &results, Vec::new());
+    let decision = decide(&[heavy, light], &results, &Calibrations::none(), Vec::new());
     let mean = decision.probabilities.unwrap();
     assert!(near(mean.reliable, 0.55));
     assert!(near(mean.to_check, 0.2));
@@ -497,6 +498,7 @@ fn ties_resolve_prudently_to_check_then_discarded_then_reliable() {
         decide(
             std::slice::from_ref(&one),
             &[result_for(&one, 50, p)],
+            &Calibrations::none(),
             Vec::new(),
         )
         .verdict
@@ -515,7 +517,7 @@ fn ties_resolve_prudently_to_check_then_discarded_then_reliable() {
 fn an_exclusion_forces_discarded_whatever_the_scoring_agents_say() {
     let one = agent_with("un", 5);
     let results = [result_for(&one, 90, (0.95, 0.04, 0.01))];
-    let decision = decide(&[one], &results, vec![exclusion()]);
+    let decision = decide(&[one], &results, &Calibrations::none(), vec![exclusion()]);
     assert_eq!(decision.verdict, Some(Verdict::Discarded));
     assert_eq!(decision.reason, Some(VerdictReason::Excluded));
     assert_eq!(decision.reason_text(), Some("excluded"));
@@ -527,7 +529,7 @@ fn an_exclusion_forces_discarded_whatever_the_scoring_agents_say() {
 #[test]
 fn an_exclusion_decides_even_without_any_valid_scoring_result() {
     let one = agent_with("un", 5);
-    let decision = decide(&[one], &[], vec![exclusion()]);
+    let decision = decide(&[one], &[], &Calibrations::none(), vec![exclusion()]);
     assert_eq!(decision.verdict, Some(Verdict::Discarded));
     assert_eq!(decision.reason, Some(VerdictReason::Excluded));
     assert_eq!(decision.score, None);
@@ -537,7 +539,12 @@ fn an_exclusion_decides_even_without_any_valid_scoring_result() {
 fn no_valid_scoring_result_leaves_the_verdict_pending() {
     let one = agent_with("un", 5);
     for results in [Vec::new(), vec![invalid_for(&one)]] {
-        let decision = decide(std::slice::from_ref(&one), &results, Vec::new());
+        let decision = decide(
+            std::slice::from_ref(&one),
+            &results,
+            &Calibrations::none(),
+            Vec::new(),
+        );
         assert_eq!(decision.verdict, None);
         assert_eq!(decision.score, None);
         assert_eq!(decision.confidence, None);
@@ -552,7 +559,7 @@ fn an_invalid_agent_is_left_out_of_the_mean() {
     let good = agent_with("bon", 5);
     let bad = agent_with("mauvais", 9);
     let results = [result_for(&good, 40, (0.1, 0.8, 0.1)), invalid_for(&bad)];
-    let decision = decide(&[good, bad], &results, Vec::new());
+    let decision = decide(&[good, bad], &results, &Calibrations::none(), Vec::new());
     assert_eq!(decision.score, Some(40));
     assert_eq!(decision.contributors, 1);
 }
@@ -568,15 +575,26 @@ fn a_disabled_agent_does_not_count() {
         result_for(&on, 60, (0.1, 0.8, 0.1)),
         result_for(&off, 0, (0.0, 0.0, 1.0)),
     ];
-    let decision = decide(&[on, off], &results, Vec::new());
+    let decision = decide(&[on, off], &results, &Calibrations::none(), Vec::new());
     assert_eq!(decision.score, Some(60));
     assert_eq!(decision.verdict, Some(Verdict::ToCheck));
 }
 
 #[test]
-fn calibration_is_the_identity_until_the_calibration_issue_lands() {
+fn without_a_calibration_the_verdict_probabilities_are_unchanged() {
     let probabilities = VerdictProbabilities::new(0.7, 0.2, 0.1);
-    assert_eq!(calibrate_verdict(probabilities, &agent()), probabilities);
+    assert_eq!(
+        calibrate_verdict(probabilities, &agent(), &Calibrations::none()),
+        probabilities
+    );
+    assert_eq!(
+        calibrate_verdict(
+            probabilities,
+            &agent(),
+            &Calibrations::applied(Vec::new(), true)
+        ),
+        probabilities
+    );
 }
 
 #[test]
@@ -585,4 +603,71 @@ fn the_rounding_of_scores_is_half_up_and_bounded() {
     assert_eq!(round_score(72.49), 72);
     assert_eq!(round_score(-3.0), 0);
     assert_eq!(round_score(140.0), 100);
+}
+
+fn calibration_for(agent: &ScoringAgent, enabled: bool) -> crate::domain::calibration::Calibration {
+    use crate::domain::calibration::{Calibration, CalibrationKind, IsotonicMap, Point};
+    Calibration {
+        profile_id: crate::domain::profile::ProfileId(uuid::Uuid::nil()),
+        kind: CalibrationKind::Scoring,
+        agent_id: agent.id.clone(),
+        map: IsotonicMap::from_points(vec![Point { x: 0.0, y: 0.1 }, Point { x: 0.5, y: 0.3 }]),
+        n: 80,
+        positives: 30,
+        brier_before: Some(0.3),
+        brier_after: Some(0.2),
+        reliability: Vec::new(),
+        fitted_at: DateTime::from_timestamp(0, 0).unwrap(),
+        enabled,
+    }
+}
+
+#[test]
+fn an_applied_calibration_changes_the_combined_probabilities_and_the_verdict() {
+    let one = agent_with("un", 5);
+    let results = [result_for(&one, 80, (0.7, 0.2, 0.1))];
+    let plain = decide(
+        std::slice::from_ref(&one),
+        &results,
+        &Calibrations::none(),
+        Vec::new(),
+    );
+    assert_eq!(plain.verdict, Some(Verdict::Reliable));
+    let calibrations = Calibrations::applied(vec![calibration_for(&one, true)], true);
+    let calibrated = decide(
+        std::slice::from_ref(&one),
+        &results,
+        &calibrations,
+        Vec::new(),
+    );
+    let mean = calibrated.probabilities.unwrap();
+    assert!(near(mean.reliable + 0.5 * mean.to_check, 0.3));
+    assert!(near(mean.to_check, 0.2));
+    assert!(near(mean.sum(), 1.0));
+    assert_eq!(calibrated.verdict, Some(Verdict::Discarded));
+    assert_eq!(calibrated.score, plain.score);
+}
+
+#[test]
+fn a_disabled_or_switched_off_calibration_leaves_the_probabilities_untouched() {
+    let one = agent_with("un", 5);
+    let results = [result_for(&one, 80, (0.7, 0.2, 0.1))];
+    let plain = decide(
+        std::slice::from_ref(&one),
+        &results,
+        &Calibrations::none(),
+        Vec::new(),
+    );
+    for calibrations in [
+        Calibrations::applied(vec![calibration_for(&one, false)], true),
+        Calibrations::applied(vec![calibration_for(&one, true)], false),
+    ] {
+        let decision = decide(
+            std::slice::from_ref(&one),
+            &results,
+            &calibrations,
+            Vec::new(),
+        );
+        assert_eq!(decision, plain);
+    }
 }

@@ -22,7 +22,7 @@ pub mod combination;
 pub mod ports;
 pub mod prompt;
 
-pub use combination::{AgentDecision, Decision, calibrate_verdict, combine, decide, round_score};
+pub use combination::{AgentDecision, Decision, combine, decide, round_score};
 
 uuid_id!(ScoringResultId);
 

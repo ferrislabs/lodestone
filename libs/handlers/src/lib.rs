@@ -1,5 +1,6 @@
 pub mod api;
 pub mod auth;
+pub mod calibration;
 pub mod company;
 pub mod drafts;
 pub mod errors;

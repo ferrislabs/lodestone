@@ -13,6 +13,7 @@ use crate::{
         },
     },
     domain::{
+        calibration::{Calibrations, opinion_score},
         company::PAGE_PROMPT_CHARS,
         facts::{LeadFacts, signal_sentence},
         job::ports::Clock,
@@ -31,7 +32,7 @@ use crate::{
         },
         qualification::{
             AgentOpinion, Completion, EvidenceStrength, Judgement, QualificationResult, ResultId,
-            ResultStatus, SCORING_VERSION, ValidOutput, Violations, agent_score, exclusions, judge,
+            ResultStatus, SCORING_VERSION, ValidOutput, Violations, exclusions, judge,
             ports::QualificationRepository,
             prompt::{AgentPrompt, build, lead_document, with_ungrounded, with_violations},
             sample_record, validate_answers, vote,
@@ -270,6 +271,7 @@ impl RunPlan {
 struct Subject<'a> {
     active: &'a ActiveProfile,
     definition: &'a ProfileDefinition,
+    calibrations: &'a Calibrations,
     lead: &'a Lead,
     documents: &'a [UntrustedDocument<'a>],
     at: DateTime<Utc>,
@@ -322,10 +324,11 @@ fn succeeded(
     output: &ValidOutput,
     stored: (bool, serde_json::Value),
 ) -> (QualificationResult, AgentOpinion) {
-    let score = agent_score(
+    let score = opinion_score(
         agent,
         &output.answers,
         subject.definition.verdict.calibration_floor,
+        subject.calibrations,
     );
     let result = QualificationResult {
         id: ResultId(generate_uuid_v7()),
@@ -705,6 +708,7 @@ where
         clock: &K,
     ) -> Result<LeadOutcome, CoreError> {
         let definition = active.revision.definition.definition();
+        let calibrations = usecase.profile_calibrations(active).await?;
         let (signals, facts, dossier) = usecase.signals_with_facts(lead).await?;
         let overview = lead_document(lead.domain.as_str(), &facts);
         let contents: Vec<String> = signals.iter().map(render_signal).collect();
@@ -730,6 +734,7 @@ where
         let subject = Subject {
             active,
             definition,
+            calibrations: &calibrations,
             lead,
             documents: &documents,
             at: clock.now(),

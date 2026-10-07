@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use crate::domain::{
+    calibration::Calibrations,
     company::{CompanyDossier, CompanyEntity, SiblingLead},
     facts::LeadFacts,
     lead::{Assessment, ContactEmail, Lead, LeadId, LeadStatus, Signal},
@@ -139,6 +140,7 @@ pub struct LeadDetail {
     pub qualification_agents: Vec<QualificationAgent>,
     pub scoring_results: Vec<ScoringResult>,
     pub scoring_agents: Vec<ScoringAgent>,
+    pub calibrations: Calibrations,
     pub summary_state: Option<SummaryState>,
     pub scoring: Option<LeadScoring>,
     pub company: Option<CompanyDossier>,

@@ -779,6 +779,67 @@ describe('LeadDetail', () => {
 		).toContain('Verdict annoncé par le modèle : Fiable')
 	})
 
+	it('shows the raw and the calibrated verdict probabilities of a calibrated agent', () => {
+		const { container } = renderDetail({
+			detail: {
+				...detail,
+				scoring_results: [
+					{
+						...scoringResult,
+						calibration: {
+							n: 80,
+							probabilities: { fiable: 10, a_verifier: 60, ecarte: 30 },
+						},
+					},
+				],
+			},
+		})
+		const card = container.querySelector(
+			'article[data-scoring-agent="score-global"]',
+		)
+		expect(
+			card?.querySelector('[data-part="calibration-badge"]')?.textContent,
+		).toBe('Calibré (n = 80)')
+		const widths = (part: string) =>
+			Array.from(
+				card?.querySelectorAll(
+					`[data-part="${part}"] [data-verdict-probability]`,
+				) ?? [],
+			).map((bar) => bar.getAttribute('style'))
+		expect(widths('verdict-probabilities-raw')).toEqual([
+			'width: 30%;',
+			'width: 60%;',
+			'width: 10%;',
+		])
+		expect(widths('verdict-probabilities-calibrated')).toEqual([
+			'width: 10%;',
+			'width: 60%;',
+			'width: 30%;',
+		])
+		expect(
+			card?.querySelector('[data-part="verdict-probabilities"]'),
+		).toBeNull()
+		expect(card?.textContent).toContain('Probabilités brutes de l')
+		expect(card?.textContent).toContain('Probabilités calibrées')
+	})
+
+	it('shows no calibration mark on an agent that is not calibrated', () => {
+		const { container } = renderDetail({
+			detail: {
+				...detail,
+				scoring_results: [{ ...scoringResult, calibration: null }],
+			},
+		})
+		const card = container.querySelector(
+			'article[data-scoring-agent="score-global"]',
+		)
+		expect(card?.querySelector('[data-part="calibration"]')).toBeNull()
+		expect(card?.textContent).not.toContain('Calibré')
+		expect(
+			card?.querySelectorAll('[data-part="verdict-probabilities"]'),
+		).toHaveLength(1)
+	})
+
 	it('shows the criteria with their quotes and flags the ungrounded ones', () => {
 		const { container } = renderDetail({
 			detail: { ...detail, scoring_results: [scoringResult] },

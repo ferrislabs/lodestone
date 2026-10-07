@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+	calibrationLabel,
 	declaredChoiceNote,
 	formatLlmScore,
 	llmScoreWidth,
@@ -70,5 +71,12 @@ describe('scoring labels', () => {
 		).toBe('Fournisseur inconnu')
 		expect(scoringWeightLabel(5)).toBe('poids 5')
 		expect(scoringWeightLabel(null)).toBe('')
+	})
+})
+
+describe('calibrationLabel', () => {
+	it('names the number of decisions the correction was learned from', () => {
+		expect(calibrationLabel(80)).toBe('Calibré (n = 80)')
+		expect(calibrationLabel(1200)).toBe('Calibré (n = 1\u202f200)')
 	})
 })

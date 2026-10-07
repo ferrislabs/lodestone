@@ -482,6 +482,17 @@ describe('definition tabs', () => {
 		expect(select).toHaveProperty('value', 'en')
 	})
 
+	it('lets the learned calibration be switched off in the settings tab', () => {
+		render(<Harness startTab="settings" />)
+		const toggle = () =>
+			screen
+				.getByLabelText('Calibration apprise activée')
+				.getAttribute('aria-checked')
+		expect(toggle()).toBe('true')
+		fireEvent.click(screen.getByLabelText('Calibration apprise activée'))
+		expect(toggle()).toBe('false')
+	})
+
 	it('never renders a JSON editor', () => {
 		const tabs: EditorTab[] = [
 			'identity',

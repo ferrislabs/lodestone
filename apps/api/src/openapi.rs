@@ -47,6 +47,8 @@ impl Modify for SecurityAddon {
         handlers::drafts::approve_draft,
         handlers::drafts::reject_draft,
         handlers::quality::quality,
+        handlers::calibration::calibration,
+        handlers::calibration::run_calibration,
         handlers::llm::list_providers,
         handlers::llm::get_provider,
         handlers::llm::create_provider,

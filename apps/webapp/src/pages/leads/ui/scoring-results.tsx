@@ -4,6 +4,7 @@ import { cn } from '#/lib/utils'
 import { verdictReasonLabel } from '#/pages/leads/lib/confidence'
 import { formatDateTime } from '#/pages/leads/lib/format'
 import {
+	calibrationLabel,
 	declaredChoiceNote,
 	formatLlmScore,
 	formatPercentValue,
@@ -28,9 +29,15 @@ const BAR_STYLES: Record<Verdict, string> = {
 	ecarte: 'bg-red-500',
 }
 
-function VerdictBars({ rows }: { rows: readonly VerdictProbabilityRow[] }) {
+function VerdictBars({
+	rows,
+	part = 'verdict-probabilities',
+}: {
+	rows: readonly VerdictProbabilityRow[]
+	part?: string
+}) {
 	return (
-		<ul className="flex flex-col gap-1" data-part="verdict-probabilities">
+		<ul className="flex flex-col gap-1" data-part={part}>
 			{rows.map((row) => (
 				<li key={row.key} className="flex items-center gap-2 text-xs">
 					<span className="w-20 shrink-0">{row.label}</span>
@@ -55,6 +62,7 @@ function AgentScoring({ result }: { result: ScoringResult }) {
 	const valid = result.status === 'valid'
 	const verdict = result.verdict ?? null
 	const note = verdict ? declaredChoiceNote(verdict) : null
+	const calibration = result.calibration ?? null
 	return (
 		<article
 			className="flex flex-col gap-3 rounded-lg border p-4"
@@ -102,7 +110,29 @@ function AgentScoring({ result }: { result: ScoringResult }) {
 							probabilité {formatConfidence(verdict.confidence)}
 						</span>
 					</div>
-					<VerdictBars rows={verdictProbabilityRows(verdict.probabilities)} />
+					{calibration ? (
+						<div className="flex flex-col gap-2" data-part="calibration">
+							<Badge variant="outline" data-part="calibration-badge">
+								{calibrationLabel(calibration.n)}
+							</Badge>
+							<p className="text-xs font-medium text-muted-foreground">
+								Probabilités brutes de l'agent
+							</p>
+							<VerdictBars
+								rows={verdictProbabilityRows(verdict.probabilities)}
+								part="verdict-probabilities-raw"
+							/>
+							<p className="text-xs font-medium text-muted-foreground">
+								Probabilités calibrées, utilisées dans le résultat combiné
+							</p>
+							<VerdictBars
+								rows={verdictProbabilityRows(calibration.probabilities)}
+								part="verdict-probabilities-calibrated"
+							/>
+						</div>
+					) : (
+						<VerdictBars rows={verdictProbabilityRows(verdict.probabilities)} />
+					)}
 					{note ? (
 						<p className="text-xs text-muted-foreground" data-part="declared">
 							{note}

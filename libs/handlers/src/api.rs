@@ -10,7 +10,7 @@ use utoipa::ToSchema;
 
 use crate::{
     auth::{AuthenticatedUser, auth_middleware},
-    company, drafts,
+    calibration, company, drafts,
     errors::ApiError,
     exports, leads, llm, profiles, quality,
     response::{DataEnvelope, Response},
@@ -97,6 +97,11 @@ pub fn router(state: AppState) -> Router<AppState> {
         )
         .route("/drafts/{assessment_id}/reject", post(drafts::reject_draft))
         .route("/quality", get(quality::quality))
+        .route("/quality/calibration", get(calibration::calibration))
+        .route(
+            "/quality/calibration/run",
+            post(calibration::run_calibration),
+        )
         .route("/leads/{lead_id}", get(leads::lead_detail))
         .route("/leads/{lead_id}/status", patch(leads::change_lead_status))
         .route(

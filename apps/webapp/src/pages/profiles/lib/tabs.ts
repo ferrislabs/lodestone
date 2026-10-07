@@ -62,7 +62,11 @@ export function tabOfPath(path: string): EditorTab | null {
 	if (belongsTo(path, 'scoring') || belongsTo(path, 'scoring_agents')) {
 		return 'scoring'
 	}
-	if (belongsTo(path, 'llm') || belongsTo(path, 'contact_ranking')) {
+	if (
+		belongsTo(path, 'llm') ||
+		belongsTo(path, 'contact_ranking') ||
+		belongsTo(path, 'calibration')
+	) {
 		return 'settings'
 	}
 	return null

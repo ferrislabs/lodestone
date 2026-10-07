@@ -10,6 +10,7 @@ use crate::{
         quality::{Decided, record_decisions},
     },
     domain::{
+        calibration::{Calibrations, ports::CalibrationRepository},
         company::{CompanyDossier, CompanyEntity, SiblingLead, ports::CompanyRepository},
         facts::{LeadFacts, SiblingSignals},
         host::{CandidateHost, ports::KnownHostRepository},
@@ -107,7 +108,8 @@ impl LodestoneUseCase {
         assessment,
         qualification,
         scoring_agent,
-        company
+        company,
+        calibration
     )]
     pub async fn lead_detail(&self, lead_id: LeadId) -> Result<LeadDetail, CoreError> {
         let mut leads = lead_repository;
@@ -120,6 +122,7 @@ impl LodestoneUseCase {
         let mut qualification = qualification_repository;
         let mut scoring_agents = scoring_agent_repository;
         let mut company = company_repository;
+        let mut calibrations = calibration_repository;
 
         let lead = leads.find(lead_id).await?.ok_or(CoreError::NotFound)?;
         if suppression.is_domain_suppressed(&lead.domain).await? {
@@ -139,7 +142,7 @@ impl LodestoneUseCase {
                     .first()
                     .map(|result| result.profile_revision)
             });
-        let (qualification_agents, scoring_agents) = match revision_number {
+        let (qualification_agents, scoring_agents, learned) = match revision_number {
             Some(number) => profiles
                 .list_revisions(lead.profile_id)
                 .await?
@@ -150,11 +153,14 @@ impl LodestoneUseCase {
                     (
                         definition.qualification_agents.clone(),
                         definition.scoring_agents.clone(),
+                        definition.calibration.learned,
                     )
                 })
                 .unwrap_or_default(),
-            None => (Vec::new(), Vec::new()),
+            None => (Vec::new(), Vec::new(), false),
         };
+        let calibrations =
+            Calibrations::applied(calibrations.list(lead.profile_id).await?, learned);
         let summary_state = qualification.summary_state(lead_id).await?;
         let scoring = qualification.scorings(&[lead_id]).await?.remove(&lead_id);
         let lead_signals = signals.list_for_lead(lead_id).await?;
@@ -173,6 +179,7 @@ impl LodestoneUseCase {
             qualification_agents,
             scoring_results,
             scoring_agents,
+            calibrations,
             facts: context.facts,
             company: context.dossier,
             entity: context.entity,

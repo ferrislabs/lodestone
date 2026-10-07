@@ -1,5 +1,5 @@
 {
-  "schema_version": 11,
+  "schema_version": 12,
   "identity": {
     "offer": "FerrisKey (open source IAM/CIAM in Rust) and Autharie (managed IAM), both by Ferrislabs",
     "target_customer": "Organizations running self-hosted Keycloak or a similar IAM, or paying for a SaaS IAM"
@@ -1000,6 +1000,9 @@
       "role_contact_found": 365,
       "saas_provider": 365
     }
+  },
+  "calibration": {
+    "learned": true
   },
   "scoring": {
     "factors": [

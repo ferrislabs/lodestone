@@ -8,6 +8,7 @@ use sqlx::postgres::PgPoolOptions;
 
 use crate::{domain::output::WebhookPolicy, infrastructure::postgres::error::map_sqlx_error};
 
+pub mod calibration;
 pub mod company;
 pub mod contacts;
 pub mod drafts;

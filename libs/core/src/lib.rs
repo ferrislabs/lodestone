@@ -16,6 +16,11 @@ pub use domain::{
         warnings as aggregation_warnings, with_problem as aggregation_problem,
     },
     ats_target::AtsTargets,
+    calibration::{
+        AgentCalibration, CALIBRATION_JOB_KIND, Calibration, CalibrationKind, CalibrationStatus,
+        Calibrations, IsotonicMap, MIN_PER_CLASS, MIN_SAMPLES, Point, ProfileCalibration,
+        ReliabilityBin, calibrate_verdict, ports::CalibrationRepository,
+    },
     company::{
         CompanyBuilder, CompanyDossier, CompanyEntity, CompanyPage, DossierBuild, DossierDocument,
         DossierState, InvalidSiren, OFFICIAL_SOURCE, OfficialData, PAGE_PROMPT_CHARS,
@@ -115,7 +120,7 @@ pub use domain::{
     scoring::{DISTINCT_SIGNALS_FACTOR, ScoreBreakdown, ScoreContribution, score},
     scoring_agent::{
         AgentDecision, Decision, ScoringOutput, ScoringResult, ScoringResultId, ScoringViolation,
-        ScoringViolations, VerdictAnswer, VerdictProbabilities, calibrate_verdict, combine, decide,
+        ScoringViolations, VerdictAnswer, VerdictProbabilities, combine, decide,
         ports::{ScoringCompletion, ScoringRepository},
         prompt::{
             INDICATORS_SOURCE, REPORT_SOURCE_PREFIX, build as scoring_prompt, render_indicators,

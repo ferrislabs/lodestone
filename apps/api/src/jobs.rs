@@ -4,7 +4,9 @@ use chrono::Utc;
 use common::CoreError;
 use fetch::PoliteFetcher;
 use lodestone_core::{
-    Clock, Job, JobQueue, LodestoneUseCase, PartnerAward, SourceName, WEBHOOK_JOB_KIND,
+    CALIBRATION_JOB_KIND, Clock, Job, JobQueue, LodestoneUseCase, PartnerAward, SourceName,
+    WEBHOOK_JOB_KIND,
+    calibration::{calibration_job, is_recurring_calibration, next_calibration},
     infrastructure::{contact_target::postgres::PgAtsTargets, job::postgres::PgJobQueue},
     is_continuous,
     jobs::{JobError, JobHandler, JobOutcome, SystemClock},
@@ -153,6 +155,32 @@ impl JobRouter {
         Ok((report.candidates, report.accepted()))
     }
 
+    async fn run_calibration(&self, job: &Job) -> Result<JobOutcome, JobError> {
+        let now = SystemClock.now();
+        let recurring = is_recurring_calibration(job);
+        let outcome = if recurring {
+            JobOutcome::RescheduleAt(next_calibration(now))
+        } else {
+            JobOutcome::Done
+        };
+        match self.usecase.calibrate_profiles(now).await {
+            Ok(report) => {
+                info!(
+                    profiles = report.profiles,
+                    active_maps = report.agents_fitted,
+                    leads_marked_stale = report.rescored,
+                    "calibration run finished"
+                );
+                Ok(outcome)
+            }
+            Err(error) if recurring && job.attempts >= job.max_attempts.get() => {
+                info!(%error, "calibration failed on its last attempt, scheduling the next run");
+                Ok(outcome)
+            }
+            Err(error) => Err(JobError::Retryable(error.to_string())),
+        }
+    }
+
     async fn run_source(&self, job: &Job) -> Result<JobOutcome, JobError> {
         let source = source_of_job(job)?;
         if is_continuous(source) {
@@ -206,6 +234,7 @@ impl JobHandler for JobRouter {
         match job.kind.as_str() {
             SOURCE_JOB_KIND => self.run_source(job).await,
             WEBHOOK_JOB_KIND => run_webhook_job(&self.usecase, self.webhook.as_ref(), job).await,
+            CALIBRATION_JOB_KIND => self.run_calibration(job).await,
             other => Err(JobError::Permanent(format!(
                 "no handler for job kind `{other}`"
             ))),
@@ -243,6 +272,18 @@ pub async fn schedule_wired_sources(
     Ok(())
 }
 
+pub async fn schedule_calibration(queue: &Arc<PgJobQueue>) -> Result<(), CoreError> {
+    let now = Utc::now();
+    if queue
+        .enqueue(&calibration_job(now, true)?, now)
+        .await?
+        .is_some()
+    {
+        info!("scheduled first calibration run");
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use lodestone_core::CONTINUOUS_SOURCES;
@@ -270,6 +311,28 @@ mod tests {
             !scheduled_sources(true)
                 .iter()
                 .any(|source| source.as_str().contains("qualif"))
+        );
+    }
+
+    #[test]
+    fn the_calibration_job_is_recurring_deduplicated_and_not_a_source() {
+        let now = Utc::now();
+        let recurring = calibration_job(now, true).unwrap();
+        assert_eq!(recurring.kind.as_str(), CALIBRATION_JOB_KIND);
+        assert_eq!(recurring.dedup_key.as_deref(), Some("quality:calibrate"));
+        assert_eq!(recurring.payload["recurring"], true);
+        let manual = calibration_job(now, false).unwrap();
+        assert_eq!(
+            manual.dedup_key.as_deref(),
+            Some("quality:calibrate:manual")
+        );
+        assert_eq!(manual.payload["recurring"], false);
+        assert_ne!(recurring.dedup_key, manual.dedup_key);
+        assert_eq!(next_calibration(now) - now, chrono::Duration::hours(24));
+        assert!(
+            !scheduled_sources(true)
+                .iter()
+                .any(|source| source.as_str().contains("calibrat"))
         );
     }
 

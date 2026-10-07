@@ -10,3 +10,7 @@ export type ReasonCount = Schemas.ReasonCountDto
 export type ExclusionCount = Schemas.ExclusionCountDto
 export type ExclusionCandidate = Schemas.ExclusionCandidateDto
 export type { ProfileSummary } from '#/pages/leads/lib/types'
+export type Calibration = Schemas.CalibrationDto
+export type ProfileCalibration = Schemas.ProfileCalibrationDto
+export type AgentCalibration = Schemas.AgentCalibrationDto
+export type ReliabilityBin = Schemas.ReliabilityBinDto

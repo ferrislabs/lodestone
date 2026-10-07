@@ -8,7 +8,7 @@ Profiles live in Postgres. Each edit creates a new revision; earlier revisions a
 
 ## Schema
 
-The JSON Schema is `docs/schemas/profile.v11.schema.json`. It is generated from `ProfileDefinition` and must not be edited by hand. Regenerate it with:
+The JSON Schema is `docs/schemas/profile.v12.schema.json`. It is generated from `ProfileDefinition` and must not be edited by hand. Regenerate it with:
 
 ```
 UPDATE_SCHEMA=1 cargo test -p lodestone-core --test profile_examples
@@ -53,6 +53,7 @@ Without `UPDATE_SCHEMA=1` the same test fails if the committed file is stale. Th
     - `Recherche entreprise`: what the company does and its size, from its dossier.
     - `Exclusions`: weight 1. Axes `editeur_integrateur`, `hebergeur_agence` (the signal concerns a customer of the company), `domaine_inactif` (`parque_ou_inactif`, `actif`, `inconnu`), `client_actuel` and `concurrent`; the other four have `oui` (excludes, score 0), `non` (score 1) and `inconnu` (score 0.5). The prompt holds three operator-editable lists in French, `Clients actuels :`, `Concurrents :` and `Éditeurs et intégrateurs du domaine :`, with short IAM-oriented defaults.
     - The IAM example (`docs/examples/profiles/iam-ferriskey.json`) enables all of them.
+- `calibration`: `learned` (default `true`). Switches the learned calibration on or off for the profile (see "Learned calibration"). The whole section and the field are optional.
 - `scoring_agents`: zero or more (ADR 0009). Each agent *decides* a score and a verdict for every lead from the reports of the qualification agents, through a contract imposed by the application. With none enabled the verdict stays pending (`en_attente`, reason `awaiting_scoring`).
   - `id`: slug, unique among all agents of the profile (sourcing, qualification and scoring). `name`, `enabled` (default `true`), `description` (1 to 300 characters), `provider_id` (`null` for the Synthèse default provider, the one of the aggregator), `system_prompt` (not empty, at most 8000 characters).
   - `weight`: integer from 1 to 10, default 5, the agent's weight in the lead score and verdict.
@@ -100,7 +101,7 @@ Validation is `validate_scoring` (`libs/core/src/domain/scoring_agent/mod.rs`) a
 **Combination.** Pure function `combine` / `decide` (`libs/core/src/domain/scoring_agent/combination.rs`), over the valid results of the enabled scoring agents:
 
 - lead score = weighted mean of the agent scores (weights 1 to 10), rounded half up to an integer;
-- verdict probabilities = weighted mean of the agents' verdict probabilities, each first passed through `calibrate_verdict(probabilities, agent)`, the identity until issue 171;
+- verdict probabilities = weighted mean of the agents' verdict probabilities, each first passed through `calibrate_verdict(probabilities, agent, calibrations)`, the identity unless a learned calibration applies to the agent (see "Learned calibration");
 - verdict = argmax, ties resolved prudently `a_verifier` > `ecarte` > `fiable`; verdict confidence = that probability, stored in percent on the lead (`leads.confidence`);
 - qualification exclusions force `ecarte` with reason `excluded` and confidence 100, whatever the scoring agents say, even when none answered;
 - no valid scoring result and no exclusion: verdict `null`, score `null`, reason `awaiting_scoring`.
@@ -110,6 +111,32 @@ Validation is `validate_scoring` (`libs/core/src/domain/scoring_agent/mod.rs`) a
 **Rescoring.** The rescoring loop (no model call) refreshes the indicators and the decay (`SCORING_VERSION` 4) and no longer decides: it recombines the stored scoring results and changes a verdict only through exclusions (a lead scored by the scoring agents is recombined, an `indicators` lead is untouched unless a qualification agent excludes it).
 
 **Quality.** Decision label snapshots keep the scoring results (`scoring_agents`, `llm_score`, `indicator_confidence`, `verdict_source`); the versions table of `GET /api/v1/quality` has a `kind` (`qualification`, `scoring`, `aggregator`), so precision is counted per scoring agent and per version (model and prompt).
+
+### Learned calibration
+
+Issue 171. The probabilities of the agents are corrected from the human decisions (`decision_labels`). Everything is pure code in `libs/core/src/domain/calibration/`; storage is the `calibrations` table.
+
+**Labelled data.** For each profile and each agent, the observations are the leads whose latest lead label (`lead_validated` = 1, `lead_rejected` = 0; draft labels and suppressed leads are ignored) has a valid result of that agent at the current revision of the lead.
+
+**Isotonic regression.** Pool-adjacent-violators over the observations `(x, y)` with unit weights: samples sharing the same `x` are averaged first, then neighbouring blocks that violate the order are pooled into their weighted mean. The fitted map is the list of blocks `[{x: lower bound of the block, y: value}]`, stored as `calibrations.points`. Prediction is a step function: the value of the last block whose lower bound is at most `x` (the first block below the smallest bound), clamped to `[0.02, 0.98]`.
+
+**Scoring agents.** `x` = `P(fiable) + 0.5 x P(a_verifier)` of the agent verdict (called the good probability), `y` = validated. With `g` the calibrated good probability and `(r, c, d)` the raw probabilities of `fiable`, `a_verifier` and `ecarte` (summing to 1), the transform keeps `c` and moves the rest:
+
+- `r' = clamp(g - 0.5 c, 0, 1 - c)`
+- `c' = c`
+- `d' = 1 - c - r'`
+
+so `r' + d' = 1 - c`, the three still sum to 1, `r' + 0.5 c'` equals `g` whenever `0.5 c <= g <= 1 - 0.5 c` (otherwise `r'` is clamped at 0 or at `1 - c`), `g` equal to the raw good probability is the identity, and `r'` is non-decreasing and `d'` non-increasing in `g`. The calibrated probabilities replace the raw ones in the weighted mean of `combine`; the stored result keeps the raw ones.
+
+**Qualification agents (indicators).** `x` = the agent score computed without the calibration floor (`agent_score(agent, answers, 0)`, recomputed from the stored answers), `y` = validated. When a map applies, the agent opinion used by the indicators is `predict(x)` instead of the score computed with `verdict.calibration_floor`; otherwise the floor applies as before. The stored `qualification_results.agent_score` keeps the value used.
+
+**Thresholds.** A map is fitted and applied only with at least 50 observations and at least 10 of each class. Below, the row keeps `n`, `positives` and `brier_before`, `points` is `[]`, `enabled` is `false`, and the identity applies.
+
+**Storage.** `calibrations (profile_id, kind scoring|qualification, agent_id, points, n, positives, brier_before, brier_after, reliability, fitted_at, enabled)`, primary key `(profile_id, kind, agent_id)`. `brier_before` is the mean squared error of the raw `x` against the outcomes, `brier_after` the same for the calibrated values on the same observations (in-sample, hence optimistic). `reliability` holds the ten-bin reliability curve of the raw predictions (non-empty bins `{n, predicted, observed}`). `enabled` means the thresholds were met; the profile setting `calibration.learned` decides whether an enabled map is applied (`false`: raw probabilities, state "Désactivée").
+
+**Job `quality.calibrate`.** A daily recurring job in the Postgres queue (payload `{"recurring": true}`, dedup key `quality:calibrate`, first run at startup then rescheduled 24 hours after each run, 3 attempts). It refits every profile from its latest revision and writes the rows with an upsert, so it is idempotent and safe to run twice. When an applied map changed (and `calibration.learned` is `true`), it sets `lead_qualification_state.scored_at` to `NULL` for the leads of the profile: the rescoring loop then recombines the stored results with the new maps, without any model call. `POST /api/v1/quality/calibration/run` (users only) enqueues a one-shot run (payload `{"recurring": false}`, dedup key `quality:calibrate:manual`, answer 202 `{queued}`, `queued` false when one is already waiting). `GET /api/v1/quality/calibration` gives the state of every agent of every profile.
+
+**Display.** The Qualité page has a "Calibration" card per profile (n, validated, Brier before and after, state "Active", "Pas assez de décisions (n/50)" or "Désactivée", reliability curve with the diagonal as reference, button "Recalculer maintenant"). The lead page shows "Calibré (n = ...)" on a scoring agent card with its raw and calibrated verdict probabilities.
 
 ### Evidence indicators
 
@@ -324,3 +351,7 @@ Every qualification agent gains `samples` (3) and `sampling_temperature` (0.7), 
 ### Version 10 to 11
 
 The profile gains `scoring_agents` with one agent, `score-global` (see `scoring_agents` above), provider `null` (the Synthèse default), weight 5, 1 sample. Stored leads keep the verdict they had, computed by the former confidence formula (`verdict_source` `indicators`), until the scoring agents have scored them: every stored lead becomes due for scoring on the next pass, and is summarised again afterwards because the aggregator now receives the scoring results. Rescoring (`SCORING_VERSION` 4) refreshes the indicators of every stored lead without calling a model. Profiles written in version 11 may declare no scoring agent; their leads then wait with a pending verdict.
+
+### Version 11 to 12
+
+The profile gains `calibration` with `learned` `true`. Nothing is learned until 50 leads are labelled with 10 of each class, so a stored profile behaves as before until then; the first run of the `quality.calibrate` job happens at startup.

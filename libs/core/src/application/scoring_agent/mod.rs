@@ -400,7 +400,8 @@ where
         let at = clock.now();
         let qualification = usecase.lead_qualification_results(lead.id).await?;
         let (signals, facts, dossier) = usecase.signals_with_facts(lead).await?;
-        let (opinions, _) = stored_opinions(definition, &qualification);
+        let calibrations = usecase.profile_calibrations(active).await?;
+        let (opinions, _) = stored_opinions(definition, &qualification, &calibrations);
         let judgement = judge(
             &opinions,
             EvidenceStrength::compute(&facts, lead.score.get(), &definition.evidence, at),
@@ -515,7 +516,7 @@ where
                 .count(),
         );
         let invalid = count(results.len()) - valid;
-        let decision = decide(&definition.scoring_agents, &results, found);
+        let decision = decide(&definition.scoring_agents, &results, &calibrations, found);
         let completion = ScoringCompletion {
             lead_id: lead.id,
             profile_revision: active.revision.number,

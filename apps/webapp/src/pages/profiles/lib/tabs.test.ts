@@ -45,6 +45,8 @@ describe('tabs', () => {
 		).toBe('qualification')
 		expect(tabOfPath('aggregator.system_prompt')).toBe('qualification')
 		expect(tabOfPath('verdict.reliable_from')).toBe('qualification')
+		expect(tabOfPath('calibration.learned')).toBe('settings')
+		expect(tabOfPath('llm.language')).toBe('settings')
 		expect(tabOfPath('$')).toBeNull()
 	})
 

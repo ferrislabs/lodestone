@@ -458,6 +458,16 @@ export const FIELD_COPY: Readonly<Record<string, FieldCopy>> = {
 		description:
 			"Solidité des preuves derrière un lead (signaux indépendants et vieillis, diversité des sources et des types, environnement des hôtes, force des signaux), calculée sur l'entreprise entière quand plusieurs domaines partagent un SIREN. Elle pondère l'avis des agents dans la confiance.",
 	},
+	calibration: {
+		label: 'Calibration apprise',
+		description:
+			"Corrige les probabilités des agents d'après les décisions validées et rejetées par les humains.",
+	},
+	'calibration.learned': {
+		label: 'Calibration apprise activée',
+		description:
+			"Corrige chaque jour les probabilités de verdict des agents de scoring et les scores des agents de qualification d'après vos décisions, dès que 50 leads sont étiquetés dont au moins 10 de chaque classe. Désactivée, les probabilités brutes sont utilisées. Activée par défaut.",
+	},
 	'evidence.influence': {
 		label: 'Influence des preuves',
 		description:

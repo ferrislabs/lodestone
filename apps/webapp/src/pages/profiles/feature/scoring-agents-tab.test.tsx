@@ -58,7 +58,7 @@ const PROVIDERS: ProviderOption[] = [
 function base(): JsonObject {
 	const taken = new Set(['ats', 'pertinence'])
 	return {
-		schema_version: 11,
+		schema_version: 12,
 		identity: { offer: 'o', target_customer: 't' },
 		agents: [newAgent('ats', [])],
 		qualification_agents: [

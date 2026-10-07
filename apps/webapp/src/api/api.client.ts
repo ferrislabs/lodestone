@@ -1,5 +1,18 @@
 export namespace Schemas {
   // <Schemas>
+  export type ReliabilityBinDto = { n: number; observed: number; predicted: number };
+  export type AgentCalibrationDto = {
+    agent_id: string;
+    brier_after?: (number | null) | undefined;
+    brier_before?: (number | null) | undefined;
+    fitted_at?: (string | null) | undefined;
+    kind: string;
+    n: number;
+    name: string;
+    positives: number;
+    reliability: Array<ReliabilityBinDto>;
+    status: string;
+  };
   export type AgentQualityDto = {
     agent_id: string;
     mean_rejected?: (number | null) | undefined;
@@ -65,6 +78,14 @@ export namespace Schemas {
     summary: string;
   };
   export type AssignTierRequest = { provider_id: string };
+  export type ProfileCalibrationDto = {
+    agents: Array<AgentCalibrationDto>;
+    learned: boolean;
+    name: string;
+    profile_id: string;
+  };
+  export type CalibrationDto = { profiles: Array<ProfileCalibrationDto>; required: number; required_per_class: number };
+  export type CalibrationRunDto = { queued: boolean };
   export type RejectionReasonDto =
     | "hors_cible"
     | "deja_client"
@@ -152,6 +173,14 @@ export namespace Schemas {
     per_page: number;
     prev_page?: (number | null) | undefined;
     total?: (number | null) | undefined;
+  };
+  export type DataEnvelope_CalibrationDto = {
+    data: { profiles: Array<ProfileCalibrationDto>; required: number; required_per_class: number };
+    pagination?: (null | PaginationMetadata) | undefined;
+  };
+  export type DataEnvelope_CalibrationRunDto = {
+    data: { queued: boolean };
+    pagination?: (null | PaginationMetadata) | undefined;
   };
   export type DataEnvelope_CompanyDto = {
     data: {
@@ -314,6 +343,7 @@ export namespace Schemas {
     value?: (string | null) | undefined;
     weight: number;
   };
+  export type ScoringCalibrationDto = { n: number; probabilities: VerdictProbabilitiesDto };
   export type ScoringVerdictDto = {
     choice: VerdictDto;
     confidence: number;
@@ -324,6 +354,7 @@ export namespace Schemas {
     agent_description?: (string | null) | undefined;
     agent_id: string;
     agent_name: string;
+    calibration?: (null | ScoringCalibrationDto) | undefined;
     created_at: string;
     criteria: Array<QualificationAnswerDto>;
     error?: (string | null) | undefined;
@@ -1218,6 +1249,20 @@ export namespace Endpoints {
     };
     responses: { 200: Schemas.DataEnvelope_QualityDto; 400: unknown; 401: unknown; 403: unknown; 404: unknown };
   };
+  export type get_Calibration = {
+    method: "GET";
+    path: "/api/v1/quality/calibration";
+    requestFormat: "json";
+    parameters: never;
+    responses: { 200: Schemas.DataEnvelope_CalibrationDto; 401: unknown; 403: unknown };
+  };
+  export type post_Run_calibration = {
+    method: "POST";
+    path: "/api/v1/quality/calibration/run";
+    requestFormat: "json";
+    parameters: never;
+    responses: { 202: Schemas.DataEnvelope_CalibrationRunDto; 401: unknown; 403: unknown };
+  };
   export type get_List_sources = {
     method: "GET";
     path: "/api/v1/sources";
@@ -1263,6 +1308,7 @@ export type EndpointByMethod = {
     "/api/v1/profiles/{profile_id}/revisions": Endpoints.get_List_revisions;
     "/api/v1/profiles/{profile_id}/revisions/{number}": Endpoints.get_Get_revision;
     "/api/v1/quality": Endpoints.get_Quality;
+    "/api/v1/quality/calibration": Endpoints.get_Calibration;
     "/api/v1/sources": Endpoints.get_List_sources;
   };
   patch: {
@@ -1283,6 +1329,7 @@ export type EndpointByMethod = {
     "/api/v1/profiles/import": Endpoints.post_Import_profile;
     "/api/v1/profiles/{profile_id}/activate": Endpoints.post_Activate_profile;
     "/api/v1/profiles/{profile_id}/deactivate": Endpoints.post_Deactivate_profile;
+    "/api/v1/quality/calibration/run": Endpoints.post_Run_calibration;
     "/api/v1/sources/{source}/run": Endpoints.post_Run_source;
   };
   delete: {

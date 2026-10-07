@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 use crate::domain::values::SourceName;
 
-pub const PROFILE_SCHEMA_VERSION: u32 = 11;
+pub const PROFILE_SCHEMA_VERSION: u32 = 12;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -15,7 +15,7 @@ pub const PROFILE_SCHEMA_VERSION: u32 = 11;
     description = "Describes one market: what is sold, which agents scan which sources, which qualification agents judge a lead, which scoring agents decide its score and verdict, how an aggregator sums it up, how signals are weighted and which contacts to prefer."
 )]
 pub struct ProfileDefinition {
-    #[schemars(description = "Profile format version. Must be 11.")]
+    #[schemars(description = "Profile format version. Must be 12.")]
     pub schema_version: u32,
     pub identity: Identity,
     #[schemars(description = "Detection agents. At least one is required.")]
@@ -36,9 +36,31 @@ pub struct ProfileDefinition {
     pub verdict: VerdictThresholds,
     #[serde(default)]
     pub evidence: EvidenceSettings,
+    #[serde(default)]
+    pub calibration: CalibrationSettings,
     pub scoring: Scoring,
     pub contact_ranking: ContactRanking,
     pub llm: LlmSettings,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(
+    title = "Calibration",
+    description = "Learns from the validate and reject decisions how far the probabilities of the agents can be trusted."
+)]
+pub struct CalibrationSettings {
+    #[serde(default = "default_enabled")]
+    #[schemars(
+        description = "When true, the verdict probabilities of the scoring agents and the scores of the qualification agents are corrected by an isotonic map learned daily from the human decisions, once at least 50 leads are labelled with 10 of each class. Default true."
+    )]
+    pub learned: bool,
+}
+
+impl Default for CalibrationSettings {
+    fn default() -> Self {
+        Self { learned: true }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]

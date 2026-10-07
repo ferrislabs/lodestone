@@ -47,3 +47,5 @@
 | indicators | The values computed in code and given to the scoring agents: the agents' opinion, the evidence strength with its components, independent signals and decayed volume. Shown as "Calcul" on the lead page. | metrics, features |
 | lead score | The score from 0 to 100 of a lead: the weighted mean of the scores of the scoring agents. Distinct from the signal score, the sum of the weighted signals of the sourcing. | rating |
 | verdict source | `scoring` when the verdict comes from the scoring agents, `indicators` for a lead qualified before they existed and not scored since. | n/a |
+| learned calibration | The correction of the probabilities of an agent by an isotonic map fitted daily on the human decisions (issue 171, `quality.calibrate` job). Applied from 50 labelled leads with 10 of each class. Distinct from the calibration floor (`verdict.calibration_floor`), the fixed clamp of the answer probabilities. | training, tuning |
+| Brier score | The mean squared error between a predicted probability and the outcome (1 validated, 0 rejected); the lower the better. Shown before and after calibration, in-sample. | n/a |

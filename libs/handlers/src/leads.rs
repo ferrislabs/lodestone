@@ -5,12 +5,12 @@ use axum::{
     extract::{Path, Query, State, rejection::JsonRejection},
 };
 use lodestone_core::{
-    Assessment, ContactEmail, DraftMessage, DraftReview, DraftStatus, Exclusion, Lead, LeadDetail,
-    LeadFacts, LeadId, LeadQuery, LeadScoring, LeadSort, LeadStatus, LlmProviderRecord, Profile,
-    ProfileId, QualificationResult, Rejection, RejectionProblem, ResultStatus, RunProvenance,
-    SUMMARY_FAILED_AFTER, ScoreContribution, ScoringResult, Signal, SignalKind, SummaryState,
-    Verdict, VerdictAnswer, VerdictCap, VerdictFilter, VerdictProbabilities, VerdictReason,
-    VerdictSource,
+    Assessment, Calibrations, ContactEmail, DraftMessage, DraftReview, DraftStatus, Exclusion,
+    Lead, LeadDetail, LeadFacts, LeadId, LeadQuery, LeadScoring, LeadSort, LeadStatus,
+    LlmProviderRecord, Profile, ProfileId, QualificationResult, Rejection, RejectionProblem,
+    ResultStatus, RunProvenance, SUMMARY_FAILED_AFTER, ScoreContribution, ScoringResult, Signal,
+    SignalKind, SummaryState, Verdict, VerdictAnswer, VerdictCap, VerdictFilter,
+    VerdictProbabilities, VerdictReason, VerdictSource, calibrate_verdict,
     definition::{QualificationAgent, Question, ScoringAgent},
     signal_sentence,
 };
@@ -792,6 +792,15 @@ impl From<&VerdictAnswer> for ScoringVerdictDto {
     }
 }
 
+/// Correction learned from the human decisions that was applied to the verdict probabilities of a scoring agent.
+#[derive(Debug, Serialize, PartialEq, ToSchema)]
+pub struct ScoringCalibrationDto {
+    /// Labelled leads the correction was learned from.
+    pub n: u64,
+    /// Probabilities after the correction, in percent from 0 to 100. The raw ones are in `verdict`.
+    pub probabilities: VerdictProbabilitiesDto,
+}
+
 #[derive(Debug, Serialize, PartialEq, ToSchema)]
 pub struct ScoringResultDto {
     pub agent_id: String,
@@ -809,6 +818,8 @@ pub struct ScoringResultDto {
     /// Score from 0 to 100, absent when the result is invalid.
     pub score: Option<u8>,
     pub verdict: Option<ScoringVerdictDto>,
+    /// Present when a learned calibration corrects the probabilities of this agent in the combined verdict of the lead.
+    pub calibration: Option<ScoringCalibrationDto>,
     /// One to five short sentences, in the profile language, that explain the score and the verdict.
     pub reasons: Vec<String>,
     pub criteria: Vec<QualificationAnswerDto>,
@@ -821,9 +832,23 @@ impl ScoringResultDto {
     fn new(
         result: &ScoringResult,
         agents: &[ScoringAgent],
+        calibrations: &Calibrations,
         providers: &[LlmProviderRecord],
     ) -> Self {
         let agent = agents.iter().find(|agent| agent.id == result.agent_id);
+        let calibration = agent
+            .zip(result.verdict.as_ref())
+            .and_then(|(agent, answer)| {
+                let applied = calibrations.scoring(&agent.id)?;
+                Some(ScoringCalibrationDto {
+                    n: applied.n,
+                    probabilities: VerdictProbabilitiesDto::from(&calibrate_verdict(
+                        answer.probabilities,
+                        agent,
+                        calibrations,
+                    )),
+                })
+            });
         let provider = result
             .provenance
             .provider_id
@@ -845,6 +870,7 @@ impl ScoringResultDto {
             status: result.status.as_str().to_owned(),
             score: result.score,
             verdict: result.verdict.as_ref().map(ScoringVerdictDto::from),
+            calibration,
             reasons: result.reasons.clone(),
             criteria: agent
                 .map(|agent| answers_from(&result.criteria, &agent.criteria))
@@ -1048,7 +1074,14 @@ fn ordered_scoring(detail: &LeadDetail, providers: &[LlmProviderRecord]) -> Vec<
     results.sort_by_key(|result| position(result));
     results
         .into_iter()
-        .map(|result| ScoringResultDto::new(result, &detail.scoring_agents, providers))
+        .map(|result| {
+            ScoringResultDto::new(
+                result,
+                &detail.scoring_agents,
+                &detail.calibrations,
+                providers,
+            )
+        })
         .collect()
 }
 

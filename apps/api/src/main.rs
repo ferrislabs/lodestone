@@ -3,7 +3,7 @@ use std::{error::Error, net::SocketAddr, num::NonZeroU32, sync::Arc, time::Durat
 use api::{
     fetchers::ct_fetch_settings,
     internal_router::internal_router,
-    jobs::{Intervals, JobRouter, WiredSources, schedule_wired_sources},
+    jobs::{Intervals, JobRouter, WiredSources, schedule_calibration, schedule_wired_sources},
     listeners::{CompanyStep, ContactStep, CtStep, HostStep, QualificationStep},
     logger::init_tracing_and_logging,
     router::router,
@@ -256,6 +256,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     )
     .with_webhook(webhook);
     schedule_wired_sources(&queue, args.france_travail.credentials().is_some()).await?;
+    schedule_calibration(&queue).await?;
 
     let usecase = app_state.usecase.clone();
     let router = router(app_state)?;

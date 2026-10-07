@@ -3,7 +3,7 @@ use std::{fs, num::NonZeroU32, path::PathBuf, time::Duration};
 use chrono::DateTime;
 use llm::openai::OpenAiCompatibleProvider;
 use lodestone_core::{
-    AgentDecision, CacheScope, CachedOutput, EvidenceComponents, EvidenceStrength,
+    AgentDecision, CacheScope, CachedOutput, Calibrations, EvidenceComponents, EvidenceStrength,
     GenerationParams, LeadId, LlmCache, ProfileId, ProviderDefinition, ProviderKind,
     QualificationResult, ReasoningEffort, ResultId, ResultStatus, RevisionNumber, RunProvenance,
     ScoringOutput, TokenPricing, UntrustedDocument, ValidatedProfile, combine,
@@ -280,6 +280,7 @@ async fn the_scoring_agent_answers_the_imposed_contract_live() {
             score: output.score,
             probabilities: output.verdict.probabilities,
         }],
+        &Calibrations::none(),
         Vec::new(),
     );
     println!("combination: {combined:#?}");

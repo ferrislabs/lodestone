@@ -19,7 +19,7 @@ use super::{
     legacy::{
         ProfileDefinitionV1, ProfileDefinitionV2, ProfileDefinitionV3, ProfileDefinitionV4,
         ProfileDefinitionV5, ProfileDefinitionV6, ProfileDefinitionV7, ProfileDefinitionV8,
-        ProfileDefinitionV10,
+        ProfileDefinitionV10, ProfileDefinitionV11,
     },
 };
 
@@ -31,7 +31,7 @@ pub enum ProfileProblem {
     #[error("malformed: {0}")]
     Malformed(String),
     #[error(
-        "unsupported schema version {found}, expected 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 or {PROFILE_SCHEMA_VERSION}"
+        "unsupported schema version {found}, expected 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 or {PROFILE_SCHEMA_VERSION}"
     )]
     UnsupportedSchemaVersion { found: u32 },
     #[error("must not be empty")]
@@ -145,6 +145,7 @@ impl ValidatedProfile {
             Some(7) => decode::<ProfileDefinitionV7>(value)?.upgrade(),
             Some(8) => decode::<ProfileDefinitionV8>(value)?.upgrade(),
             Some(9 | 10) => decode::<ProfileDefinitionV10>(value)?.upgrade(),
+            Some(11) => decode::<ProfileDefinitionV11>(value)?.upgrade(),
             Some(PROFILE_SCHEMA_VERSION) | None => decode::<ProfileDefinition>(value)?,
             Some(found) => {
                 return Err(Path::root()
@@ -980,10 +981,10 @@ mod tests {
             v["scoring"] = iam_scoring_v2();
             v["llm"]["qualification_threshold"] = json!(50);
         });
-        assert_eq!(profile.definition().schema_version, 11);
+        assert_eq!(profile.definition().schema_version, 12);
         assert_eq!(weights(&profile), [10, 5, 3, 8, 7, 2, 2]);
         assert_eq!(profile.definition().llm.qualification_threshold, 37);
-        assert_eq!(profile.to_json()["schema_version"], 11);
+        assert_eq!(profile.to_json()["schema_version"], 12);
     }
 
     #[test]
@@ -1082,11 +1083,11 @@ mod tests {
 
     #[test]
     fn unsupported_schema_version_is_rejected() {
-        let error = error_for(|v| v["schema_version"] = json!(12));
+        let error = error_for(|v| v["schema_version"] = json!(13));
         assert_eq!(error.path, "schema_version");
         assert_eq!(
             error.problem,
-            ProfileProblem::UnsupportedSchemaVersion { found: 12 }
+            ProfileProblem::UnsupportedSchemaVersion { found: 13 }
         );
         let error = error_for(|v| v["schema_version"] = json!(0));
         assert_eq!(
@@ -1412,7 +1413,7 @@ mod tests {
         value["sources"] = json!({"http_probe": source, "ats": {"keywords": ["sso"]}});
         let profile = ValidatedProfile::parse(value).unwrap();
         let definition = profile.definition();
-        assert_eq!(definition.schema_version, 11);
+        assert_eq!(definition.schema_version, 12);
         let summary: Vec<_> = definition
             .agents
             .iter()
@@ -1422,7 +1423,7 @@ mod tests {
             summary,
             [("http-probe", "HTTP probe", true), ("ats", "ATS", true)]
         );
-        assert_eq!(profile.to_json()["schema_version"], 11);
+        assert_eq!(profile.to_json()["schema_version"], 12);
         assert_eq!(profile.to_json()["agents"][0]["source"], agent);
     }
 
@@ -1492,6 +1493,7 @@ mod tests {
         let mut value = v4();
         value["schema_version"] = json!(8);
         value.as_object_mut().unwrap().remove("scoring_agents");
+        value.as_object_mut().unwrap().remove("calibration");
         value.as_object_mut().unwrap().remove("escalation");
         for agent in value["qualification_agents"].as_array_mut().unwrap() {
             let agent = agent.as_object_mut().unwrap();
@@ -1536,7 +1538,7 @@ mod tests {
     fn version_three_is_upgraded_with_a_default_qualification_agent() {
         let profile = ValidatedProfile::parse(minimal()).unwrap();
         let definition = profile.definition();
-        assert_eq!(definition.schema_version, 11);
+        assert_eq!(definition.schema_version, 12);
         assert_eq!(definition.qualification_agents.len(), 1);
         let agent = &definition.qualification_agents[0];
         assert_eq!(agent.id.as_str(), "pertinence");
@@ -1638,7 +1640,7 @@ mod tests {
     fn version_five_is_upgraded_with_default_evidence_settings() {
         let profile = ValidatedProfile::parse(v5()).unwrap();
         let definition = profile.definition();
-        assert_eq!(definition.schema_version, 11);
+        assert_eq!(definition.schema_version, 12);
         assert_eq!(definition.verdict.reliable_from, 80);
         assert_eq!(definition.verdict.discard_below, 20);
         assert_eq!(definition.verdict.calibration_floor, 0.05);
@@ -1646,7 +1648,7 @@ mod tests {
         assert_eq!(definition.evidence, EvidenceSettings::default());
         assert_eq!(definition.evidence.influence, 0.6);
         assert_eq!(definition.evidence.reference_score, 50.0);
-        assert_eq!(profile.to_json()["schema_version"], 11);
+        assert_eq!(profile.to_json()["schema_version"], 12);
     }
 
     #[test]
@@ -1771,12 +1773,13 @@ mod tests {
         let mut value = v4();
         value["schema_version"] = json!(9);
         value.as_object_mut().unwrap().remove("scoring_agents");
+        value.as_object_mut().unwrap().remove("calibration");
         value["evidence"]
             .as_object_mut()
             .unwrap()
             .remove("half_life_days");
         let profile = ValidatedProfile::parse(value).unwrap();
-        assert_eq!(profile.definition().schema_version, 11);
+        assert_eq!(profile.definition().schema_version, 12);
         assert_eq!(profile.definition().evidence, EvidenceSettings::default());
     }
 
@@ -1835,10 +1838,10 @@ mod tests {
         agent.insert("name".to_owned(), json!("Maturité technique"));
         let profile = ValidatedProfile::parse(value).unwrap();
         let agent = &profile.definition().qualification_agents[0];
-        assert_eq!(profile.definition().schema_version, 11);
+        assert_eq!(profile.definition().schema_version, 12);
         assert_eq!(agent.description, "Évalue : Maturité technique");
         assert_eq!(agent.name, "Maturité technique");
-        assert_eq!(profile.to_json()["schema_version"], 11);
+        assert_eq!(profile.to_json()["schema_version"], 12);
     }
 
     #[test]
@@ -2065,7 +2068,7 @@ mod tests {
                     json!({"value": value, "label": "Je ne sais pas", "score": 0.4}),
                 );
             let profile = ValidatedProfile::parse(document).unwrap();
-            assert_eq!(profile.definition().schema_version, 11);
+            assert_eq!(profile.definition().schema_version, 12);
             assert_eq!(
                 options_of(&profile),
                 [
@@ -2094,7 +2097,7 @@ mod tests {
         );
         let appended = &profile.definition().qualification_agents[0].questions[0].options[3];
         assert_eq!(appended.label, "Inconnu");
-        assert_eq!(profile.to_json()["schema_version"], 11);
+        assert_eq!(profile.to_json()["schema_version"], 12);
     }
 
     #[test]
@@ -2131,7 +2134,7 @@ mod tests {
     fn version_seven_is_upgraded_with_exclusion_defaults() {
         let profile = ValidatedProfile::parse(v7()).unwrap();
         let definition = profile.definition();
-        assert_eq!(definition.schema_version, 11);
+        assert_eq!(definition.schema_version, 12);
         for agent in &definition.qualification_agents {
             assert_eq!(agent.exclusion_threshold, 0.6);
             assert!(
@@ -2142,7 +2145,7 @@ mod tests {
                     .all(|option| !option.excludes)
             );
         }
-        assert_eq!(profile.to_json()["schema_version"], 11);
+        assert_eq!(profile.to_json()["schema_version"], 12);
         assert_eq!(profile, ValidatedProfile::parse(v4()).unwrap());
     }
 
@@ -2162,7 +2165,7 @@ mod tests {
     fn version_eight_is_upgraded_with_sampling_and_escalation_defaults() {
         let profile = ValidatedProfile::parse(v8()).unwrap();
         let definition = profile.definition();
-        assert_eq!(definition.schema_version, 11);
+        assert_eq!(definition.schema_version, 12);
         assert_eq!(definition.escalation, Escalation::default());
         assert_eq!(definition.escalation.provider, None);
         assert_eq!(
@@ -2176,7 +2179,7 @@ mod tests {
             assert_eq!(agent.samples, 3);
             assert_eq!(agent.sampling_temperature, 0.7);
         }
-        assert_eq!(profile.to_json()["schema_version"], 11);
+        assert_eq!(profile.to_json()["schema_version"], 12);
         assert_eq!(profile, ValidatedProfile::parse(v4()).unwrap());
     }
 
@@ -2365,9 +2368,10 @@ mod tests {
         let mut value = v4();
         value["schema_version"] = json!(10);
         value.as_object_mut().unwrap().remove("scoring_agents");
+        value.as_object_mut().unwrap().remove("calibration");
         let profile = ValidatedProfile::parse(value).unwrap();
         let definition = profile.definition();
-        assert_eq!(definition.schema_version, 11);
+        assert_eq!(definition.schema_version, 12);
         assert_eq!(definition.scoring_agents.len(), 1);
         let agent = &definition.scoring_agents[0];
         assert_eq!(agent.id.as_str(), "score-global");
@@ -2390,6 +2394,34 @@ mod tests {
             assert!(criterion.options.iter().all(|option| !option.excludes));
         }
         assert!(agent.system_prompt.starts_with("Tu décides"));
+    }
+
+    #[test]
+    fn version_eleven_is_upgraded_with_learned_calibration_on() {
+        let mut value = v4();
+        value["schema_version"] = json!(11);
+        value.as_object_mut().unwrap().remove("calibration");
+        let profile = ValidatedProfile::parse(value).unwrap();
+        let definition = profile.definition();
+        assert_eq!(definition.schema_version, 12);
+        assert!(definition.calibration.learned);
+        assert_eq!(profile.to_json()["calibration"]["learned"], json!(true));
+    }
+
+    #[test]
+    fn learned_calibration_can_be_switched_off() {
+        let profile = v4_ok(|v| v["calibration"] = json!({"learned": false}));
+        assert!(!profile.definition().calibration.learned);
+        let error = v4_error(|v| v["calibration"] = json!({"learnt": false}));
+        assert_eq!(error.path, "calibration.learnt");
+    }
+
+    #[test]
+    fn a_missing_calibration_defaults_to_learned() {
+        let profile = v4_ok(|v| {
+            v.as_object_mut().unwrap().remove("calibration");
+        });
+        assert!(profile.definition().calibration.learned);
     }
 
     #[test]

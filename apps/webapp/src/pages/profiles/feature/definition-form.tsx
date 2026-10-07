@@ -185,6 +185,10 @@ export function DefinitionTabContent({
 						{fields('llm')}
 					</section>
 					<section className="flex flex-col gap-3">
+						<h2 className="text-base font-semibold">Calibration</h2>
+						{fields('calibration')}
+					</section>
+					<section className="flex flex-col gap-3">
 						<h2 className="text-base font-semibold">Contact ranking</h2>
 						{fields('contact_ranking')}
 					</section>

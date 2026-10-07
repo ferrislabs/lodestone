@@ -1,5 +1,5 @@
 export const NEW_PROFILE_TEMPLATE = `{
-  "schema_version": 11,
+  "schema_version": 12,
   "identity": {
     "offer": "",
     "target_customer": ""
@@ -42,6 +42,9 @@ export const NEW_PROFILE_TEMPLATE = `{
       "role_contact_found": 365,
       "default": 180
     }
+  },
+  "calibration": {
+    "learned": true
   },
   "scoring": {
     "factors": []

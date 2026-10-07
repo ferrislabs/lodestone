@@ -1175,6 +1175,74 @@ async fn detail_lists_the_scoring_results_and_the_combined_decision(pool: PgPool
 }
 
 #[sqlx::test(migrations = "../../migrations")]
+async fn detail_shows_the_raw_and_calibrated_probabilities_of_a_calibrated_agent(pool: PgPool) {
+    let seed = Seed { pool: pool.clone() };
+    let profile = seed.qualified_profile("keycloak-ops").await;
+    let calibrated = seed.lead(&profile, "calibrated.com", "new", 8.0, 1).await;
+    let plain = seed.lead(&profile, "plain.com", "new", 7.0, 2).await;
+    for lead in [&calibrated, &plain] {
+        seed.result(
+            lead,
+            SeededResult {
+                agent: "pertinence",
+                provider: None,
+                status: "valid",
+                summary: None,
+                answers: json!({}),
+                score: Some(0.5),
+                error: None,
+            },
+        )
+        .await;
+        sqlx::query(
+            "INSERT INTO scoring_results (id, lead_id, profile_id, profile_revision, agent_id, model, prompt_version, status, criteria, score, verdict, reasons, created_at, provider_name, samples)
+             SELECT $1, l.id, l.profile_id, 2, 'score-global', 'gemma_laya', 'scoring-agent@hash', 'valid', '{}'::jsonb, 72, $3, '[\"r\"]'::jsonb, now(), 'Synthèse', 1
+             FROM leads l WHERE l.id = $2::uuid",
+        )
+        .bind(common::generate_uuid_v7())
+        .bind(lead)
+        .bind(json!({"choice": "fiable", "confidence": 0.7,
+            "probabilities": {"fiable": 0.7, "a_verifier": 0.2, "ecarte": 0.1}}))
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+    let api = Api::new(pool.clone()).await;
+
+    let (_, before) = api.get(&format!("/api/v1/leads/{calibrated}")).await;
+    assert!(before["data"]["scoring_results"][0]["calibration"].is_null());
+
+    sqlx::query(
+        "INSERT INTO calibrations (profile_id, kind, agent_id, points, n, positives, brier_before, brier_after, fitted_at, enabled)
+         VALUES ($1::uuid, 'scoring', 'score-global', $2, 80, 30, 0.3, 0.2, now(), true)",
+    )
+    .bind(&profile)
+    .bind(json!([{"x": 0.0, "y": 0.4}]))
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let (status, body) = api.get(&format!("/api/v1/leads/{calibrated}")).await;
+
+    assert_eq!(status, StatusCode::OK);
+    let result = &body["data"]["scoring_results"][0];
+    assert_eq!(result["verdict"]["probabilities"]["fiable"], 70.0);
+    assert_eq!(result["verdict"]["probabilities"]["a_verifier"], 20.0);
+    let calibration = &result["calibration"];
+    assert_eq!(calibration["n"], 80);
+    assert_eq!(calibration["probabilities"]["fiable"], 30.0);
+    assert_eq!(calibration["probabilities"]["a_verifier"], 20.0);
+    assert_eq!(calibration["probabilities"]["ecarte"], 50.0);
+
+    sqlx::query("UPDATE calibrations SET enabled = false")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (_, disabled) = api.get(&format!("/api/v1/leads/{plain}")).await;
+    assert!(disabled["data"]["scoring_results"][0]["calibration"].is_null());
+}
+
+#[sqlx::test(migrations = "../../migrations")]
 async fn an_unscored_lead_waits_for_its_scoring_and_the_list_sorts_by_llm_score(pool: PgPool) {
     let seed = Seed { pool: pool.clone() };
     let profile = seed.profile("keycloak-ops").await;

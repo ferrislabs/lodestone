@@ -52,7 +52,7 @@ describe('classify', () => {
 
 	it('classifies every $def of the committed schema', () => {
 		const names = Object.keys(root.$defs ?? {})
-		expect(names.length).toBe(25)
+		expect(names.length).toBe(26)
 		for (const name of names) {
 			const node = classify(root, { $ref: `#/$defs/${name}` })
 			const expected = unions.includes(name)
@@ -142,6 +142,7 @@ describe('defaultValue', () => {
 			agents: [],
 			qualification_agents: [],
 			scoring_agents: [],
+			calibration: { learned: true },
 			aggregator: { system_prompt: DEFAULT_AGGREGATOR_PROMPT },
 			escalation: { band_low: 40, band_high: 70 },
 			verdict: {

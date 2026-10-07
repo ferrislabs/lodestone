@@ -14,6 +14,12 @@
 		"aggregator": {
 			"$ref": "#/$defs/Aggregator"
 		},
+		"calibration": {
+			"$ref": "#/$defs/CalibrationSettings",
+			"default": {
+				"learned": true
+			}
+		},
 		"contact_ranking": {
 			"$ref": "#/$defs/ContactRanking"
 		},
@@ -63,7 +69,7 @@
 			}
 		},
 		"schema_version": {
-			"description": "Profile format version. Must be 11.",
+			"description": "Profile format version. Must be 12.",
 			"type": "integer",
 			"format": "uint32",
 			"minimum": 0
@@ -431,6 +437,19 @@
 			},
 			"additionalProperties": false,
 			"required": ["system_prompt"]
+		},
+		"CalibrationSettings": {
+			"title": "Calibration",
+			"description": "Learns from the validate and reject decisions how far the probabilities of the agents can be trusted.",
+			"type": "object",
+			"properties": {
+				"learned": {
+					"description": "When true, the verdict probabilities of the scoring agents and the scores of the qualification agents are corrected by an isotonic map learned daily from the human decisions, once at least 50 leads are labelled with 10 of each class. Default true.",
+					"type": "boolean",
+					"default": true
+				}
+			},
+			"additionalProperties": false
 		},
 		"CnamePattern": {
 			"title": "CNAME pattern",

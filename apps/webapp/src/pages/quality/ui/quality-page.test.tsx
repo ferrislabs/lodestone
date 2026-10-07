@@ -7,7 +7,7 @@ import {
 } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import type { Quality } from '#/pages/quality/lib/types'
+import type { Calibration, Quality } from '#/pages/quality/lib/types'
 import { QualityPage } from './quality-page'
 
 afterEach(cleanup)
@@ -157,6 +157,66 @@ const FILLED: Quality = {
 	exclusion_candidates: [],
 }
 
+const CALIBRATION: Calibration = {
+	required: 50,
+	required_per_class: 10,
+	profiles: [
+		{
+			profile_id: 'p1',
+			name: 'Fintech',
+			learned: true,
+			agents: [
+				{
+					kind: 'scoring',
+					agent_id: 'score-global',
+					name: 'Score global',
+					n: 80,
+					positives: 30,
+					brier_before: 0.3123,
+					brier_after: 0.2,
+					status: 'active',
+					reliability: [
+						{ n: 40, predicted: 0.2, observed: 0.1 },
+						{ n: 40, predicted: 0.85, observed: 0.6 },
+					],
+					fitted_at: '2026-10-07T00:00:00Z',
+				},
+				{
+					kind: 'qualification',
+					agent_id: 'pertinence',
+					name: 'Pertinence',
+					n: 12,
+					positives: 5,
+					brier_before: 0.25,
+					brier_after: null,
+					status: 'insufficient',
+					reliability: [{ n: 12, predicted: 0.5, observed: 0.4 }],
+					fitted_at: null,
+				},
+			],
+		},
+		{
+			profile_id: 'p2',
+			name: 'Santé',
+			learned: false,
+			agents: [
+				{
+					kind: 'scoring',
+					agent_id: 'score-sante',
+					name: 'Score santé',
+					n: 70,
+					positives: 20,
+					brier_before: 0.2,
+					brier_after: null,
+					status: 'disabled',
+					reliability: [],
+					fitted_at: null,
+				},
+			],
+		},
+	],
+}
+
 function renderPage(
 	overrides: Partial<Parameters<typeof QualityPage>[0]> = {},
 ) {
@@ -176,6 +236,11 @@ function renderPage(
 		copiedLeadId: null,
 		copyFailed: false,
 		onCopyExclusion: vi.fn(),
+		calibration: null,
+		calibrationRunning: false,
+		calibrationNotice: null,
+		calibrationError: null,
+		onRecalibrate: vi.fn(),
 		...overrides,
 	}
 	render(<QualityPage {...props} />)
@@ -494,5 +559,89 @@ describe('QualityPage', () => {
 		expect(section.getByText('acme.test')).toBeTruthy()
 		expect(section.getByText(/liste « Clients actuels »/)).toBeTruthy()
 		expect(section.getByRole('alert').textContent).toContain('presse-papiers')
+	})
+
+	it('shows the calibration of every agent of every profile', () => {
+		renderPage({ calibration: CALIBRATION })
+		const card = within(screen.getByLabelText('Calibration'))
+		const fintech = within(card.getByLabelText('Calibration de Fintech'))
+		const scoring = fintech
+			.getByText('Score global')
+			.closest('tr') as HTMLElement
+		expect(within(scoring).getByText('80')).toBeTruthy()
+		expect(within(scoring).getByText('30')).toBeTruthy()
+		expect(within(scoring).getByText('0,312')).toBeTruthy()
+		expect(within(scoring).getByText('0,2')).toBeTruthy()
+		expect(within(scoring).getByText('Active')).toBeTruthy()
+		const qualification = fintech
+			.getByText('Pertinence')
+			.closest('tr') as HTMLElement
+		expect(
+			within(qualification).getByText('Pas assez de décisions (12/50)'),
+		).toBeTruthy()
+		expect(within(qualification).getByText('—')).toBeTruthy()
+		const sante = within(card.getByLabelText('Calibration de Santé'))
+		expect(sante.getByText('Désactivée')).toBeTruthy()
+	})
+
+	it('draws one reliability curve per agent with a diagonal reference', () => {
+		renderPage({ calibration: CALIBRATION })
+		const curve = screen.getByRole('img', {
+			name: 'Courbe de fiabilité de Score global',
+		})
+		expect(curve.querySelector('[data-part="diagonal"]')).not.toBeNull()
+		expect(curve.querySelectorAll('[data-part="bin"]')).toHaveLength(2)
+		expect(
+			curve.querySelector('[data-part="curve"]')?.getAttribute('points'),
+		).toBe('20,90 85,40')
+		expect(
+			screen.getByRole('img', { name: 'Courbe de fiabilité de Pertinence' }),
+		).toBeTruthy()
+		expect(
+			screen.queryByRole('img', { name: 'Courbe de fiabilité de Score santé' }),
+		).toBeNull()
+	})
+
+	it('keeps only the selected profile in the calibration card', () => {
+		renderPage({ calibration: CALIBRATION, profileId: 'p2' })
+		const card = within(screen.getByLabelText('Calibration'))
+		expect(card.queryByLabelText('Calibration de Fintech')).toBeNull()
+		expect(card.getByLabelText('Calibration de Santé')).toBeTruthy()
+	})
+
+	it('asks for a recalculation and shows the outcome', () => {
+		const props = renderPage({
+			calibration: CALIBRATION,
+			calibrationNotice: 'Recalcul programmé : bientôt.',
+		})
+		fireEvent.click(
+			screen.getByRole('button', { name: 'Recalculer maintenant' }),
+		)
+		expect(props.onRecalibrate).toHaveBeenCalledTimes(1)
+		expect(screen.getByText('Recalcul programmé : bientôt.')).toBeTruthy()
+	})
+
+	it('disables the button while the recalculation is being queued', () => {
+		renderPage({ calibration: CALIBRATION, calibrationRunning: true })
+		const button = screen.getByRole('button', {
+			name: 'Recalculer maintenant',
+		}) as HTMLButtonElement
+		expect(button.disabled).toBe(true)
+	})
+
+	it('shows the calibration card even before any decision', () => {
+		renderPage({ quality: EMPTY, calibration: CALIBRATION })
+		expect(screen.getByLabelText('Calibration')).toBeTruthy()
+	})
+
+	it('shows a calibration error', () => {
+		renderPage({
+			calibration: CALIBRATION,
+			calibrationError: 'Impossible de programmer le recalcul',
+		})
+		expect(
+			within(screen.getByLabelText('Calibration')).getByRole('alert')
+				.textContent,
+		).toBe('Impossible de programmer le recalcul')
 	})
 })

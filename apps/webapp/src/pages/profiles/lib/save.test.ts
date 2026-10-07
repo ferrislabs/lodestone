@@ -37,7 +37,7 @@ describe('prepareSave', () => {
 
 	it('blocks a scoring agent that breaks the rules the server enforces', () => {
 		const filled = {
-			schema_version: 11,
+			schema_version: 12,
 			identity: { offer: 'o', target_customer: 't' },
 			agents: [newAgent('ats', [])],
 			qualification_agents: [newQualificationAgent('pertinence', new Set())],

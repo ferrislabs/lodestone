@@ -2,8 +2,8 @@ use serde::Deserialize;
 use uuid::Uuid;
 
 use super::definition::{
-    Agent, AgentId, AgentSource, Aggregator, CertificateTransparency, ContactRanking,
-    DEFAULT_EXCLUSION_THRESHOLD, DEFAULT_SAMPLES, DEFAULT_SAMPLING_TEMPERATURE,
+    Agent, AgentId, AgentSource, Aggregator, CalibrationSettings, CertificateTransparency,
+    ContactRanking, DEFAULT_EXCLUSION_THRESHOLD, DEFAULT_SAMPLES, DEFAULT_SAMPLING_TEMPERATURE,
     DEFAULT_SCORING_SAMPLES, DnsCname, Escalation, EvidenceSettings, HttpProbe, Identity,
     KeywordSource, Language, LlmSettings, MAX_DESCRIPTION_CHARS, MAX_PROMPT_CHARS,
     PROFILE_SCHEMA_VERSION, ProfileDefinition, QualificationAgent, Question, QuestionOption,
@@ -400,6 +400,7 @@ impl ProfileDefinitionV4 {
                 .map(QualificationAgentV4::upgrade)
                 .collect(),
             scoring_agents: default_scoring_agents(),
+            calibration: CalibrationSettings::default(),
             aggregator: self.aggregator,
             escalation: Escalation::default(),
             verdict: self.verdict,
@@ -439,6 +440,7 @@ impl ProfileDefinitionV5 {
                 .map(QualificationAgentV6::upgrade)
                 .collect(),
             scoring_agents: default_scoring_agents(),
+            calibration: CalibrationSettings::default(),
             aggregator: self.aggregator,
             escalation: Escalation::default(),
             verdict: self.verdict,
@@ -480,6 +482,7 @@ impl ProfileDefinitionV6 {
                 .map(QualificationAgentV6::upgrade)
                 .collect(),
             scoring_agents: default_scoring_agents(),
+            calibration: CalibrationSettings::default(),
             aggregator: self.aggregator,
             escalation: Escalation::default(),
             verdict: self.verdict,
@@ -600,6 +603,7 @@ impl ProfileDefinitionV7 {
                 .map(QualificationAgentV7::upgrade)
                 .collect(),
             scoring_agents: default_scoring_agents(),
+            calibration: CalibrationSettings::default(),
             aggregator: self.aggregator,
             escalation: Escalation::default(),
             verdict: self.verdict,
@@ -677,6 +681,7 @@ impl ProfileDefinitionV8 {
                 .map(QualificationAgentV8::upgrade)
                 .collect(),
             scoring_agents: default_scoring_agents(),
+            calibration: CalibrationSettings::default(),
             aggregator: self.aggregator,
             escalation: Escalation::default(),
             verdict: self.verdict,
@@ -697,6 +702,7 @@ impl ProfileDefinitionV3 {
             agents: self.agents,
             qualification_agents,
             scoring_agents: default_scoring_agents(),
+            calibration: CalibrationSettings::default(),
             aggregator: Aggregator {
                 provider_id: None,
                 system_prompt: AGGREGATOR_PROMPT.to_owned(),
@@ -859,6 +865,49 @@ impl ProfileDefinitionV10 {
             agents: self.agents,
             qualification_agents: self.qualification_agents,
             scoring_agents: default_scoring_agents(),
+            calibration: CalibrationSettings::default(),
+            aggregator: self.aggregator,
+            escalation: self.escalation,
+            verdict: self.verdict,
+            evidence: self.evidence,
+            scoring: self.scoring,
+            contact_ranking: self.contact_ranking,
+            llm: self.llm,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct ProfileDefinitionV11 {
+    #[serde(rename = "schema_version")]
+    _schema_version: u32,
+    identity: Identity,
+    agents: Vec<Agent>,
+    qualification_agents: Vec<QualificationAgent>,
+    #[serde(default)]
+    scoring_agents: Vec<ScoringAgent>,
+    aggregator: Aggregator,
+    #[serde(default)]
+    escalation: Escalation,
+    #[serde(default)]
+    verdict: VerdictThresholds,
+    #[serde(default)]
+    evidence: EvidenceSettings,
+    scoring: Scoring,
+    contact_ranking: ContactRanking,
+    llm: LlmSettings,
+}
+
+impl ProfileDefinitionV11 {
+    pub(super) fn upgrade(self) -> ProfileDefinition {
+        ProfileDefinition {
+            schema_version: PROFILE_SCHEMA_VERSION,
+            identity: self.identity,
+            agents: self.agents,
+            qualification_agents: self.qualification_agents,
+            scoring_agents: self.scoring_agents,
+            calibration: CalibrationSettings::default(),
             aggregator: self.aggregator,
             escalation: self.escalation,
             verdict: self.verdict,
