@@ -1,3 +1,4 @@
+pub mod crawl;
 pub mod fetchers;
 pub mod internal_router;
 pub mod jobs;

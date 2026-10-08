@@ -54,6 +54,11 @@ pub trait CompanyRepository: Send {
         now: DateTime<Utc>,
     ) -> impl Future<Output = Result<(), CoreError>> + Send;
 
+    fn retry_robots_unreachable(
+        &mut self,
+        now: DateTime<Utc>,
+    ) -> impl Future<Output = Result<u64, CoreError>> + Send;
+
     fn entity_of(
         &mut self,
         domain: &NormalizedDomain,

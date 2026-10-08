@@ -1,6 +1,6 @@
 use std::{sync::Arc, time::Duration};
 
-use common::Secret;
+use common::{RobotsPolicy, Secret};
 use lodestone_core::{
     FetchError, FetchPurpose, FetchRequest, FetchResponse, Fetcher, NormalizedDomain, SourceName,
 };
@@ -11,11 +11,12 @@ use reqwest::{
     redirect::Policy,
 };
 use thiserror::Error;
-use tracing::{Instrument, info_span};
+use tracing::{Instrument, info, info_span};
 use url::{Host, Url, form_urlencoded};
 
 use crate::{
     address::ensure_public,
+    gate::RobotsGate,
     robots::{RobotsCache, RobotsRule},
     settings::FetchSettings,
 };
@@ -94,12 +95,14 @@ struct Inner<L> {
 
 pub struct PoliteFetcher<L: RateLimiter = InMemoryRateLimiter> {
     inner: Arc<Inner<L>>,
+    gate: RobotsGate,
 }
 
 impl<L: RateLimiter> Clone for PoliteFetcher<L> {
     fn clone(&self) -> Self {
         Self {
             inner: Arc::clone(&self.inner),
+            gate: self.gate.clone(),
         }
     }
 }
@@ -129,7 +132,33 @@ impl<L: RateLimiter> PoliteFetcher<L> {
                 settings,
                 robots: RobotsCache::default(),
             }),
+            gate: RobotsGate::default(),
         })
+    }
+
+    pub fn with_robots_gate(self, gate: RobotsGate) -> Self {
+        Self { gate, ..self }
+    }
+
+    pub fn robots_policy(&self) -> RobotsPolicy {
+        self.gate.policy()
+    }
+
+    fn note_ignored(&self, url: &Url) {
+        let origin = url.origin().ascii_serialization();
+        let refused = self
+            .inner
+            .robots
+            .get(&origin)
+            .is_some_and(|rule| !rule.allows(url.as_str()));
+        if refused {
+            self.gate.record_ignored();
+            info!(
+                url = %url,
+                robots_ignored = self.gate.robots_ignored(),
+                "robots.txt refusal ignored by the operator policy"
+            );
+        }
     }
 
     async fn throttle(&self, url: &Url, source: SourceName) -> Result<(), FetchError> {
@@ -291,9 +320,14 @@ impl<L: RateLimiter> PoliteFetcher<L> {
                 ensure_public(&current).await?;
             }
             if request.purpose == FetchPurpose::Crawl {
-                let rule = self.robots_rule(&current, request.source).await?;
-                if !rule.allows(current.as_str()) {
-                    return Err(FetchError::DisallowedByRobots);
+                match self.gate.policy() {
+                    RobotsPolicy::Respect => {
+                        let rule = self.robots_rule(&current, request.source).await?;
+                        if !rule.allows(current.as_str()) {
+                            return Err(FetchError::DisallowedByRobots);
+                        }
+                    }
+                    RobotsPolicy::Ignore => self.note_ignored(&current),
                 }
             }
             self.throttle(&current, request.source).await?;

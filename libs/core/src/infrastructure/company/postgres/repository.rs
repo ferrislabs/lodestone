@@ -2,7 +2,8 @@ use chrono::{DateTime, Utc};
 use common::CoreError;
 use lodestone_macros::repository;
 use serde_json::to_value;
-use sqlx::query_scalar;
+use sqlx::{query, query_scalar};
+use tracing::instrument;
 
 use crate::{
     LeadId, NormalizedDomain,
@@ -288,6 +289,25 @@ impl<'tx> CompanyRepository for PgCompanyRepository<'tx> {
         .await
         .map_err(map_sqlx_error)?;
         Ok(())
+    }
+
+    #[instrument(skip(self), fields(db.system = "postgresql", db.operation = "update", db.table = "company_dossiers"), err)]
+    async fn retry_robots_unreachable(&mut self, now: DateTime<Utc>) -> Result<u64, CoreError> {
+        let mut tx = self.tx.lock().await;
+        let result = query!(
+            r#"
+            UPDATE company_dossiers
+            SET next_attempt_at = LEAST(next_attempt_at, $1),
+                attempts        = 0
+            WHERE state = 'unreachable'
+              AND error ILIKE '%robots.txt%'
+            "#,
+            now,
+        )
+        .execute(&mut ***tx)
+        .await
+        .map_err(map_sqlx_error)?;
+        Ok(result.rows_affected())
     }
 
     #[tracing::instrument(skip(self), fields(db.system = "postgresql", db.operation = "select", db.table = "companies", domain = %domain.as_str()), err)]

@@ -14,3 +14,5 @@ export interface SaveBody {
 	settings: Record<string, string | number | boolean>
 	secrets: Record<string, string>
 }
+
+export type CrawlSettings = Schemas.CrawlSettingsDto

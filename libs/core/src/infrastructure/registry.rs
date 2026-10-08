@@ -20,6 +20,7 @@ pub mod domain {
     pub struct KnownHost;
     pub struct Lead;
     pub struct LlmProvider;
+    pub struct OrganisationSetting;
     pub struct Partner;
     pub struct Profile;
     pub struct Qualification;

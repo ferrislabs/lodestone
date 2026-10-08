@@ -153,6 +153,10 @@ pub use domain::{
         },
         round_score, scoring_sample_record, validate_scoring, vote_scoring,
     },
+    settings::{
+        CrawlSettings, ROBOTS_POLICY_KEY, SettingOrigin, StoredSetting,
+        ports::OrganisationSettingRepository,
+    },
     source::{Observation, Source, SourceError},
     source_provider::{
         ATS, AuthKind, AuthSpec, BOAMP, BODACC, BODACC_DEFAULT_URL, CERTIFICATE_TRANSPARENCY,

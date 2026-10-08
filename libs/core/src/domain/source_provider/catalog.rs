@@ -170,7 +170,7 @@ static CATALOG: [SourceProviderDescriptor; 12] = [
         fields: &[],
         capabilities: NO_SEARCH,
         terms_note: Some(
-            "Pages publiques uniquement : robots.txt est respecté et le débit par hôte est limité.",
+            "Pages publiques uniquement : robots.txt est respecté sauf décision de l'opérateur dans les règles de collecte, et le débit par hôte est limité.",
         ),
     },
     SourceProviderDescriptor {
@@ -217,7 +217,7 @@ static CATALOG: [SourceProviderDescriptor; 12] = [
         fields: &[],
         capabilities: NO_SEARCH,
         terms_note: Some(
-            "Pages publiques uniquement : robots.txt est respecté et le débit par hôte est limité.",
+            "Pages publiques uniquement : robots.txt est respecté sauf décision de l'opérateur dans les règles de collecte, et le débit par hôte est limité.",
         ),
     },
     SourceProviderDescriptor {
@@ -229,7 +229,7 @@ static CATALOG: [SourceProviderDescriptor; 12] = [
         fields: &[],
         capabilities: NO_SEARCH,
         terms_note: Some(
-            "Données publiées par les entreprises elles-mêmes ; robots.txt est respecté. Aucun message n'est envoyé.",
+            "Données publiées par les entreprises elles-mêmes ; robots.txt est respecté sauf décision de l'opérateur dans les règles de collecte. Aucun message n'est envoyé.",
         ),
     },
     SourceProviderDescriptor {

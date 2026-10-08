@@ -1,6 +1,6 @@
 use common::Config;
 use dns::{DnsSettings, HickoryResolver};
-use fetch::{FetchSettings, PoliteFetcher};
+use fetch::{FetchSettings, PoliteFetcher, RobotsGate};
 use lodestone_core::{
     BODACC, COMPANY_RESEARCH, DECP, LodestoneAuthService, LodestoneRateLimitService,
     LodestoneUseCase, ProfileId, RequalifyPolicy, WebhookPolicy, create_service,
@@ -17,6 +17,7 @@ use sources::{
     endpoint::Endpoint,
 };
 use std::sync::Arc;
+use tracing::warn;
 
 const ECOSYSTEM_MAX_BODY_BYTES: usize = 16 * 1024 * 1024;
 
@@ -33,6 +34,7 @@ pub struct AppState {
     pub cipher: Arc<AesGcmCipher>,
     pub providers: Arc<ProviderEngine<PoliteFetcher>>,
     pub ecosystem: Arc<Ecosystem>,
+    pub robots: RobotsGate,
 }
 
 pub type Ecosystem = EcosystemModules<PoliteFetcher, HickoryResolver>;
@@ -94,12 +96,14 @@ pub async fn state(args: Arc<Args>) -> Result<AppState, ServerError> {
     let cipher = AesGcmCipher::new(&config.llm.encryption_key)
         .map_err(|e| ServerError::Configuration(e.to_string()))?;
 
+    let robots = RobotsGate::new(args.crawl.robots_policy);
     let fetch_settings = FetchSettings::from_outbound(&config.outbound);
     let mut ecosystem_fetch = fetch_settings.clone();
     ecosystem_fetch.max_body_bytes = ecosystem_fetch.max_body_bytes.max(ECOSYSTEM_MAX_BODY_BYTES);
     let ecosystem_fetcher = Arc::new(
         PoliteFetcher::new(ecosystem_fetch)
-            .map_err(|e| ServerError::Configuration(e.to_string()))?,
+            .map_err(|e| ServerError::Configuration(e.to_string()))?
+            .with_robots_gate(robots.clone()),
     );
     let allow_http = fetch_settings.allow_private_targets;
     let fetcher = PoliteFetcher::new(fetch_settings)
@@ -121,6 +125,18 @@ pub async fn state(args: Arc<Args>) -> Result<AppState, ServerError> {
         args.enrichment.requalify_max_per_day,
     );
     let service = create_service(config).await.unwrap();
+    match service
+        .usecase
+        .crawl_settings(args.crawl.robots_policy)
+        .await
+    {
+        Ok(settings) => {
+            robots.set(settings.robots_policy);
+        }
+        Err(error) => {
+            warn!(%error, "crawl settings unreadable, CRAWL_ROBOTS_POLICY applies until the next refresh");
+        }
+    }
     let resolver = HickoryResolver::from_system(DnsSettings::default())
         .map_err(|e| ServerError::Configuration(e.to_string()))?;
     let ecosystem = ecosystem_modules(
@@ -143,5 +159,6 @@ pub async fn state(args: Arc<Args>) -> Result<AppState, ServerError> {
         cipher: Arc::new(cipher),
         providers: Arc::new(providers),
         ecosystem: Arc::new(ecosystem),
+        robots,
     })
 }

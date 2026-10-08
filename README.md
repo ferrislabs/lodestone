@@ -95,6 +95,7 @@ Common flags / env vars (see `libs/args/src/`):
 | `OUTBOUND_REQUESTS_PER_HOST_PER_MINUTE` | `--outbound-requests-per-host-per-minute` | `6` |
 | `OUTBOUND_REVISIT_INTERVAL_HOURS` | `--outbound-revisit-interval-hours` | `720` |
 | `OUTBOUND_REQUEST_TIMEOUT_SECONDS` | `--outbound-request-timeout-seconds` | `15` |
+| `CRAWL_ROBOTS_POLICY` | `--crawl-robots-policy` | `respect` (or `ignore`); seeds the « Règles de collecte » setting until it is saved in the web UI, see ADR 0004 |
 | `CT_LOG_LIST_URL` | `--ct-log-list-url` | Chrome v3 log list |
 | `CT_MAX_LOGS` | `--ct-max-logs` | `8` |
 | `CT_TILES_PER_RUN` | `--ct-tiles-per-run` | `64` |

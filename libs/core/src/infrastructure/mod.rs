@@ -16,6 +16,7 @@ pub mod lead;
 pub mod listener;
 pub mod llm_cache;
 pub mod llm_provider;
+pub mod organisation_setting;
 pub mod partner;
 pub mod postgres;
 pub mod profile;

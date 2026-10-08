@@ -110,4 +110,21 @@ describe('CatalogFeature', () => {
 		fireEvent.click(await screen.findByRole('button', { name: 'Activité' }))
 		expect(router.navigate).toHaveBeenCalledWith({ to: '/sources/activity' })
 	})
+
+	it('opens the collection rules panel from the header', async () => {
+		renderFeature()
+		fireEvent.click(
+			await screen.findByRole('button', { name: 'Règles de collecte' }),
+		)
+		expect(
+			await screen.findByRole('dialog', { name: 'Règles de collecte' }),
+		).toBeTruthy()
+		expect(
+			vi
+				.mocked(fetch)
+				.mock.calls.some(([url]) =>
+					String(url).endsWith('/api/v1/settings/crawl'),
+				),
+		).toBe(true)
+	})
 })
