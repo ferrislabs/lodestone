@@ -33,6 +33,13 @@ describe('tabs', () => {
 		expect(tabSearchSchema.parse({}).tab).toBeUndefined()
 	})
 
+	it('reads the open sourcing agent from the search', () => {
+		expect(
+			tabSearchSchema.parse({ tab: 'sourcing', agent: 'offres-missions' }),
+		).toEqual({ tab: 'sourcing', agent: 'offres-missions' })
+		expect(tabSearchSchema.parse({ agent: 3 }).agent).toBeUndefined()
+	})
+
 	it('maps server paths to their tab', () => {
 		expect(tabOfPath('agents[0].id')).toBe('sourcing')
 		expect(tabOfPath('qualification_agents')).toBe('qualification')

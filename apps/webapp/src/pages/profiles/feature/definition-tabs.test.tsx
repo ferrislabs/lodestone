@@ -3,7 +3,6 @@ import {
 	fireEvent,
 	render,
 	screen,
-	waitFor,
 	within,
 } from '@testing-library/react'
 import { useState } from 'react'
@@ -29,6 +28,7 @@ import {
 import type { Problem } from '#/pages/profiles/lib/types'
 import { ProfileEditor } from '#/pages/profiles/ui/profile-editor'
 import { TabBar } from '#/pages/profiles/ui/tab-bar'
+import { summary } from '#/pages/source-providers/lib/fixtures'
 
 class NoopMediaQuery {
 	matches = false
@@ -48,6 +48,8 @@ beforeAll(() => {
 })
 
 afterEach(cleanup)
+
+const CATALOG = [summary({ key: 'boamp', name: 'BOAMP', status: 'ready' })]
 
 function blank(): JsonObject {
 	return toJsonObject(
@@ -79,6 +81,7 @@ function Harness({
 						value={value}
 						problems={problems}
 						onChange={setValue}
+						catalog={CATALOG}
 					/>
 				}
 				problems={[]}
@@ -101,19 +104,35 @@ function Harness({
 
 function addAgent(kind: AgentKind) {
 	fireEvent.click(screen.getByRole('button', { name: 'Ajouter un agent' }))
+	const dialog = within(screen.getByRole('dialog'))
 	fireEvent.click(
-		within(screen.getByLabelText("Choisir un type d'agent")).getByText(
-			KIND_META[kind].label,
-		),
+		dialog.getByRole('radio', {
+			name: (name) => name.startsWith(KIND_META[kind].label),
+		}),
+	)
+	if (kind === 'search') {
+		fireEvent.click(dialog.getByRole('button', { name: 'BOAMP' }))
+	}
+	fireEvent.click(dialog.getByRole('button', { name: 'Suivant' }))
+	if (kind === 'search') {
+		const keywords = dialog.getByLabelText('Mots-clés')
+		fireEvent.change(keywords, { target: { value: 'sso' } })
+		fireEvent.keyDown(keywords, { key: 'Enter' })
+	}
+	fireEvent.click(dialog.getByRole('button', { name: 'Suivant' }))
+	fireEvent.click(dialog.getByRole('button', { name: 'Créer' }))
+}
+
+function openAgent(position = 0) {
+	fireEvent.click(
+		screen.getAllByRole('button', { name: /Modifier/ })[
+			position
+		] as HTMLElement,
 	)
 }
 
-function closeSheet() {
-	fireEvent.keyDown(document, { key: 'Escape' })
-}
-
-function sheet() {
-	return within(screen.getByRole('dialog'))
+function backToList() {
+	fireEvent.click(screen.getByRole('button', { name: 'Agents de sourcing' }))
 }
 
 describe('definition tabs', () => {
@@ -185,7 +204,6 @@ describe('definition tabs', () => {
 		).toBeTruthy()
 		expect(screen.queryByRole('button', { name: 'Créer le profil' })).toBeNull()
 		addAgent('search')
-		closeSheet()
 		expect(
 			screen
 				.getByRole('button', { name: 'Créer le profil' })
@@ -194,21 +212,18 @@ describe('definition tabs', () => {
 	})
 
 	for (const kind of AGENT_KINDS) {
-		it(`adds a ${kind} agent with only its fields`, async () => {
+		it(`adds a ${kind} agent with only its fields`, () => {
 			render(<Harness startTab="sourcing" />)
 			addAgent(kind)
-			const scoped = sheet()
-			expect(scoped.getByLabelText('Nom')).toHaveProperty(
+			openAgent()
+			expect(screen.getByLabelText("Nom de l'agent")).toHaveProperty(
 				'value',
 				KIND_META[kind].label,
 			)
-			await waitFor(() =>
-				expect(document.activeElement).toBe(scoped.getByLabelText('Nom')),
-			)
 			expect(
-				scoped.queryAllByText('Critères LLM propres à cet agent').length,
+				screen.queryAllByText('Critères LLM propres à cet agent').length,
 			).toBe(0)
-			const has = (text: string) => scoped.queryAllByText(text).length > 0
+			const has = (text: string) => screen.queryAllByText(text).length > 0
 			if (kind === 'certificate_transparency') {
 				expect(has('Libellés')).toBe(true)
 				expect(has('Mots-clés')).toBe(false)
@@ -222,7 +237,7 @@ describe('definition tabs', () => {
 			} else {
 				expect(has('Mots-clés')).toBe(true)
 				expect(has('Exclusions')).toBe(true)
-				expect(has('Mots-clés distincts pour accepter sans LLM')).toBe(true)
+				expect(has('Mots-clés distincts pour un signal fort')).toBe(true)
 				expect(has('Empreintes')).toBe(false)
 				expect(has('Libellés')).toBe(false)
 			}
@@ -232,17 +247,15 @@ describe('definition tabs', () => {
 	it('suffixes ids of agents of the same kind', () => {
 		render(<Harness startTab="sourcing" />)
 		addAgent('search')
-		closeSheet()
 		addAgent('search')
-		expect(sheet().getByLabelText('Identifiant')).toHaveProperty(
+		openAgent(1)
+		expect(screen.getByLabelText('Identifiant')).toHaveProperty(
 			'value',
 			'recherche-2',
 		)
-		closeSheet()
-		fireEvent.click(
-			screen.getAllByRole('button', { name: /Modifier/ })[0] as HTMLElement,
-		)
-		expect(sheet().getByLabelText('Identifiant')).toHaveProperty(
+		backToList()
+		openAgent(0)
+		expect(screen.getByLabelText('Identifiant')).toHaveProperty(
 			'value',
 			'recherche',
 		)
@@ -263,21 +276,21 @@ describe('definition tabs', () => {
 		expect(grid?.querySelectorAll('[data-agent]')).toHaveLength(3)
 		expect(grid?.lastElementChild?.hasAttribute('data-add-agent')).toBe(true)
 		expect(screen.getAllByText('0 mot-clé')).toHaveLength(3)
-		fireEvent.click(
-			screen.getAllByRole('button', { name: /Modifier/ })[1] as HTMLElement,
-		)
-		const cards = grid?.querySelectorAll<HTMLElement>('[data-agent]') ?? []
+		openAgent(1)
+		expect(screen.getAllByLabelText('Identifiant')).toHaveLength(1)
+		backToList()
+		const cards = document.querySelectorAll<HTMLElement>('[data-agent]')
 		expect(cards[1]?.className).toContain('ring-2')
 		expect(cards[0]?.className).not.toContain('ring-2')
 		expect(cards[2]?.className).not.toContain('ring-2')
 		expect(cards[1]?.className).not.toContain('col-span')
-		expect(screen.getAllByLabelText('Identifiant')).toHaveLength(1)
 	})
 
 	it('follows the name with the id until the id is edited', () => {
 		render(<Harness startTab="sourcing" />)
 		addAgent('search')
-		fireEvent.change(screen.getByLabelText('Nom'), {
+		openAgent()
+		fireEvent.change(screen.getByLabelText("Nom de l'agent"), {
 			target: { value: 'Recherche anglais' },
 		})
 		expect(screen.getByLabelText('Identifiant')).toHaveProperty(
@@ -287,14 +300,15 @@ describe('definition tabs', () => {
 		fireEvent.change(screen.getByLabelText('Identifiant'), {
 			target: { value: 'mine' },
 		})
-		fireEvent.change(screen.getByLabelText('Nom'), { target: { value: 'Z' } })
+		fireEvent.change(screen.getByLabelText("Nom de l'agent"), {
+			target: { value: 'Z' },
+		})
 		expect(screen.getByLabelText('Identifiant')).toHaveProperty('value', 'mine')
 	})
 
 	it('removes an agent after an inline confirmation', () => {
 		render(<Harness startTab="sourcing" />)
 		addAgent('search')
-		closeSheet()
 		fireEvent.click(screen.getByRole('button', { name: /Supprimer l'agent/ }))
 		fireEvent.click(screen.getByRole('button', { name: 'Conserver' }))
 		expect(document.querySelectorAll('[data-agent]')).toHaveLength(1)
@@ -306,55 +320,48 @@ describe('definition tabs', () => {
 		expect(screen.getByText(/Aucun agent pour le moment/)).toBeTruthy()
 	})
 
-	it('opens the sheet with the agent name and closes it on Escape or Fermer', () => {
+	it('opens the agent page with the agent name and returns to the list', () => {
 		const agent = { ...newAgent('search', []), name: 'ATS français' }
 		render(
 			<Harness startTab="sourcing" initial={{ ...blank(), agents: [agent] }} />,
 		)
-		expect(screen.queryByRole('dialog')).toBeNull()
 		fireEvent.click(
 			screen.getByRole('button', { name: 'Modifier ATS français' }),
 		)
-		const dialog = screen.getByRole('dialog')
-		expect(within(dialog).getByRole('heading').textContent).toContain(
+		expect(screen.getByLabelText("Nom de l'agent")).toHaveProperty(
+			'value',
 			'ATS français',
 		)
-		expect(within(dialog).getByRole('heading').textContent).toContain(
-			KIND_META.search.label,
-		)
-		expect(dialog.className).toContain('sm:max-w-2xl')
-		closeSheet()
+		expect(screen.getByText(KIND_META.search.label)).toBeTruthy()
 		expect(screen.queryByRole('dialog')).toBeNull()
-		fireEvent.click(
+		backToList()
+		expect(screen.queryByLabelText("Nom de l'agent")).toBeNull()
+		expect(
 			screen.getByRole('button', { name: 'Modifier ATS français' }),
-		)
-		const close = within(screen.getByRole('dialog')).getAllByRole('button', {
-			name: 'Fermer',
-		})
-		fireEvent.click(close[close.length - 1] as HTMLElement)
-		expect(screen.queryByRole('dialog')).toBeNull()
+		).toBeTruthy()
 	})
 
 	it('keeps the identifier behind a collapsed advanced section', () => {
 		render(<Harness startTab="sourcing" />)
 		addAgent('search')
-		const advanced = sheet().getByText('Avancé').closest('details')
+		openAgent()
+		const advanced = screen.getByText('Avancé').closest('details')
 		expect(advanced?.hasAttribute('open')).toBe(false)
-		expect(advanced?.contains(sheet().getByLabelText('Identifiant'))).toBe(true)
+		expect(advanced?.contains(screen.getByLabelText('Identifiant'))).toBe(true)
 	})
 
 	it('lays a keyword agent out with a 1 to 5 choice and two tag inputs', () => {
 		render(<Harness startTab="sourcing" />)
 		addAgent('search')
-		const scoped = sheet()
-		const keywords = scoped.getByLabelText('Mots-clés')
-		const exclusions = scoped.getByLabelText('Exclusions')
+		openAgent()
+		const keywords = screen.getByLabelText('Mots-clés')
+		const exclusions = screen.getByLabelText('Exclusions')
 		expect(keywords.closest('.md\\:grid-cols-2')).toBe(
 			exclusions.closest('.md\\:grid-cols-2'),
 		)
 		expect(keywords.closest('.md\\:grid-cols-2')).toBeTruthy()
-		const choice = scoped.getByRole('radiogroup', {
-			name: 'Mots-clés distincts pour accepter sans LLM',
+		const choice = screen.getByRole('radiogroup', {
+			name: 'Mots-clés distincts pour un signal fort',
 		})
 		const radios = within(choice).getAllByRole('radio')
 		expect(radios.map((radio) => radio.textContent)).toEqual([
@@ -370,15 +377,16 @@ describe('definition tabs', () => {
 		expect(radios[1]?.getAttribute('aria-checked')).toBe('false')
 		fireEvent.change(keywords, { target: { value: 'cloud' } })
 		fireEvent.keyDown(keywords, { key: 'Enter' })
-		expect(scoped.getByLabelText('Retirer cloud')).toBeTruthy()
-		closeSheet()
-		expect(screen.getByText('1 mot-clé')).toBeTruthy()
+		expect(screen.getByLabelText('Retirer cloud')).toBeTruthy()
+		backToList()
+		expect(screen.getByText('2 mots-clés')).toBeTruthy()
 	})
 
 	it('lays a dns_cname agent out as compact rows', () => {
 		render(<Harness startTab="sourcing" />)
 		addAgent('dns_cname')
-		const scoped = sheet()
+		openAgent()
+		const scoped = screen
 		fireEvent.click(scoped.getByText('Ajouter un motif'))
 		const row = document.querySelector<HTMLElement>(
 			'[data-row="agents[0].source.patterns[0]"]',
@@ -394,7 +402,8 @@ describe('definition tabs', () => {
 	it('switches the variant of an http probe matcher inline', () => {
 		render(<Harness startTab="sourcing" />)
 		addAgent('http_probe')
-		const scoped = sheet()
+		openAgent()
+		const scoped = screen
 		fireEvent.click(scoped.getByLabelText('Ajouter : Empreintes'))
 		expect(scoped.getByText('Version et dette technique')).toBeTruthy()
 		fireEvent.click(scoped.getByText('Ajouter une condition'))
@@ -421,7 +430,6 @@ describe('definition tabs', () => {
 		render(<Harness startTab="sourcing" />)
 		expect(screen.queryByTestId('save-bar')).toBeNull()
 		addAgent('search')
-		closeSheet()
 		const bar = within(screen.getByTestId('save-bar'))
 		expect(bar.getByText('Modifications non enregistrées')).toBeTruthy()
 		expect(bar.getByRole('button', { name: 'Créer le profil' })).toBeTruthy()
@@ -449,7 +457,6 @@ describe('definition tabs', () => {
 		expect(screen.getByRole('alert').textContent).toContain(
 			'Sonde les hôtes trouvés par un agent Transparence des certificats',
 		)
-		closeSheet()
 		addAgent('certificate_transparency')
 		expect(screen.queryByRole('alert')).toBeNull()
 		expect(

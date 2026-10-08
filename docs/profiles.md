@@ -269,7 +269,7 @@ A search agent defines its criteria once and every provider attached to it trans
 | `countries` | ISO 3166-1 alpha-2 codes in uppercase (`FR`), no duplicate. Empty means every country. |
 | `contracts` | `freelance`, `employee`, `public_contract`, `any`. Empty or containing `any` means every contract type. |
 
-`accept_min_keywords` (default 2, at least 1) is the number of distinct keywords from which a candidate is accepted without the LLM, provided no exclusion matches.
+A candidate without any keyword is rejected. `accept_min_keywords` (default 2, at least 1) is the number of distinct keywords from which a candidate gives a strong signal (route `keywords`, strength 0.7), provided no exclusion matches. Fewer keywords, or any exclusion, still keep the candidate with a weaker signal (route `keywords_ambiguous`, strength 0.5): exclusions never reject.
 
 Each provider filters natively what its API supports (`capabilities.filters` of its catalog descriptor) and the rest is applied after collection, on every candidate, by the same function for all providers (`passes_filters`, `libs/core/src/domain/triage/filters.rs`). A candidate dropped by the filters is counted as `rejected_by_filters` and never reaches the keyword routing. The signals recorded by a search agent carry its id in `agent`.
 

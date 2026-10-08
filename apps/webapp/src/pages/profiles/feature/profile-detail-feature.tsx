@@ -61,6 +61,13 @@ export function ProfileDetailFeature() {
 			search: { tab: next },
 			replace: true,
 		})
+	const setAgent = (agent: string | null, replace: boolean) =>
+		void navigate({
+			to: '/profiles/$profileId',
+			params: { profileId },
+			search: agent === null ? { tab: 'sourcing' } : { tab: 'sourcing', agent },
+			replace,
+		})
 	const [localProblems, setLocalProblems] = useState<Problem[]>([])
 	const [notice, setNotice] = useState<string | null>(null)
 	const [selected, setSelected] = useState<number | null>(null)
@@ -148,6 +155,8 @@ export function ProfileDetailFeature() {
 							void navigate({ to: '/sources/providers/$key', params: { key } })
 						}
 						calibration={calibration}
+						agentId={search.agent ?? null}
+						onAgentChange={setAgent}
 						now={Date.now()}
 						onChange={(next) => {
 							if (update.isError) update.reset()

@@ -6,7 +6,6 @@ import {
 	type JsonObject,
 	type JsonValue,
 	type Problem,
-	resolve,
 	type Schema,
 	toJsonObject,
 } from '#/lib/schema-form'
@@ -169,22 +168,25 @@ export function sourceSchema(kind: SignalKind) {
 	return sourceVariant(kind)?.schema ?? {}
 }
 
-export function searchFieldsSchema(): Schema {
+function pickProperties(
+	keys: readonly string[],
+	required: readonly string[],
+): Schema {
 	const properties = agentVariant('search')?.schema.properties ?? {}
 	const picked: Record<string, Schema> = {}
-	for (const key of ['keywords', 'exclusions', 'accept_min_keywords']) {
+	for (const key of keys) {
 		const property = properties[key]
 		if (property !== undefined) picked[key] = property
 	}
-	return { properties: picked, required: ['keywords'] }
+	return { properties: picked, required: [...required] }
 }
 
-export function filtersCountriesSchema(): Schema {
-	const filters = agentVariant('search')?.schema.properties?.filters
-	if (filters === undefined) return {}
-	const resolved = resolve(PROFILE_SCHEMA, filters)
-	const countries = resolved.properties?.countries
-	return countries === undefined ? {} : { properties: { countries } }
+export function keywordFieldsSchema(): Schema {
+	return pickProperties(['keywords', 'exclusions'], ['keywords'])
+}
+
+export function advancedFieldsSchema(): Schema {
+	return pickProperties(['accept_min_keywords'], [])
 }
 
 export function defaultSource(kind: SignalKind): JsonObject {

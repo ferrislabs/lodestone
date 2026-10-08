@@ -16,6 +16,10 @@ const BORDERS: Readonly<Record<string, string>> = {
 	not_configured: 'border-dashed border-border hover:border-foreground/40',
 }
 
+export function statusBorder(status: string): string {
+	return BORDERS[status] ?? BORDERS.not_configured ?? ''
+}
+
 interface ProviderCardProps {
 	provider: ProviderSummary
 	onOpen: (key: string) => void
@@ -39,7 +43,7 @@ export function ProviderCard({
 			title={label}
 			className={cn(
 				'relative flex aspect-square flex-col items-center gap-1.5 overflow-hidden rounded-xl border-2 bg-card p-3 text-center shadow-xs transition-colors hover:bg-accent/40 has-[a:focus-visible]:ring-[3px] has-[a:focus-visible]:ring-ring/50',
-				BORDERS[provider.status] ?? BORDERS.not_configured,
+				statusBorder(provider.status),
 			)}
 		>
 			<span className="flex size-14 shrink-0 items-center justify-center rounded-lg bg-white p-2 ring-1 ring-border">

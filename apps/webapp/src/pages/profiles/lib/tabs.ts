@@ -33,6 +33,7 @@ export const tabSearchSchema = z.object({
 		)
 		.optional()
 		.catch(undefined),
+	agent: z.string().optional().catch(undefined),
 })
 
 export interface TabItem<T extends string = ProfileTab> {

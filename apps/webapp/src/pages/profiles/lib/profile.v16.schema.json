@@ -108,7 +108,7 @@
 					"type": "object",
 					"properties": {
 						"accept_min_keywords": {
-							"description": "Distinct keywords needed to accept a candidate without the LLM. Fewer, or any exclusion, sends it to LLM triage.",
+							"description": "Distinct keywords a candidate needs for a strong signal. Fewer, or any exclusion, still keeps the candidate with a weaker signal.",
 							"type": "integer",
 							"format": "uint8",
 							"default": 2,
@@ -121,7 +121,7 @@
 							"default": true
 						},
 						"exclusions": {
-							"description": "Keywords that send a candidate to LLM triage when present.",
+							"description": "Keywords that weaken the signal of a candidate when present. They never reject it: only a candidate without any keyword is rejected.",
 							"type": "array",
 							"default": [],
 							"items": {

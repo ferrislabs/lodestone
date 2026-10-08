@@ -1324,6 +1324,36 @@ mod tests {
     }
 
     #[test]
+    fn version_fifteen_ats_agent_keeps_its_provider_and_criteria() {
+        let mut value = with_version_fifteen_agents(v4());
+        value["schema_version"] = json!(15);
+        value["agents"] = json!([{
+            "id": "offres-missions",
+            "name": "Offres de missions",
+            "enabled": true,
+            "source": {
+                "kind": "ats",
+                "keywords": ["freelance Rust", "mission Rust"],
+                "exclusions": ["stage"],
+                "accept_min_keywords": 3
+            }
+        }]);
+        let profile = ValidatedProfile::parse(value).unwrap();
+        let agent = &profile.to_json()["agents"][0];
+        assert_eq!(agent["type"], "search");
+        assert_eq!(agent["id"], "offres-missions");
+        assert_eq!(agent["name"], "Offres de missions");
+        assert_eq!(agent["providers"], json!(["ats"]));
+        assert_eq!(agent["keywords"], json!(["freelance Rust", "mission Rust"]));
+        assert_eq!(agent["exclusions"], json!(["stage"]));
+        assert_eq!(agent["accept_min_keywords"], 3);
+        assert_eq!(
+            agent["filters"],
+            json!({"remote": "any", "countries": [], "contracts": []})
+        );
+    }
+
+    #[test]
     fn version_one_without_sources_is_rejected_as_no_agent() {
         let error = error_for(|v| {
             v["schema_version"] = json!(1);

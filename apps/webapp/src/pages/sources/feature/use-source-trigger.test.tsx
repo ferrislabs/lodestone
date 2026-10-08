@@ -21,7 +21,7 @@ function Harness() {
 				index={0}
 				problems={[]}
 				note={null}
-				editing={false}
+				highlighted={false}
 				confirmingRemove={false}
 				runPending={sourceTrigger.pending}
 				runResults={sourceTrigger.results}

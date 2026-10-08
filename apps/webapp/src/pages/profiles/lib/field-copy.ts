@@ -189,17 +189,18 @@ export const FIELD_COPY: Readonly<Record<string, FieldCopy>> = {
 	},
 	'agents[].keywords': {
 		label: 'Mots-clés',
-		description: 'Mots-clés à rechercher.',
+		description:
+			'Une annonce est gardée si elle contient au moins un de ces mots-clés, en mot entier.',
 	},
 	'agents[].accept_min_keywords': {
-		label: 'Mots-clés distincts pour accepter sans LLM',
+		label: 'Mots-clés distincts pour un signal fort',
 		description:
-			"Nombre de mots-clés distincts requis pour accepter un candidat sans le LLM. En dessous, ou en présence d'une exclusion, il passe au tri par le LLM.",
+			"Nombre de mots-clés distincts qu'une annonce doit contenir pour donner un signal fort. En dessous, ou si une exclusion y figure, l'annonce est gardée avec un signal plus faible. Une annonce sans aucun mot-clé est écartée.",
 	},
 	'agents[].exclusions': {
 		label: 'Exclusions',
 		description:
-			"Mots-clés qui envoient un candidat au tri par le LLM lorsqu'ils sont présents.",
+			"Mots qui affaiblissent le signal d'une annonce lorsqu'ils y figurent. Ils ne l'écartent pas : seule une annonce sans aucun mot-clé est écartée.",
 	},
 	'qualification_agents[].learned_calibration': LEARNED_CALIBRATION_COPY,
 	qualification_agents: {

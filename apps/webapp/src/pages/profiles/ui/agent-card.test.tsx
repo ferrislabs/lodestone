@@ -21,7 +21,7 @@ function renderCard(
 		index: 0,
 		problems: [],
 		note: null,
-		editing: false,
+		highlighted: false,
 		confirmingRemove: false,
 		onEdit: vi.fn(),
 		onEnabled: vi.fn(),

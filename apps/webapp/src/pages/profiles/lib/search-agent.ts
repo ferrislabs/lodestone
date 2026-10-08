@@ -7,7 +7,7 @@ import type { ProviderSummary } from '#/pages/source-providers/lib/types'
 
 export const REMOTE_OPTIONS = [
 	{ value: 'any', label: 'Indifférent' },
-	{ value: 'full_remote', label: 'Full remote uniquement' },
+	{ value: 'full_remote', label: 'Full remote' },
 	{ value: 'remote_or_hybrid', label: 'Remote ou hybride' },
 ] as const
 
@@ -15,7 +15,7 @@ export const CONTRACT_OPTIONS = [
 	{ value: 'freelance', label: 'Freelance' },
 	{ value: 'employee', label: 'Salarié' },
 	{ value: 'public_contract', label: 'Marché public' },
-	{ value: 'any', label: 'Tous les contrats' },
+	{ value: 'any', label: 'Tous' },
 ] as const
 
 export const UNKNOWN_PROVIDER_STATUS = 'unknown'
@@ -119,11 +119,16 @@ export function withProvider(
 
 export function withFilter(
 	agent: JsonObject,
-	field: 'remote' | 'contracts',
+	field: 'remote' | 'contracts' | 'countries',
 	value: JsonValue,
 ): JsonObject {
 	const filters = isJsonObject(agent.filters) ? agent.filters : {}
 	return { ...agent, filters: { ...filters, [field]: value } }
+}
+
+export function allContracts(agent: JsonValue | undefined): boolean {
+	const contracts = agentContracts(agent)
+	return contracts.length === 0 || contracts.includes('any')
 }
 
 export function withContract(
@@ -131,11 +136,36 @@ export function withContract(
 	contract: string,
 	selected: boolean,
 ): JsonObject {
-	const current = agentContracts(agent)
+	if (contract === 'any') {
+		return withFilter(agent, 'contracts', selected ? [] : agentContracts(agent))
+	}
+	const current = agentContracts(agent).filter((item) => item !== 'any')
 	const next = selected
 		? current.includes(contract)
 			? current
 			: [...current, contract]
 		: current.filter((item) => item !== contract)
 	return withFilter(agent, 'contracts', next)
+}
+
+export function agentCountries(agent: JsonValue | undefined): string[] {
+	if (!isJsonObject(agent) || !isJsonObject(agent.filters)) return []
+	const countries = agent.filters.countries
+	return Array.isArray(countries)
+		? countries.filter((item): item is string => typeof item === 'string')
+		: []
+}
+
+export function withCountries(
+	agent: JsonObject,
+	countries: readonly string[],
+): JsonObject {
+	return withFilter(agent, 'countries', [...countries])
+}
+
+export function agentKeywordCount(agent: JsonValue | undefined): number {
+	if (!isJsonObject(agent) || !Array.isArray(agent.keywords)) return 0
+	return agent.keywords.filter(
+		(item) => typeof item === 'string' && item.trim() !== '',
+	).length
 }

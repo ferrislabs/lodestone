@@ -16,7 +16,7 @@ import {
 } from '#/pages/profiles/lib/agents'
 import { providerName } from '#/pages/profiles/lib/search-agent'
 import { belongsToPath } from '#/pages/profiles/lib/tabs'
-import { DependencyNoteText } from '#/pages/profiles/ui/agent-form'
+import { DependencyNoteText } from '#/pages/profiles/ui/dependency-note'
 import { ProviderChips } from '#/pages/profiles/ui/provider-chips'
 import type { ProviderSummary } from '#/pages/source-providers/lib/types'
 import {
@@ -36,7 +36,7 @@ interface AgentCardProps {
 	index: number
 	problems: readonly Problem[]
 	note: DependencyNote | null
-	editing: boolean
+	highlighted: boolean
 	confirmingRemove: boolean
 	catalog?: readonly ProviderSummary[]
 	runPending?: ReadonlySet<string>
@@ -56,7 +56,7 @@ export function AgentCard({
 	index,
 	problems,
 	note,
-	editing,
+	highlighted,
 	confirmingRemove,
 	catalog = NO_CATALOG,
 	runPending = NO_PENDING,
@@ -79,9 +79,9 @@ export function AgentCard({
 	return (
 		<li
 			data-agent={index}
-			data-editing={editing}
+			data-highlighted={highlighted}
 			className={`flex h-full flex-col gap-2 rounded-md border bg-muted/20 p-3 ${
-				editing ? 'ring-2 ring-primary' : ''
+				highlighted ? 'ring-2 ring-primary' : ''
 			}`}
 		>
 			<div className="flex items-start justify-between gap-2">
