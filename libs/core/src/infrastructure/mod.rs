@@ -1,3 +1,5 @@
+pub mod agent_registry;
+pub mod agent_work;
 pub mod assessment;
 pub mod calibration;
 pub mod candidate_host;

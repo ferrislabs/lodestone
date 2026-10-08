@@ -10,6 +10,7 @@ use crate::{
         quality::{Decided, record_decisions},
     },
     domain::{
+        agent_work::ports::AgentWorkRepository,
         calibration::{Calibrations, ports::CalibrationRepository},
         company::{CompanyDossier, CompanyEntity, SiblingLead, ports::CompanyRepository},
         enrichment::{
@@ -129,7 +130,8 @@ impl LodestoneUseCase {
         scoring_agent,
         company,
         calibration,
-        enrichment
+        enrichment,
+        agent_work
     )]
     pub async fn lead_detail(&self, lead_id: LeadId) -> Result<LeadDetail, CoreError> {
         let mut leads = lead_repository;
@@ -144,6 +146,7 @@ impl LodestoneUseCase {
         let mut company = company_repository;
         let mut calibrations = calibration_repository;
         let mut enrichments = enrichment_repository;
+        let mut stops = agent_work_repository;
 
         let lead = leads.find(lead_id).await?.ok_or(CoreError::NotFound)?;
         if suppression.is_domain_suppressed(&lead.domain).await? {
@@ -211,6 +214,7 @@ impl LodestoneUseCase {
             enrichment,
             summary_state,
             agent_failures,
+            agent_stops: stops.stops(lead_id).await?,
             scoring,
             qualification_results,
             qualification_agents,

@@ -11,6 +11,8 @@ import {
 	runSummary,
 	shortError,
 	shouldPoll,
+	sourceState,
+	stateLabel,
 	TRIGGER_TTL_MS,
 } from './state'
 
@@ -143,6 +145,16 @@ describe('run availability', () => {
 		expect(runDisabledReason(source('boamp'))).toBeNull()
 	})
 
+	it('a source whose job was stopped is shown stopped and cannot be run', () => {
+		const stopped = source('boamp', { status: 'cancelled' })
+		expect(sourceState(stopped)).toBe('cancelled')
+		expect(stateLabel('cancelled')).toBe('Arrêté')
+		expect(canRun(stopped)).toBe(false)
+		expect(runDisabledReason(stopped)).toBe(
+			"La tâche a été arrêtée : plus aucun agent actif n'utilise cette source",
+		)
+	})
+
 	it('a source whose provider is not ready cannot be run', () => {
 		for (const status of ['not_configured', 'untested', 'failing']) {
 			const blocked = source('boamp', {
@@ -216,6 +228,22 @@ describe('runSummary', () => {
 		expect(summary.error?.length).toBe(80)
 		expect(summary.error?.endsWith('…')).toBe(true)
 		expect(shortError('a\n b')).toBe('a b')
+	})
+
+	it('says why a cancelled run stopped', () => {
+		const summary = runSummary(
+			run({ status: 'cancelled', cancel_reason: 'agent_removed', volume: 2 }),
+			NOW,
+		)
+		expect(summary.statusLabel).toBe('Arrêté : agent supprimé')
+		expect(summary.failed).toBe(false)
+		expect(summary.counts).toBe('2 éléments, 1 signal')
+		expect(
+			runSummary(
+				run({ status: 'cancelled', cancel_reason: 'profile_deactivated' }),
+				NOW,
+			).statusLabel,
+		).toBe('Arrêté : profil désactivé')
 	})
 
 	it('has no counts while running', () => {

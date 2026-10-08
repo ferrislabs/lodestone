@@ -15,6 +15,7 @@ export type Verdict = Schemas.VerdictDto
 export type Exclusion = Schemas.ExclusionDto
 export type SummaryState = Schemas.SummaryStateDto
 export type AgentFailure = Schemas.AgentFailureDto
+export type AgentStop = Schemas.AgentStopDto
 export type QualificationResult = Schemas.QualificationResultDto
 export type QualificationAnswer = Schemas.QualificationAnswerDto
 export type ScoringResult = Schemas.ScoringResultDto

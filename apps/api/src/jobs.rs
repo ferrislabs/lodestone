@@ -97,41 +97,35 @@ impl JobRouter {
             rejected_by_rules = report.rejected_by_rules,
             rejected_by_filters = report.rejected_by_filters,
             skipped_no_lead = report.skipped_no_lead,
+            cancelled = report.cancelled,
             "keyword sourcing finished"
         );
         Ok(report)
     }
 
-    async fn run_boamp(&self) -> Result<(u64, u64), SourceRunError> {
-        let report = self.triage_source(&self.sources.boamp, "boamp").await?;
-        Ok((report.candidates, report.accepted()))
+    async fn run_boamp(&self) -> Result<TriageReport, SourceRunError> {
+        self.triage_source(&self.sources.boamp, "boamp").await
     }
 
-    async fn run_ted(&self) -> Result<(u64, u64), SourceRunError> {
-        let report = self.triage_source(&self.sources.ted, "ted").await?;
-        Ok((report.candidates, report.accepted()))
+    async fn run_ted(&self) -> Result<TriageReport, SourceRunError> {
+        self.triage_source(&self.sources.ted, "ted").await
     }
 
-    async fn run_ats(&self) -> Result<(u64, u64), SourceRunError> {
-        let report = self.triage_source(&self.sources.ats, "ats").await?;
-        Ok((report.candidates, report.accepted()))
+    async fn run_ats(&self) -> Result<TriageReport, SourceRunError> {
+        self.triage_source(&self.sources.ats, "ats").await
     }
 
-    async fn run_hacker_news(&self) -> Result<(u64, u64), SourceRunError> {
-        let report = self
-            .triage_source(&self.sources.hacker_news, "hacker_news_hiring")
-            .await?;
-        Ok((report.candidates, report.accepted()))
+    async fn run_hacker_news(&self) -> Result<TriageReport, SourceRunError> {
+        self.triage_source(&self.sources.hacker_news, "hacker_news_hiring")
+            .await
     }
 
-    async fn run_france_travail(&self) -> Result<(u64, u64), SourceRunError> {
-        let report = self
-            .triage_source(&self.sources.france_travail, "france_travail")
-            .await?;
-        Ok((report.candidates, report.accepted()))
+    async fn run_france_travail(&self) -> Result<TriageReport, SourceRunError> {
+        self.triage_source(&self.sources.france_travail, "france_travail")
+            .await
     }
 
-    async fn run_decp(&self) -> Result<(u64, u64), SourceRunError> {
+    async fn run_decp(&self) -> Result<TriageReport, SourceRunError> {
         let report = self.triage_source(&self.sources.decp, "decp").await?;
         let contracts = self.sources.decp.take_awards();
         let mut partners = 0;
@@ -166,7 +160,7 @@ impl JobRouter {
             partner_awards = partners,
             "decp partner awards recorded"
         );
-        Ok((report.candidates, report.accepted()))
+        Ok(report)
     }
 
     async fn run_calibration(&self, job: &Job) -> Result<JobOutcome, JobError> {
@@ -231,8 +225,18 @@ impl JobRouter {
         };
         let next_run = SystemClock.now() + delay_of(interval);
         match result {
-            Ok((items, signals)) => {
-                info!(%source, items, signals, "source run finished");
+            Ok(report) => {
+                if let Some(reason) = report.all_cancelled()
+                    && !self
+                        .usecase
+                        .has_source_targets(source)
+                        .await
+                        .map_err(|error| JobError::Retryable(error.to_string()))?
+                {
+                    info!(%source, reason = reason.as_str(), "source run stopped, no agent serves it any more");
+                    return Ok(JobOutcome::Cancelled(reason));
+                }
+                info!(%source, items = report.candidates, signals = report.accepted(), "source run finished");
                 Ok(JobOutcome::RescheduleAt(next_run))
             }
             Err(error) if job.attempts >= job.max_attempts.get() => {

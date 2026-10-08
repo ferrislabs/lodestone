@@ -2,17 +2,22 @@ use std::{num::NonZeroU32, time::Duration};
 
 use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
+use serde_json::Value;
 use thiserror::Error;
+use tokio::select;
 use tracing::warn;
 
 use aws_lc_rs::digest::{Context, SHA256};
 use chrono::Utc;
 use serde::Serialize;
 
-use crate::domain::llm::{
-    LlmError, LlmProvider, LlmRequest, TokenUsage, UntrustedDocument,
-    cache::{CacheScope, CachedOutput, LlmCache},
-    provider::TokenPricing,
+use crate::domain::{
+    agent_work::{AgentWork, CancelReason},
+    llm::{
+        LlmError, LlmProvider, LlmRequest, TokenUsage, UntrustedDocument,
+        cache::{CacheScope, CachedOutput, LlmCache},
+        provider::TokenPricing,
+    },
 };
 
 const MICROCENTS_PER_CENT: u64 = 1_000_000;
@@ -87,6 +92,8 @@ pub enum LlmCallError {
     Provider(LlmError),
     #[error("llm output schema could not be generated: {0}")]
     Schema(String),
+    #[error("llm call stopped: {}", .0.as_str())]
+    Cancelled(CancelReason),
 }
 
 impl LlmCallError {
@@ -100,7 +107,7 @@ impl LlmCallError {
                     | LlmError::Network(_)
                     | LlmError::Status { .. }
             ),
-            Self::InvalidOutput(_) | Self::Schema(_) => false,
+            Self::InvalidOutput(_) | Self::Schema(_) | Self::Cancelled(_) => false,
         }
     }
 
@@ -268,6 +275,27 @@ where
         }
     }
     Ok(fresh)
+}
+
+pub async fn call_with_schema_until<P, C, A>(
+    provider: &P,
+    cache: &C,
+    call: SchemaCall<'_>,
+    accept: A,
+    settings: CallSettings,
+    budget: &mut RunBudget,
+    work: &AgentWork,
+) -> Result<Structured<Value>, LlmCallError>
+where
+    P: LlmProvider,
+    C: LlmCache,
+    A: Fn(&Value) -> bool,
+{
+    select! {
+        biased;
+        reason = work.cancelled() => Err(LlmCallError::Cancelled(reason)),
+        result = call_with_schema(provider, cache, call, accept, settings, budget) => result,
+    }
 }
 
 fn hash_field(context: &mut Context, field: &[u8]) {

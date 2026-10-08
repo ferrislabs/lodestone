@@ -11,11 +11,15 @@ use crate::{
             Providers, count, load_cached, render_signal,
         },
         llm::gateway::{
-            CallSettings, LlmCallError, Prompt, RunBudget, SchemaCall, Structured, call_with_schema,
+            CallSettings, LlmCallError, Prompt, RunBudget, SchemaCall, Structured,
+            call_with_schema_until,
         },
         rescoring::stored_opinions,
     },
     domain::{
+        agent_work::{
+            AgentWork, CancelReason, WorkKind, WorkTarget, first_stop, ports::AgentWorkRepository,
+        },
         company::PAGE_PROMPT_CHARS,
         job::ports::Clock,
         lead::{Lead, LeadId},
@@ -51,6 +55,7 @@ pub struct ScoringReport {
     pub valid: u64,
     pub invalid: u64,
     pub deferred: u64,
+    pub stopped: u64,
     pub backlog: u64,
     pub budget_exhausted: bool,
 }
@@ -67,18 +72,21 @@ enum SampleOutcome {
         error: String,
     },
     BudgetExhausted,
+    Stopped(CancelReason),
 }
 
 enum AgentOutcome {
     Result(Box<ScoringResult>),
     CallFailed(CallFailure),
     BudgetExhausted,
+    Stopped(CancelReason),
 }
 
 enum LeadOutcome {
     Done { valid: u64, invalid: u64 },
     Deferred,
     BudgetExhausted,
+    Stopped,
 }
 
 struct Subject<'a> {
@@ -94,6 +102,19 @@ struct AgentRun<'a, P> {
     subject: &'a Subject<'a>,
     agent: &'a ScoringAgent,
     prompt: &'a AgentPrompt,
+    work: &'a AgentWork,
+}
+
+fn scoring_works(usecase: &LodestoneUseCase, active: &ActiveProfile) -> Vec<AgentWork> {
+    let mut works: Vec<AgentWork> = active
+        .revision
+        .definition
+        .definition()
+        .enabled_scoring_agents()
+        .map(|agent| usecase.agent_work(active, WorkTarget::new(WorkKind::Scoring, &agent.id)))
+        .collect();
+    works.push(usecase.agent_work(active, WorkTarget::aggregator()));
+    works
 }
 
 struct Scorer<'a, B, S, C> {
@@ -179,6 +200,7 @@ where
             subject,
             agent,
             prompt,
+            work,
         } = *run;
         let schema = scoring_contract_schema(agent);
         let scope = CacheScope {
@@ -200,7 +222,7 @@ where
             },
             schema: &schema,
         };
-        call_with_schema(
+        call_with_schema_until(
             &loaded.provider,
             self.cache,
             call,
@@ -211,6 +233,7 @@ where
                 base_delay: self.settings.base_delay,
             },
             budget,
+            work,
         )
         .await
     }
@@ -234,6 +257,7 @@ where
             let structured = match self.ask(run, &instruction, sample, budget).await {
                 Ok(structured) => structured,
                 Err(LlmCallError::BudgetExhausted) => return SampleOutcome::BudgetExhausted,
+                Err(LlmCallError::Cancelled(reason)) => return SampleOutcome::Stopped(reason),
                 Err(error) => {
                     if let Some((output, model)) = fallback {
                         return SampleOutcome::Valid { output, model };
@@ -293,6 +317,7 @@ where
         usecase: &LodestoneUseCase,
         subject: &Subject<'_>,
         agent: &ScoringAgent,
+        work: &AgentWork,
         providers: &mut Providers<B::Provider>,
         budget: &mut RunBudget,
     ) -> Result<AgentOutcome, CoreError> {
@@ -331,6 +356,7 @@ where
             subject,
             agent,
             prompt: &prompt,
+            work,
         };
         let samples = u32::from(agent.samples).max(1);
         let mut valid: Vec<ScoringOutput> = Vec::new();
@@ -339,8 +365,12 @@ where
         let mut first_error: Option<String> = None;
         let mut call_errors: Vec<String> = Vec::new();
         for sample in 0..samples {
+            if let Some(reason) = work.stop_reason() {
+                return Ok(AgentOutcome::Stopped(reason));
+            }
             match self.run_sample(&run, sample, budget).await {
                 SampleOutcome::BudgetExhausted => return Ok(AgentOutcome::BudgetExhausted),
+                SampleOutcome::Stopped(reason) => return Ok(AgentOutcome::Stopped(reason)),
                 SampleOutcome::CallFailed { error } => {
                     warn!(
                         agent = agent.id.as_str(),
@@ -519,6 +549,11 @@ where
             .any(|result| result.status == ResultStatus::Valid);
         let mut results: Vec<ScoringResult> = Vec::new();
         for agent in definition.enabled_scoring_agents() {
+            let work = usecase.agent_work(active, WorkTarget::new(WorkKind::Scoring, &agent.id));
+            if let Some(reason) = work.stop_reason() {
+                usecase.note_stop(lead.id, &work, reason, at).await?;
+                return Ok(LeadOutcome::Stopped);
+            }
             if !reported {
                 results.push(failed(
                     &subject,
@@ -530,10 +565,14 @@ where
                 continue;
             }
             match self
-                .score_agent(usecase, &subject, agent, providers, budget)
+                .score_agent(usecase, &subject, agent, &work, providers, budget)
                 .await?
             {
                 AgentOutcome::BudgetExhausted => return Ok(LeadOutcome::BudgetExhausted),
+                AgentOutcome::Stopped(reason) => {
+                    usecase.note_stop(lead.id, &work, reason, at).await?;
+                    return Ok(LeadOutcome::Stopped);
+                }
                 AgentOutcome::CallFailed(failure) => {
                     let record =
                         failure.into_record(lead.id, AgentKind::Scoring, active.revision.number);
@@ -565,6 +604,14 @@ where
                 .count(),
         );
         let invalid = count(results.len()) - valid;
+        if let Some(work) = scoring_works(usecase, active)
+            .into_iter()
+            .find(|work| !work.is_live())
+            && let Some(reason) = work.stop_reason()
+        {
+            usecase.note_stop(lead.id, &work, reason, at).await?;
+            return Ok(LeadOutcome::Stopped);
+        }
         let decision = decide(&definition.scoring_agents, &results, &calibrations, found);
         let completion = ScoringCompletion {
             lead_id: lead.id,
@@ -601,7 +648,7 @@ impl LodestoneUseCase {
             settings,
         };
         let profiles: Vec<ActiveProfile> = self
-            .list_active_profiles()
+            .refreshed_active_profiles()
             .await?
             .into_iter()
             .filter(|active| {
@@ -625,11 +672,20 @@ impl LodestoneUseCase {
             let leads = self
                 .due_scoring_leads(active, remaining, clock.now())
                 .await?;
+            let works = scoring_works(self, active);
             for lead in &leads {
+                if let Some(reason) = first_stop(&works) {
+                    info!(profile = %active.profile.id, reason = reason.as_str(), "scoring pass stopped for the profile");
+                    continue 'profiles;
+                }
                 match scorer
                     .score_lead(self, active, lead, &mut providers, &mut budget, clock)
                     .await?
                 {
+                    LeadOutcome::Stopped => {
+                        report.stopped += 1;
+                        continue 'profiles;
+                    }
                     LeadOutcome::Done { valid, invalid } => {
                         report.leads += 1;
                         report.valid += valid;
@@ -677,16 +733,20 @@ impl LodestoneUseCase {
             .await
     }
 
-    #[transactional(scoring_agent)]
+    #[transactional(scoring_agent, agent_work)]
     async fn store_scoring(
         &self,
         results: &[ScoringResult],
         completion: &ScoringCompletion,
     ) -> Result<bool, CoreError> {
         let mut repo = scoring_agent_repository;
+        let mut stops = agent_work_repository;
         for result in results {
             repo.store_result(result).await?;
         }
+        stops
+            .clear_stops(completion.lead_id, &[WorkKind::Scoring])
+            .await?;
         repo.complete(completion).await
     }
 

@@ -8,9 +8,11 @@ use serde_json::json;
 use crate::{
     application::{
         LodestoneUseCase,
-        sources::{LeadCreation, SourceRunError},
+        sources::{Collected, LeadCreation, SourceRunError, collect_until},
     },
     domain::{
+        agent_work::{AgentWork, CancelReason, WorkKind, WorkTarget},
+        enrichment::EnrichmentStep,
         job::ports::Clock,
         profile::{
             ActiveProfile,
@@ -45,11 +47,20 @@ pub struct TriageReport {
     pub rejected_by_rules: u64,
     pub rejected_by_filters: u64,
     pub skipped_no_lead: u64,
+    pub runs: u64,
+    pub cancelled: u64,
+    pub cancel_reason: Option<CancelReason>,
 }
 
 impl TriageReport {
     pub fn accepted(&self) -> u64 {
         self.accepted_by_rules + self.accepted_ambiguous
+    }
+
+    pub fn all_cancelled(&self) -> Option<CancelReason> {
+        (self.runs > 0 && self.cancelled == self.runs)
+            .then_some(self.cancel_reason)
+            .flatten()
     }
 }
 
@@ -72,6 +83,15 @@ fn candidate_text(candidate: &Candidate) -> String {
 struct KeywordTarget<'a> {
     agent: Option<&'a AgentId>,
     rules: Cow<'a, SearchAgent>,
+}
+
+impl KeywordTarget<'_> {
+    fn work_target(&self) -> WorkTarget {
+        match self.agent {
+            Some(agent) => WorkTarget::new(WorkKind::Sourcing, agent),
+            None => WorkTarget::enrichment(EnrichmentStep::CompanyJobs),
+        }
+    }
 }
 
 fn keyword_targets(definition: &ProfileDefinition, source: SourceName) -> Vec<KeywordTarget<'_>> {
@@ -175,7 +195,7 @@ impl LodestoneUseCase {
     {
         let name = source.name();
         let profiles: Vec<ActiveProfile> = self
-            .list_active_profiles()
+            .refreshed_active_profiles()
             .await?
             .into_iter()
             .filter(|active| {
@@ -193,6 +213,10 @@ impl LodestoneUseCase {
         if targets.is_empty() {
             return Ok(TriageReport::default());
         }
+        let works: Vec<AgentWork> = targets
+            .iter()
+            .map(|(active, target)| self.agent_work(active, target.work_target()))
+            .collect();
 
         let started_at = clock.now();
         let runs: Vec<Run> = targets
@@ -209,7 +233,27 @@ impl LodestoneUseCase {
             .collect();
         self.insert_triage_runs(&runs).await?;
 
-        let candidates = match source.collect(&profiles, started_at).await {
+        let collected = match collect_until(&works, source.collect(&profiles, started_at)).await {
+            Collected::Items(collected) => collected,
+            Collected::Stopped(reason) => {
+                for (run, work) in runs.iter().zip(&works) {
+                    let outcome = RunOutcome::Cancelled {
+                        volume: 0,
+                        signals: 0,
+                        reason: work.stop_reason().unwrap_or(reason),
+                    };
+                    self.finish_triage_run(run.id, &outcome, clock.now())
+                        .await?;
+                }
+                return Ok(TriageReport {
+                    runs: count(runs.len()),
+                    cancelled: count(runs.len()),
+                    cancel_reason: Some(reason),
+                    ..TriageReport::default()
+                });
+            }
+        };
+        let candidates = match collected {
             Ok(candidates) => candidates,
             Err(error) => {
                 let outcome = RunOutcome::Failed {
@@ -228,10 +272,11 @@ impl LodestoneUseCase {
         let volume = count(candidates.len());
         let mut report = TriageReport {
             candidates: volume,
+            runs: count(runs.len()),
             ..TriageReport::default()
         };
         let mut first_error: Option<CoreError> = None;
-        for ((active, target), run) in targets.iter().zip(&runs) {
+        for (((active, target), run), work) in targets.iter().zip(&runs).zip(&works) {
             let observations = match decide(target, &candidates, &mut report) {
                 Ok(observations) => observations,
                 Err(error) => {
@@ -251,13 +296,19 @@ impl LodestoneUseCase {
                 None => LeadCreation::ExistingOnly,
             };
             let recorded = self
-                .record_observations_with(active, name, &observations, clock.now(), creation)
+                .record_until_stopped(
+                    active,
+                    name,
+                    observations
+                        .into_iter()
+                        .map(|observation| vec![observation]),
+                    work,
+                    creation,
+                    clock,
+                )
                 .await;
-            let skipped = recorded.as_ref().map_or(0, |skipped| *skipped);
-            report.skipped_no_lead += skipped;
-            let signals = count(observations.len()).saturating_sub(skipped);
             let outcome = match &recorded {
-                Ok(_) => RunOutcome::Succeeded { volume, signals },
+                Ok(recorded) => recorded.outcome(volume),
                 Err(error) => RunOutcome::Failed {
                     volume,
                     signals: 0,
@@ -266,8 +317,17 @@ impl LodestoneUseCase {
             };
             self.finish_triage_run(run.id, &outcome, clock.now())
                 .await?;
-            if let Err(error) = recorded {
-                first_error.get_or_insert(error);
+            match recorded {
+                Ok(recorded) => {
+                    report.skipped_no_lead += recorded.skipped;
+                    if let Some(reason) = recorded.stopped {
+                        report.cancelled += 1;
+                        report.cancel_reason.get_or_insert(reason);
+                    }
+                }
+                Err(error) => {
+                    first_error.get_or_insert(error);
+                }
             }
         }
         match first_error {

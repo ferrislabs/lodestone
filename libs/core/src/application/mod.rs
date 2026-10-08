@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 use auth::{AuthService, FerrisKeyRepository};
 use common::{Config, CoreError};
@@ -6,8 +6,12 @@ use rate_limit::{InMemoryRateLimiter, Quota, RateLimitService};
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 
-use crate::{domain::output::WebhookPolicy, infrastructure::postgres::error::map_sqlx_error};
+use crate::{
+    domain::output::WebhookPolicy,
+    infrastructure::{agent_registry::InMemoryAgentRegistry, postgres::error::map_sqlx_error},
+};
 
+pub mod agents;
 pub mod calibration;
 pub mod company;
 pub mod contacts;
@@ -43,6 +47,7 @@ pub struct LodestoneUseCase {
     pub(crate) listener_stale_after: Duration,
     pub(crate) company_wait: Duration,
     pub(crate) enrichment_wait: Duration,
+    pub(crate) agents: Arc<InMemoryAgentRegistry>,
 }
 
 impl LodestoneUseCase {
@@ -53,7 +58,12 @@ impl LodestoneUseCase {
             listener_stale_after: crate::domain::listener::STALE_FLOOR,
             company_wait: Duration::ZERO,
             enrichment_wait: Duration::ZERO,
+            agents: Arc::new(InMemoryAgentRegistry::new()),
         }
+    }
+
+    pub fn agent_registry(&self) -> &InMemoryAgentRegistry {
+        &self.agents
     }
 
     pub fn with_enrichment_wait(mut self, wait: Duration) -> Self {

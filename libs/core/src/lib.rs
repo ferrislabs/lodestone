@@ -8,6 +8,12 @@ pub use application::evaluation::QUALIFICATION_LISTENER;
 pub use application::*;
 pub use domain::{
     NormalizedDomain, NormalizedDomainError, User, UserId,
+    agent_work::{
+        AGGREGATOR_AGENT_ID, AgentWork, CancelReason, ProfileAgents, WorkKind, WorkSnapshot,
+        WorkTarget, all_cancelled, first_stop, kept_agents, only_removes_agents,
+        ports::{AgentRegistry, AgentStop, AgentWorkRepository, KeptAgents},
+        work_targets,
+    },
     aggregation::{
         AggregationPrompt, AggregatorOutput, EVIDENCE_RETRY, Facts, build as aggregation_prompt,
         check as check_aggregation, instruction as aggregation_instruction,

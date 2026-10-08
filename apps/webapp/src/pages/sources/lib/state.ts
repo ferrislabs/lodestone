@@ -1,3 +1,4 @@
+import { stopReasonLabel } from '#/lib/agent-stop'
 import { formatDateTime, formatRelative } from '#/lib/format'
 import { sourceLabel } from '#/lib/labels'
 import {
@@ -45,6 +46,7 @@ const STATE_LABELS: Readonly<Record<SourceState, string>> = {
 	running: 'En cours',
 	failed: 'Échec',
 	succeeded: 'Terminé',
+	cancelled: 'Arrêté',
 	unavailable: 'Indisponible',
 }
 
@@ -53,6 +55,7 @@ export function sourceState(source: Source): SourceState {
 		case 'running':
 		case 'failed':
 		case 'succeeded':
+		case 'cancelled':
 		case 'unavailable':
 			return source.status
 		default:
@@ -88,6 +91,8 @@ export function runDisabledReason(source: Source): string | null {
 			return 'La tâche a échoué définitivement et ne sera plus planifiée'
 		case 'succeeded':
 			return "La tâche est terminée et n'est plus planifiée"
+		case 'cancelled':
+			return "La tâche a été arrêtée : plus aucun agent actif n'utilise cette source"
 	}
 }
 
@@ -205,7 +210,10 @@ export function runSummary(run: SourceRun, now: number): RunSummary {
 	const running = run.status === 'running'
 	return {
 		status: run.status,
-		statusLabel: RUN_STATUS_LABELS[run.status] ?? run.status,
+		statusLabel:
+			run.status === 'cancelled'
+				? stopReasonLabel(run.cancel_reason)
+				: (RUN_STATUS_LABELS[run.status] ?? run.status),
 		failed: run.status === 'failed',
 		counts: running
 			? null

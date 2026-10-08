@@ -32,6 +32,14 @@ export namespace Schemas {
     separation?: (number | null) | undefined;
     validated: number;
   };
+  export type AgentStopDto = {
+    agent_id: string;
+    agent_name: string;
+    kind: string;
+    profile_revision: number;
+    reason: string;
+    stopped_at: string;
+  };
   export type DraftStatusDto = "pending" | "approved" | "rejected";
   export type DraftDto = {
     body: string;
@@ -415,6 +423,7 @@ export namespace Schemas {
   export type DataEnvelope_LeadDetailDto = {
     data: {
       agent_failures: Array<AgentFailureDto>;
+      agent_stops: Array<AgentStopDto>;
       assessments: Array<AssessmentDto>;
       company?: (null | CompanyDto) | undefined;
       contacts: Array<ContactDto>;
@@ -610,6 +619,7 @@ export namespace Schemas {
   };
   export type SourceRunDto = {
     agent_id?: (string | null) | undefined;
+    cancel_reason?: (string | null) | undefined;
     error?: (string | null) | undefined;
     finished_at?: (string | null) | undefined;
     profile_id: string;
@@ -803,6 +813,7 @@ export namespace Schemas {
   export type ErrorDetail = { message: string; path: string };
   export type LeadDetailDto = {
     agent_failures: Array<AgentFailureDto>;
+    agent_stops: Array<AgentStopDto>;
     assessments: Array<AssessmentDto>;
     company?: (null | CompanyDto) | undefined;
     contacts: Array<ContactDto>;
@@ -1256,6 +1267,15 @@ export namespace Endpoints {
       422: Schemas.ErrorBody;
     };
   };
+  export type delete_Delete_profile = {
+    method: "DELETE";
+    path: "/api/v1/profiles/{profile_id}";
+    requestFormat: "json";
+    parameters: {
+      path: { profile_id: string };
+    };
+    responses: { 204: unknown; 400: unknown; 401: unknown; 403: unknown; 404: unknown };
+  };
   export type post_Activate_profile = {
     method: "POST";
     path: "/api/v1/profiles/{profile_id}/activate";
@@ -1515,6 +1535,7 @@ export type EndpointByMethod = {
   delete: {
     "/api/v1/llm/providers/{provider_id}": Endpoints.delete_Delete_provider;
     "/api/v1/llm/tiers/{tier}": Endpoints.delete_Unassign_tier;
+    "/api/v1/profiles/{profile_id}": Endpoints.delete_Delete_profile;
     "/api/v1/source-providers/{key}": Endpoints.delete_Delete_source_provider;
   };
   put: {

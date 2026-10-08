@@ -2144,3 +2144,31 @@ async fn the_detail_exposes_the_enrichment_steps_status_and_waiting_reason(pool:
     let (_, body) = api.get(&uri).await;
     assert!(body["data"]["enrichment"]["waiting_reason"].is_null());
 }
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_detail_reports_agents_whose_work_was_stopped(pool: PgPool) {
+    let seed = Seed { pool: pool.clone() };
+    let profile = seed.qualified_profile("keycloak-ops").await;
+    let lead = seed.lead(&profile, "acme.com", "new", 5.0, 1).await;
+    query(
+        "INSERT INTO lead_agent_stops (lead_id, kind, agent_id, profile_revision, reason, stopped_at)
+         VALUES ($1::uuid, 'qualification', 'pertinence', 1, 'agent_disabled', now())",
+    )
+    .bind(&lead)
+    .execute(&pool)
+    .await
+    .expect("stop");
+    let api = Api::new(pool.clone()).await;
+
+    let (_, body) = api.get(&format!("/api/v1/leads/{lead}")).await;
+
+    let stops = body["data"]["agent_stops"]
+        .as_array()
+        .unwrap_or_else(|| panic!("{body}"));
+    assert_eq!(stops.len(), 1);
+    assert_eq!(stops[0]["kind"], "qualification");
+    assert_eq!(stops[0]["agent_id"], "pertinence");
+    assert_eq!(stops[0]["reason"], "agent_disabled");
+    assert_eq!(stops[0]["profile_revision"], 1);
+    assert!(stops[0]["stopped_at"].is_string());
+}
