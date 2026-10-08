@@ -1,14 +1,17 @@
 use common::Config;
 use fetch::{FetchSettings, PoliteFetcher};
 use lodestone_core::{
-    COMPANY_RESEARCH, LodestoneAuthService, LodestoneRateLimitService, LodestoneUseCase, ProfileId,
-    WebhookPolicy, create_service, infrastructure::crypto::AesGcmCipher,
+    BODACC, COMPANY_RESEARCH, DECP, LodestoneAuthService, LodestoneRateLimitService,
+    LodestoneUseCase, ProfileId, WebhookPolicy, create_service,
+    infrastructure::crypto::AesGcmCipher,
 };
 use rate_limit::Quota;
 use server::errors::ServerError;
 use source_providers::ProviderEngine;
 use sources::{
+    bodacc::BodaccSettings,
     company::CompanySettings,
+    decp::holders::HolderSettings,
     ecosystem::{EcosystemConfig, EcosystemModules, WebsiteSettings},
     endpoint::Endpoint,
 };
@@ -50,6 +53,24 @@ pub fn ecosystem_modules(
                 max_pages: args.company.max_pages.get(),
                 max_rate_limit_wait: wait,
                 origin: None,
+            },
+            bodacc: BodaccSettings {
+                dataset_url: Endpoint::catalog(
+                    usecase.clone(),
+                    BODACC,
+                    "base_url",
+                    args.bodacc.url.clone(),
+                ),
+                max_rate_limit_wait: wait,
+            },
+            holders: HolderSettings {
+                holders_url: Endpoint::catalog(
+                    usecase.clone(),
+                    DECP,
+                    "holders_url",
+                    args.decp.holders_url.clone(),
+                ),
+                max_rate_limit_wait: wait,
             },
             website: WebsiteSettings {
                 max_rate_limit_wait: wait,

@@ -2137,21 +2137,26 @@ async fn the_detail_exposes_the_module_statuses_and_the_ecosystem_findings(pool:
         modules,
         [
             ("official_identity", "pending"),
+            ("legal_life", "pending"),
+            ("public_contracts", "pending"),
             ("website_stack", "pending"),
             ("hiring_activity", "pending")
         ]
     );
 
-    for (module, status) in [
-        ("official_identity", "done"),
-        ("website_stack", "not_applicable"),
-        ("hiring_activity", "failed"),
+    for (module, status, note) in [
+        ("official_identity", "done", None),
+        ("legal_life", "not_applicable", Some("SIREN inconnu")),
+        ("public_contracts", "not_applicable", Some("SIREN inconnu")),
+        ("website_stack", "not_applicable", None),
+        ("hiring_activity", "failed", Some("boom")),
     ] {
         query(
-            "INSERT INTO lead_ecosystem_modules (domain, module, status, last_run, next_run_at, error) VALUES ('acme.com', $1, $2, now(), now(), NULL)",
+            "INSERT INTO lead_ecosystem_modules (domain, module, status, last_run, next_run_at, error) VALUES ('acme.com', $1, $2, now(), now(), $3)",
         )
         .bind(module)
         .bind(status)
+        .bind(note)
         .execute(&pool)
         .await
         .unwrap();
@@ -2179,8 +2184,12 @@ async fn the_detail_exposes_the_module_statuses_and_the_ecosystem_findings(pool:
         ecosystem["modules"][0]["findings"][0]["source_url"],
         "https://recherche-entreprises.api.gouv.fr/search?q=552100554"
     );
+    assert_eq!(ecosystem["modules"][1]["module"], "legal_life");
     assert_eq!(ecosystem["modules"][1]["status"], "not_applicable");
-    assert_eq!(ecosystem["modules"][2]["findings"], json!([]));
+    assert_eq!(ecosystem["modules"][1]["error"], "SIREN inconnu");
+    assert_eq!(ecosystem["modules"][2]["module"], "public_contracts");
+    assert_eq!(ecosystem["modules"][3]["status"], "not_applicable");
+    assert_eq!(ecosystem["modules"][4]["findings"], json!([]));
 
     seed.signal(&lead, "product_detected").await;
     let (_, body) = api.get(&uri).await;
@@ -2274,7 +2283,7 @@ async fn the_dry_run_runs_one_module_for_users_and_stores_nothing(pool: PgPool) 
     let (unavailable, _, _) = send(
         api.app(),
         Method::POST,
-        &format!("/api/v1/leads/{lead}/ecosystem/dry-run?module=legal_life"),
+        &format!("/api/v1/leads/{lead}/ecosystem/dry-run?module=dns_email"),
         Some(&api.bearer),
         None,
     )
@@ -2303,6 +2312,327 @@ async fn the_dry_run_runs_one_module_for_users_and_stores_nothing(pool: PgPool) 
     assert_eq!(missing, StatusCode::NOT_FOUND);
 }
 
+async fn ready_providers(pool: &PgPool) {
+    for key in ["company_research", "bodacc", "decp"] {
+        query(
+            "INSERT INTO source_provider_configurations (provider_key, settings, status, created_at, updated_at) VALUES ($1, '{}'::jsonb, 'ready', now(), now()) ON CONFLICT (provider_key) DO UPDATE SET status = 'ready'",
+        )
+        .bind(key)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+}
+
+async fn record_identity(pool: &PgPool, status: &str, siren: Option<&str>) {
+    query(
+        "INSERT INTO lead_ecosystem_modules (domain, module, status, last_run, next_run_at, error) VALUES ('acme.com', 'official_identity', $1, now(), now() + interval '30 days', NULL)",
+    )
+    .bind(status)
+    .execute(pool)
+    .await
+    .unwrap();
+    if let Some(siren) = siren {
+        query(
+            "INSERT INTO lead_ecosystem (domain, module, finding_key, kind, label, value, source_url, observed_at, details)
+             VALUES ('acme.com', 'official_identity', 'siren', 'siren', 'SIREN', $1, 'https://acme.com/mentions-legales', now(), 'null'::jsonb)",
+        )
+        .bind(siren)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+}
+
+async fn dry_run(api: &Api, lead: &str, module: &str) -> Value {
+    let (status, body, _) = send(
+        api.app(),
+        Method::POST,
+        &format!("/api/v1/leads/{lead}/ecosystem/dry-run?module={module}"),
+        Some(&api.bearer),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    body["data"].clone()
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_dry_run_reads_the_legal_life_and_the_public_contracts_by_siren(pool: PgPool) {
+    let seed = Seed { pool: pool.clone() };
+    let profile = seed.qualified_profile("keycloak-ops").await;
+    let lead = seed.lead(&profile, "acme.com", "new", 3.0, 1).await;
+    record_identity(&pool, "done", Some("552100554")).await;
+    ready_providers(&pool).await;
+    let api = Api::new(pool.clone()).await;
+    let bodacc = api
+        .harness
+        .server
+        .mock_async(|when, then| {
+            when.method(MockMethod::GET)
+                .path("/bodacc/annonces/records")
+                .query_param("where", "registre=\"552100554\"")
+                .query_param("order_by", "dateparution desc")
+                .query_param("limit", "20");
+            then.status(200).json_body(json!({"total_count": 1, "results": [{
+                "id": "A202601733059",
+                "dateparution": "2026-09-10",
+                "familleavis": "collective",
+                "familleavis_lib": "Procédures collectives",
+                "typeavis": "annonce",
+                "typeavis_lib": "Avis initial",
+                "tribunal": "Greffe du Tribunal des Activités Economiques de Nanterre",
+                "registre": ["552100554", "552 100 554"],
+                "jugement": "{\"famille\": \"Jugement d'ouverture\", \"nature\": \"Jugement d'ouverture de liquidation judiciaire\", \"date\": \"2026-09-01\"}",
+                "url_complete": "https://www.bodacc.fr/pages/annonces-commerciales-detail/?q.id=id:A202601733059"
+            }]}));
+        })
+        .await;
+    let holders = api
+        .harness
+        .server
+        .mock_async(|when, then| {
+            when.method(MockMethod::GET)
+                .path("/decp/holders/")
+                .query_param("titulaire_id__contains", "552100554");
+            then.status(200).json_body(json!({"data": [{
+                "uid": "24290007400251A25052S",
+                "id": "A25052S",
+                "acheteur_id": "24290007400251",
+                "acheteur_nom": "COMMUNAUTE DE COMMUNES DU PAYS D IROISE",
+                "titulaire_id": "55210055400047",
+                "titulaire_typeIdentifiant": "SIRET",
+                "objet": "Diagnostic des réseaux",
+                "montant": 400000,
+                "procedure": "Procédure adaptée",
+                "dateNotification": "2026-08-10",
+                "donneesActuelles": true
+            }]}));
+        })
+        .await;
+
+    let legal = dry_run(&api, &lead, "legal_life").await;
+    assert_eq!(legal["status"], "done");
+    let announcement = &legal["findings"][0];
+    assert_eq!(announcement["kind"], "collective_proceeding");
+    assert_eq!(announcement["label"], "Procédure collective");
+    assert_eq!(
+        announcement["value"],
+        "Jugement d'ouverture de liquidation judiciaire"
+    );
+    assert_eq!(announcement["details"]["date"], "2026-09-10");
+    assert_eq!(announcement["details"]["collective"], true);
+    assert_eq!(
+        announcement["details"]["link"],
+        "https://www.bodacc.fr/pages/annonces-commerciales-detail/?q.id=id:A202601733059"
+    );
+    let contracts = dry_run(&api, &lead, "public_contracts").await;
+    assert_eq!(contracts["status"], "done");
+    let award = &contracts["findings"][0];
+    assert_eq!(award["kind"], "contract");
+    assert_eq!(award["value"], "Diagnostic des réseaux");
+    assert_eq!(
+        award["details"]["buyer"],
+        "COMMUNAUTE DE COMMUNES DU PAYS D IROISE"
+    );
+    assert_eq!(award["details"]["amount_eur"], 400000.0);
+    assert_eq!(award["details"]["date"], "2026-08-10");
+    assert!(
+        award["source_url"]
+            .as_str()
+            .unwrap()
+            .contains("titulaire_id__contains=552100554")
+    );
+    bodacc.assert_async().await;
+    holders.assert_async().await;
+    let stored: i64 = query_scalar("SELECT COUNT(*) FROM lead_ecosystem")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(stored, 1);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_dry_run_reports_an_unknown_siren_and_a_registry_failure(pool: PgPool) {
+    let seed = Seed { pool: pool.clone() };
+    let profile = seed.qualified_profile("keycloak-ops").await;
+    let lead = seed.lead(&profile, "acme.com", "new", 3.0, 1).await;
+    record_identity(&pool, "not_applicable", None).await;
+    ready_providers(&pool).await;
+    let api = Api::new(pool.clone()).await;
+    let bodacc = api
+        .harness
+        .server
+        .mock_async(|when, then| {
+            when.method(MockMethod::GET)
+                .path("/bodacc/annonces/records");
+            then.status(500);
+        })
+        .await;
+
+    for module in ["legal_life", "public_contracts"] {
+        let data = dry_run(&api, &lead, module).await;
+        assert_eq!(data["status"], "not_applicable", "{module}");
+        assert_eq!(data["error"], "SIREN inconnu", "{module}");
+        assert_eq!(data["findings"], json!([]));
+    }
+    assert_eq!(bodacc.hits_async().await, 0);
+
+    query("DELETE FROM lead_ecosystem_modules")
+        .execute(&pool)
+        .await
+        .unwrap();
+    record_identity(&pool, "done", Some("552100554")).await;
+    let failed = dry_run(&api, &lead, "legal_life").await;
+    assert_eq!(failed["status"], "failed");
+    assert!(
+        failed["error"]
+            .as_str()
+            .unwrap()
+            .contains("BODACC answered 500")
+    );
+    assert_eq!(bodacc.hits_async().await, 1);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_dry_run_of_the_official_identity_finds_the_siren_on_the_legal_notice(pool: PgPool) {
+    let seed = Seed { pool: pool.clone() };
+    let profile = seed.qualified_profile("keycloak-ops").await;
+    let lead = seed.lead(&profile, "acme.com", "new", 3.0, 1).await;
+    ready_providers(&pool).await;
+    let api = Api::new(pool.clone()).await;
+    let server = &api.harness.server;
+    server
+        .mock_async(|when, then| {
+            when.method(MockMethod::GET).path("/");
+            then.status(200)
+                .header("content-type", "text/html")
+                .body("<html><head><title>Acme</title></head><body><h1>Acme, outils pour les collectivités</h1><p>Logiciels de gestion depuis 2004.</p><a href=\"/mentions-legales\">Mentions légales</a></body></html>");
+        })
+        .await;
+    server
+        .mock_async(|when, then| {
+            when.method(MockMethod::GET).path("/mentions-legales");
+            then.status(200)
+                .header("content-type", "text/html")
+                .body("<html><head><title>Mentions légales</title></head><body><h1>Mentions légales</h1><p>ACME SAS, société par actions simplifiée, SIREN 552 100 554, RCS Lyon. Directeur de la publication : la présidence.</p></body></html>");
+        })
+        .await;
+    server
+        .mock_async(|when, then| {
+            when.method(MockMethod::GET)
+                .path("/entreprises")
+                .query_param("q", "552100554");
+            then.status(200).json_body(json!({"results": [{
+                "siren": "552100554",
+                "nom_complet": "ACME SAS",
+                "activite_principale": "62.01Z",
+                "section_activite_principale": "J",
+                "tranche_effectif_salarie": "12",
+                "date_creation": "2004-06-09",
+                "siege": {"code_postal": "69002", "libelle_commune": "LYON"}
+            }]}));
+        })
+        .await;
+
+    let data = dry_run(&api, &lead, "official_identity").await;
+    assert_eq!(data["status"], "done", "{data}");
+    let findings = data["findings"].as_array().unwrap();
+    let pairs: Vec<(&str, &str)> = findings
+        .iter()
+        .map(|found| {
+            (
+                found["kind"].as_str().unwrap(),
+                found["value"].as_str().unwrap(),
+            )
+        })
+        .collect();
+    assert!(pairs.contains(&("legal_name", "ACME SAS")));
+    assert!(pairs.contains(&("siren", "552100554")));
+    assert!(pairs.contains(&("created_on", "2004-06-09")));
+    assert!(pairs.contains(&("head_office", "69002 LYON France")));
+    let siren = findings
+        .iter()
+        .find(|found| found["kind"] == "siren")
+        .unwrap();
+    assert!(
+        siren["source_url"]
+            .as_str()
+            .unwrap()
+            .ends_with("/mentions-legales")
+    );
+    let name = findings
+        .iter()
+        .find(|found| found["kind"] == "legal_name")
+        .unwrap();
+    assert_eq!(
+        name["source_url"],
+        "https://recherche-entreprises.api.gouv.fr/search?q=552100554"
+    );
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_module_whose_provider_is_not_ready_is_flagged_and_cannot_be_tested(pool: PgPool) {
+    let seed = Seed { pool: pool.clone() };
+    let profile = seed.qualified_profile("keycloak-ops").await;
+    let lead = seed.lead(&profile, "acme.com", "new", 3.0, 1).await;
+    ready_providers(&pool).await;
+    query("UPDATE source_provider_configurations SET status = 'failing' WHERE provider_key = 'bodacc'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let api = Api::new(pool.clone()).await;
+
+    let (status, body, _) = send(
+        api.app(),
+        Method::POST,
+        &format!("/api/v1/leads/{lead}/ecosystem/dry-run?module=legal_life"),
+        Some(&api.bearer),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert!(
+        body.to_string().contains("Fournisseur non prêt : bodacc"),
+        "{body}"
+    );
+
+    let (_, body) = api.get(&format!("/api/v1/leads/{lead}")).await;
+    let modules = body["data"]["ecosystem"]["modules"].as_array().unwrap();
+    let legal = modules
+        .iter()
+        .find(|module| module["module"] == "legal_life")
+        .unwrap();
+    assert_eq!(legal["provider"], "bodacc");
+    assert_eq!(legal["provider_ready"], false);
+    let contracts = modules
+        .iter()
+        .find(|module| module["module"] == "public_contracts")
+        .unwrap();
+    assert_eq!(contracts["provider"], "decp");
+    assert_eq!(contracts["provider_ready"], true);
+    let website = modules
+        .iter()
+        .find(|module| module["module"] == "website_stack")
+        .unwrap();
+    assert!(website["provider"].is_null());
+    assert_eq!(website["provider_ready"], true);
+
+    let (_, body) = api.get("/api/v1/ecosystem/modules").await;
+    let listed = body["data"].as_array().unwrap();
+    let legal = listed
+        .iter()
+        .find(|module| module["module"] == "legal_life")
+        .unwrap();
+    assert_eq!(legal["provider"], "bodacc");
+    assert_eq!(legal["provider_ready"], false);
+    let identity = listed
+        .iter()
+        .find(|module| module["module"] == "official_identity")
+        .unwrap();
+    assert_eq!(identity["provider_ready"], true);
+}
+
 #[sqlx::test(migrations = "../../migrations")]
 async fn the_module_catalog_lists_every_module_with_its_week_of_activity(pool: PgPool) {
     query(
@@ -2328,7 +2658,17 @@ async fn the_module_catalog_lists_every_module_with_its_week_of_activity(pool: P
         "Qui est officiellement cette entreprise ?"
     );
     assert_eq!(modules[1]["module"], "legal_life");
-    assert_eq!(modules[1]["available"], false);
+    assert_eq!(modules[1]["available"], true);
+    assert_eq!(modules[1]["refresh_days"], 7);
+    assert_eq!(modules[2]["module"], "public_contracts");
+    assert_eq!(modules[2]["available"], true);
+    assert_eq!(modules[2]["refresh_days"], 14);
+    let soon: Vec<&str> = modules
+        .iter()
+        .filter(|module| module["available"] == false)
+        .map(|module| module["module"].as_str().unwrap())
+        .collect();
+    assert_eq!(soon, ["dns_email", "recent_activity"]);
     let hiring = modules
         .iter()
         .find(|module| module["module"] == "hiring_activity")

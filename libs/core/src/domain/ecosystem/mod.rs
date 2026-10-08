@@ -4,13 +4,14 @@ use serde_json::Value;
 
 use crate::domain::{
     NormalizedDomain,
-    company::{CompanyDossier, DossierDocument},
+    company::{CompanyDossier, DossierDocument, DossierState, Siren},
     lead::str_enum,
     profile::{
         ProfileId,
         definition::{Fingerprint, ProfileDefinition},
     },
     source::SourceError,
+    source_provider::{BODACC, COMPANY_RESEARCH, DECP},
 };
 
 mod platform;
@@ -21,6 +22,9 @@ pub use platform::{HOSTING_PLATFORMS, hosting_platform};
 pub const MAX_DOCUMENT_FINDINGS: usize = 12;
 pub const STATS_WINDOW_DAYS: i64 = 7;
 pub const STATS_RETENTION_DAYS: i64 = 30;
+pub const SIREN_UNKNOWN: &str = "SIREN inconnu";
+pub const SIREN_FINDING_KEY: &str = "siren";
+pub const PROVIDER_NOT_READY: &str = "Fournisseur non prêt";
 const FAILURE_RETRY_HOURS: i64 = 6;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -55,8 +59,10 @@ impl EcosystemModule {
         Self::RecentActivity,
     ];
 
-    pub const AVAILABLE: [Self; 3] = [
+    pub const AVAILABLE: [Self; 5] = [
         Self::OfficialIdentity,
+        Self::LegalLife,
+        Self::PublicContracts,
         Self::WebsiteStack,
         Self::HiringActivity,
     ];
@@ -131,18 +137,63 @@ impl EcosystemModule {
         !matches!(self, Self::LegalLife | Self::PublicContracts)
     }
 
+    pub fn provider(self) -> Option<&'static str> {
+        match self {
+            Self::OfficialIdentity => Some(COMPANY_RESEARCH),
+            Self::LegalLife => Some(BODACC),
+            Self::PublicContracts => Some(DECP),
+            Self::WebsiteStack | Self::DnsEmail | Self::HiringActivity | Self::RecentActivity => {
+                None
+            }
+        }
+    }
+
+    pub fn needs_siren(self) -> bool {
+        matches!(
+            self,
+            Self::OfficialIdentity | Self::LegalLife | Self::PublicContracts
+        )
+    }
+
     pub fn refresh_interval(self) -> Duration {
         match self {
             Self::OfficialIdentity => Duration::days(30),
-            Self::LegalLife | Self::PublicContracts | Self::WebsiteStack | Self::DnsEmail => {
-                Duration::days(7)
-            }
+            Self::PublicContracts => Duration::days(14),
+            Self::LegalLife | Self::WebsiteStack | Self::DnsEmail => Duration::days(7),
             Self::HiringActivity | Self::RecentActivity => Duration::days(3),
         }
     }
 
     pub fn failure_retry(self) -> Duration {
         Duration::hours(FAILURE_RETRY_HOURS)
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct EcosystemReadiness {
+    not_ready: Vec<EcosystemModule>,
+}
+
+impl EcosystemReadiness {
+    pub fn with_not_ready(not_ready: Vec<EcosystemModule>) -> Self {
+        Self { not_ready }
+    }
+
+    pub fn from_ready_providers(ready: &[String]) -> Self {
+        Self {
+            not_ready: EcosystemModule::AVAILABLE
+                .into_iter()
+                .filter(|module| {
+                    module
+                        .provider()
+                        .is_some_and(|provider| !ready.iter().any(|key| key == provider))
+                })
+                .collect(),
+        }
+    }
+
+    pub fn is_ready(&self, module: EcosystemModule) -> bool {
+        !self.not_ready.contains(&module)
     }
 }
 
@@ -243,6 +294,39 @@ impl EcosystemFinding {
         self
     }
 
+    fn detail_text(&self, key: &str) -> Option<&str> {
+        self.details
+            .get(key)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+    }
+
+    pub fn document_line(&self) -> String {
+        let mut line = match self.detail_text("date") {
+            Some(date) => format!("- {} ({date}): {}", self.label, self.value),
+            None => format!("- {}: {}", self.label, self.value),
+        };
+        let mut extras: Vec<String> = Vec::new();
+        if let Some(buyer) = self.detail_text("buyer") {
+            extras.push(format!("buyer {buyer}"));
+        }
+        if let Some(amount) = self.details.get("amount_eur").and_then(Value::as_f64) {
+            extras.push(format!("amount {} EUR", euros(amount)));
+        }
+        if let Some(procedure) = self.detail_text("procedure") {
+            extras.push(format!("procedure {procedure}"));
+        }
+        if let Some(court) = self.detail_text("court") {
+            extras.push(format!("court {court}"));
+        }
+        if !extras.is_empty() {
+            line.push_str("; ");
+            line.push_str(&extras.join("; "));
+        }
+        line
+    }
+
     pub fn example(&self, domain: &NormalizedDomain) -> FindingExample {
         FindingExample {
             domain: domain.as_str().to_owned(),
@@ -264,7 +348,7 @@ pub struct FindingExample {
 #[derive(Debug, Clone, PartialEq)]
 pub enum ModuleOutcome {
     Done(Vec<EcosystemFinding>),
-    NotApplicable,
+    NotApplicable(Option<&'static str>),
     Failed(String),
 }
 
@@ -272,7 +356,7 @@ impl ModuleOutcome {
     pub fn status(&self) -> ModuleStatus {
         match self {
             Self::Done(_) => ModuleStatus::Done,
-            Self::NotApplicable => ModuleStatus::NotApplicable,
+            Self::NotApplicable(_) => ModuleStatus::NotApplicable,
             Self::Failed(_) => ModuleStatus::Failed,
         }
     }
@@ -280,7 +364,63 @@ impl ModuleOutcome {
     pub fn findings(&self) -> &[EcosystemFinding] {
         match self {
             Self::Done(findings) => findings,
-            Self::NotApplicable | Self::Failed(_) => &[],
+            Self::NotApplicable(_) | Self::Failed(_) => &[],
+        }
+    }
+
+    pub fn note(&self) -> Option<&str> {
+        match self {
+            Self::Failed(message) => Some(message),
+            Self::NotApplicable(reason) => *reason,
+            Self::Done(_) => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Inspection {
+    Found(Vec<EcosystemFinding>),
+    NotApplicable(&'static str),
+}
+
+impl Inspection {
+    pub fn outcome(self) -> ModuleOutcome {
+        match self {
+            Self::Found(findings) => ModuleOutcome::Done(findings),
+            Self::NotApplicable(reason) => ModuleOutcome::NotApplicable(Some(reason)),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SirenLookup<'a> {
+    Known(&'a Siren),
+    Unknown,
+    Unresolved,
+}
+
+impl<'a> SirenLookup<'a> {
+    pub fn of(
+        dossier: Option<&'a CompanyDossier>,
+        recorded: Option<&'a Siren>,
+        identity_settled: bool,
+    ) -> Self {
+        let from_dossier = dossier.and_then(|dossier| {
+            dossier
+                .siren
+                .as_ref()
+                .or_else(|| dossier.official.as_ref().map(|official| &official.siren))
+        });
+        if let Some(siren) = from_dossier.or(recorded) {
+            return Self::Known(siren);
+        }
+        let dossier_built = dossier.is_some_and(|dossier| {
+            dossier.built_at.is_some() && dossier.state != DossierState::Pending
+        });
+        if dossier_built || identity_settled {
+            Self::Unknown
+        } else {
+            Self::Unresolved
         }
     }
 }
@@ -341,6 +481,7 @@ pub struct InspectionTarget<'a> {
     pub domain: &'a NormalizedDomain,
     pub settings: &'a InspectionSettings,
     pub dossier: Option<&'a CompanyDossier>,
+    pub siren: SirenLookup<'a>,
     pub now: DateTime<Utc>,
 }
 
@@ -350,7 +491,7 @@ pub trait ModuleRunner: Send + Sync {
     fn inspect(
         &self,
         target: &InspectionTarget<'_>,
-    ) -> impl Future<Output = Result<Vec<EcosystemFinding>, SourceError>> + Send;
+    ) -> impl Future<Output = Result<Inspection, SourceError>> + Send;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -410,6 +551,27 @@ impl DomainEcosystem {
             .iter()
             .filter(move |finding| finding.module == module)
     }
+
+    pub fn recorded_siren(&self) -> Option<Siren> {
+        self.findings_of(EcosystemModule::OfficialIdentity)
+            .find(|finding| finding.key == SIREN_FINDING_KEY)
+            .and_then(|finding| Siren::parse(&finding.value).ok())
+    }
+
+    pub fn identity_settled(&self) -> bool {
+        matches!(
+            self.state_of(EcosystemModule::OfficialIdentity).status,
+            ModuleStatus::Done | ModuleStatus::NotApplicable
+        )
+    }
+}
+
+fn euros(amount: f64) -> String {
+    if amount.fract() == 0.0 {
+        format!("{amount:.0}")
+    } else {
+        format!("{amount:.2}")
+    }
 }
 
 pub fn ecosystem_documents(findings: &[EcosystemFinding]) -> Vec<DossierDocument> {
@@ -436,11 +598,7 @@ pub fn ecosystem_documents(findings: &[EcosystemFinding]) -> Vec<DossierDocument
                 module.english_name(),
                 module.as_str()
             )];
-            lines.extend(
-                members
-                    .iter()
-                    .map(|finding| format!("- {}: {}", finding.label, finding.value)),
-            );
+            lines.extend(members.iter().map(|finding| finding.document_line()));
             DossierDocument {
                 source: source.to_owned(),
                 content: lines.join("\n"),

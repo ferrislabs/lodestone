@@ -1,4 +1,4 @@
-import { Briefcase, Database } from 'lucide-react'
+import { Briefcase, Database, Scale } from 'lucide-react'
 import { describe, expect, it } from 'vitest'
 
 import { summary } from '#/pages/source-providers/lib/fixtures'
@@ -37,6 +37,11 @@ describe('providerIcon', () => {
 
 	it('shows the company job offers with a briefcase', () => {
 		expect(providerIcon('ats')).toEqual({ kind: 'lucide', Icon: Briefcase })
+	})
+
+	it('shows the legal announcements of the BODACC with scales', () => {
+		expect(CATALOG_KEYS).toContain('bodacc')
+		expect(providerIcon('bodacc')).toEqual({ kind: 'lucide', Icon: Scale })
 	})
 
 	it('falls back to a lucide icon', () => {

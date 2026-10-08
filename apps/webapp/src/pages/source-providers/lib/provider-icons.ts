@@ -5,6 +5,7 @@ import {
 	type LucideIcon,
 	Network,
 	Radar,
+	Scale,
 	ShieldCheck,
 } from 'lucide-react'
 
@@ -31,6 +32,7 @@ const ICONS: Readonly<Record<string, ProviderIcon>> = {
 	http_probe: { kind: 'lucide', Icon: Radar },
 	contacts: { kind: 'lucide', Icon: Contact },
 	company_research: { kind: 'logo', src: companyResearch },
+	bodacc: { kind: 'lucide', Icon: Scale },
 }
 
 const DEFAULT_ICON: ProviderIcon = { kind: 'lucide', Icon: Database }

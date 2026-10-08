@@ -1,7 +1,9 @@
 import {
 	type FindingRow,
 	findingRows,
+	moduleNote,
 	moduleStatusLabel,
+	providerLink,
 	type StatusTone,
 	statusTone,
 } from '#/lib/ecosystem'
@@ -33,7 +35,9 @@ export interface ModuleSection {
 	statusLabel: string
 	tone: StatusTone
 	lastRun: string | null
-	error: string | null
+	note: string | null
+	failed: boolean
+	providerLink: string | null
 	rows: FindingRow[]
 }
 
@@ -44,7 +48,9 @@ export function moduleSections(ecosystem: Ecosystem): ModuleSection[] {
 		statusLabel: moduleStatusLabel(report.status),
 		tone: statusTone(report.status),
 		lastRun: report.last_run ? formatDateTime(report.last_run) : null,
-		error: report.status === 'failed' ? (report.error ?? null) : null,
+		note: moduleNote(report.status, report.error),
+		failed: report.status === 'failed',
+		providerLink: providerLink(report.provider, report.provider_ready),
 		rows: findingRows(report.findings),
 	}))
 }

@@ -17,7 +17,7 @@ An **identified lead** is a lead with a registrable domain, which every lead has
 
 - Identité officielle (`official_identity`), Vie légale (`legal_life`), Marchés publics (`public_contracts`), Site et stack technique (`website_stack`), Écosystème DNS et e-mail (`dns_email`), Activité de recrutement (`hiring_activity`), Activité récente (`recent_activity`).
 - A module is a `ModuleRunner` (core trait, static dispatch through the `EcosystemRunner` enum of the sources crate, no `dyn`) that turns a domain into **findings**: module, key, kind, French label, value, source URL (a confirmed link or the API URL it was read from), observation time and details.
-- This decision builds the framework. Its first modules wrap the existing pieces: the company dossier is « Identité officielle », the HTTP probe with the profile fingerprints is part of « Site et stack technique » (with the home page server, technology and generator), the career page and recruiting board reader is « Activité de recrutement ». The other modules come with issues 211 and 212; until then they are listed as « À venir » and have no status.
+- This decision builds the framework. Its first modules wrap the existing pieces: the company dossier is « Identité officielle », the HTTP probe with the profile fingerprints is part of « Site et stack technique » (with the home page server, technology and generator), the career page and recruiting board reader is « Activité de recrutement ». The other modules come with issues 211 and 212; until then they are listed as « À venir » and have no status (see "Official modules" below for issue 211).
 
 ### Shared per domain
 
@@ -44,6 +44,17 @@ One continuous listener, `ecosystem_inspection` (ADR 0006), picks the due domain
 ### Qualification and agents
 
 Qualification keeps the wait of ADR 0011 (`ENRICHMENT_WAIT_MINUTES`): a lead is due once every available module has settled for its domain (any status but `pending`), or once the wait is over, or at once when the inspection of its profile is off; a lead whose only evidence is a certificate still waits for other evidence. The qualification, scoring and aggregator agents receive one « Ecosystem » document per module and source; evidence may quote them.
+
+### Official modules (issue 211)
+
+« Identité officielle », « Vie légale » and « Marchés publics » need the SIREN of the company. It comes from the company dossier, else from the SIREN finding of « Identité officielle » (which runs first), else, when neither the dossier nor the identity module has settled yet, from a company research done by the module itself. Without a SIREN the module is `not_applicable` and its status carries the reason « SIREN inconnu » (stored in the `error` column, no migration).
+
+- « Identité officielle » gives the legal name, SIREN, NAF code and label, headcount range, head office and creation date. The SIREN finding points to the page of the site where it was read (the legal notice), the others to the Recherche d'entreprises API URL.
+- « Vie légale » reads the BODACC open data (DILA, Licence Ouverte / Open Licence, no account) on the OpenDataSoft API, dataset `annonces-commerciales`, `records?where=registre="<SIREN>"&order_by=dateparution desc&limit=20`. One finding per announcement: type (création, immatriculation, modification, vente ou cession, radiation, procédure collective with the nature of the judgment, conciliation, rétablissement professionnel, dépôt des comptes), publication date, court, short description and the link to the announcement on bodacc.fr. Refreshed every 7 days. The endpoint is the `base_url` of the new catalog provider `bodacc` (category Entreprises, no authentication, test = GET of the dataset metadata).
+- « Marchés publics » reads the consolidated DECP of data.gouv.fr (Licence Ouverte v2.0) through its tabular API, `titulaire_id__contains=<SIREN>`, and keeps the rows whose holder SIRET (or SIREN) belongs to the company: buyer, object, amount, notification date and procedure, the 20 most recent. Refreshed every 14 days. The endpoint is the `holders_url` setting of the `decp` provider.
+- A registry error is a `failed` status retried after six hours; a rate limit pauses the pass as for the other modules.
+- The three modules respect the catalog readiness of ADR 0010: « Identité officielle » needs `company_research`, « Vie légale » `bodacc` and « Marchés publics » `decp`. While its provider is not ready a module is skipped for the pass (its status is unchanged) and leaves the set of modules the qualification waits for, like a module to come: a lead qualifies as soon as the other available modules settled, and once the provider is ready the module runs and its findings are read at the next qualification, the module card and the lead section show « Fournisseur non prêt » with a link to the provider page of the catalog, and the dry run answers `409` with that message. Missing buyer names are not resolved.
+- The agent documents carry one concise line per finding: label, date, value, then the buyer, amount, procedure or court when known.
 
 ### Operator
 

@@ -30,6 +30,7 @@ function info(overrides: Partial<EcosystemModuleInfo>): EcosystemModuleInfo {
 		available: true,
 		reads_site: true,
 		refresh_days: 3,
+		provider_ready: true,
 		stats: { leads_inspected: 0, findings_count: 0 },
 		...overrides,
 	}
@@ -120,7 +121,7 @@ describe('module cards', () => {
 	it('marks modules to come and the switched off inspection', () => {
 		const cards = moduleCards(
 			[
-				info({ module: 'legal_life', available: false }),
+				info({ module: 'dns_email', available: false }),
 				info({ module: 'website_stack' }),
 			],
 			false,
@@ -178,6 +179,90 @@ describe('dry run view', () => {
 		)
 		expect(failed.summary).toBe('acme.fr · Échec en 1,3 s · 0 élément trouvé')
 		expect(failed.notice).toBe('home page not confirmed')
+	})
+
+	it('explains a module without SIREN and renders its findings per kind', () => {
+		const unknown = dryRunView(
+			result({
+				module: 'legal_life',
+				status: 'not_applicable',
+				hosting_platform: null,
+				error: 'SIREN inconnu',
+			}),
+		)
+		expect(unknown.notice).toBe('SIREN inconnu')
+		const view = dryRunView(
+			result({
+				module: 'public_contracts',
+				findings: [
+					{
+						module: 'public_contracts',
+						key: 'contract:1',
+						kind: 'contract',
+						label: 'Marché remporté',
+						value: 'Diagnostic des réseaux',
+						source_url:
+							'https://tabular-api.data.gouv.fr/api/resources/r/data/',
+						observed_at: '2026-08-10T00:00:00Z',
+						details: { date: '2026-08-10', amount_eur: 1200 },
+					},
+				],
+			}),
+		)
+		expect(view.rows[0].date).toBe('10 août 2026')
+		expect(view.rows[0].amount?.replace(/\s/g, ' ')).toBe('1 200 €')
+	})
+
+	it('lets the official modules be tested once available', () => {
+		const cards = moduleCards(
+			[
+				info({ module: 'legal_life', refresh_days: 7 }),
+				info({ module: 'public_contracts', refresh_days: 14 }),
+			],
+			true,
+		)
+		expect(cards.map((card) => card.chip.label)).toEqual(['Actif', 'Actif'])
+		expect(cards.every((card) => card.canTest)).toBe(true)
+		expect(cards[1].refresh).toBe('Rafraîchi tous les 14 jours')
+		expect(cards[0].providerLink).toBeNull()
+	})
+
+	it('flags a module whose catalog provider is not ready', () => {
+		const [legal, soon, off] = [
+			...moduleCards(
+				[
+					info({
+						module: 'legal_life',
+						provider: 'bodacc',
+						provider_ready: false,
+					}),
+					info({
+						module: 'dns_email',
+						available: false,
+						provider_ready: true,
+					}),
+				],
+				true,
+			),
+			...moduleCards(
+				[
+					info({
+						module: 'legal_life',
+						provider: 'bodacc',
+						provider_ready: false,
+					}),
+				],
+				false,
+			),
+		]
+		expect(legal.chip).toEqual({
+			label: 'Fournisseur non prêt',
+			tone: 'failed',
+		})
+		expect(legal.providerLink).toBe('/sources/providers/bodacc')
+		expect(soon.chip.label).toBe('À venir')
+		expect(soon.providerLink).toBeNull()
+		expect(off.chip.label).toBe('Désactivé')
 	})
 })
 

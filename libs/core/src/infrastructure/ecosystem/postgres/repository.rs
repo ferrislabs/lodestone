@@ -11,9 +11,9 @@ use crate::{
     LeadId, NormalizedDomain, ProfileId, ValidatedProfile,
     domain::{
         ecosystem::{
-            DomainEcosystem, DueDomain, EcosystemFinding, EcosystemModule, FindingExample,
-            ModuleOutcome, ModuleRun, ModuleState, ModuleStats, ModuleStatus, STATS_RETENTION_DAYS,
-            hosting_platform, ports::EcosystemRepository,
+            DomainEcosystem, DueDomain, EcosystemFinding, EcosystemModule, EcosystemReadiness,
+            FindingExample, ModuleOutcome, ModuleRun, ModuleState, ModuleStats, ModuleStatus,
+            STATS_RETENTION_DAYS, hosting_platform, ports::EcosystemRepository,
         },
         enrichment::{CERTIFICATE_SEEN_KIND, CONTACT_SOURCES, InspectionRecord, ListedEnrichment},
     },
@@ -231,10 +231,7 @@ impl<'tx> EcosystemRepository for PgEcosystemRepository<'tx> {
         ran_at: DateTime<Utc>,
         next_run_at: DateTime<Utc>,
     ) -> Result<(), CoreError> {
-        let error = match outcome {
-            ModuleOutcome::Failed(message) => Some(message.as_str()),
-            ModuleOutcome::Done(_) | ModuleOutcome::NotApplicable => None,
-        };
+        let error = outcome.note();
         let mut tx = self.tx.lock().await;
         query!(
             r#"
@@ -520,6 +517,18 @@ impl<'tx> EcosystemRepository for PgEcosystemRepository<'tx> {
                 modules.entry(row.domain.as_str()).or_default().push(state);
             }
         }
+        let providers: Vec<&str> = EcosystemModule::AVAILABLE
+            .iter()
+            .filter_map(|module| module.provider())
+            .collect();
+        let ready = query_scalar!(
+            "SELECT provider_key FROM source_provider_configurations WHERE status = 'ready' AND provider_key = ANY($1::text[])",
+            &providers as &[&str],
+        )
+        .fetch_all(&mut ***tx)
+        .await
+        .map_err(map_sqlx_error)?;
+        let readiness = EcosystemReadiness::from_ready_providers(&ready);
         let certificates_only: HashMap<Uuid, bool> = evidence
             .into_iter()
             .map(|row| (row.lead_id, row.certificate && !row.evidence))
@@ -538,6 +547,7 @@ impl<'tx> EcosystemRepository for PgEcosystemRepository<'tx> {
                         .get(lead.domain.as_str())
                         .cloned()
                         .unwrap_or_default(),
+                    readiness: readiness.clone(),
                 };
                 let listed = ListedEnrichment {
                     record,

@@ -1,5 +1,6 @@
 pub mod ats;
 pub mod boamp;
+pub mod bodacc;
 pub(crate) mod buyer_domain;
 pub mod company;
 pub mod contact_pages;

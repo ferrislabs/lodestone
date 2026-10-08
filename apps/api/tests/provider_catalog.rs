@@ -19,9 +19,9 @@ use httpmock::{
     Mock, MockServer,
 };
 use lodestone_core::{
-    ActiveProfile, BOAMP, CERTIFICATE_TRANSPARENCY, COMPANY_RESEARCH, DECP, HACKER_NEWS_HIRING,
-    Job, JobId, JobKind, JobStatus, Profile, ProfileId, ProfileName, ProfileRevision,
-    ProviderStatus, RevisionNumber, TED, ValidatedProfile,
+    ActiveProfile, BOAMP, BODACC, CERTIFICATE_TRANSPARENCY, COMPANY_RESEARCH, DECP,
+    DECP_HOLDERS_DEFAULT_URL, HACKER_NEWS_HIRING, Job, JobId, JobKind, JobStatus, Profile,
+    ProfileId, ProfileName, ProfileRevision, ProviderStatus, RevisionNumber, TED, ValidatedProfile,
     infrastructure::contact_target::postgres::PgAtsTargets,
     jobs::{JobHandler, JobOutcome},
     provider_descriptor,
@@ -74,6 +74,8 @@ fn public_seed(server: &MockServer) -> ProviderSeed {
         "company_research",
         object(json!({"entreprises_url": server.url("/company")})),
     );
+    seed.settings
+        .insert("bodacc", object(json!({"base_url": server.url("/bodacc")})));
     seed
 }
 
@@ -102,6 +104,7 @@ async fn public_upstreams(server: &MockServer) {
         ("/ted", 405),
         ("/ct", 200),
         ("/company", 200),
+        ("/bodacc", 200),
     ] {
         server
             .mock_async(|when, then| {
@@ -189,6 +192,7 @@ async fn public_providers_are_created_and_tested_on_first_start(pool: PgPool) {
         "http_probe",
         "contacts",
         "company_research",
+        "bodacc",
     ] {
         let entry = status_of(&report, key).unwrap();
         assert!(entry.created, "{key}");
@@ -894,8 +898,11 @@ async fn catalog_endpoints_follow_the_settings_and_fall_back_to_the_seed(pool: P
         &fallback,
     );
     let company = catalog_endpoint(&harness, COMPANY_RESEARCH, "entreprises_url", &fallback);
+    let bodacc = catalog_endpoint(&harness, BODACC, "base_url", &fallback);
+    let holders = catalog_endpoint(&harness, DECP, "holders_url", &fallback);
 
     assert_eq!(log_list.resolve().await.unwrap().as_str(), fallback);
+    assert_eq!(bodacc.resolve().await.unwrap().as_str(), fallback);
 
     provision(&harness, &public_seed(&server)).await;
     assert_eq!(
@@ -905,6 +912,14 @@ async fn catalog_endpoints_follow_the_settings_and_fall_back_to_the_seed(pool: P
     assert_eq!(
         company.resolve().await.unwrap().as_str(),
         server.url("/company")
+    );
+    assert_eq!(
+        bodacc.resolve().await.unwrap().as_str(),
+        server.url("/bodacc")
+    );
+    assert_eq!(
+        holders.resolve().await.unwrap().as_str(),
+        DECP_HOLDERS_DEFAULT_URL
     );
 
     reconfigure(

@@ -17,12 +17,14 @@ use lodestone_core::{
 use serde_json::{Value, from_str, json};
 use sources::{
     ats::{AtsSettings, AtsSource},
+    bodacc::{BODACC_URL, BodaccSettings},
     company::CompanySettings,
+    decp::holders::{DECP_HOLDERS_URL, HolderSettings},
     ecosystem::{EcosystemConfig, EcosystemModules, WebsiteSettings},
     endpoint::Endpoint,
     http_probe::{HttpProbeSettings, HttpProbeSource, ProbeScheme},
 };
-use sqlx::PgPool;
+use sqlx::{PgPool, query};
 use url::Url;
 
 mod fixtures_support;
@@ -153,9 +155,22 @@ async fn lead_signals(pool: &PgPool, profile: ProfileId) -> Vec<(String, String)
     found
 }
 
+async fn ready_providers(pool: &PgPool) {
+    for key in ["company_research", "bodacc", "decp"] {
+        query(
+            "INSERT INTO source_provider_configurations (provider_key, settings, status, created_at, updated_at) VALUES ($1, '{}'::jsonb, 'ready', now(), now()) ON CONFLICT (provider_key) DO UPDATE SET status = 'ready'",
+        )
+        .bind(key)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+}
+
 #[sqlx::test(migrations = "../../migrations")]
 async fn a_boamp_lead_is_enriched_by_the_http_probe_and_its_job_offers(pool: PgPool) {
     let profile = active_iam_profile(&pool).await;
+    ready_providers(&pool).await;
     record_tender(&pool).await;
     let realm = fixtures_support::load("keycloak/kc26-realms-master.json");
     let server = MockServer::start();
@@ -270,6 +285,14 @@ async fn a_boamp_lead_is_enriched_by_the_http_probe_and_its_job_offers(pool: PgP
                 max_rate_limit_wait: Duration::from_secs(1),
                 origin: None,
             },
+            bodacc: BodaccSettings {
+                dataset_url: Endpoint::from(Url::parse(BODACC_URL).unwrap()),
+                max_rate_limit_wait: Duration::from_secs(1),
+            },
+            holders: HolderSettings {
+                holders_url: Endpoint::from(Url::parse(DECP_HOLDERS_URL).unwrap()),
+                max_rate_limit_wait: Duration::from_secs(1),
+            },
             website: WebsiteSettings {
                 max_rate_limit_wait: Duration::from_secs(1),
                 origin: None,
@@ -286,10 +309,20 @@ async fn a_boamp_lead_is_enriched_by_the_http_probe_and_its_job_offers(pool: PgP
         )
         .await
         .unwrap();
-    assert_eq!(inspection.domains, 3);
+    assert_eq!(inspection.domains, 5);
+    assert_eq!(inspection.not_applicable, 3);
     assert!(site_realm.hits() >= 1);
     let detail = usecase.lead_detail(lead.id).await.unwrap();
     assert_eq!(detail.enrichment.status, EnrichmentStatus::Complete);
+    for module in [
+        EcosystemModule::OfficialIdentity,
+        EcosystemModule::LegalLife,
+        EcosystemModule::PublicContracts,
+    ] {
+        let state = detail.ecosystem.state_of(module);
+        assert_eq!(state.status, ModuleStatus::NotApplicable, "{module:?}");
+        assert_eq!(state.error.as_deref(), Some("SIREN inconnu"));
+    }
     let website: Vec<(&str, &str)> = detail
         .ecosystem
         .findings_of(EcosystemModule::WebsiteStack)
