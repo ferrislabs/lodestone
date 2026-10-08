@@ -1,13 +1,20 @@
 use common::Config;
 use fetch::{FetchSettings, PoliteFetcher};
 use lodestone_core::{
-    LodestoneAuthService, LodestoneRateLimitService, LodestoneUseCase, ProfileId, WebhookPolicy,
-    create_service, infrastructure::crypto::AesGcmCipher,
+    COMPANY_RESEARCH, LodestoneAuthService, LodestoneRateLimitService, LodestoneUseCase, ProfileId,
+    WebhookPolicy, create_service, infrastructure::crypto::AesGcmCipher,
 };
 use rate_limit::Quota;
 use server::errors::ServerError;
 use source_providers::ProviderEngine;
+use sources::{
+    company::CompanySettings,
+    ecosystem::{EcosystemConfig, EcosystemModules, WebsiteSettings},
+    endpoint::Endpoint,
+};
 use std::sync::Arc;
+
+const ECOSYSTEM_MAX_BODY_BYTES: usize = 16 * 1024 * 1024;
 
 use args::Args;
 
@@ -21,6 +28,37 @@ pub struct AppState {
     pub rate_limit_quota: Quota,
     pub cipher: Arc<AesGcmCipher>,
     pub providers: Arc<ProviderEngine<PoliteFetcher>>,
+    pub ecosystem: Arc<EcosystemModules<PoliteFetcher>>,
+}
+
+pub fn ecosystem_modules(
+    args: &Args,
+    usecase: &LodestoneUseCase,
+    fetcher: Arc<PoliteFetcher>,
+) -> EcosystemModules<PoliteFetcher> {
+    let wait = args.contacts.max_rate_limit_wait();
+    EcosystemModules::new(
+        fetcher,
+        EcosystemConfig {
+            company: CompanySettings {
+                entreprises_url: Endpoint::catalog(
+                    usecase.clone(),
+                    COMPANY_RESEARCH,
+                    "entreprises_url",
+                    args.decp.entreprises_url.clone(),
+                ),
+                max_pages: args.company.max_pages.get(),
+                max_rate_limit_wait: wait,
+                origin: None,
+            },
+            website: WebsiteSettings {
+                max_rate_limit_wait: wait,
+                origin: None,
+            },
+            max_career_paths: args.ats.max_career_paths.get(),
+            max_rate_limit_wait: wait,
+        },
+    )
 }
 
 pub async fn state(args: Arc<Args>) -> Result<AppState, ServerError> {
@@ -31,6 +69,12 @@ pub async fn state(args: Arc<Args>) -> Result<AppState, ServerError> {
         .map_err(|e| ServerError::Configuration(e.to_string()))?;
 
     let fetch_settings = FetchSettings::from_outbound(&config.outbound);
+    let mut ecosystem_fetch = fetch_settings.clone();
+    ecosystem_fetch.max_body_bytes = ecosystem_fetch.max_body_bytes.max(ECOSYSTEM_MAX_BODY_BYTES);
+    let ecosystem_fetcher = Arc::new(
+        PoliteFetcher::new(ecosystem_fetch)
+            .map_err(|e| ServerError::Configuration(e.to_string()))?,
+    );
     let allow_http = fetch_settings.allow_private_targets;
     let fetcher = PoliteFetcher::new(fetch_settings)
         .map_err(|e| ServerError::Configuration(e.to_string()))?;
@@ -49,6 +93,7 @@ pub async fn state(args: Arc<Args>) -> Result<AppState, ServerError> {
     let company_wait = args.company.wait();
     let enrichment_wait = args.enrichment.wait();
     let service = create_service(config).await.unwrap();
+    let ecosystem = ecosystem_modules(&args, &service.usecase, ecosystem_fetcher);
 
     Ok(AppState {
         args,
@@ -63,5 +108,6 @@ pub async fn state(args: Arc<Args>) -> Result<AppState, ServerError> {
         rate_limit_quota: service.rate_limit_quota,
         cipher: Arc::new(cipher),
         providers: Arc::new(providers),
+        ecosystem: Arc::new(ecosystem),
     })
 }

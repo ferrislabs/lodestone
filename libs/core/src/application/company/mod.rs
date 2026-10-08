@@ -1,6 +1,6 @@
 use std::{num::NonZeroU16, time::Duration};
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration as Delta, Utc};
 use common::CoreError;
 use lodestone_macros::transactional;
 use serde_json::json;
@@ -11,9 +11,10 @@ use crate::{
     domain::{
         NormalizedDomain,
         company::{
-            CompanyBuilder, CompanyDossier, DossierBuild, PageReview, PageVerifier, bounded_error,
-            ports::CompanyRepository, settle,
+            CompanyBuilder, CompanyDossier, DossierBuild, DossierState, PageReview, PageVerifier,
+            bounded_error, ports::CompanyRepository, settle,
         },
+        ecosystem::hosting_platform,
         fetch::link::UnconfirmedLinks,
         job::{JobKind, NewJob, ports::Clock},
         lead::{LeadId, ports::LeadRepository},
@@ -26,7 +27,7 @@ pub const COMPANY_RESEARCH_LISTENER: &str = "company_research";
 pub const PAGE_RECHECK_JOB_KIND: &str = "company.recheck_pages";
 const PAGE_RECHECK_DEDUP_KEY: &str = "company:recheck_pages";
 const PAGE_RECHECK_MAX_ATTEMPTS: NonZeroU16 = NonZeroU16::new(5).unwrap();
-const MIN_RATE_LIMIT_PAUSE: chrono::Duration = chrono::Duration::minutes(1);
+const MIN_RATE_LIMIT_PAUSE: Delta = Delta::minutes(1);
 
 pub fn page_recheck_job(run_at: DateTime<Utc>) -> Result<NewJob, CoreError> {
     let kind = JobKind::parse(PAGE_RECHECK_JOB_KIND)
@@ -87,19 +88,29 @@ impl LodestoneUseCase {
         B: CompanyBuilder,
         C: Clock,
     {
-        let refresh = chrono::Duration::from_std(settings.refresh_interval)
+        let refresh = Delta::from_std(settings.refresh_interval)
             .map_err(|_| CoreError::Internal("refresh interval out of range".to_owned()))?;
         let mut report = CompanyRunReport::default();
         let domains = self
             .due_company_domains(clock.now(), settings.batch_size)
             .await?;
         for domain in &domains {
+            if hosting_platform(domain).is_some() {
+                self.save_company_dossier(&CompanyDossier::on_hosting_platform(
+                    domain.clone(),
+                    clock.now(),
+                    refresh,
+                ))
+                .await?;
+                report.domains += 1;
+                continue;
+            }
             let previous = self.company_dossier(domain).await?;
             let built = match builder.build(domain).await {
                 Ok(built) => built,
                 Err(SourceError::RateLimited { retry_after }) => {
                     report.rate_limited = true;
-                    let pause = chrono::Duration::from_std(retry_after)
+                    let pause = Delta::from_std(retry_after)
                         .unwrap_or(MIN_RATE_LIMIT_PAUSE)
                         .max(MIN_RATE_LIMIT_PAUSE);
                     let held = previous
@@ -184,6 +195,40 @@ impl LodestoneUseCase {
         }
         report.remaining = self.count_unchecked_company_pages().await?;
         Ok(report)
+    }
+
+    pub async fn settle_platform_dossiers<C: Clock>(
+        &self,
+        refresh_interval: Duration,
+        clock: &C,
+    ) -> Result<u64, CoreError> {
+        let refresh = Delta::from_std(refresh_interval)
+            .map_err(|_| CoreError::Internal("refresh interval out of range".to_owned()))?;
+        let mut settled = 0;
+        for domain in self
+            .company_domains_except(DossierState::HostingPlatform)
+            .await?
+            .into_iter()
+            .filter(|domain| hosting_platform(domain).is_some())
+        {
+            self.save_company_dossier(&CompanyDossier::on_hosting_platform(
+                domain,
+                clock.now(),
+                refresh,
+            ))
+            .await?;
+            settled += 1;
+        }
+        Ok(settled)
+    }
+
+    #[transactional(company)]
+    async fn company_domains_except(
+        &self,
+        state: DossierState,
+    ) -> Result<Vec<NormalizedDomain>, CoreError> {
+        let mut repo = company_repository;
+        repo.domains_except(state).await
     }
 
     #[transactional(company)]

@@ -6,12 +6,12 @@ use axum::{
 };
 use lodestone_core::{
     AGENT_FAILED_AFTER, AgentFailure, AgentKind, AgentStop, Assessment, Calibrations, ContactEmail,
-    DraftMessage, DraftReview, DraftStatus, EnrichmentState, EnrichmentStatus, EnrichmentStep,
-    Exclusion, Lead, LeadDetail, LeadFacts, LeadId, LeadQuery, LeadScoring, LeadSort, LeadStatus,
-    LlmProviderRecord, Profile, ProfileId, QualificationResult, Rejection, RejectionProblem,
-    ResultStatus, RunProvenance, SUMMARY_FAILED_AFTER, ScoringResult, Signal, SignalKind,
-    SummaryState, Verdict, VerdictAnswer, VerdictCap, VerdictFilter, VerdictProbabilities,
-    VerdictReason, VerdictSource, WaitingReason, WorkKind, calibrate_verdict,
+    DraftMessage, DraftReview, DraftStatus, EnrichmentState, EnrichmentStatus, Exclusion, Lead,
+    LeadDetail, LeadFacts, LeadId, LeadQuery, LeadScoring, LeadSort, LeadStatus, LlmProviderRecord,
+    Profile, ProfileId, QualificationResult, Rejection, RejectionProblem, ResultStatus,
+    RunProvenance, SUMMARY_FAILED_AFTER, ScoringResult, Signal, SignalKind, SummaryState, Verdict,
+    VerdictAnswer, VerdictCap, VerdictFilter, VerdictProbabilities, VerdictReason, VerdictSource,
+    WaitingReason, WorkKind, calibrate_verdict,
     definition::{QualificationAgent, Question, ScoringAgent},
     signal_sentence,
 };
@@ -22,6 +22,7 @@ use utoipa::{IntoParams, ToSchema};
 use crate::{
     auth::AuthenticatedUser,
     company::CompanyDto,
+    ecosystem::{EcosystemDto, ModuleStateDto},
     errors::{ApiError, ErrorDetail},
     profiles::ProfileRefDto,
     response::Response,
@@ -281,7 +282,7 @@ pub struct LeadDto {
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq, ToSchema)]
 pub struct EnrichmentWaitingDto {
-    /// `awaiting_enrichment` while an enabled step has not run and the wait is not over, `awaiting_enrichment_evidence` for a lead whose only evidence is a certificate; null when the lead does not wait.
+    /// `awaiting_enrichment` while a module of the ecosystem inspection has not run and the wait is not over, `awaiting_enrichment_evidence` for a lead whose only evidence is a certificate; null when the lead does not wait.
     pub waiting_reason: Option<WaitingReasonDto>,
     /// End of the wait while `awaiting_enrichment`.
     #[schema(format = DateTime)]
@@ -914,23 +915,6 @@ impl SummaryStateDto {
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "snake_case")]
-#[schema(as = EnrichmentStep)]
-pub enum EnrichmentStepDto {
-    HttpProbe,
-    CompanyJobs,
-}
-
-impl From<EnrichmentStep> for EnrichmentStepDto {
-    fn from(step: EnrichmentStep) -> Self {
-        match step {
-            EnrichmentStep::HttpProbe => Self::HttpProbe,
-            EnrichmentStep::CompanyJobs => Self::CompanyJobs,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq, ToSchema)]
-#[serde(rename_all = "snake_case")]
 #[schema(as = EnrichmentStatus)]
 pub enum EnrichmentStatusDto {
     Disabled,
@@ -968,20 +952,13 @@ impl From<WaitingReason> for WaitingReasonDto {
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq, ToSchema)]
-pub struct EnrichmentStepStateDto {
-    pub step: EnrichmentStepDto,
-    pub enabled: bool,
-    #[schema(format = DateTime)]
-    pub ran_at: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, PartialEq, Eq, ToSchema)]
 pub struct EnrichmentDto {
     pub status: EnrichmentStatusDto,
     pub waiting_reason: Option<WaitingReasonDto>,
     #[schema(format = DateTime)]
     pub wait_until: Option<String>,
-    pub steps: Vec<EnrichmentStepStateDto>,
+    pub modules: Vec<ModuleStateDto>,
+    pub hosting_platform: Option<String>,
 }
 
 impl From<&EnrichmentState> for EnrichmentDto {
@@ -990,15 +967,8 @@ impl From<&EnrichmentState> for EnrichmentDto {
             status: state.status.into(),
             waiting_reason: state.waiting_reason.map(WaitingReasonDto::from),
             wait_until: state.wait_until.map(|at| at.to_rfc3339()),
-            steps: state
-                .steps
-                .iter()
-                .map(|step| EnrichmentStepStateDto {
-                    step: step.step.into(),
-                    enabled: step.enabled,
-                    ran_at: step.ran_at.map(|at| at.to_rfc3339()),
-                })
-                .collect(),
+            modules: state.modules.iter().map(ModuleStateDto::from).collect(),
+            hosting_platform: state.hosting_platform.map(str::to_owned),
         }
     }
 }
@@ -1245,6 +1215,7 @@ pub struct LeadDetailDto {
     /// Company dossier of the lead domain; null until the company research listener has seen the domain.
     pub company: Option<CompanyDto>,
     pub enrichment: EnrichmentDto,
+    pub ecosystem: EcosystemDto,
 }
 
 fn ordered_results(
@@ -1293,6 +1264,7 @@ impl LeadDetailDto {
     pub fn new(detail: &LeadDetail, providers: &[LlmProviderRecord]) -> Self {
         Self {
             enrichment: EnrichmentDto::from(&detail.enrichment),
+            ecosystem: EcosystemDto::new(&detail.ecosystem, detail.enrichment.hosting_platform),
             summary_state: detail.summary_state.as_ref().and_then(SummaryStateDto::new),
             agent_failures: detail
                 .agent_failures

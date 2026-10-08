@@ -8,13 +8,12 @@ use crate::domain::{source_provider::descriptor as provider_descriptor, values::
 
 use super::{
     definition::{
-        Agent, Aggregator, CnamePattern, CompanyJobsEnrichment, ContactRanking, DebtRule,
-        Enrichment, Escalation, EvidenceSettings, Fingerprint, HttpProbeEnrichment, Identity,
-        MAX_CALIBRATION_FLOOR, MAX_DESCRIPTION_CHARS, MAX_HALF_LIFE_DAYS, MAX_OPTIONS,
-        MAX_PROMPT_CHARS, MAX_SAMPLES, MAX_SAMPLING_TEMPERATURE, MIN_EXCLUSION_THRESHOLD,
-        MIN_HALF_LIFE_DAYS, MIN_OPTIONS, Matcher, PROFILE_SCHEMA_VERSION, ProfileDefinition,
-        QualificationAgent, Question, ScoringAgent, SearchAgent, SearchFilters, VerdictThresholds,
-        VersionExtractor,
+        Agent, Aggregator, CnamePattern, ContactRanking, CustomInspection, DebtRule, Escalation,
+        EvidenceSettings, Fingerprint, Identity, MAX_CALIBRATION_FLOOR, MAX_DESCRIPTION_CHARS,
+        MAX_HALF_LIFE_DAYS, MAX_OPTIONS, MAX_PROMPT_CHARS, MAX_SAMPLES, MAX_SAMPLING_TEMPERATURE,
+        MIN_EXCLUSION_THRESHOLD, MIN_HALF_LIFE_DAYS, MIN_OPTIONS, Matcher, PROFILE_SCHEMA_VERSION,
+        ProfileDefinition, QualificationAgent, Question, ScoringAgent, SearchAgent, SearchFilters,
+        VerdictThresholds, VersionExtractor,
     },
     legacy::{
         ProfileDefinitionV1, ProfileDefinitionV2, ProfileDefinitionV3, ProfileDefinitionV4,
@@ -24,6 +23,7 @@ use super::{
     },
     v15::ProfileDefinitionV15,
     v16::ProfileDefinitionV16,
+    v17::ProfileDefinitionV17,
 };
 
 const REGEX_SIZE_LIMIT: usize = 1 << 20;
@@ -34,7 +34,7 @@ pub enum ProfileProblem {
     #[error("malformed: {0}")]
     Malformed(String),
     #[error(
-        "unsupported schema version {found}, expected 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16 or {PROFILE_SCHEMA_VERSION}"
+        "unsupported schema version {found}, expected 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17 or {PROFILE_SCHEMA_VERSION}"
     )]
     UnsupportedSchemaVersion { found: u32 },
     #[error("must not be empty")]
@@ -160,6 +160,7 @@ impl ValidatedProfile {
             Some(14) => decode::<ProfileDefinitionV14>(value)?.upgrade(),
             Some(15) => decode::<ProfileDefinitionV15>(value)?.upgrade(),
             Some(16) => decode::<ProfileDefinitionV16>(value)?.upgrade(),
+            Some(17) => decode::<ProfileDefinitionV17>(value)?.upgrade(),
             Some(PROFILE_SCHEMA_VERSION) | None => decode::<ProfileDefinition>(value)?,
             Some(found) => {
                 return Err(Path::root()
@@ -244,11 +245,7 @@ fn validate(definition: &ProfileDefinition) -> Check {
             }));
     }
     validate_identity(&definition.identity, &root.field("identity"))?;
-    validate_agents(
-        &definition.agents,
-        &definition.enrichment,
-        &root.field("agents"),
-    )?;
+    validate_agents(definition, &root.field("agents"))?;
     validate_enrichment(definition, &root.field("enrichment"))?;
     validate_qualification_agents(
         &definition.qualification_agents,
@@ -310,8 +307,9 @@ fn validate_identity(identity: &Identity, path: &Path) -> Check {
     non_empty(&identity.target_customer, &path.field("target_customer"))
 }
 
-fn validate_agents(agents: &[Agent], enrichment: &Enrichment, path: &Path) -> Check {
-    if agents.is_empty() && !enrichment.any_enabled() {
+fn validate_agents(definition: &ProfileDefinition, path: &Path) -> Check {
+    let agents = &definition.agents;
+    if agents.is_empty() && !definition.probes_hosts() && !definition.reads_company_jobs() {
         return Err(path.fail(ProfileProblem::NoAgent));
     }
     for (index, agent) in agents.iter().enumerate() {
@@ -652,30 +650,10 @@ fn validate_agent(agent: &Agent, path: &Path) -> Check {
 
 fn validate_enrichment(definition: &ProfileDefinition, path: &Path) -> Check {
     let enrichment = &definition.enrichment;
-    validate_http_probe(&enrichment.http_probe, &path.field("http_probe"))?;
-    validate_company_jobs(
-        &enrichment.company_jobs,
-        &definition.company_jobs_keywords(),
-        &path.field("company_jobs"),
-    )
-}
-
-fn validate_company_jobs(
-    company_jobs: &CompanyJobsEnrichment,
-    effective: &[String],
-    path: &Path,
-) -> Check {
-    let keywords = path.field("keywords");
-    for (index, keyword) in company_jobs.keywords.iter().enumerate() {
+    validate_custom_inspection(&enrichment.custom, &path.field("custom"))?;
+    let keywords = path.field("highlight_keywords");
+    for (index, keyword) in enrichment.highlight_keywords.iter().enumerate() {
         non_empty(keyword, &keywords.index(index))?;
-    }
-    if company_jobs.enabled && effective.is_empty() {
-        return Err(keywords.fail(ProfileProblem::Empty));
-    }
-    if company_jobs.accept_min_keywords < 1 {
-        return Err(path
-            .field("accept_min_keywords")
-            .fail(ProfileProblem::MustBePositive));
     }
     Ok(())
 }
@@ -741,11 +719,8 @@ fn validate_labels(labels: &[String], path: &Path) -> Check {
     Ok(())
 }
 
-fn validate_http_probe(probe: &HttpProbeEnrichment, path: &Path) -> Check {
+fn validate_custom_inspection(probe: &CustomInspection, path: &Path) -> Check {
     let fingerprints = path.field("fingerprints");
-    if probe.enabled {
-        non_empty_list(&probe.fingerprints, &fingerprints)?;
-    }
     unique(
         probe
             .fingerprints
@@ -993,8 +968,8 @@ mod tests {
             v["scoring"] = iam_scoring_v2();
             v["llm"]["qualification_threshold"] = json!(50);
         });
-        assert_eq!(profile.definition().schema_version, 17);
-        assert_eq!(profile.to_json()["schema_version"], 17);
+        assert_eq!(profile.definition().schema_version, 18);
+        assert_eq!(profile.to_json()["schema_version"], 18);
         assert!(profile.to_json().get("scoring").is_none());
         assert!(profile.to_json().get("llm").is_none());
     }
@@ -1009,7 +984,7 @@ mod tests {
             v["llm"]["qualification_threshold"] = json!(50);
         });
         assert!(profile.definition().agents.is_empty());
-        assert!(profile.definition().enrichment.company_jobs.enabled);
+        assert_eq!(profile.definition().enrichment.highlight_keywords, ["sso"]);
     }
 
     #[test]
@@ -1021,7 +996,7 @@ mod tests {
         assert!(matches!(error.problem, ProfileProblem::Malformed(_)));
     }
 
-    const PROBE: &str = "enrichment.http_probe.fingerprints[0]";
+    const PROBE: &str = "enrichment.custom.fingerprints[0]";
 
     fn search_json(id: &str, providers: Value, keywords: Value) -> Value {
         json!({"type": "search", "id": id, "name": id, "providers": providers, "keywords": keywords})
@@ -1033,11 +1008,11 @@ mod tests {
 
     #[test]
     fn unsupported_schema_version_is_rejected() {
-        let error = error_for(|v| v["schema_version"] = json!(18));
+        let error = error_for(|v| v["schema_version"] = json!(19));
         assert_eq!(error.path, "schema_version");
         assert_eq!(
             error.problem,
-            ProfileProblem::UnsupportedSchemaVersion { found: 18 }
+            ProfileProblem::UnsupportedSchemaVersion { found: 19 }
         );
         let error = error_for(|v| v["schema_version"] = json!(0));
         assert_eq!(
@@ -1061,15 +1036,26 @@ mod tests {
     }
 
     #[test]
-    fn profile_without_agents_needs_an_enrichment_step() {
+    fn profile_without_agents_needs_its_own_fingerprints_or_keywords() {
         let profile = v4_ok(|v| v["agents"] = json!([]));
         assert!(profile.definition().agents.is_empty());
         let error = v4_error(|v| {
             v["agents"] = json!([]);
-            v["enrichment"]["http_probe"]["enabled"] = json!(false);
+            v["enrichment"]["custom"]["fingerprints"] = json!([]);
         });
         assert_eq!(error.path, "agents");
         assert_eq!(error.problem, ProfileProblem::NoAgent);
+        let error = v4_error(|v| {
+            v["agents"] = json!([]);
+            v["inspection"] = json!({"enabled": false});
+        });
+        assert_eq!(error.problem, ProfileProblem::NoAgent);
+        let keywords = v4_ok(|v| {
+            v["agents"] = json!([]);
+            v["enrichment"]["custom"]["fingerprints"] = json!([]);
+            v["enrichment"]["highlight_keywords"] = json!(["SSO"]);
+        });
+        assert!(keywords.definition().reads_company_jobs());
     }
 
     #[test]
@@ -1139,7 +1125,7 @@ mod tests {
     #[test]
     fn invalid_regex_points_at_the_pattern() {
         let error = v4_error(|v| {
-            v["enrichment"]["http_probe"]["fingerprints"][0]["matchers"][1]["pattern"] = json!("(")
+            v["enrichment"]["custom"]["fingerprints"][0]["matchers"][1]["pattern"] = json!("(")
         });
         assert_eq!(error.path, format!("{PROBE}.matchers[1].pattern"));
         assert_eq!(error.problem, ProfileProblem::InvalidPattern);
@@ -1148,7 +1134,7 @@ mod tests {
     #[test]
     fn version_extractor_needs_a_capture_group() {
         let error = v4_error(|v| {
-            v["enrichment"]["http_probe"]["fingerprints"][0]["version"]["pattern"] = json!("^\\d+")
+            v["enrichment"]["custom"]["fingerprints"][0]["version"]["pattern"] = json!("^\\d+")
         });
         assert_eq!(error.path, format!("{PROBE}.version.pattern"));
         assert_eq!(error.problem, ProfileProblem::MissingCaptureGroup);
@@ -1157,7 +1143,7 @@ mod tests {
     #[test]
     fn version_below_needs_an_extractor() {
         let error = v4_error(|v| {
-            v["enrichment"]["http_probe"]["fingerprints"][0]
+            v["enrichment"]["custom"]["fingerprints"][0]
                 .as_object_mut()
                 .unwrap()
                 .remove("version");
@@ -1169,7 +1155,7 @@ mod tests {
     #[test]
     fn fingerprint_path_must_be_absolute() {
         let error = v4_error(|v| {
-            v["enrichment"]["http_probe"]["fingerprints"][0]["path"] = json!("https://evil.test/x")
+            v["enrichment"]["custom"]["fingerprints"][0]["path"] = json!("https://evil.test/x")
         });
         assert_eq!(error.path, format!("{PROBE}.path"));
         assert_eq!(error.problem, ProfileProblem::InvalidPath);
@@ -1178,50 +1164,48 @@ mod tests {
     #[test]
     fn duplicate_fingerprint_ids_are_rejected() {
         let error = v4_error(|v| {
-            let first = v["enrichment"]["http_probe"]["fingerprints"][0].clone();
-            v["enrichment"]["http_probe"]["fingerprints"]
+            let first = v["enrichment"]["custom"]["fingerprints"][0].clone();
+            v["enrichment"]["custom"]["fingerprints"]
                 .as_array_mut()
                 .unwrap()
                 .push(first);
         });
-        assert_eq!(error.path, "enrichment.http_probe.fingerprints[1].id");
+        assert_eq!(error.path, "enrichment.custom.fingerprints[1].id");
         assert!(matches!(error.problem, ProfileProblem::Duplicate(_)));
     }
 
     #[test]
-    fn an_enabled_http_probe_needs_fingerprints_and_label_subdomains() {
-        let error = v4_error(|v| v["enrichment"]["http_probe"]["fingerprints"] = json!([]));
-        assert_eq!(error.path, "enrichment.http_probe.fingerprints");
-        assert_eq!(error.problem, ProfileProblem::Empty);
-        let profile = v4_ok(|v| {
-            v["enrichment"]["http_probe"]["fingerprints"] = json!([]);
-            v["enrichment"]["http_probe"]["enabled"] = json!(false);
-        });
-        assert!(!profile.definition().enrichment.http_probe.enabled);
+    fn custom_fingerprints_are_optional_and_subdomains_are_labels() {
+        let profile = v4_ok(|v| v["enrichment"]["custom"]["fingerprints"] = json!([]));
+        assert!(!profile.definition().probes_hosts());
         let error = v4_error(|v| {
-            v["enrichment"]["http_probe"]["extra_subdomains"] = json!(["auth", "Single Sign"])
+            v["enrichment"]["custom"]["extra_subdomains"] = json!(["auth", "Single Sign"])
         });
-        assert_eq!(error.path, "enrichment.http_probe.extra_subdomains[1]");
+        assert_eq!(error.path, "enrichment.custom.extra_subdomains[1]");
         assert_eq!(error.problem, ProfileProblem::InvalidLabel);
         let error =
-            v4_error(|v| v["enrichment"]["http_probe"]["extra_subdomains"] = json!(["sso", "sso"]));
-        assert_eq!(error.path, "enrichment.http_probe.extra_subdomains[1]");
+            v4_error(|v| v["enrichment"]["custom"]["extra_subdomains"] = json!(["sso", "sso"]));
+        assert_eq!(error.path, "enrichment.custom.extra_subdomains[1]");
         assert_eq!(error.problem, ProfileProblem::Duplicate("sso".to_owned()));
     }
 
     #[test]
-    fn enrichment_defaults_probe_common_subdomains_and_stay_disabled() {
+    fn the_inspection_is_on_by_default_without_trade_defaults() {
         let profile = v4_ok(|v| {
-            v.as_object_mut().unwrap().remove("enrichment");
+            let object = v.as_object_mut().unwrap();
+            object.remove("enrichment");
+            object.remove("inspection");
         });
-        let enrichment = &profile.definition().enrichment;
-        assert!(!enrichment.http_probe.enabled);
-        assert!(!enrichment.company_jobs.enabled);
-        assert_eq!(
-            enrichment.http_probe.extra_subdomains,
-            ["auth", "sso", "login", "id", "idp", "accounts"]
-        );
-        assert_eq!(enrichment.company_jobs.accept_min_keywords, 2);
+        let definition = profile.definition();
+        assert!(definition.inspection.enabled);
+        assert!(definition.enrichment.custom.fingerprints.is_empty());
+        assert!(definition.enrichment.custom.extra_subdomains.is_empty());
+        assert!(definition.enrichment.highlight_keywords.is_empty());
+        assert!(!definition.probes_hosts());
+        assert!(!definition.reads_company_jobs());
+        let json = profile.to_json();
+        assert_eq!(json["inspection"], json!({"enabled": true}));
+        assert_eq!(json["enrichment"]["custom"]["extra_subdomains"], json!([]));
     }
 
     #[test]
@@ -1239,7 +1223,6 @@ mod tests {
                     json!(["sso", "Keycloak"]),
                 ),
             );
-            v["enrichment"]["company_jobs"] = json!({"enabled": true});
         });
         assert_eq!(
             profile.definition().company_jobs_keywords(),
@@ -1248,37 +1231,21 @@ mod tests {
         let rules = profile.definition().company_jobs_rules().unwrap();
         assert_eq!(rules.keywords, ["SSO", "IAM", "Keycloak"]);
         assert_eq!(rules.providers, ["ats"]);
-        let own = v4_ok(|v| {
-            v["enrichment"]["company_jobs"] =
-                json!({"enabled": true, "keywords": ["okta"], "accept_min_keywords": 1});
-        });
+        assert_eq!(rules.accept_min_keywords, 2);
+        let own = v4_ok(|v| v["enrichment"]["highlight_keywords"] = json!(["okta"]));
         assert_eq!(own.definition().company_jobs_keywords(), ["okta"]);
-        assert_eq!(
-            own.definition()
-                .company_jobs_rules()
-                .unwrap()
-                .accept_min_keywords,
-            1
-        );
+        let off = v4_ok(|v| {
+            v["enrichment"]["highlight_keywords"] = json!(["okta"]);
+            v["inspection"]["enabled"] = json!(false);
+        });
+        assert!(off.definition().company_jobs_rules().is_none());
     }
 
     #[test]
-    fn enabled_company_jobs_need_keywords_somewhere() {
-        let error = v4_error(|v| v["enrichment"]["company_jobs"] = json!({"enabled": true}));
-        assert_eq!(error.path, "enrichment.company_jobs.keywords");
+    fn highlighted_keywords_must_not_be_blank() {
+        let error = v4_error(|v| v["enrichment"]["highlight_keywords"] = json!(["sso", " "]));
+        assert_eq!(error.path, "enrichment.highlight_keywords[1]");
         assert_eq!(error.problem, ProfileProblem::Empty);
-        let error = v4_error(|v| {
-            v["enrichment"]["company_jobs"] = json!({"enabled": true, "keywords": ["sso", " "]})
-        });
-        assert_eq!(error.path, "enrichment.company_jobs.keywords[1]");
-        let error = v4_error(|v| {
-            v["enrichment"]["company_jobs"] =
-                json!({"enabled": true, "keywords": ["sso"], "accept_min_keywords": 0})
-        });
-        assert_eq!(error.path, "enrichment.company_jobs.accept_min_keywords");
-        assert_eq!(error.problem, ProfileProblem::MustBePositive);
-        let disabled = v4_ok(|v| v["enrichment"]["company_jobs"] = json!({"enabled": false}));
-        assert!(disabled.definition().company_jobs_rules().is_none());
     }
 
     #[test]
@@ -1392,7 +1359,7 @@ mod tests {
     #[test]
     fn targets_add_the_enabled_enrichment_steps() {
         let profile = v4_ok(|v| {
-            v["enrichment"]["company_jobs"] = json!({"enabled": true, "keywords": ["sso"]});
+            v["enrichment"]["highlight_keywords"] = json!(["sso"]);
         });
         let definition = profile.definition();
         let probe = definition.targets(SourceName::HttpProbe);
@@ -1428,19 +1395,18 @@ mod tests {
         value["sources"] = json!({"http_probe": source, "ats": {"keywords": ["sso"]}});
         let profile = ValidatedProfile::parse(value).unwrap();
         let definition = profile.definition();
-        assert_eq!(definition.schema_version, 17);
+        assert_eq!(definition.schema_version, 18);
         assert!(definition.agents.is_empty());
-        assert!(definition.enrichment.http_probe.enabled);
-        assert!(definition.enrichment.company_jobs.enabled);
-        assert_eq!(definition.enrichment.company_jobs.keywords, ["sso"]);
+        assert!(definition.probes_hosts());
+        assert_eq!(definition.enrichment.highlight_keywords, ["sso"]);
         let json = profile.to_json();
-        assert_eq!(json["schema_version"], 17);
+        assert_eq!(json["schema_version"], 18);
         assert_eq!(
-            json["enrichment"]["http_probe"]["fingerprints"],
+            json["enrichment"]["custom"]["fingerprints"],
             agent["fingerprints"]
         );
         assert_eq!(
-            json["enrichment"]["http_probe"]["excluded_products"],
+            json["enrichment"]["custom"]["excluded_products"],
             agent["excluded_products"]
         );
     }
@@ -1464,8 +1430,8 @@ mod tests {
         let json = profile.to_json();
         assert_eq!(json["agents"], json!([]));
         assert_eq!(
-            json["enrichment"]["company_jobs"],
-            json!({"enabled": true, "keywords": ["freelance Rust", "mission Rust"], "accept_min_keywords": 3})
+            json["enrichment"]["highlight_keywords"],
+            json!(["freelance Rust", "mission Rust"])
         );
     }
 
@@ -1530,6 +1496,7 @@ mod tests {
     fn with_version_fifteen_agents(mut value: Value) -> Value {
         let object = value.as_object_mut().unwrap();
         let enrichment = object.remove("enrichment").unwrap_or(Value::Null);
+        object.remove("inspection");
         let mut agents = Vec::new();
         for agent in object["agents"].as_array().unwrap() {
             let mut agent = agent.as_object().unwrap().clone();
@@ -1554,8 +1521,11 @@ mod tests {
             agent.insert("source".to_owned(), Value::Object(source));
             agents.push(Value::Object(agent));
         }
-        let probe = &enrichment["http_probe"];
-        if probe["enabled"] == json!(true) {
+        let probe = &enrichment["custom"];
+        if probe["fingerprints"]
+            .as_array()
+            .is_some_and(|fingerprints| !fingerprints.is_empty())
+        {
             agents.push(json!({
                 "id": "http-probe",
                 "name": "HTTP probe",
@@ -1661,7 +1631,7 @@ mod tests {
     fn version_three_is_upgraded_with_a_default_qualification_agent() {
         let profile = ValidatedProfile::parse(minimal()).unwrap();
         let definition = profile.definition();
-        assert_eq!(definition.schema_version, 17);
+        assert_eq!(definition.schema_version, 18);
         assert_eq!(definition.qualification_agents.len(), 1);
         let agent = &definition.qualification_agents[0];
         assert_eq!(agent.id.as_str(), "pertinence");
@@ -1761,14 +1731,14 @@ mod tests {
     fn version_five_is_upgraded_with_default_evidence_settings() {
         let profile = ValidatedProfile::parse(v5()).unwrap();
         let definition = profile.definition();
-        assert_eq!(definition.schema_version, 17);
+        assert_eq!(definition.schema_version, 18);
         assert_eq!(definition.verdict.reliable_from, 80);
         assert_eq!(definition.verdict.discard_below, 20);
         assert_eq!(definition.verdict.calibration_floor, 0.05);
         assert_eq!(definition.verdict.min_evidence, 0.5);
         assert_eq!(definition.evidence, EvidenceSettings::default());
         assert_eq!(definition.evidence.influence, 0.6);
-        assert_eq!(profile.to_json()["schema_version"], 17);
+        assert_eq!(profile.to_json()["schema_version"], 18);
     }
 
     #[test]
@@ -1902,7 +1872,7 @@ mod tests {
             .unwrap()
             .remove("half_life_days");
         let profile = ValidatedProfile::parse(value).unwrap();
-        assert_eq!(profile.definition().schema_version, 17);
+        assert_eq!(profile.definition().schema_version, 18);
         assert_eq!(profile.definition().evidence, EvidenceSettings::default());
     }
 
@@ -1959,10 +1929,10 @@ mod tests {
         agent.insert("name".to_owned(), json!("Maturité technique"));
         let profile = ValidatedProfile::parse(value).unwrap();
         let agent = &profile.definition().qualification_agents[0];
-        assert_eq!(profile.definition().schema_version, 17);
+        assert_eq!(profile.definition().schema_version, 18);
         assert_eq!(agent.description, "Évalue : Maturité technique");
         assert_eq!(agent.name, "Maturité technique");
-        assert_eq!(profile.to_json()["schema_version"], 17);
+        assert_eq!(profile.to_json()["schema_version"], 18);
     }
 
     #[test]
@@ -2201,7 +2171,7 @@ mod tests {
                     json!({"value": value, "label": "Je ne sais pas", "score": 0.4}),
                 );
             let profile = ValidatedProfile::parse(document).unwrap();
-            assert_eq!(profile.definition().schema_version, 17);
+            assert_eq!(profile.definition().schema_version, 18);
             assert_eq!(
                 options_of(&profile),
                 [
@@ -2230,7 +2200,7 @@ mod tests {
         );
         let appended = &profile.definition().qualification_agents[0].questions[0].options[3];
         assert_eq!(appended.label, "Inconnu");
-        assert_eq!(profile.to_json()["schema_version"], 17);
+        assert_eq!(profile.to_json()["schema_version"], 18);
     }
 
     #[test]
@@ -2267,7 +2237,7 @@ mod tests {
     fn version_seven_is_upgraded_with_exclusion_defaults() {
         let profile = ValidatedProfile::parse(v7()).unwrap();
         let definition = profile.definition();
-        assert_eq!(definition.schema_version, 17);
+        assert_eq!(definition.schema_version, 18);
         for agent in &definition.qualification_agents {
             assert_eq!(agent.exclusion_threshold, 0.6);
             assert!(
@@ -2278,7 +2248,7 @@ mod tests {
                     .all(|option| !option.excludes)
             );
         }
-        assert_eq!(profile.to_json()["schema_version"], 17);
+        assert_eq!(profile.to_json()["schema_version"], 18);
         assert_eq!(profile, ValidatedProfile::parse(v4()).unwrap());
     }
 
@@ -2298,7 +2268,7 @@ mod tests {
     fn version_eight_is_upgraded_with_sampling_and_escalation_defaults() {
         let profile = ValidatedProfile::parse(v8()).unwrap();
         let definition = profile.definition();
-        assert_eq!(definition.schema_version, 17);
+        assert_eq!(definition.schema_version, 18);
         assert_eq!(definition.escalation, Escalation::default());
         assert_eq!(definition.escalation.provider, None);
         assert_eq!(
@@ -2312,7 +2282,7 @@ mod tests {
             assert_eq!(agent.samples, 3);
             assert_eq!(agent.sampling_temperature, 0.7);
         }
-        assert_eq!(profile.to_json()["schema_version"], 17);
+        assert_eq!(profile.to_json()["schema_version"], 18);
         assert_eq!(profile, ValidatedProfile::parse(v4()).unwrap());
     }
 
@@ -2505,7 +2475,7 @@ mod tests {
         value.as_object_mut().unwrap().remove("calibration");
         let profile = ValidatedProfile::parse(value).unwrap();
         let definition = profile.definition();
-        assert_eq!(definition.schema_version, 17);
+        assert_eq!(definition.schema_version, 18);
         assert_eq!(definition.scoring_agents.len(), 1);
         let agent = &definition.scoring_agents[0];
         assert_eq!(agent.id.as_str(), "score-global");
@@ -2538,7 +2508,7 @@ mod tests {
         value.as_object_mut().unwrap().remove("calibration");
         let profile = ValidatedProfile::parse(value).unwrap();
         let definition = profile.definition();
-        assert_eq!(definition.schema_version, 17);
+        assert_eq!(definition.schema_version, 18);
         assert!(
             definition
                 .qualification_agents
@@ -2563,8 +2533,8 @@ mod tests {
         value["evidence"]["influence"] = json!(0.3);
         let profile = ValidatedProfile::parse(value).unwrap();
         let json = profile.to_json();
-        assert_eq!(profile.definition().schema_version, 17);
-        assert_eq!(json["schema_version"], 17);
+        assert_eq!(profile.definition().schema_version, 18);
+        assert_eq!(json["schema_version"], 18);
         assert!(json.get("scoring").is_none());
         assert!(json["evidence"].get("reference_score").is_none());
         assert_eq!(profile.definition().evidence.influence, 0.3);

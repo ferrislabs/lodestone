@@ -76,12 +76,15 @@ describe('groupedSources', () => {
 		])
 	})
 
-	it('groups the company job offers and the HTTP probe under Enrichissement', () => {
+	it('groups the inspection, the company job offers and the HTTP probe under Enrichissement', () => {
 		const groups = groupedSources([
 			source('ats'),
 			source('france_travail'),
 			source('http_probe'),
 			source('certificate_transparency'),
+			source('ecosystem_inspection', {
+				kind: 'listener.ecosystem_inspection',
+			}),
 		])
 		expect(groups.map((group) => group.title)).toEqual([
 			'Infrastructure',
@@ -89,6 +92,7 @@ describe('groupedSources', () => {
 			'Enrichissement',
 		])
 		expect(groups[2]?.sources.map((item) => item.source)).toEqual([
+			'ecosystem_inspection',
 			'http_probe',
 			'ats',
 		])

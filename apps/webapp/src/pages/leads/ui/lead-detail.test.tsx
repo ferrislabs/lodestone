@@ -115,7 +115,8 @@ const detail: LeadDetailData = {
 	scoring_results: [],
 	agent_failures: [],
 	agent_stops: [],
-	enrichment: { status: 'disabled', steps: [] },
+	enrichment: { status: 'disabled', modules: [] },
+	ecosystem: { modules: [] },
 	qualification_results: [
 		{
 			agent_id: 'pertinence',
@@ -449,46 +450,143 @@ describe('LeadDetail', () => {
 		expect(facts?.textContent).toContain('Pays probableFrance')
 	})
 
-	it('shows the enrichment steps next to the facts', () => {
+	it('shows the ecosystem findings per module with their sources next to the facts', () => {
 		const { container } = renderDetail({
 			detail: {
 				...detail,
 				enrichment: {
 					status: 'pending',
-					steps: [
-						{
-							step: 'http_probe',
-							enabled: true,
-							ran_at: '2026-02-01T10:00:00Z',
-						},
-						{ step: 'company_jobs', enabled: false, ran_at: null },
-					],
+					modules: [],
 					waiting_reason: 'awaiting_enrichment',
 					wait_until: '2026-02-01T10:30:00Z',
+				},
+				ecosystem: {
+					hosting_platform: null,
+					modules: [
+						{
+							module: 'official_identity',
+							label: 'Identité officielle',
+							status: 'done',
+							last_run: '2026-02-01T10:00:00Z',
+							findings: [
+								{
+									module: 'official_identity',
+									key: 'legal_name',
+									kind: 'legal_name',
+									label: 'Raison sociale',
+									value: 'ACME SAS',
+									source_url:
+										'https://recherche-entreprises.api.gouv.fr/search?q=552100554',
+									observed_at: '2026-02-01T10:00:00Z',
+									details: {},
+								},
+							],
+						},
+						{
+							module: 'hiring_activity',
+							label: 'Activité de recrutement',
+							status: 'done',
+							last_run: '2026-02-01T10:00:00Z',
+							findings: [
+								{
+									module: 'hiring_activity',
+									key: 'job_offer:https://jobs.acme.test/2',
+									kind: 'job_offer',
+									label: "Offre d'emploi",
+									value: 'Ingénieur IAM',
+									source_url: 'https://jobs.acme.test/2',
+									observed_at: '2026-02-01T10:00:00Z',
+									details: { highlighted: true },
+								},
+							],
+						},
+						{
+							module: 'website_stack',
+							label: 'Site et stack technique',
+							status: 'pending',
+							findings: [],
+						},
+					],
 				},
 			},
 		})
 		const facts = container.querySelector('[data-section="facts"]')
-		const block = container.querySelector('[data-section="enrichment"]')
+		const block = container.querySelector('[data-section="ecosystem"]')
 		expect(block).toBeTruthy()
+		expect(block?.textContent).toContain('Écosystème')
 		expect(
 			facts && block
 				? facts.compareDocumentPosition(block) &
 						Node.DOCUMENT_POSITION_FOLLOWING
 				: 0,
 		).toBeTruthy()
-		const probe = block?.querySelector('[data-step="http_probe"]')
-		expect(probe?.getAttribute('data-state')).toBe('done')
-		expect(probe?.textContent).toContain('Sonde HTTP')
-		expect(probe?.textContent).toContain('Fait')
-		expect(probe?.textContent).toContain(formatDateTime('2026-02-01T10:00:00Z'))
-		const jobs = block?.querySelector('[data-step="company_jobs"]')
-		expect(jobs?.getAttribute('data-state')).toBe('disabled')
-		expect(jobs?.textContent).toContain("Offres d'emploi de l'entreprise")
-		expect(jobs?.textContent).toContain('Désactivé')
+		const identity = block?.querySelector('[data-module="official_identity"]')
+		expect(identity?.textContent).toContain('Identité officielle')
+		expect(identity?.textContent).toContain('Fait')
+		expect(identity?.textContent).toContain('ACME SAS')
+		expect(identity?.textContent).toContain(
+			`Dernier passage : ${formatDateTime('2026-02-01T10:00:00Z')}`,
+		)
+		expect(identity?.querySelector('a')?.getAttribute('href')).toBe(
+			'https://recherche-entreprises.api.gouv.fr/search?q=552100554',
+		)
+		const hiring = block?.querySelector('[data-module="hiring_activity"]')
+		expect(hiring?.textContent).toContain('Mis en avant')
+		const website = block?.querySelector('[data-module="website_stack"]')
+		expect(website?.textContent).toContain('En attente')
+		expect(website?.textContent).toContain('Aucun élément trouvé.')
+		expect(block?.querySelector('[data-notice="hosting-platform"]')).toBeNull()
 		const waiting = block?.querySelector('[data-waiting]')
 		expect(waiting?.textContent).toBe(
 			`En attente d'enrichissement jusqu'au ${formatDateTime('2026-02-01T10:30:00Z')}`,
+		)
+	})
+
+	it('flags a site hosted on a platform', () => {
+		const { container } = renderDetail({
+			detail: {
+				...detail,
+				ecosystem: {
+					hosting_platform: 'github.io',
+					modules: [
+						{
+							module: 'website_stack',
+							label: 'Site et stack technique',
+							status: 'not_applicable',
+							findings: [],
+						},
+					],
+				},
+			},
+		})
+		expect(
+			container.querySelector('[data-notice="hosting-platform"]')?.textContent,
+		).toBe(
+			"Site hébergé sur une plateforme (github.io) : les modules qui lisent le site ne s'appliquent pas.",
+		)
+		expect(
+			container.querySelector('[data-module="website_stack"]')?.textContent,
+		).toContain('Non applicable')
+	})
+
+	it('says no company dossier is read for a site on a hosting platform', () => {
+		const { container } = renderDetail({
+			detail: {
+				...detail,
+				company: {
+					...completeCompany,
+					state: 'hosting_platform',
+					official: null,
+					siren: null,
+					pages: [],
+				},
+			},
+		})
+		expect(container.querySelector('[data-company-state]')?.textContent).toBe(
+			'Hébergé sur une plateforme',
+		)
+		expect(container.querySelector('[data-company-notice]')?.textContent).toBe(
+			'Site hébergé sur une plateforme : pas de dossier entreprise lu.',
 		)
 	})
 
@@ -499,20 +597,14 @@ describe('LeadDetail', () => {
 				lead: pendingScoring,
 				enrichment: {
 					status: 'complete',
-					steps: [
-						{
-							step: 'http_probe',
-							enabled: true,
-							ran_at: '2026-02-01T10:00:00Z',
-						},
-					],
+					modules: [],
 					waiting_reason: 'awaiting_enrichment_evidence',
 					wait_until: null,
 				},
 			},
 		})
 		expect(
-			container.querySelector('[data-section="enrichment"] [data-waiting]')
+			container.querySelector('[data-section="ecosystem"] [data-waiting]')
 				?.textContent,
 		).toBe("En attente de preuve d'enrichissement")
 		expect(container.querySelector('[data-verdict]')?.textContent).toBe(
@@ -527,7 +619,7 @@ describe('LeadDetail', () => {
 				lead: pendingScoring,
 				enrichment: {
 					status: 'pending',
-					steps: [{ step: 'http_probe', enabled: true, ran_at: null }],
+					modules: [],
 					waiting_reason: 'awaiting_enrichment',
 					wait_until: null,
 				},
@@ -538,10 +630,10 @@ describe('LeadDetail', () => {
 		)
 	})
 
-	it('says so when the profile enables no enrichment step', () => {
+	it('says so when the profile switches the inspection off', () => {
 		const { container } = renderDetail()
-		const block = container.querySelector('[data-section="enrichment"]')
-		expect(block?.textContent).toContain('Aucune étape activée')
+		const block = container.querySelector('[data-section="ecosystem"]')
+		expect(block?.textContent).toContain('Inspection désactivée')
 		expect(block?.querySelector('[data-waiting]')).toBeNull()
 	})
 

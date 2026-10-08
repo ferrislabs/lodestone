@@ -6,6 +6,7 @@ pub mod contact_pages;
 pub mod ct;
 pub mod decp;
 pub mod dns_cname;
+pub mod ecosystem;
 pub mod endpoint;
 pub mod france_travail;
 pub mod hacker_news;

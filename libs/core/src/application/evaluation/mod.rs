@@ -18,7 +18,6 @@ use crate::{
             AgentWork, CancelReason, WorkKind, WorkTarget, first_stop, ports::AgentWorkRepository,
         },
         calibration::{Calibrations, opinion_score},
-        company::PAGE_PROMPT_CHARS,
         facts::{LeadFacts, signal_sentence},
         job::ports::Clock,
         lead::{Lead, LeadId, Signal},
@@ -843,10 +842,7 @@ where
         let (signals, facts, dossier) = usecase.signals_with_facts(lead).await?;
         let overview = lead_document(lead.domain.as_str(), &facts);
         let contents: Vec<String> = signals.iter().map(render_signal).collect();
-        let dossier_documents = dossier
-            .as_ref()
-            .map(|dossier| dossier.documents(PAGE_PROMPT_CHARS))
-            .unwrap_or_default();
+        let dossier_documents = usecase.grounding_documents(lead, dossier.as_ref()).await?;
         let mut documents = Vec::with_capacity(signals.len() + dossier_documents.len() + 1);
         documents.push(UntrustedDocument {
             source: "lead",
@@ -1074,12 +1070,10 @@ impl LodestoneUseCase {
     }
 
     pub(crate) fn due_gates(&self, active: &ActiveProfile, now: DateTime<Utc>) -> DueGates {
-        let enrichment = &active.revision.definition.definition().enrichment;
+        let inspection = &active.revision.definition.definition().inspection;
         DueGates {
             dossier: wait_gate(self.company_wait, now),
-            enrichment: wait_gate(self.enrichment_wait, now).filter(|_| enrichment.any_enabled()),
-            http_probe: enrichment.http_probe.enabled,
-            company_jobs: enrichment.company_jobs.enabled,
+            inspection: wait_gate(self.enrichment_wait, now).filter(|_| inspection.enabled),
         }
     }
 

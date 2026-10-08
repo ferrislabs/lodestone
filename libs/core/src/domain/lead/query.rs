@@ -4,6 +4,7 @@ use crate::domain::{
     agent_work::ports::AgentStop,
     calibration::Calibrations,
     company::{CompanyDossier, CompanyEntity, SiblingLead},
+    ecosystem::DomainEcosystem,
     enrichment::EnrichmentState,
     facts::LeadFacts,
     lead::{Assessment, ContactEmail, Lead, LeadId, LeadStatus, Signal},
@@ -135,6 +136,7 @@ pub struct LeadListing {
 pub struct LeadDetail {
     pub lead: Lead,
     pub enrichment: EnrichmentState,
+    pub ecosystem: DomainEcosystem,
     pub profile: Profile,
     pub signals: Vec<Signal>,
     pub facts: LeadFacts,

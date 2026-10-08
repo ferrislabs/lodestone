@@ -1,23 +1,21 @@
 export const NEW_PROFILE_TEMPLATE = `{
-  "schema_version": 17,
+  "schema_version": 18,
   "identity": {
     "offer": "",
     "target_customer": ""
   },
   "language": "fr",
   "agents": [],
+  "inspection": {
+    "enabled": true
+  },
   "enrichment": {
-    "http_probe": {
-      "enabled": false,
+    "custom": {
       "fingerprints": [],
       "excluded_products": [],
-      "extra_subdomains": ["auth", "sso", "login", "id", "idp", "accounts"]
+      "extra_subdomains": []
     },
-    "company_jobs": {
-      "enabled": false,
-      "keywords": [],
-      "accept_min_keywords": 2
-    }
+    "highlight_keywords": []
   },
   "qualification_agents": [],
   "scoring_agents": [],

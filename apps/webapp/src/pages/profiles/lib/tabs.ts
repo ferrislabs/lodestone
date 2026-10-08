@@ -57,7 +57,7 @@ export function tabOfPath(path: string): EditorTab | null {
 	if (belongsTo(path, 'agents') || belongsTo(path, 'contact_ranking')) {
 		return 'sourcing'
 	}
-	if (belongsTo(path, 'enrichment')) {
+	if (belongsTo(path, 'enrichment') || belongsTo(path, 'inspection')) {
 		return 'enrichment'
 	}
 	if (

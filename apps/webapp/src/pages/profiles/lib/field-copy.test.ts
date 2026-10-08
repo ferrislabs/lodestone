@@ -37,30 +37,36 @@ describe('french field copy', () => {
 	it('names the enrichment fields shown on the Enrichissement tab', () => {
 		const enrichment = fields
 			.map((field) => field.pattern)
-			.filter((pattern) => pattern.startsWith('enrichment.'))
+			.filter(
+				(pattern) =>
+					pattern.startsWith('enrichment.') || pattern.startsWith('inspection'),
+			)
 		expect(enrichment).toEqual(
 			expect.arrayContaining([
-				'enrichment.http_probe.fingerprints',
-				'enrichment.http_probe.extra_subdomains',
-				'enrichment.http_probe.excluded_products',
-				'enrichment.company_jobs.keywords',
-				'enrichment.company_jobs.accept_min_keywords',
+				'inspection.enabled',
+				'enrichment.custom.fingerprints',
+				'enrichment.custom.extra_subdomains',
+				'enrichment.custom.excluded_products',
+				'enrichment.highlight_keywords',
 			]),
 		)
 		for (const pattern of enrichment) {
 			expect(tabOfPath(pattern)).toBe('enrichment')
 		}
 		const copy = PROFILE_HINTS.fields
-		expect(copy['enrichment.http_probe.extra_subdomains']?.label).toBe(
+		expect(copy['enrichment.custom.extra_subdomains']?.label).toBe(
 			'Sous-domaines supplémentaires',
 		)
-		expect(copy['enrichment.http_probe.excluded_products']?.label).toBe(
+		expect(copy['enrichment.custom.excluded_products']?.label).toBe(
 			'Produits exclus',
 		)
-		expect(copy['enrichment.company_jobs.keywords']?.description).toContain(
+		expect(copy['enrichment.highlight_keywords']?.label).toBe(
+			'Mots-clés à mettre en avant',
+		)
+		expect(copy['enrichment.highlight_keywords']?.description).toContain(
 			'Vide : les mots-clés des agents de recherche',
 		)
-		expect(copy['enrichment.http_probe.fingerprints[]']?.add).toBe(
+		expect(copy['enrichment.custom.fingerprints[]']?.add).toBe(
 			'Ajouter une empreinte',
 		)
 	})

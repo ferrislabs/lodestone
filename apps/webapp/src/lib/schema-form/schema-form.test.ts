@@ -156,14 +156,14 @@ describe('defaultValue', () => {
 				weights: { volume: 1, diversity: 1, environment: 1, strength: 1 },
 			},
 			contact_ranking: { preferred_local_parts: [], guess_local_parts: [] },
+			inspection: { enabled: true },
 			enrichment: {
-				http_probe: {
-					enabled: false,
+				custom: {
 					fingerprints: [],
 					excluded_products: [],
-					extra_subdomains: ['auth', 'sso', 'login', 'id', 'idp', 'accounts'],
+					extra_subdomains: [],
 				},
-				company_jobs: { enabled: false, keywords: [], accept_min_keywords: 2 },
+				highlight_keywords: [],
 			},
 			language: 'fr',
 		})
@@ -191,7 +191,7 @@ describe('defaultValue', () => {
 		expect(
 			defaultValue(root, { $ref: '#/$defs/Matcher' }, PROFILE_HINTS, [
 				'enrichment',
-				'http_probe',
+				'custom',
 				'fingerprints',
 				0,
 				'matchers',
@@ -208,7 +208,7 @@ describe('defaultValue', () => {
 		expect(
 			enabledValue(root, version, PROFILE_HINTS, [
 				'enrichment',
-				'http_probe',
+				'custom',
 				'fingerprints',
 				0,
 				'version',
@@ -227,14 +227,14 @@ describe('paths', () => {
 		expect(
 			formatPath([
 				'enrichment',
-				'http_probe',
+				'custom',
 				'fingerprints',
 				0,
 				'matchers',
 				1,
 				'pattern',
 			]),
-		).toBe('enrichment.http_probe.fingerprints[0].matchers[1].pattern')
+		).toBe('enrichment.custom.fingerprints[0].matchers[1].pattern')
 		expect(formatPath(['agents', 1, 'source', 'labels', 1])).toBe(
 			'agents[1].source.labels[1]',
 		)
@@ -298,7 +298,7 @@ describe('validateValue', () => {
 		})
 		const bad = setIn(
 			setIn(value, ['evidence', 'influence'], 3),
-			['enrichment', 'http_probe', 'fingerprints'],
+			['enrichment', 'custom', 'fingerprints'],
 			[
 				{
 					id: 'x',
@@ -311,7 +311,7 @@ describe('validateValue', () => {
 		const paths = validateValue(root, root, bad).map((p) => p.path)
 		expect(paths).toContain('evidence.influence')
 		expect(paths).toContain(
-			'enrichment.http_probe.fingerprints[0].matchers[0].equals',
+			'enrichment.custom.fingerprints[0].matchers[0].equals',
 		)
 	})
 

@@ -35,7 +35,8 @@ const DETAIL: LeadDetailData = {
 	scoring_results: [],
 	agent_failures: [],
 	agent_stops: [],
-	enrichment: { status: 'disabled', steps: [] },
+	enrichment: { status: 'disabled', modules: [] },
+	ecosystem: { modules: [] },
 	assessments: [],
 	facts: {
 		distinct_hosts: 0,

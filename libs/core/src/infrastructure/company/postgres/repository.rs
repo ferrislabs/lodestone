@@ -2,10 +2,13 @@ use chrono::{DateTime, Utc};
 use common::CoreError;
 use lodestone_macros::repository;
 use serde_json::to_value;
+use sqlx::query_scalar;
 
 use crate::{
     LeadId, NormalizedDomain,
-    domain::company::{CompanyDossier, CompanyEntity, SiblingLead, ports::CompanyRepository},
+    domain::company::{
+        CompanyDossier, CompanyEntity, DossierState, SiblingLead, ports::CompanyRepository,
+    },
     infrastructure::{
         company::postgres::model::{DossierRow, EntityRow, SiblingRow},
         lead::postgres::repository::NOT_SUPPRESSED,
@@ -69,6 +72,24 @@ impl<'tx> CompanyRepository for PgCompanyRepository<'tx> {
                     .map_err(|_| CoreError::Internal("stored dossier domain is invalid".to_owned()))
             })
             .collect()
+    }
+
+    #[tracing::instrument(skip(self), fields(db.system = "postgresql", db.operation = "select", db.table = "company_dossiers"), err)]
+    async fn domains_except(
+        &mut self,
+        state: DossierState,
+    ) -> Result<Vec<NormalizedDomain>, CoreError> {
+        let mut tx = self.tx.lock().await;
+        let rows: Vec<String> =
+            query_scalar("SELECT domain FROM company_dossiers WHERE state <> $1 ORDER BY domain")
+                .bind(state.as_str())
+                .fetch_all(&mut ***tx)
+                .await
+                .map_err(map_sqlx_error)?;
+        Ok(rows
+            .iter()
+            .filter_map(|domain| NormalizedDomain::from_host(domain).ok())
+            .collect())
     }
 
     #[tracing::instrument(skip(self), fields(db.system = "postgresql", db.operation = "select", db.table = "company_dossiers"), err)]

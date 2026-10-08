@@ -1,3 +1,14 @@
+import type { Schemas } from '#/api/api.client'
+import {
+	type FindingRow,
+	findingRows,
+	formatDuration,
+	moduleStatusLabel,
+	platformNotice,
+	type StatusTone,
+	statusTone,
+} from '#/lib/ecosystem'
+import { formatDateTime, formatNumber } from '#/lib/format'
 import {
 	defaultValue,
 	getIn,
@@ -13,74 +24,65 @@ import { PROFILE_HINTS } from '#/pages/profiles/lib/form-hints'
 import { PROFILE_SCHEMA } from '#/pages/profiles/lib/profile-schema'
 import { belongsToPath } from '#/pages/profiles/lib/tabs'
 
-export const ENRICHMENT_STEPS = ['http_probe', 'company_jobs'] as const
-
-export type EnrichmentStepKey = (typeof ENRICHMENT_STEPS)[number]
+export type EcosystemModuleInfo = Schemas.EcosystemModuleInfoDto
+export type DryRunResult = Schemas.EcosystemDryRunDto
 
 export const ENRICHMENT_WAIT_MINUTES = 30
 
-function stepSchema(step: EnrichmentStepKey): Schema {
-	const section = resolve(
-		PROFILE_SCHEMA,
-		PROFILE_SCHEMA.properties?.enrichment ?? {},
-	)
-	return resolve(PROFILE_SCHEMA, section.properties?.[step] ?? {})
+function enrichmentSchema(): Schema {
+	return resolve(PROFILE_SCHEMA, PROFILE_SCHEMA.properties?.enrichment ?? {})
 }
 
-function stepDefaults(step: EnrichmentStepKey): JsonObject {
-	return toJsonObject(
-		defaultValue(PROFILE_SCHEMA, stepSchema(step), PROFILE_HINTS, [
-			'enrichment',
-			step,
-		]),
-	)
+function customSchema(): Schema {
+	return resolve(PROFILE_SCHEMA, enrichmentSchema().properties?.custom ?? {})
 }
 
-export function enrichmentStep(
-	value: JsonObject,
-	step: EnrichmentStepKey,
-): JsonObject {
-	const current = getIn(value, ['enrichment', step])
-	return isJsonObject(current) ? current : stepDefaults(step)
-}
-
-export function stepEnabled(
-	value: JsonObject,
-	step: EnrichmentStepKey,
-): boolean {
-	return enrichmentStep(value, step).enabled === true
-}
-
-export function withStepEnabled(
-	value: JsonObject,
-	step: EnrichmentStepKey,
-	enabled: boolean,
-): JsonObject {
-	const section = isJsonObject(value.enrichment) ? value.enrichment : {}
-	return {
-		...value,
-		enrichment: {
-			...section,
-			[step]: { ...enrichmentStep(value, step), enabled },
-		},
-	}
-}
-
-export function enrichmentFieldSchema(
-	step: EnrichmentStepKey,
-	key: string,
-): Schema {
-	const property = stepSchema(step).properties?.[key]
+function picked(schema: Schema, key: string): Schema {
+	const property = schema.properties?.[key]
 	return { properties: property === undefined ? {} : { [key]: property } }
 }
 
-export function stepHasProblem(
-	problems: readonly Problem[],
-	step: EnrichmentStepKey,
-	key: string,
-): boolean {
-	const root = `enrichment.${step}.${key}`
-	return problems.some((problem) => belongsToPath(problem.path, root))
+export function inspectionEnabled(value: JsonObject): boolean {
+	return getIn(value, ['inspection', 'enabled']) !== false
+}
+
+export function withInspectionEnabled(
+	value: JsonObject,
+	enabled: boolean,
+): JsonObject {
+	const section = isJsonObject(value.inspection) ? value.inspection : {}
+	return { ...value, inspection: { ...section, enabled } }
+}
+
+export function customSection(value: JsonObject): JsonObject {
+	const current = getIn(value, ['enrichment', 'custom'])
+	return isJsonObject(current)
+		? current
+		: toJsonObject(
+				defaultValue(PROFILE_SCHEMA, customSchema(), PROFILE_HINTS, [
+					'enrichment',
+					'custom',
+				]),
+			)
+}
+
+export function enrichmentSection(value: JsonObject): JsonObject {
+	const current = value.enrichment
+	return isJsonObject(current) ? current : { highlight_keywords: [] }
+}
+
+export function customFieldSchema(key: string): Schema {
+	return picked(customSchema(), key)
+}
+
+export function enrichmentFieldSchema(key: string): Schema {
+	return picked(enrichmentSchema(), key)
+}
+
+export function advancedHasProblem(problems: readonly Problem[]): boolean {
+	return problems.some((problem) =>
+		belongsToPath(problem.path, 'enrichment.custom'),
+	)
 }
 
 export function searchKeywordUnion(value: JsonObject): string[] {
@@ -98,4 +100,104 @@ export function searchKeywordUnion(value: JsonObject): string[] {
 		}
 	}
 	return union
+}
+
+export interface ModuleChip {
+	label: string
+	tone: StatusTone
+}
+
+export interface ModuleStat {
+	label: string
+	value: string
+}
+
+export interface ModuleExample {
+	text: string
+	domain: string
+	sourceUrl: string
+}
+
+export interface ModuleCard {
+	module: Schemas.EcosystemModule
+	title: string
+	label: string
+	learns: string
+	refresh: string
+	chip: ModuleChip
+	stats: ModuleStat[]
+	example: ModuleExample | null
+	canTest: boolean
+}
+
+function chipOf(module: EcosystemModuleInfo, enabled: boolean): ModuleChip {
+	if (!module.available) return { label: 'À venir', tone: 'soon' }
+	if (!enabled) return { label: 'Désactivé', tone: 'off' }
+	return { label: 'Actif', tone: 'done' }
+}
+
+export function moduleCards(
+	modules: readonly EcosystemModuleInfo[],
+	enabled: boolean,
+): ModuleCard[] {
+	return modules.map((module) => {
+		const stats = module.stats
+		const example = stats.latest_example ?? null
+		const lastRun = stats.last_run ?? null
+		return {
+			module: module.module,
+			title: module.question,
+			label: module.label,
+			learns: module.learns,
+			refresh: `Rafraîchi tous les ${module.refresh_days} jours`,
+			chip: chipOf(module, enabled),
+			stats: [
+				{
+					label: 'Leads inspectés',
+					value: formatNumber(stats.leads_inspected),
+				},
+				{
+					label: 'Éléments trouvés',
+					value: formatNumber(stats.findings_count),
+				},
+				{
+					label: 'Dernier passage',
+					value: lastRun === null ? 'Jamais' : formatDateTime(lastRun),
+				},
+			],
+			example:
+				example === null
+					? null
+					: {
+							text: `${example.label} : ${example.value}`,
+							domain: example.domain,
+							sourceUrl: example.source_url,
+						},
+			canTest: module.available,
+		}
+	})
+}
+
+export interface DryRunView {
+	summary: string
+	tone: StatusTone
+	notice: string | null
+	rows: FindingRow[]
+}
+
+function countLabel(count: number): string {
+	return count > 1 ? `${count} éléments trouvés` : `${count} élément trouvé`
+}
+
+export function dryRunView(result: DryRunResult): DryRunView {
+	const notice =
+		result.status === 'not_applicable'
+			? platformNotice(result.hosting_platform)
+			: (result.error ?? null)
+	return {
+		summary: `${result.domain} · ${moduleStatusLabel(result.status)} en ${formatDuration(result.duration_ms)} · ${countLabel(result.findings.length)}`,
+		tone: statusTone(result.status),
+		notice,
+		rows: findingRows(result.findings),
+	}
 }

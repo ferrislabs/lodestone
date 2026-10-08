@@ -51,6 +51,8 @@ export function backlogText(source: string, backlog: number): string {
 			return `${amount} ${pluralize(backlog, 'lead à qualifier', 'leads à qualifier')}`
 		case 'company_research':
 			return `${amount} ${pluralize(backlog, 'domaine à rechercher', 'domaines à rechercher')}`
+		case 'ecosystem_inspection':
+			return `${amount} ${pluralize(backlog, 'module à passer', 'modules à passer')}`
 		case 'dns_cname':
 		case 'http_probe':
 			return `${amount} ${pluralize(backlog, 'hôte', 'hôtes')} à sonder`

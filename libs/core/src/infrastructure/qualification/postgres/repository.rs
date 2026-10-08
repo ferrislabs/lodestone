@@ -7,7 +7,8 @@ use lodestone_macros::repository;
 use crate::{
     Lead, LeadId, ProfileId, ProviderId, RevisionNumber,
     domain::{
-        enrichment::{CERTIFICATE_SEEN_KIND, CONTACT_SOURCES, EnrichmentStep},
+        ecosystem::EcosystemModule,
+        enrichment::{CERTIFICATE_SEEN_KIND, CONTACT_SOURCES},
         qualification::{
             AGENT_ERROR_MAX_CHARS, AGENT_FAILED_AFTER, AWAITING_SCORING_REASON, AgentCallFailure,
             AgentFailure, AgentKind, Completion, DueGates, EvidenceStrength, Exclusion,
@@ -111,30 +112,30 @@ const DUE: &str = r#"
       )
 "#;
 
-fn enrichment_due(gate: usize) -> String {
+fn inspection_due(gate: usize) -> String {
     let contact_sources = CONTACT_SOURCES
         .iter()
         .map(|source| format!("'{}'", source.as_str()))
         .collect::<Vec<_>>()
         .join(", ");
-    let http_probe = gate + 1;
-    let company_jobs = gate + 2;
-    let probe_step = EnrichmentStep::HttpProbe.as_str();
-    let jobs_step = EnrichmentStep::CompanyJobs.as_str();
+    let modules = EcosystemModule::AVAILABLE
+        .iter()
+        .map(|module| format!("'{}'", module.as_str()))
+        .collect::<Vec<_>>()
+        .join(", ");
     format!(
         r#"
       AND (
           ${gate}::timestamptz IS NULL
           OR leads.created_at <= ${gate}
-          OR (
-              (NOT ${http_probe}::boolean OR EXISTS (
-                  SELECT 1 FROM lead_enrichments e
-                  WHERE e.lead_id = leads.id AND e.step = '{probe_step}' AND e.ran_at IS NOT NULL
-              ))
-              AND (NOT ${company_jobs}::boolean OR EXISTS (
-                  SELECT 1 FROM lead_enrichments e
-                  WHERE e.lead_id = leads.id AND e.step = '{jobs_step}' AND e.ran_at IS NOT NULL
-              ))
+          OR NOT EXISTS (
+              SELECT 1 FROM UNNEST(ARRAY[{modules}]::text[]) AS expected(module)
+              WHERE NOT EXISTS (
+                  SELECT 1 FROM lead_ecosystem_modules inspected
+                  WHERE inspected.domain = leads.domain
+                    AND inspected.module = expected.module
+                    AND inspected.status <> 'pending'
+              )
           )
       )
       AND NOT (
@@ -209,7 +210,7 @@ impl<'tx> QualificationRepository for PgQualificationRepository<'tx> {
         now: DateTime<Utc>,
     ) -> Result<Vec<Lead>, CoreError> {
         let revision = revision_number(revision)?;
-        let enrichment = enrichment_due(6);
+        let enrichment = inspection_due(6);
         let query = format!(
             "SELECT leads.id, leads.profile_id, leads.domain, leads.status, leads.score, leads.confidence, leads.verdict, leads.llm_score, leads.qualified_at, leads.first_seen_at, leads.last_seen_at, leads.updated_at {DUE}{enrichment}{QUALIFICATION_BACKOFF}{NOT_SUPPRESSED} ORDER BY leads.first_seen_at ASC, leads.id ASC LIMIT $5"
         );
@@ -220,9 +221,7 @@ impl<'tx> QualificationRepository for PgQualificationRepository<'tx> {
             .bind(gates.dossier)
             .bind(now)
             .bind(i64::from(limit))
-            .bind(gates.enrichment)
-            .bind(gates.http_probe)
-            .bind(gates.company_jobs)
+            .bind(gates.inspection)
             .fetch_all(&mut ***tx)
             .await
             .map_err(map_sqlx_error)?;
@@ -238,7 +237,7 @@ impl<'tx> QualificationRepository for PgQualificationRepository<'tx> {
         now: DateTime<Utc>,
     ) -> Result<u64, CoreError> {
         let revision = revision_number(revision)?;
-        let enrichment = enrichment_due(5);
+        let enrichment = inspection_due(5);
         let query =
             format!("SELECT COUNT(*) {DUE}{enrichment}{QUALIFICATION_BACKOFF}{NOT_SUPPRESSED}");
         let mut tx = self.tx.lock().await;
@@ -247,9 +246,7 @@ impl<'tx> QualificationRepository for PgQualificationRepository<'tx> {
             .bind(revision)
             .bind(gates.dossier)
             .bind(now)
-            .bind(gates.enrichment)
-            .bind(gates.http_probe)
-            .bind(gates.company_jobs)
+            .bind(gates.inspection)
             .fetch_one(&mut ***tx)
             .await
             .map_err(map_sqlx_error)?;

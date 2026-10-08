@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO lead_ecosystem_modules (domain, module, status, last_run, next_run_at, error)\n            VALUES ($1, $2, 'pending', NULL, $3, NULL)\n            ON CONFLICT (domain, module) DO UPDATE SET next_run_at = EXCLUDED.next_run_at\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c49e29f77d40ee06f5cd7a0a4bb70b180cbf4194d08901771617b91525da6372"
+}

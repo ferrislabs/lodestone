@@ -16,6 +16,7 @@ pub mod ports;
 pub mod service;
 mod v15;
 mod v16;
+mod v17;
 pub mod validation;
 
 pub use validation::{ProfileProblem, ProfileValidationError, ValidatedProfile};

@@ -23,7 +23,6 @@ use crate::{
             instruction_with_dossier, missing_results, render_agent, render_scoring, retry_message,
             scoring_source, warnings, with_problem,
         },
-        company::PAGE_PROMPT_CHARS,
         job::ports::Clock,
         lead::{
             Assessment, AssessmentId, Evidence, Lead, LeadStatus, QualityWarning, Signal,
@@ -170,10 +169,7 @@ where
         if signals.is_empty() {
             return Ok(Outcome::Skipped);
         }
-        let dossier_documents = dossier
-            .as_ref()
-            .map(|dossier| dossier.documents(PAGE_PROMPT_CHARS))
-            .unwrap_or_default();
+        let dossier_documents = usecase.grounding_documents(lead, dossier.as_ref()).await?;
         let signal_contents: Vec<String> = signals.iter().map(render_signal).collect();
         let overview = lead_document(lead.domain.as_str(), &facts);
         let scoring_results = usecase.lead_scoring_results(lead.id).await?;

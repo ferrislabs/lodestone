@@ -12,10 +12,13 @@ use crate::{
     domain::{
         agent_work::ports::AgentWorkRepository,
         calibration::{Calibrations, ports::CalibrationRepository},
-        company::{CompanyDossier, CompanyEntity, SiblingLead, ports::CompanyRepository},
+        company::{
+            CompanyDossier, CompanyEntity, DossierDocument, PAGE_PROMPT_CHARS, SiblingLead,
+            ports::CompanyRepository,
+        },
+        ecosystem::{ecosystem_documents, hosting_platform, ports::EcosystemRepository},
         enrichment::{
-            EnrichmentState, LeadEnrichmentRecord, enrichment_state, listed_enrichment_state,
-            ports::EnrichmentRepository,
+            EnrichmentState, InspectionRecord, enrichment_state, listed_enrichment_state,
         },
         facts::{LeadFacts, SiblingSignals},
         host::{CandidateHost, ports::KnownHostRepository},
@@ -24,7 +27,7 @@ use crate::{
             ports::{AssessmentRepository, ContactRepository, LeadRepository, SignalRepository},
             query::{LeadDetail, LeadListing, LeadQuery, ProfileSummary},
         },
-        profile::{ProfileId, definition::Enrichment, ports::ProfileRepository},
+        profile::{ProfileId, ports::ProfileRepository},
         qualification::ports::QualificationRepository,
         quality::{DecisionKind, Rejection},
         scoring_agent::ports::ScoringRepository,
@@ -77,7 +80,7 @@ async fn company_context(
 }
 
 impl LodestoneUseCase {
-    #[transactional(lead, profile, assessment, qualification, enrichment)]
+    #[transactional(lead, profile, assessment, qualification, ecosystem)]
     pub async fn list_leads(
         &self,
         profile_id: ProfileId,
@@ -87,7 +90,7 @@ impl LodestoneUseCase {
         let mut profiles = profile_repository;
         let mut assessments = assessment_repository;
         let mut qualification = qualification_repository;
-        let mut enrichment = enrichment_repository;
+        let mut ecosystem = ecosystem_repository;
         let profile = profiles
             .find(profile_id)
             .await?
@@ -98,8 +101,8 @@ impl LodestoneUseCase {
         let scorings = qualification.scorings(&ids).await?;
         let wait = self.wait_duration();
         let now = Utc::now();
-        let enrichments = enrichment
-            .records(&ids)
+        let enrichments = ecosystem
+            .listed(&ids)
             .await?
             .into_iter()
             .map(|(id, listed)| {
@@ -130,7 +133,7 @@ impl LodestoneUseCase {
         scoring_agent,
         company,
         calibration,
-        enrichment,
+        ecosystem,
         agent_work
     )]
     pub async fn lead_detail(&self, lead_id: LeadId) -> Result<LeadDetail, CoreError> {
@@ -145,7 +148,7 @@ impl LodestoneUseCase {
         let mut scoring_agents = scoring_agent_repository;
         let mut company = company_repository;
         let mut calibrations = calibration_repository;
-        let mut enrichments = enrichment_repository;
+        let mut ecosystems = ecosystem_repository;
         let mut stops = agent_work_repository;
 
         let lead = leads.find(lead_id).await?.ok_or(CoreError::NotFound)?;
@@ -193,13 +196,17 @@ impl LodestoneUseCase {
         let summary_state = qualification.summary_state(lead_id).await?;
         let scoring = qualification.scorings(&[lead_id]).await?.remove(&lead_id);
         let lead_signals = signals.list_for_lead(lead_id).await?;
-        let record = enrichments
-            .record(lead_id)
+        let ecosystem = ecosystems.of_domain(&lead.domain).await?;
+        let record = ecosystems
+            .listed(&[lead_id])
             .await?
-            .unwrap_or(LeadEnrichmentRecord {
+            .remove(&lead_id)
+            .map(|listed| listed.record)
+            .unwrap_or_else(|| InspectionRecord {
                 created_at: lead.first_seen_at,
-                runs: Vec::new(),
-                settings: Enrichment::default(),
+                enabled: true,
+                hosting_platform: hosting_platform(&lead.domain),
+                modules: ecosystem.modules.clone(),
             });
         let enrichment = self.lead_enrichment_state(&record, &lead_signals);
         let context = company_context(
@@ -212,6 +219,7 @@ impl LodestoneUseCase {
         .await?;
         Ok(LeadDetail {
             enrichment,
+            ecosystem,
             summary_state,
             agent_failures,
             agent_stops: stops.stops(lead_id).await?,
@@ -235,7 +243,7 @@ impl LodestoneUseCase {
 
     fn lead_enrichment_state(
         &self,
-        record: &LeadEnrichmentRecord,
+        record: &InspectionRecord,
         signals: &[Signal],
     ) -> EnrichmentState {
         enrichment_state(record, signals, self.wait_duration(), Utc::now())
@@ -243,6 +251,22 @@ impl LodestoneUseCase {
 
     fn wait_duration(&self) -> Duration {
         Duration::from_std(self.enrichment_wait).unwrap_or_default()
+    }
+
+    #[transactional(ecosystem)]
+    pub(crate) async fn grounding_documents(
+        &self,
+        lead: &Lead,
+        dossier: Option<&CompanyDossier>,
+    ) -> Result<Vec<DossierDocument>, CoreError> {
+        let mut ecosystem = ecosystem_repository;
+        let mut documents = dossier
+            .map(|dossier| dossier.documents(PAGE_PROMPT_CHARS))
+            .unwrap_or_default();
+        documents.extend(ecosystem_documents(
+            &ecosystem.of_domain(&lead.domain).await?.findings,
+        ));
+        Ok(documents)
     }
 
     #[transactional(signal, known_host, company)]

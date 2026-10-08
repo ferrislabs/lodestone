@@ -11,6 +11,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { defaultValue, type JsonObject, toJsonObject } from '#/lib/schema-form'
 import { DefinitionTabContent } from '#/pages/profiles/feature/definition-form'
 import { useDefinitionEditor } from '#/pages/profiles/feature/use-definition-editor'
+import type { EcosystemUi } from '#/pages/profiles/feature/use-ecosystem-ui'
 import {
 	AGENT_KINDS,
 	type AgentKind,
@@ -18,6 +19,10 @@ import {
 	KIND_META,
 	newAgent,
 } from '#/pages/profiles/lib/agents'
+import {
+	dryRunView,
+	type EcosystemModuleInfo,
+} from '#/pages/profiles/lib/enrichment'
 import { PROFILE_HINTS } from '#/pages/profiles/lib/form-hints'
 import { PROFILE_SCHEMA } from '#/pages/profiles/lib/profile-schema'
 import {
@@ -57,14 +62,75 @@ function blank(): JsonObject {
 	)
 }
 
+const MODULES: EcosystemModuleInfo[] = [
+	{
+		module: 'official_identity',
+		label: 'Identité officielle',
+		question: 'Qui est officiellement cette entreprise ?',
+		learns: 'Raison sociale, SIREN et siège.',
+		available: true,
+		reads_site: true,
+		refresh_days: 30,
+		stats: { leads_inspected: 0, findings_count: 0 },
+	},
+	{
+		module: 'legal_life',
+		label: 'Vie légale',
+		question: 'Que dit sa vie légale ?',
+		learns: 'Événements publiés au BODACC.',
+		available: false,
+		reads_site: false,
+		refresh_days: 7,
+		stats: { leads_inspected: 0, findings_count: 0 },
+	},
+	{
+		module: 'hiring_activity',
+		label: 'Activité de recrutement',
+		question: 'Recrute-t-elle, et sur quels postes ?',
+		learns: 'Page carrières, outil de recrutement et offres publiées.',
+		available: true,
+		reads_site: true,
+		refresh_days: 3,
+		stats: {
+			leads_inspected: 12,
+			findings_count: 31,
+			last_run: '2026-10-08T09:00:00Z',
+			latest_example: {
+				domain: 'acme.fr',
+				label: "Offre d'emploi",
+				value: 'Ingénieur IAM',
+				source_url: 'https://jobs.acme.fr/1',
+			},
+		},
+	},
+]
+
+function ecosystemUi(overrides: Partial<EcosystemUi> = {}): EcosystemUi {
+	return {
+		modules: MODULES,
+		modulesState: 'ready',
+		test: null,
+		onTest: vi.fn(),
+		testActions: {
+			onClose: vi.fn(),
+			onQuery: vi.fn(),
+			onPick: vi.fn(),
+			onRun: vi.fn(),
+		},
+		...overrides,
+	}
+}
+
 function Harness({
 	initial = blank(),
 	problems = [],
 	startTab = 'identity',
+	ecosystem,
 }: {
 	initial?: JsonObject
 	problems?: readonly Problem[]
 	startTab?: EditorTab
+	ecosystem?: EcosystemUi
 }) {
 	const [seed] = useState(initial)
 	const editor = useDefinitionEditor(seed)
@@ -82,6 +148,7 @@ function Harness({
 						problems={problems}
 						onChange={setValue}
 						catalog={CATALOG}
+						ecosystem={ecosystem}
 					/>
 				}
 				problems={[]}
@@ -472,63 +539,183 @@ describe('definition tabs', () => {
 		expect(panel.textContent).not.toContain('Sonde HTTP ←')
 	})
 
-	it('edits the enrichment steps on their own tab', () => {
-		render(<Harness />)
+	it('shows one card per inspection module with its week of activity', () => {
+		const ecosystem = ecosystemUi()
+		render(<Harness ecosystem={ecosystem} />)
 		fireEvent.click(screen.getByRole('tab', { name: TAB_LABELS.enrichment }))
-		const probe = within(screen.getByRole('region', { name: 'Sonde HTTP' }))
-		const jobs = within(
-			screen.getByRole('region', {
-				name: "Offres d'emploi de l'entreprise",
+		const hiring = within(
+			screen.getByRole('region', { name: 'Activité de recrutement' }),
+		)
+		expect(
+			hiring.getByRole('heading', {
+				name: 'Recrute-t-elle, et sur quels postes ?',
 			}),
-		)
-		const dossier = within(
-			screen.getByRole('region', { name: 'Dossier entreprise' }),
-		)
-		expect(probe.getByText('Empreintes')).toBeTruthy()
-		expect(probe.getByText('Sous-domaines supplémentaires')).toBeTruthy()
-		expect(probe.getByText('Produits exclus')).toBeTruthy()
-		expect(probe.getByLabelText('Retirer auth')).toBeTruthy()
-		const probeSwitch = probe.getByRole('switch', {
-			name: 'Activer la sonde HTTP',
-		})
-		expect(probeSwitch.getAttribute('aria-checked')).toBe('false')
-		fireEvent.click(probeSwitch)
-		expect(probeSwitch.getAttribute('aria-checked')).toBe('true')
-		fireEvent.click(probe.getByText('Ajouter une empreinte'))
-		const row = document.querySelector<HTMLElement>(
-			'[data-row="enrichment.http_probe.fingerprints[0]"]',
-		) as HTMLElement
-		expect(within(row).getByText(/^Chemin/)).toBeTruthy()
-		expect(
-			jobs.getByText(/Vide : les mots-clés des agents de recherche/),
 		).toBeTruthy()
-		expect(jobs.getByText('Avancé')).toBeTruthy()
 		expect(
-			jobs.getByText('Mots-clés distincts pour un signal fort'),
+			hiring.getByText(
+				'Page carrières, outil de recrutement et offres publiées.',
+			),
 		).toBeTruthy()
-		fireEvent.click(
-			jobs.getByRole('switch', {
-				name: "Activer les offres d'emploi de l'entreprise",
-			}),
-		)
+		expect(hiring.getByText('Actif')).toBeTruthy()
+		expect(hiring.getByText('Leads inspectés')).toBeTruthy()
+		expect(hiring.getByText('12')).toBeTruthy()
+		expect(hiring.getByText('Éléments trouvés')).toBeTruthy()
+		expect(hiring.getByText('31')).toBeTruthy()
+		expect(hiring.getByText('Dernier passage')).toBeTruthy()
+		expect(hiring.getByText(/Offre d'emploi : Ingénieur IAM/)).toBeTruthy()
 		expect(
-			jobs
-				.getByRole('switch', {
-					name: "Activer les offres d'emploi de l'entreprise",
-				})
-				.getAttribute('aria-checked'),
-		).toBe('true')
-		expect(dossier.getByText(/Toujours actif/)).toBeTruthy()
-		expect(dossier.queryByRole('switch')).toBeNull()
+			hiring.getByRole('link', { name: /jobs\.acme\.fr/ }).getAttribute('href'),
+		).toBe('https://jobs.acme.fr/1')
+		fireEvent.click(hiring.getByRole('button', { name: 'Tester sur un lead' }))
+		expect(ecosystem.onTest).toHaveBeenCalledWith('hiring_activity')
+		const legal = within(screen.getByRole('region', { name: 'Vie légale' }))
+		expect(legal.getByText('À venir')).toBeTruthy()
+		expect(
+			legal.queryByRole('button', { name: 'Tester sur un lead' }),
+		).toBeNull()
+		const identity = within(
+			screen.getByRole('region', { name: 'Identité officielle' }),
+		)
+		expect(identity.getByText('Jamais')).toBeTruthy()
+		expect(identity.getByText('Rien sur les 7 derniers jours.')).toBeTruthy()
 		const help = within(screen.getByTestId('help-panel'))
-		expect(help.getByText(/ne crée jamais de lead/)).toBeTruthy()
+		expect(help.getByText(/même inspection de son écosystème/)).toBeTruthy()
 		expect(help.getByText(/30 minutes/)).toBeTruthy()
 		expect(
 			screen.queryByRole('button', { name: 'Ajouter un agent' }),
 		).toBeNull()
 	})
 
-	it('shows the search keywords used when the job keywords are empty', () => {
+	it('switches the inspection off and keeps the profile fingerprints under Avancé', () => {
+		render(<Harness ecosystem={ecosystemUi()} startTab="enrichment" />)
+		const master = screen.getByRole('switch', {
+			name: "Inspecter l'écosystème des leads",
+		})
+		expect(master.getAttribute('aria-checked')).toBe('true')
+		fireEvent.click(master)
+		expect(master.getAttribute('aria-checked')).toBe('false')
+		expect(
+			within(
+				screen.getByRole('region', { name: 'Activité de recrutement' }),
+			).getByText('Désactivé'),
+		).toBeTruthy()
+		expect(screen.getByText('Avancé')).toBeTruthy()
+		expect(screen.getByText('Empreintes')).toBeTruthy()
+		expect(screen.getByText('Sous-domaines supplémentaires')).toBeTruthy()
+		expect(screen.getByText('Produits exclus')).toBeTruthy()
+		expect(screen.queryByLabelText('Retirer auth')).toBeNull()
+		fireEvent.click(screen.getByText('Ajouter une empreinte'))
+		const row = document.querySelector<HTMLElement>(
+			'[data-row="enrichment.custom.fingerprints[0]"]',
+		) as HTMLElement
+		expect(within(row).getByText(/^Chemin/)).toBeTruthy()
+		expect(screen.getByText('Mots-clés à mettre en avant')).toBeTruthy()
+		expect(screen.queryByText('Sonde HTTP')).toBeNull()
+		expect(screen.queryByText('Dossier entreprise')).toBeNull()
+	})
+
+	it('tests a module on a lead picked by its domain and shows the findings', () => {
+		const ecosystem = ecosystemUi({
+			test: {
+				module: 'hiring_activity',
+				moduleLabel: 'Activité de recrutement',
+				query: 'acme',
+				options: [
+					{ id: 'l1', domain: 'acme.fr' },
+					{ id: 'l2', domain: 'acme-group.com' },
+				],
+				searching: false,
+				selectedId: 'l1',
+				running: false,
+				error: null,
+				unavailableReason: null,
+				result: dryRunView({
+					module: 'hiring_activity',
+					domain: 'acme.fr',
+					status: 'done',
+					duration_ms: 420,
+					findings: [
+						{
+							module: 'hiring_activity',
+							key: 'job_offer:https://jobs.acme.fr/2',
+							kind: 'job_offer',
+							label: "Offre d'emploi",
+							value: 'Ingénieur IAM',
+							source_url: 'https://jobs.acme.fr/2',
+							observed_at: '2026-10-08T09:00:00Z',
+							details: { highlighted: true },
+						},
+					],
+				}),
+			},
+		})
+		render(<Harness ecosystem={ecosystem} startTab="enrichment" />)
+		const panel = within(
+			screen.getByRole('region', {
+				name: 'Tester Activité de recrutement sur un lead',
+			}),
+		)
+		expect(panel.getByText(/Rien n'est enregistré/)).toBeTruthy()
+		fireEvent.change(panel.getByLabelText('Rechercher un lead par domaine'), {
+			target: { value: 'acme.f' },
+		})
+		expect(ecosystem.testActions.onQuery).toHaveBeenCalledWith('acme.f')
+		expect(
+			panel
+				.getByRole('button', { name: 'acme.fr' })
+				.getAttribute('aria-pressed'),
+		).toBe('true')
+		fireEvent.click(panel.getByRole('button', { name: 'acme-group.com' }))
+		expect(ecosystem.testActions.onPick).toHaveBeenCalledWith('l2')
+		fireEvent.click(panel.getByRole('button', { name: 'Lancer le test' }))
+		expect(ecosystem.testActions.onRun).toHaveBeenCalled()
+		expect(
+			panel.getByText('acme.fr · Fait en 420 ms · 1 élément trouvé'),
+		).toBeTruthy()
+		expect(panel.getByText('Ingénieur IAM')).toBeTruthy()
+		expect(panel.getByText('Mis en avant')).toBeTruthy()
+		expect(
+			panel
+				.getByRole('link', { name: /jobs\.acme\.fr\/2/ })
+				.getAttribute('href'),
+		).toBe('https://jobs.acme.fr/2')
+		expect(
+			screen.queryAllByRole('button', { name: 'Tester sur un lead' }),
+		).toHaveLength(1)
+		fireEvent.click(panel.getByRole('button', { name: 'Fermer' }))
+		expect(ecosystem.testActions.onClose).toHaveBeenCalled()
+	})
+
+	it('asks to save a new profile before testing a module', () => {
+		render(
+			<Harness
+				startTab="enrichment"
+				ecosystem={ecosystemUi({
+					test: {
+						module: 'official_identity',
+						moduleLabel: 'Identité officielle',
+						query: '',
+						options: [],
+						searching: false,
+						selectedId: null,
+						running: false,
+						error: null,
+						unavailableReason:
+							'Enregistrez le profil pour tester un module sur un de ses leads.',
+						result: null,
+					},
+				})}
+			/>,
+		)
+		expect(
+			screen.getByText(
+				'Enregistrez le profil pour tester un module sur un de ses leads.',
+			),
+		).toBeTruthy()
+		expect(screen.queryByRole('button', { name: 'Lancer le test' })).toBeNull()
+	})
+
+	it('shows the search keywords used when no keyword is highlighted', () => {
 		const agent = { ...newAgent('search', [], ['boamp']), keywords: ['sso'] }
 		render(
 			<Harness
@@ -536,16 +723,36 @@ describe('definition tabs', () => {
 				initial={{ ...blank(), agents: [agent] }}
 			/>,
 		)
-		expect(screen.getByText("Utilisés aujourd'hui : sso")).toBeTruthy()
+		expect(
+			screen.getByText('Sans mot-clé ici, ceux des agents de recherche : sso'),
+		).toBeTruthy()
 	})
 
-	it('badges the enrichment tab for a problem inside an enrichment step', () => {
+	it('badges the enrichment tab and opens Avancé for a fingerprint problem', () => {
 		render(
 			<Harness
+				initial={{
+					...blank(),
+					enrichment: {
+						custom: {
+							fingerprints: [
+								{
+									id: 'kc',
+									path: 'realms',
+									product: 'keycloak',
+									matchers: [{ kind: 'status', equals: 200 }],
+								},
+							],
+							excluded_products: [],
+							extra_subdomains: [],
+						},
+						highlight_keywords: [],
+					},
+				}}
 				problems={[
 					{
-						path: 'enrichment.http_probe.fingerprints',
-						message: 'Au moins une empreinte',
+						path: 'enrichment.custom.fingerprints[0].path',
+						message: 'Chemin absolu attendu',
 					},
 				]}
 			/>,
@@ -553,7 +760,10 @@ describe('definition tabs', () => {
 		const tab = screen.getByRole('tab', { name: /Enrichissement/ })
 		expect(within(tab).getByLabelText('1 problème')).toBeTruthy()
 		fireEvent.click(tab)
-		expect(screen.getByText('Au moins une empreinte')).toBeTruthy()
+		expect(screen.getByText('Chemin absolu attendu')).toBeTruthy()
+		expect(
+			screen.getByText('Avancé').closest('details')?.hasAttribute('open'),
+		).toBe(true)
 	})
 
 	it('offers the LLM answer language as a french select in the identity tab', () => {

@@ -3,7 +3,7 @@ use common::CoreError;
 
 use crate::domain::{
     NormalizedDomain,
-    company::{CompanyDossier, CompanyEntity, SiblingLead},
+    company::{CompanyDossier, CompanyEntity, DossierState, SiblingLead},
     lead::LeadId,
 };
 
@@ -33,6 +33,11 @@ pub trait CompanyRepository: Send {
     fn unchecked_domains(
         &mut self,
         limit: u32,
+    ) -> impl Future<Output = Result<Vec<NormalizedDomain>, CoreError>> + Send;
+
+    fn domains_except(
+        &mut self,
+        state: DossierState,
     ) -> impl Future<Output = Result<Vec<NormalizedDomain>, CoreError>> + Send;
 
     fn count_unchecked(&mut self) -> impl Future<Output = Result<u64, CoreError>> + Send;

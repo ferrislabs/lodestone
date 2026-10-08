@@ -1,6 +1,6 @@
 use std::{
     num::NonZeroU32,
-    sync::Mutex,
+    sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 
@@ -15,6 +15,7 @@ use lodestone_core::{
     SourceName, StepOutcome,
     company::{COMPANY_RESEARCH_LISTENER, CompanyRunSettings},
     contacts::ContactRunSettings,
+    ecosystem::{ECOSYSTEM_LISTENER, InspectionRunSettings},
     evaluation::{EvaluationSettings, ProviderBuilder, QUALIFICATION_LISTENER},
     infrastructure::{
         candidate_host::postgres::PgCandidateHosts, contact_target::postgres::PgContactTargets,
@@ -27,7 +28,8 @@ use lodestone_core::{
 };
 use sources::{
     contact_pages::PublicPageFinder, ct::CtSource, dns_cname::DnsCnameSource,
-    http_probe::HttpProbeSource, role_guess::RoleGuessFinder, security_txt::SecurityTxtFinder,
+    ecosystem::EcosystemModules, http_probe::HttpProbeSource, role_guess::RoleGuessFinder,
+    security_txt::SecurityTxtFinder,
 };
 use tracing::info;
 
@@ -198,6 +200,43 @@ impl<B: CompanyBuilder> ListenerStep for CompanyStep<B> {
         Ok(StepOutcome {
             processed: report.domains,
             signals: report.changed,
+            backlog: Some(report.backlog),
+        })
+    }
+}
+
+pub struct InspectionStep {
+    pub usecase: LodestoneUseCase,
+    pub modules: Arc<EcosystemModules<PoliteFetcher>>,
+    pub settings: InspectionRunSettings,
+}
+
+impl ListenerStep for InspectionStep {
+    fn name(&self) -> &str {
+        ECOSYSTEM_LISTENER
+    }
+
+    async fn is_active(&self) -> Result<bool, CoreError> {
+        self.usecase.has_inspected_profile().await
+    }
+
+    async fn run_once(&self) -> Result<StepOutcome, SourceRunError> {
+        let report = self
+            .usecase
+            .inspect_due_domains(&self.modules.runners(), self.settings, &SystemClock)
+            .await?;
+        if report.failed > 0 || report.not_applicable > 0 {
+            info!(
+                inspected = report.domains,
+                failed = report.failed,
+                not_applicable = report.not_applicable,
+                rate_limited = report.rate_limited,
+                "ecosystem inspection pass finished"
+            );
+        }
+        Ok(StepOutcome {
+            processed: report.domains,
+            signals: report.findings,
             backlog: Some(report.backlog),
         })
     }

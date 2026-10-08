@@ -55,3 +55,7 @@ A profile may have no sourcing agent when an enrichment step is enabled, so a st
 - Certificates create many weak leads; the evidence gate keeps them away from the models until something else confirms them.
 - Qualification of a new lead is delayed by up to the enrichment wait.
 - The catalog descriptor `ats` becomes « Offres d'emploi de l'entreprise » in the Entreprises category, without keyword search. The webapp editor for the new sections is issue 203.
+
+## Update: the enrichment becomes the ecosystem inspection
+
+ADR 0012 replaces the two enrichment steps by one ecosystem inspection, the same for every profile (profile schema 18). Sourcing is unchanged; the qualification wait now waits for the modules of the inspection.

@@ -73,7 +73,7 @@ fn a_removed_agent_and_a_disabled_agent_have_their_own_reason() {
                 agent["enabled"] = json!(false);
             }
         }
-        document["enrichment"]["http_probe"]["enabled"] = json!(false);
+        document["enrichment"]["custom"]["fingerprints"] = json!([]);
     });
     let snapshot = snapshot_of(&profile);
     let id = profile.profile.id;
@@ -226,7 +226,7 @@ fn removing_or_disabling_agents_only_is_detected_and_any_other_edit_is_not() {
             .as_array_mut()
             .unwrap()
             .retain(|agent| agent["id"] != "dns");
-        document["enrichment"]["http_probe"]["enabled"] = json!(false);
+        document["enrichment"]["custom"]["fingerprints"] = json!([]);
     });
     let edited = current(2, true, |document| {
         document["qualification_agents"]
@@ -245,6 +245,13 @@ fn removing_or_disabling_agents_only_is_detected_and_any_other_edit_is_not() {
         edited.revision.definition.definition()
     ));
     assert!(!only_removes_agents(before, before));
+    let switched_off = current(2, true, |document| {
+        document["inspection"]["enabled"] = json!(false);
+    });
+    assert!(only_removes_agents(
+        before,
+        switched_off.revision.definition.definition()
+    ));
     let kept = kept_agents(&ProfileAgents::of(&removed));
     assert!(!kept.qualification.contains(&"marche".to_owned()));
     assert!(kept.qualification.contains(&"pertinence".to_owned()));

@@ -218,6 +218,86 @@ fn extract_version(extractor: &CompiledExtractor, response: &ProbedResponse) -> 
     captures.get(1).map(|found| found.as_str().to_owned())
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FingerprintMatch {
+    pub fingerprint: String,
+    pub product: String,
+    pub path: String,
+    pub status: u16,
+    pub version: Option<String>,
+    pub markers: Vec<String>,
+}
+
+fn matches(compiled: &CompiledProfile, responses: &[ProbedPath]) -> Vec<FingerprintMatch> {
+    let mut matched: Vec<(&CompiledFingerprint, &ProbedResponse)> = Vec::new();
+    for fingerprint in &compiled.fingerprints {
+        let Some(response) = responses
+            .iter()
+            .find(|probed| probed.path == fingerprint.path)
+            .and_then(|probed| probed.response.as_ref())
+        else {
+            continue;
+        };
+        if fingerprint
+            .matchers
+            .iter()
+            .all(|matcher| matcher_holds(matcher, response))
+        {
+            matched.push((fingerprint, response));
+        }
+    }
+    if matched
+        .iter()
+        .any(|(fingerprint, _)| compiled.excluded.contains(&fingerprint.product))
+    {
+        return Vec::new();
+    }
+    matched
+        .into_iter()
+        .map(|(fingerprint, response)| {
+            let version = fingerprint
+                .version
+                .as_ref()
+                .and_then(|extractor| extract_version(extractor, response));
+            let parsed = version.as_deref().and_then(parse_version);
+            let markers = fingerprint
+                .markers
+                .iter()
+                .filter(|(_, rule)| match rule {
+                    CompiledRule::Matches(matcher) => matcher_holds(matcher, response),
+                    CompiledRule::VersionBelow(bound) => parsed
+                        .as_deref()
+                        .is_some_and(|found| version_below(found, bound)),
+                })
+                .map(|(marker, _)| marker.clone())
+                .collect();
+            FingerprintMatch {
+                fingerprint: fingerprint.id.clone(),
+                product: fingerprint.product.clone(),
+                path: fingerprint.path.clone(),
+                status: response.status,
+                version,
+                markers,
+            }
+        })
+        .collect()
+}
+
+pub fn detect(
+    fingerprints: &[Fingerprint],
+    excluded: &[String],
+    responses: &[ProbedPath],
+) -> Vec<FingerprintMatch> {
+    let compiled = CompiledProfile {
+        fingerprints: fingerprints
+            .iter()
+            .filter_map(compile_fingerprint)
+            .collect(),
+        excluded: excluded.to_vec(),
+    };
+    matches(&compiled, responses)
+}
+
 pub struct HttpProbeSource<F: Fetcher, H: CandidateHosts, G: ProbeGuard> {
     fetcher: Arc<F>,
     hosts: Arc<H>,
@@ -293,7 +373,7 @@ fn probe_paths(profiles: &[ActiveProfile]) -> Vec<String> {
     paths
 }
 
-fn probed(response: &FetchResponse) -> ProbedResponse {
+pub fn probed(response: &FetchResponse) -> ProbedResponse {
     let end = response.body.len().min(MAX_BODY_BYTES);
     ProbedResponse {
         status: response.status,
@@ -403,17 +483,12 @@ where
             return Ok(Vec::new());
         }
         for active in profiles {
-            let probe = &active
-                .revision
-                .definition
-                .definition()
-                .enrichment
-                .http_probe;
-            if probe.enabled {
+            let definition = active.revision.definition.definition();
+            if definition.probes_hosts() {
                 self.hosts
                     .seed_lead_hosts(
                         active.profile.id,
-                        &probe.extra_subdomains,
+                        &definition.enrichment.custom.extra_subdomains,
                         now,
                         self.settings.batch_size,
                     )
@@ -505,59 +580,32 @@ where
         ) else {
             return Vec::new();
         };
-        let mut matched: Vec<(&CompiledFingerprint, &ProbedResponse)> = Vec::new();
-        for fingerprint in &compiled.fingerprints {
-            let Some(response) = item
-                .responses
-                .iter()
-                .find(|probed| probed.path == fingerprint.path)
-                .and_then(|probed| probed.response.as_ref())
-            else {
-                continue;
-            };
-            if fingerprint
-                .matchers
-                .iter()
-                .all(|matcher| matcher_holds(matcher, response))
-            {
-                matched.push((fingerprint, response));
-            }
-        }
-        if matched
-            .iter()
-            .any(|(fingerprint, _)| compiled.excluded.contains(&fingerprint.product))
-        {
-            return Vec::new();
-        }
         let mut products: Vec<&str> = Vec::new();
         let mut markers: Vec<&str> = Vec::new();
         let mut observations = Vec::new();
-        for (fingerprint, response) in matched {
+        let found = matches(&compiled, &item.responses);
+        for detected in &found {
             let Ok(provenance) = Provenance::parse(&format!(
                 "{}://{}{}",
                 self.settings.scheme.as_str(),
                 item.host.host,
-                fingerprint.path
+                detected.path
             )) else {
                 continue;
             };
-            let version = fingerprint
-                .version
-                .as_ref()
-                .and_then(|extractor| extract_version(extractor, response));
             let raw = json!({
                 "host": item.host.host.as_str(),
-                "fingerprint": fingerprint.id,
-                "path": fingerprint.path,
-                "status": response.status,
-                "version": version,
+                "fingerprint": detected.fingerprint,
+                "path": detected.path,
+                "status": detected.status,
+                "version": detected.version,
             });
-            if !products.contains(&fingerprint.product.as_str()) {
-                products.push(fingerprint.product.as_str());
+            if !products.contains(&detected.product.as_str()) {
+                products.push(detected.product.as_str());
                 observations.push(Observation {
                     domain: item.host.domain.clone(),
                     kind: product_kind.clone(),
-                    value: Some(fingerprint.product.clone()),
+                    value: Some(detected.product.clone()),
                     raw: raw.clone(),
                     provenance: provenance.clone(),
                     strength: product_strength,
@@ -565,30 +613,21 @@ where
                     agent: None,
                 });
             }
-            let parsed = version.as_deref().and_then(parse_version);
-            for (marker, rule) in &fingerprint.markers {
+            for marker in &detected.markers {
                 if markers.contains(&marker.as_str()) {
                     continue;
                 }
-                let holds = match rule {
-                    CompiledRule::Matches(matcher) => matcher_holds(matcher, response),
-                    CompiledRule::VersionBelow(bound) => parsed
-                        .as_deref()
-                        .is_some_and(|found| version_below(found, bound)),
-                };
-                if holds {
-                    markers.push(marker.as_str());
-                    observations.push(Observation {
-                        domain: item.host.domain.clone(),
-                        kind: debt_kind.clone(),
-                        value: Some(marker.clone()),
-                        raw: raw.clone(),
-                        provenance: provenance.clone(),
-                        strength: debt_strength,
-                        observed_at: item.probed_at,
-                        agent: None,
-                    });
-                }
+                markers.push(marker.as_str());
+                observations.push(Observation {
+                    domain: item.host.domain.clone(),
+                    kind: debt_kind.clone(),
+                    value: Some(marker.clone()),
+                    raw: raw.clone(),
+                    provenance: provenance.clone(),
+                    strength: debt_strength,
+                    observed_at: item.probed_at,
+                    agent: None,
+                });
             }
         }
         observations

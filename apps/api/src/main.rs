@@ -7,7 +7,7 @@ use api::{
         Intervals, JobRouter, WiredSources, schedule_calibration, schedule_page_recheck,
         schedule_wired_sources,
     },
-    listeners::{CompanyStep, ContactStep, CtStep, HostStep, QualificationStep},
+    listeners::{CompanyStep, ContactStep, CtStep, HostStep, InspectionStep, QualificationStep},
     logger::init_tracing_and_logging,
     providers::{CatalogAccess, ProviderSeed, provision_providers},
     router::router,
@@ -26,6 +26,7 @@ use lodestone_core::{
     BOAMP, CERTIFICATE_TRANSPARENCY, COMPANY_RESEARCH, DECP, HACKER_NEWS_HIRING, RetryPolicy, TED,
     company::CompanyRunSettings,
     contacts::ContactRunSettings,
+    ecosystem::InspectionRunSettings,
     infrastructure::{
         candidate_host::postgres::PgCandidateHosts,
         contact_target::postgres::{PgAtsTargets, PgContactTargets},
@@ -59,6 +60,7 @@ use tracing::{error, info};
 
 const DNS_BATCH_SIZE: u32 = 500;
 const COMPANY_BATCH_SIZE: u32 = 5;
+const INSPECTION_BATCH_SIZE: u32 = 10;
 const PROBE_BATCH_SIZE: u32 = 200;
 const BOAMP_MAX_BODY_BYTES: usize = 16 * 1024 * 1024;
 const BOAMP_REQUESTS_PER_MINUTE: u32 = 30;
@@ -319,8 +321,19 @@ async fn main() -> Result<(), Box<dyn Error>> {
     schedule_wired_sources(&queue).await?;
     schedule_calibration(&queue).await?;
     schedule_page_recheck(&queue, &app_state.usecase).await?;
+    let platform_dossiers = app_state
+        .usecase
+        .settle_platform_dossiers(args.company.refresh_interval(), &SystemClock)
+        .await?;
+    if platform_dossiers > 0 {
+        info!(
+            platform_dossiers,
+            "dossiers of domains on a hosting platform no longer read their site"
+        );
+    }
 
     let usecase = app_state.usecase.clone();
+    let ecosystem = Arc::clone(&app_state.ecosystem);
     let router = router(app_state)?;
     let internal_router = internal_router()?;
 
@@ -434,6 +447,18 @@ async fn main() -> Result<(), Box<dyn Error>> {
         instance.clone(),
         listener_settings,
     );
+    let inspection_listener = Listener::new(
+        InspectionStep {
+            usecase: usecase.clone(),
+            modules: ecosystem,
+            settings: InspectionRunSettings {
+                batch_size: INSPECTION_BATCH_SIZE,
+            },
+        },
+        pool.clone(),
+        instance.clone(),
+        listener_settings,
+    );
     let qualification_listener = Listener::new(
         QualificationStep {
             usecase,
@@ -472,6 +497,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         public_page_listener.run(shutdown_rx.clone()),
         role_guess_listener.run(shutdown_rx.clone()),
         company_listener.run(shutdown_rx.clone()),
+        inspection_listener.run(shutdown_rx.clone()),
         qualification_listener.run(shutdown_rx),
     );
 

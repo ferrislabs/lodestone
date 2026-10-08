@@ -1611,6 +1611,7 @@ dependencies = [
  "serde_json",
  "server",
  "source-providers",
+ "sources",
  "thiserror 2.0.18",
  "tokio",
  "tracing",

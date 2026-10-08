@@ -20,7 +20,6 @@ use crate::{
         agent_work::{
             AgentWork, CancelReason, WorkKind, WorkTarget, first_stop, ports::AgentWorkRepository,
         },
-        company::PAGE_PROMPT_CHARS,
         job::ports::Clock,
         lead::{Lead, LeadId},
         llm::{
@@ -477,10 +476,7 @@ where
         let found = exclusions(&qualification, &definition.qualification_agents);
         let overview = lead_document(lead.domain.as_str(), &facts);
         let contents: Vec<String> = signals.iter().map(render_signal).collect();
-        let dossier_documents = dossier
-            .as_ref()
-            .map(|dossier| dossier.documents(PAGE_PROMPT_CHARS))
-            .unwrap_or_default();
+        let dossier_documents = usecase.grounding_documents(lead, dossier.as_ref()).await?;
         let reports: Vec<(String, String)> = definition
             .qualification_agents
             .iter()

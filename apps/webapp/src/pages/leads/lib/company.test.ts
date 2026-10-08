@@ -54,6 +54,12 @@ describe('company dossier helpers', () => {
 		expect(companyState(company({ state: 'weird' }))).toBe('pending')
 		expect(companyStateLabel(companyState(company()))).toBe('Complète')
 		expect(companyStateLabel('unreachable')).toBe('Inaccessible')
+		expect(companyState(company({ state: 'hosting_platform' }))).toBe(
+			'hosting_platform',
+		)
+		expect(companyStateLabel('hosting_platform')).toBe(
+			'Hébergé sur une plateforme',
+		)
 	})
 
 	it('joins the activity code and its label', () => {
@@ -87,6 +93,11 @@ describe('company dossier helpers', () => {
 		expect(companyNotice(company({ state: 'unreachable' }))).toContain(
 			'inaccessible',
 		)
+		expect(
+			companyNotice(
+				company({ state: 'hosting_platform', official: null, siren: null }),
+			),
+		).toBe('Site hébergé sur une plateforme : pas de dossier entreprise lu.')
 		expect(
 			companyNotice(company({ state: 'partial', siren: null, official: null })),
 		).toContain('SIREN introuvable')

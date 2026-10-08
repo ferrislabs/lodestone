@@ -13,24 +13,24 @@ use std::{
 use chrono::{DateTime, NaiveDate, Utc};
 use common::{EncryptionKey, Secret};
 use lodestone_core::{
-    ActiveProfile, AtsTargets, CandidateHosts, Clock, CompanyBuilder, CompanyPage,
-    CreateProfileCommand, DossierBuild, DossierState, EnrichmentState, EnrichmentStatus,
-    EnrichmentStep, GenerationParams, Hostname, Lead, LeadQuery, LeadRepository, LinkRejection,
-    LlmError, LlmProvider, LlmRequest, LlmResponse, LodestoneUseCase, NormalizedDomain,
-    Observation, OfficialData, PageReview, PageVerifier, ProfileId, ProfileName, Provenance,
-    ProviderDefinition, ProviderKind, SignalKind, Siren, SourceError, SourceName, Tier,
+    ActiveProfile, Clock, CompanyBuilder, CompanyPage, CreateProfileCommand, DossierBuild,
+    DossierState, EcosystemFinding, EcosystemModule, EnrichmentState, EnrichmentStatus,
+    GenerationParams, InspectionTarget, Lead, LeadQuery, LeadRepository, LinkRejection, LlmError,
+    LlmProvider, LlmRequest, LlmResponse, LodestoneUseCase, ModuleRunner, ModuleStatus,
+    NormalizedDomain, Observation, OfficialData, PageReview, PageVerifier, ProfileId, ProfileName,
+    Provenance, ProviderDefinition, ProviderKind, SignalKind, Siren, SourceError, SourceName, Tier,
     TokenPricing, TokenUsage, UnconfirmedLinks, UnitInterval, ValidatedProfile, WaitingReason,
     company::{CompanyRunReport, CompanyRunSettings, PageRecheckReport},
+    ecosystem::InspectionRunSettings,
     evaluation::{EvaluationSettings, ProviderBuilder},
     infrastructure::{
-        candidate_host::PgCandidateHosts, contact_target::postgres::PgAtsTargets,
         crypto::AesGcmCipher, lead::postgres::PgLeadRepository, llm_cache::postgres::PgLlmCache,
         postgres::with_tx,
     },
     llm::CreateLlmProvider,
 };
 use serde_json::{Value, json};
-use sqlx::PgPool;
+use sqlx::{PgPool, query};
 use support::{at, domain};
 
 const IAM: &str = include_str!("../../../docs/examples/profiles/iam-ferriskey.json");
@@ -43,6 +43,28 @@ const NINETY_DAYS: Duration = Duration::from_secs(90 * 86_400);
 
 #[derive(Clone)]
 struct TestClock(Arc<AtomicI64>);
+
+struct FakeModule(EcosystemModule);
+
+impl ModuleRunner for FakeModule {
+    fn module(&self) -> EcosystemModule {
+        self.0
+    }
+
+    async fn inspect(
+        &self,
+        target: &InspectionTarget<'_>,
+    ) -> Result<Vec<EcosystemFinding>, SourceError> {
+        Ok(vec![EcosystemFinding::new(
+            self.0,
+            "fact",
+            "Fait observé",
+            format!("FACT-OF-{}", self.0.as_str()),
+            format!("https://{}/{}", target.domain, self.0.as_str()),
+            target.now,
+        )])
+    }
+}
 
 impl Clock for TestClock {
     fn now(&self) -> DateTime<Utc> {
@@ -405,30 +427,20 @@ impl Harness {
             .unwrap();
     }
 
-    async fn probe_every_lead_host(&self, profile: ProfileId, seconds: i64) {
-        let hosts = PgCandidateHosts::new(self.pool.clone());
-        hosts
-            .seed_lead_hosts(profile, &["sso".to_owned()], at(seconds), 50)
-            .await
-            .unwrap();
-        let due: Vec<Hostname> = hosts
-            .list_due(SourceName::HttpProbe, at(seconds), 50)
-            .await
-            .unwrap()
-            .into_iter()
-            .map(|candidate| candidate.host)
-            .collect();
-        hosts
-            .mark_checked(&due, SourceName::HttpProbe, at(seconds))
+    async fn inspect(&self, modules: &[EcosystemModule]) {
+        let runners: Vec<FakeModule> = modules.iter().copied().map(FakeModule).collect();
+        self.usecase
+            .inspect_due_domains(
+                &runners,
+                InspectionRunSettings { batch_size: 10 },
+                &self.clock,
+            )
             .await
             .unwrap();
     }
 
-    async fn read_company_jobs(&self, host: &str, seconds: i64) {
-        PgAtsTargets::new(self.pool.clone())
-            .mark_checked(&[domain(host)], at(seconds))
-            .await
-            .unwrap();
+    fn every_call(&self) -> Vec<Seen> {
+        self.shared.seen.lock().unwrap().clone()
     }
 
     async fn defaults(&self) {
@@ -989,7 +1001,7 @@ async fn the_agents_wait_for_the_enrichment_then_run_after_the_timeout(pool: PgP
 }
 
 #[sqlx::test(migrations = "../../migrations")]
-async fn the_agents_run_once_every_enabled_enrichment_step_ran(pool: PgPool) {
+async fn the_agents_run_once_every_module_of_the_inspection_settled(pool: PgPool) {
     let harness = Harness::new(pool).enriching();
     harness.defaults().await;
     let profile = harness.profile().await;
@@ -998,25 +1010,32 @@ async fn the_agents_run_once_every_enabled_enrichment_step_ran(pool: PgPool) {
         .await;
     harness.created_at_clock_zero().await;
 
-    harness.probe_every_lead_host(profile, 20).await;
+    harness.inspect(&[EcosystemModule::WebsiteStack]).await;
     assert_eq!(harness.qualify().await, 0);
     let lead = harness.lead(profile, "mairie.fr").await;
     let detail = harness.usecase.lead_detail(lead.id).await.unwrap();
-    let ran: Vec<(EnrichmentStep, bool)> = detail
+    let statuses: Vec<(EcosystemModule, ModuleStatus)> = detail
         .enrichment
-        .steps
+        .modules
         .iter()
-        .map(|step| (step.step, step.ran_at.is_some()))
+        .map(|state| (state.module, state.status))
         .collect();
     assert_eq!(
-        ran,
+        statuses,
         [
-            (EnrichmentStep::HttpProbe, true),
-            (EnrichmentStep::CompanyJobs, false)
+            (EcosystemModule::OfficialIdentity, ModuleStatus::Pending),
+            (EcosystemModule::WebsiteStack, ModuleStatus::Done),
+            (EcosystemModule::HiringActivity, ModuleStatus::Pending)
         ]
     );
+    assert_eq!(detail.enrichment.status, EnrichmentStatus::Pending);
 
-    harness.read_company_jobs("mairie.fr", 30).await;
+    harness
+        .inspect(&[
+            EcosystemModule::OfficialIdentity,
+            EcosystemModule::HiringActivity,
+        ])
+        .await;
     assert_eq!(harness.qualify().await, 1);
     let detail = harness.usecase.lead_detail(lead.id).await.unwrap();
     assert_eq!(detail.enrichment.status, EnrichmentStatus::Complete);
@@ -1040,8 +1059,7 @@ async fn a_certificate_only_lead_waits_for_evidence_then_qualifies_on_a_new_sign
         )
         .await;
     harness.created_at_clock_zero().await;
-    harness.probe_every_lead_host(profile, 20).await;
-    harness.read_company_jobs("acme.com", 30).await;
+    harness.inspect(&EcosystemModule::AVAILABLE).await;
     harness
         .observe_kind("acme.com", SourceName::RoleGuess, "role_contact_found", 40)
         .await;
@@ -1196,4 +1214,126 @@ async fn a_rate_limited_recheck_keeps_the_pages_and_asks_to_retry(pool: PgPool) 
         .unwrap()
         .unwrap();
     assert_eq!(dossier.pages.len(), 2);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn every_agent_document_set_carries_the_ecosystem_findings(pool: PgPool) {
+    let harness = Harness::new(pool).enriching();
+    harness.defaults().await;
+    harness.profile().await;
+    harness
+        .observe_kind("mairie.fr", SourceName::Boamp, "public_tender", 10)
+        .await;
+    harness.created_at_clock_zero().await;
+    harness.inspect(&EcosystemModule::AVAILABLE).await;
+
+    assert_eq!(harness.qualify().await, 1);
+    assert_eq!(harness.summarise().await, 1);
+    let calls = harness.every_call();
+    assert!(calls.iter().any(|call| call.scoring));
+    assert!(calls.iter().any(|call| call.aggregator));
+    for call in &calls {
+        let ecosystem: Vec<&(String, String)> = call
+            .documents
+            .iter()
+            .filter(|(_, content)| content.starts_with("Ecosystem, module"))
+            .collect();
+        assert_eq!(ecosystem.len(), 3, "{:?}", call.documents);
+        let website = ecosystem
+            .iter()
+            .find(|(source, _)| source == "https://mairie.fr/website_stack")
+            .unwrap();
+        assert!(website.1.contains("- Fait observé: FACT-OF-website_stack"));
+    }
+    let aggregator = calls.iter().find(|call| call.aggregator).unwrap();
+    assert!(
+        aggregator
+            .instruction
+            .contains("are the company dossier and the ecosystem findings")
+    );
+    let qualification = calls
+        .iter()
+        .find(|call| !call.aggregator && !call.scoring)
+        .unwrap();
+    assert!(qualification.system.contains("start with \"Ecosystem\""));
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_domain_on_a_hosting_platform_gets_no_dossier_read_and_releases_the_wait(pool: PgPool) {
+    let harness = Harness::new(pool).waiting();
+    harness.defaults().await;
+    let profile = harness.profile().await;
+    harness
+        .observe("jawagg.notion.site", SourceName::HttpProbe, 10)
+        .await;
+    harness.created_at_clock_zero().await;
+    let builder = FakeCompany::new(Vec::new());
+
+    assert_eq!(harness.qualify().await, 0);
+    let report = harness.research(&builder).await;
+
+    assert_eq!(report.domains, 1);
+    assert!(builder.calls().is_empty());
+    let lead = harness.lead(profile, "jawagg.notion.site").await;
+    let dossier = harness
+        .usecase
+        .company_dossier(&lead.domain)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(dossier.state, DossierState::HostingPlatform);
+    assert!(dossier.pages.is_empty());
+    assert!(dossier.official.is_none());
+    assert!(dossier.built_at.is_some());
+    assert_eq!(harness.research(&builder).await.domains, 0);
+    assert_eq!(harness.qualify().await, 1);
+    let detail = harness.usecase.lead_detail(lead.id).await.unwrap();
+    assert_eq!(detail.company.unwrap().state, DossierState::HostingPlatform);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn existing_dossiers_of_platform_domains_are_settled_once(pool: PgPool) {
+    let harness = Harness::new(pool);
+    for domain in ["jawagg.notion.site", "acme.com"] {
+        query(
+            "INSERT INTO company_dossiers (domain, state, pages, built_at, next_attempt_at)
+             VALUES ($1, 'partial', '[{\"url\": \"https://x/mentions-legales\", \"text\": \"guessed\"}]'::jsonb, now(), now() + interval '90 days')",
+        )
+        .bind(domain)
+        .execute(&harness.pool)
+        .await
+        .unwrap();
+    }
+
+    let settled = harness
+        .usecase
+        .settle_platform_dossiers(NINETY_DAYS, &harness.clock)
+        .await
+        .unwrap();
+
+    assert_eq!(settled, 1);
+    let platform = harness
+        .usecase
+        .company_dossier(&domain("jawagg.notion.site"))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(platform.state, DossierState::HostingPlatform);
+    assert!(platform.pages.is_empty());
+    let other = harness
+        .usecase
+        .company_dossier(&domain("acme.com"))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(other.state, DossierState::Partial);
+    assert_eq!(other.pages.len(), 1);
+    assert_eq!(
+        harness
+            .usecase
+            .settle_platform_dossiers(NINETY_DAYS, &harness.clock)
+            .await
+            .unwrap(),
+        0
+    );
 }

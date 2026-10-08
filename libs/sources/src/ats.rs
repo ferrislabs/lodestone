@@ -266,15 +266,7 @@ impl<F: Fetcher, T: AtsTargets> CandidateSource for AtsSource<F, T> {
             .map_err(|_| store_error("revisit interval out of range"))?;
         let enriched: Vec<ProfileId> = profiles
             .iter()
-            .filter(|active| {
-                active
-                    .revision
-                    .definition
-                    .definition()
-                    .enrichment
-                    .company_jobs
-                    .enabled
-            })
+            .filter(|active| active.revision.definition.definition().reads_company_jobs())
             .map(|active| active.profile.id)
             .collect();
         let domains = self

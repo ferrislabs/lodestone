@@ -96,10 +96,7 @@ pub fn work_targets(definition: &ProfileDefinition) -> HashMap<WorkTarget, bool>
         );
     }
     for step in EnrichmentStep::ALL {
-        targets.insert(
-            WorkTarget::enrichment(step),
-            step.enabled_in(&definition.enrichment),
-        );
+        targets.insert(WorkTarget::enrichment(step), step.enabled_in(definition));
     }
     for agent in &definition.qualification_agents {
         targets.insert(
@@ -325,11 +322,14 @@ pub fn only_removes_agents(previous: &ProfileDefinition, current: &ProfileDefini
                 .any(|kept| kept.id == agent.id && kept.enabled)
     });
     after.scoring_agents.retain(|agent| agent.enabled);
-    if !current.enrichment.http_probe.enabled {
-        before.enrichment.http_probe = current.enrichment.http_probe.clone();
+    if !current.inspection.enabled {
+        before.inspection = current.inspection.clone();
     }
-    if !current.enrichment.company_jobs.enabled {
-        before.enrichment.company_jobs = current.enrichment.company_jobs.clone();
+    if !current.probes_hosts() {
+        before.enrichment.custom = current.enrichment.custom.clone();
+    }
+    if !current.reads_company_jobs() {
+        before.enrichment.highlight_keywords = current.enrichment.highlight_keywords.clone();
     }
     before == after
 }
