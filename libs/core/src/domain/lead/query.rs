@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use crate::domain::{
     calibration::Calibrations,
     company::{CompanyDossier, CompanyEntity, SiblingLead},
+    enrichment::EnrichmentState,
     facts::LeadFacts,
     lead::{Assessment, ContactEmail, Lead, LeadId, LeadStatus, Signal},
     profile::{
@@ -131,6 +132,7 @@ pub struct LeadListing {
 #[derive(Debug, Clone, PartialEq)]
 pub struct LeadDetail {
     pub lead: Lead,
+    pub enrichment: EnrichmentState,
     pub profile: Profile,
     pub signals: Vec<Signal>,
     pub facts: LeadFacts,

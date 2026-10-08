@@ -27,7 +27,7 @@ import {
 	isSignalKind,
 	KIND_GROUPS,
 	KIND_META,
-	sourceSchema,
+	settingsSchema,
 } from '#/pages/profiles/lib/agents'
 import { countryName } from '#/pages/profiles/lib/countries'
 import { criteriaMatrix } from '#/pages/profiles/lib/matrix'
@@ -309,9 +309,9 @@ export function AgentWizard({
 					{step === 'criteria' && isSignalKind(kind) ? (
 						<ObjectFields
 							context={context}
-							schema={sourceSchema(kind)}
-							path={['agents', index, 'source']}
-							value={agent.source}
+							schema={settingsSchema(kind)}
+							path={['agents', index]}
+							value={agent}
 						/>
 					) : null}
 					{step === 'summary' ? (

@@ -74,8 +74,8 @@ const CATALOG = [
 	}),
 	summary({ key: 'ats', name: 'Pages carrières', status: 'ready' }),
 	summary({
-		key: 'http_probe',
-		name: 'Sonde HTTP',
+		key: 'dns_cname',
+		name: 'DNS CNAME',
 		status: 'untested',
 		capabilities: {
 			keyword_search: false,
@@ -322,7 +322,7 @@ describe('sourcing agent page', () => {
 			within(tile('boamp')).getByRole('button', { name: 'BOAMP' }),
 		)
 		expect(latest.agents).toMatchObject([{ providers: ['ted'] }])
-		expect(tile('http_probe')).toBeNull()
+		expect(tile('dns_cname')).toBeNull()
 	})
 
 	it('shows a provider that is not ready as dashed with a link to configure it', () => {
@@ -474,17 +474,15 @@ describe('sourcing agent page', () => {
 	})
 
 	it('puts the settings of a signal agent left and its provider right', () => {
-		render(
-			<Layout agents={[{ ...newAgent('http_probe', []), name: 'Ma sonde' }]} />,
-		)
-		openAgent('Ma sonde')
+		render(<Layout agents={[{ ...newAgent('dns', []), name: 'Mon DNS' }]} />)
+		openAgent('Mon DNS')
 		const settings = within(screen.getByRole('region', { name: 'Réglages' }))
-		expect(settings.getAllByText('Empreintes').length).toBeGreaterThan(0)
+		expect(settings.getAllByText('Motifs CNAME').length).toBeGreaterThan(0)
 		const provider = within(screen.getByRole('region', { name: 'Fournisseur' }))
-		expect(provider.getByText('Sonde HTTP')).toBeTruthy()
-		expect(tile('http_probe').getAttribute('data-status')).toBe('untested')
+		expect(provider.getByText('DNS CNAME')).toBeTruthy()
+		expect(tile('dns_cname').getAttribute('data-status')).toBe('untested')
 		expect(
-			provider.getByRole('link', { name: 'Configurer Sonde HTTP' }),
+			provider.getByRole('link', { name: 'Configurer DNS CNAME' }),
 		).toBeTruthy()
 		expect(
 			screen.queryByRole('region', {
@@ -592,17 +590,17 @@ describe('new agent wizard', () => {
 	it('creates a signal agent with its own settings step', () => {
 		render(<Layout agents={[]} />)
 		fireEvent.click(screen.getByRole('button', { name: 'Ajouter un agent' }))
-		fireEvent.click(wizard().getByRole('radio', { name: /^Sonde HTTP/ }))
+		fireEvent.click(wizard().getByRole('radio', { name: /^DNS/ }))
 		expect(document.querySelector('[data-provider-tile]')).toBeNull()
 		fireEvent.click(wizard().getByRole('button', { name: 'Suivant' }))
 		expect(currentStep()).toContain('Critères')
-		expect(wizard().getAllByText('Empreintes').length).toBeGreaterThan(0)
+		expect(wizard().getAllByText('Motifs CNAME').length).toBeGreaterThan(0)
 		expect(wizard().queryByLabelText('Mots-clés')).toBeNull()
 		fireEvent.click(wizard().getByRole('button', { name: 'Suivant' }))
-		expect(wizard().getByText('Signal · Sonde HTTP')).toBeTruthy()
+		expect(wizard().getByText('Signal · DNS')).toBeTruthy()
 		fireEvent.click(wizard().getByRole('button', { name: 'Créer' }))
 		expect(latest.agents).toMatchObject([
-			{ type: 'signal', id: 'http-probe', source: { provider: 'http_probe' } },
+			{ type: 'dns', id: 'dns', patterns: [] },
 		])
 	})
 

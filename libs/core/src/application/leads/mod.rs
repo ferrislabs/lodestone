@@ -1,4 +1,4 @@
-use chrono::Utc;
+use chrono::{Duration, Utc};
 use common::CoreError;
 use lodestone_macros::transactional;
 
@@ -12,6 +12,9 @@ use crate::{
     domain::{
         calibration::{Calibrations, ports::CalibrationRepository},
         company::{CompanyDossier, CompanyEntity, SiblingLead, ports::CompanyRepository},
+        enrichment::{
+            EnrichmentState, LeadEnrichmentRecord, enrichment_state, ports::EnrichmentRepository,
+        },
         facts::{LeadFacts, SiblingSignals},
         host::{CandidateHost, ports::KnownHostRepository},
         lead::{
@@ -19,7 +22,7 @@ use crate::{
             ports::{AssessmentRepository, ContactRepository, LeadRepository, SignalRepository},
             query::{LeadDetail, LeadListing, LeadQuery, ProfileSummary},
         },
-        profile::{ProfileId, ports::ProfileRepository},
+        profile::{ProfileId, definition::Enrichment, ports::ProfileRepository},
         qualification::ports::QualificationRepository,
         quality::{DecisionKind, Rejection},
         scoring_agent::ports::ScoringRepository,
@@ -109,7 +112,8 @@ impl LodestoneUseCase {
         qualification,
         scoring_agent,
         company,
-        calibration
+        calibration,
+        enrichment
     )]
     pub async fn lead_detail(&self, lead_id: LeadId) -> Result<LeadDetail, CoreError> {
         let mut leads = lead_repository;
@@ -123,6 +127,7 @@ impl LodestoneUseCase {
         let mut scoring_agents = scoring_agent_repository;
         let mut company = company_repository;
         let mut calibrations = calibration_repository;
+        let mut enrichments = enrichment_repository;
 
         let lead = leads.find(lead_id).await?.ok_or(CoreError::NotFound)?;
         if suppression.is_domain_suppressed(&lead.domain).await? {
@@ -169,6 +174,15 @@ impl LodestoneUseCase {
         let summary_state = qualification.summary_state(lead_id).await?;
         let scoring = qualification.scorings(&[lead_id]).await?.remove(&lead_id);
         let lead_signals = signals.list_for_lead(lead_id).await?;
+        let record = enrichments
+            .record(lead_id)
+            .await?
+            .unwrap_or(LeadEnrichmentRecord {
+                created_at: lead.first_seen_at,
+                runs: Vec::new(),
+                settings: Enrichment::default(),
+            });
+        let enrichment = self.lead_enrichment_state(&record, &lead_signals);
         let context = company_context(
             &mut signals,
             &mut known_hosts,
@@ -178,6 +192,7 @@ impl LodestoneUseCase {
         )
         .await?;
         Ok(LeadDetail {
+            enrichment,
             summary_state,
             agent_failures,
             scoring,
@@ -196,6 +211,15 @@ impl LodestoneUseCase {
             lead,
             profile,
         })
+    }
+
+    fn lead_enrichment_state(
+        &self,
+        record: &LeadEnrichmentRecord,
+        signals: &[Signal],
+    ) -> EnrichmentState {
+        let wait = Duration::from_std(self.enrichment_wait).unwrap_or_default();
+        enrichment_state(record, signals, wait, Utc::now())
     }
 
     #[transactional(signal, known_host, company)]

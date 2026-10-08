@@ -22,7 +22,7 @@ export const LEARNED_CALIBRATION_COPY: FieldCopy = {
 		"Corrige chaque jour les probabilités de cet agent d'après vos décisions, dès 50 leads étiquetés dont au moins 10 de chaque classe.",
 }
 
-const FINGERPRINT = 'agents[].source.fingerprints[]'
+const FINGERPRINT = 'enrichment.http_probe.fingerprints[]'
 const MARKER = `${FINGERPRINT}.debt_markers[]`
 
 export const FIELD_COPY: Readonly<Record<string, FieldCopy>> = {
@@ -40,12 +40,13 @@ export const FIELD_COPY: Readonly<Record<string, FieldCopy>> = {
 	},
 	agents: {
 		label: 'Agents',
-		description: 'Agents de détection. Au moins un est requis.',
+		description:
+			"Agents de sourcing : ils trouvent les leads. Au moins un est requis, sauf si une étape d'enrichissement est activée.",
 	},
 	'agents[]': {
 		label: 'Agent',
 		description:
-			'Un agent de recherche interroge des fournisseurs du catalogue, un agent de signal lit un fournisseur technique.',
+			'Un agent de recherche interroge des fournisseurs du catalogue, un agent Certificats lit les journaux de certificats, un agent DNS reconnaît des fournisseurs par la cible CNAME.',
 	},
 	'agents[].id': {
 		label: 'Identifiant',
@@ -59,35 +60,69 @@ export const FIELD_COPY: Readonly<Record<string, FieldCopy>> = {
 		label: 'Activé',
 		description: "Un agent désactivé est conservé mais n'est pas exécuté.",
 	},
-	'agents[].source': {
-		label: 'Source',
-		description: 'La source interrogée et ses réglages.',
-	},
-	'agents[].source.labels': {
+	'agents[].labels': {
 		label: 'Libellés',
 		description:
 			"Libellés de nom d'hôte à rechercher, par exemple auth ou sso.",
 	},
-	'agents[].source.patterns': {
+	'agents[].patterns': {
 		label: 'Motifs CNAME',
 		description: 'Couples fournisseur et suffixe de cible.',
 	},
-	'agents[].source.patterns[]': {
+	'agents[].patterns[]': {
 		label: 'Motif CNAME',
 		description: "Un fournisseur et le suffixe de cible CNAME qui l'identifie.",
 		add: 'Ajouter un motif',
 	},
-	'agents[].source.patterns[].provider': {
+	'agents[].patterns[].provider': {
 		label: 'Fournisseur',
 		description: 'Nom du fournisseur.',
 	},
-	'agents[].source.patterns[].target_suffix': {
+	'agents[].patterns[].target_suffix': {
 		label: 'Suffixe cible',
 		description: 'Suffixe de la cible CNAME qui identifie le fournisseur.',
 	},
-	'agents[].source.fingerprints': {
+	enrichment: {
+		label: 'Enrichissement',
+		description:
+			"Étapes exécutées sur chaque lead du profil, quel que soit l'agent qui l'a trouvé. Un lead est qualifié une fois ses étapes passées, ou après un délai.",
+	},
+	'enrichment.http_probe': {
+		label: 'Sonde HTTP',
+		description:
+			'Sonde le domaine de chaque lead, ses hôtes connus et les sous-domaines courants.',
+	},
+	'enrichment.http_probe.enabled': {
+		label: 'Activée',
+		description: 'Sonde les hôtes de chaque lead.',
+	},
+	'enrichment.http_probe.extra_subdomains': {
+		label: 'Sous-domaines sondés',
+		description:
+			'Sous-domaines du domaine du lead sondés en plus, par exemple auth ou sso.',
+	},
+	'enrichment.http_probe.fingerprints': {
 		label: 'Empreintes',
-		description: 'Empreintes à sonder sur chaque domaine.',
+		description: 'Empreintes à sonder sur chaque hôte.',
+	},
+	'enrichment.company_jobs': {
+		label: "Offres d'emploi de l'entreprise",
+		description:
+			'Lit les offres de la page carrières ou de la plateforme de recrutement de chaque lead.',
+	},
+	'enrichment.company_jobs.enabled': {
+		label: 'Activée',
+		description: 'Lit les offres de chaque lead.',
+	},
+	'enrichment.company_jobs.keywords': {
+		label: 'Mots-clés',
+		description:
+			'Mots-clés cherchés dans les offres. Vide : les mots-clés des agents de recherche activés.',
+	},
+	'enrichment.company_jobs.accept_min_keywords': {
+		label: 'Mots-clés distincts pour un signal fort',
+		description:
+			"Nombre de mots-clés distincts qu'une offre doit contenir pour donner un signal fort.",
 	},
 	[FINGERPRINT]: {
 		label: 'Empreinte',
@@ -158,7 +193,7 @@ export const FIELD_COPY: Readonly<Record<string, FieldCopy>> = {
 		description:
 			'Expression régulière avec un groupe de capture pour la version.',
 	},
-	'agents[].source.excluded_products': {
+	'enrichment.http_probe.excluded_products': {
 		label: 'Produits exclus',
 		description: 'Produits à ignorer, par exemple les vôtres.',
 	},
@@ -538,7 +573,8 @@ export const FIELD_COPY: Readonly<Record<string, FieldCopy>> = {
 
 export const VARIANT_TITLES: Readonly<Record<string, string>> = {
 	search: 'Recherche',
-	signal: 'Signal',
+	certificates: 'Certificats',
+	dns: 'DNS',
 	certificate_transparency: 'Transparence des certificats',
 	dns_cname: 'DNS CNAME',
 	http_probe: 'Sonde HTTP',

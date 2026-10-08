@@ -6,12 +6,15 @@ use lodestone_macros::repository;
 
 use crate::{
     Lead, LeadId, ProfileId, ProviderId, RevisionNumber,
-    domain::qualification::{
-        AGENT_ERROR_MAX_CHARS, AGENT_FAILED_AFTER, AWAITING_SCORING_REASON, AgentCallFailure,
-        AgentFailure, AgentKind, Completion, EvidenceStrength, Exclusion, LeadScoring,
-        QualificationResult, Rescoring, SCORING_MAX_AGE_HOURS, SCORING_VERSION,
-        SUMMARY_ERROR_MAX_CHARS, SummaryState, agent_retry_delay, ports::QualificationRepository,
-        summary_retry_delay,
+    domain::{
+        enrichment::{CERTIFICATE_SEEN_KIND, CONTACT_SOURCES, EnrichmentStep},
+        qualification::{
+            AGENT_ERROR_MAX_CHARS, AGENT_FAILED_AFTER, AWAITING_SCORING_REASON, AgentCallFailure,
+            AgentFailure, AgentKind, Completion, DueGates, EvidenceStrength, Exclusion,
+            LeadScoring, QualificationResult, Rescoring, SCORING_MAX_AGE_HOURS, SCORING_VERSION,
+            SUMMARY_ERROR_MAX_CHARS, SummaryState, agent_retry_delay,
+            ports::QualificationRepository, summary_retry_delay,
+        },
     },
     infrastructure::{
         lead::postgres::{model::LeadRow, repository::NOT_SUPPRESSED},
@@ -108,6 +111,48 @@ const DUE: &str = r#"
       )
 "#;
 
+fn enrichment_due(gate: usize) -> String {
+    let contact_sources = CONTACT_SOURCES
+        .iter()
+        .map(|source| format!("'{}'", source.as_str()))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let http_probe = gate + 1;
+    let company_jobs = gate + 2;
+    let probe_step = EnrichmentStep::HttpProbe.as_str();
+    let jobs_step = EnrichmentStep::CompanyJobs.as_str();
+    format!(
+        r#"
+      AND (
+          ${gate}::timestamptz IS NULL
+          OR leads.created_at <= ${gate}
+          OR (
+              (NOT ${http_probe}::boolean OR EXISTS (
+                  SELECT 1 FROM lead_enrichments e
+                  WHERE e.lead_id = leads.id AND e.step = '{probe_step}' AND e.ran_at IS NOT NULL
+              ))
+              AND (NOT ${company_jobs}::boolean OR EXISTS (
+                  SELECT 1 FROM lead_enrichments e
+                  WHERE e.lead_id = leads.id AND e.step = '{jobs_step}' AND e.ran_at IS NOT NULL
+              ))
+          )
+      )
+      AND NOT (
+          EXISTS (
+              SELECT 1 FROM signals
+              WHERE signals.lead_id = leads.id AND signals.kind = '{CERTIFICATE_SEEN_KIND}'
+          )
+          AND NOT EXISTS (
+              SELECT 1 FROM signals
+              WHERE signals.lead_id = leads.id
+                AND signals.kind <> '{CERTIFICATE_SEEN_KIND}'
+                AND signals.source NOT IN ({contact_sources})
+          )
+      )
+"#
+    )
+}
+
 const QUALIFICATION_BACKOFF: &str = r#"
       AND NOT EXISTS (
           SELECT 1 FROM lead_agent_retries retry
@@ -160,20 +205,24 @@ impl<'tx> QualificationRepository for PgQualificationRepository<'tx> {
         profile_id: ProfileId,
         revision: RevisionNumber,
         limit: u32,
-        dossier_gate: Option<DateTime<Utc>>,
+        gates: DueGates,
         now: DateTime<Utc>,
     ) -> Result<Vec<Lead>, CoreError> {
         let revision = revision_number(revision)?;
+        let enrichment = enrichment_due(6);
         let query = format!(
-            "SELECT leads.id, leads.profile_id, leads.domain, leads.status, leads.score, leads.confidence, leads.verdict, leads.llm_score, leads.qualified_at, leads.first_seen_at, leads.last_seen_at, leads.updated_at {DUE}{QUALIFICATION_BACKOFF}{NOT_SUPPRESSED} ORDER BY leads.first_seen_at ASC, leads.id ASC LIMIT $5"
+            "SELECT leads.id, leads.profile_id, leads.domain, leads.status, leads.score, leads.confidence, leads.verdict, leads.llm_score, leads.qualified_at, leads.first_seen_at, leads.last_seen_at, leads.updated_at {DUE}{enrichment}{QUALIFICATION_BACKOFF}{NOT_SUPPRESSED} ORDER BY leads.first_seen_at ASC, leads.id ASC LIMIT $5"
         );
         let mut tx = self.tx.lock().await;
         let rows = sqlx::query_as::<_, LeadRow>(&query)
             .bind(profile_id.0)
             .bind(revision)
-            .bind(dossier_gate)
+            .bind(gates.dossier)
             .bind(now)
             .bind(i64::from(limit))
+            .bind(gates.enrichment)
+            .bind(gates.http_probe)
+            .bind(gates.company_jobs)
             .fetch_all(&mut ***tx)
             .await
             .map_err(map_sqlx_error)?;
@@ -185,17 +234,22 @@ impl<'tx> QualificationRepository for PgQualificationRepository<'tx> {
         &mut self,
         profile_id: ProfileId,
         revision: RevisionNumber,
-        dossier_gate: Option<DateTime<Utc>>,
+        gates: DueGates,
         now: DateTime<Utc>,
     ) -> Result<u64, CoreError> {
         let revision = revision_number(revision)?;
-        let query = format!("SELECT COUNT(*) {DUE}{QUALIFICATION_BACKOFF}{NOT_SUPPRESSED}");
+        let enrichment = enrichment_due(5);
+        let query =
+            format!("SELECT COUNT(*) {DUE}{enrichment}{QUALIFICATION_BACKOFF}{NOT_SUPPRESSED}");
         let mut tx = self.tx.lock().await;
         let count: i64 = sqlx::query_scalar(&query)
             .bind(profile_id.0)
             .bind(revision)
-            .bind(dossier_gate)
+            .bind(gates.dossier)
             .bind(now)
+            .bind(gates.enrichment)
+            .bind(gates.http_probe)
+            .bind(gates.company_jobs)
             .fetch_one(&mut ***tx)
             .await
             .map_err(map_sqlx_error)?;

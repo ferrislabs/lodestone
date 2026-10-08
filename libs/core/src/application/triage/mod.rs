@@ -1,13 +1,21 @@
+use std::borrow::Cow;
+
 use chrono::{DateTime, Utc};
 use common::{CoreError, generate_uuid_v7};
 use lodestone_macros::transactional;
 use serde_json::json;
 
 use crate::{
-    application::{LodestoneUseCase, sources::SourceRunError},
+    application::{
+        LodestoneUseCase,
+        sources::{LeadCreation, SourceRunError},
+    },
     domain::{
         job::ports::Clock,
-        profile::{ActiveProfile, definition::SearchAgent},
+        profile::{
+            ActiveProfile,
+            definition::{AgentId, ProfileDefinition, SearchAgent},
+        },
         run::{Run, RunId, RunOutcome, ports::RunRepository},
         source::{Observation, SourceError},
         triage::{Candidate, Route, passes_filters, route},
@@ -36,6 +44,7 @@ pub struct TriageReport {
     pub accepted_ambiguous: u64,
     pub rejected_by_rules: u64,
     pub rejected_by_filters: u64,
+    pub skipped_no_lead: u64,
 }
 
 impl TriageReport {
@@ -60,9 +69,33 @@ fn candidate_text(candidate: &Candidate) -> String {
     format!("{}\n\n{}", candidate.title, candidate.text)
 }
 
+struct KeywordTarget<'a> {
+    agent: Option<&'a AgentId>,
+    rules: Cow<'a, SearchAgent>,
+}
+
+fn keyword_targets(definition: &ProfileDefinition, source: SourceName) -> Vec<KeywordTarget<'_>> {
+    let mut targets: Vec<KeywordTarget<'_>> = definition
+        .enabled_search_agents(source)
+        .map(|agent| KeywordTarget {
+            agent: Some(&agent.id),
+            rules: Cow::Borrowed(agent),
+        })
+        .collect();
+    if source == SourceName::Ats
+        && let Some(rules) = definition.company_jobs_rules()
+    {
+        targets.push(KeywordTarget {
+            agent: None,
+            rules: Cow::Owned(rules),
+        });
+    }
+    targets
+}
+
 fn observation(
     candidate: &Candidate,
-    agent: &SearchAgent,
+    agent: Option<&AgentId>,
     matched: &[String],
     excluded: Option<&[String]>,
     route: &str,
@@ -85,15 +118,16 @@ fn observation(
         provenance: candidate.provenance.clone(),
         strength: self::strength(strength)?,
         observed_at: candidate.observed_at,
-        agent: Some(agent.id.clone()),
+        agent: agent.cloned(),
     })
 }
 
 fn decide(
-    agent: &SearchAgent,
+    target: &KeywordTarget<'_>,
     candidates: &[Candidate],
     report: &mut TriageReport,
 ) -> Result<Vec<Observation>, CoreError> {
+    let agent = target.rules.as_ref();
     let mut observations = Vec::new();
     for candidate in candidates {
         if !passes_filters(&agent.filters, candidate) {
@@ -106,7 +140,7 @@ fn decide(
                 report.accepted_by_rules += 1;
                 observations.push(observation(
                     candidate,
-                    agent,
+                    target.agent,
                     &matched,
                     None,
                     "keywords",
@@ -117,7 +151,7 @@ fn decide(
                 report.accepted_ambiguous += 1;
                 observations.push(observation(
                     candidate,
-                    agent,
+                    target.agent,
                     &matched,
                     Some(&excluded),
                     "keywords_ambiguous",
@@ -145,24 +179,15 @@ impl LodestoneUseCase {
             .await?
             .into_iter()
             .filter(|active| {
-                active
-                    .revision
-                    .definition
-                    .definition()
-                    .enabled_search_agents(name)
-                    .next()
-                    .is_some()
+                !keyword_targets(active.revision.definition.definition(), name).is_empty()
             })
             .collect();
-        let targets: Vec<(&ActiveProfile, &SearchAgent)> = profiles
+        let targets: Vec<(&ActiveProfile, KeywordTarget<'_>)> = profiles
             .iter()
             .flat_map(|active| {
-                active
-                    .revision
-                    .definition
-                    .definition()
-                    .enabled_search_agents(name)
-                    .map(move |agent| (active, agent))
+                keyword_targets(active.revision.definition.definition(), name)
+                    .into_iter()
+                    .map(move |target| (active, target))
             })
             .collect();
         if targets.is_empty() {
@@ -172,12 +197,12 @@ impl LodestoneUseCase {
         let started_at = clock.now();
         let runs: Vec<Run> = targets
             .iter()
-            .map(|(active, agent)| {
+            .map(|(active, target)| {
                 Run::start(
                     RunId(generate_uuid_v7()),
                     active.profile.id,
                     name,
-                    Some(agent.id.clone()),
+                    target.agent.cloned(),
                     started_at,
                 )
             })
@@ -206,8 +231,8 @@ impl LodestoneUseCase {
             ..TriageReport::default()
         };
         let mut first_error: Option<CoreError> = None;
-        for ((active, agent), run) in targets.iter().zip(&runs) {
-            let observations = match decide(agent, &candidates, &mut report) {
+        for ((active, target), run) in targets.iter().zip(&runs) {
+            let observations = match decide(target, &candidates, &mut report) {
                 Ok(observations) => observations,
                 Err(error) => {
                     let outcome = RunOutcome::Failed {
@@ -221,12 +246,18 @@ impl LodestoneUseCase {
                     continue;
                 }
             };
-            let signals = count(observations.len());
+            let creation = match target.agent {
+                Some(_) => LeadCreation::Create,
+                None => LeadCreation::ExistingOnly,
+            };
             let recorded = self
-                .record_observations_at(active, name, &observations, clock.now())
+                .record_observations_with(active, name, &observations, clock.now(), creation)
                 .await;
+            let skipped = recorded.as_ref().map_or(0, |skipped| *skipped);
+            report.skipped_no_lead += skipped;
+            let signals = count(observations.len()).saturating_sub(skipped);
             let outcome = match &recorded {
-                Ok(()) => RunOutcome::Succeeded { volume, signals },
+                Ok(_) => RunOutcome::Succeeded { volume, signals },
                 Err(error) => RunOutcome::Failed {
                     volume,
                     signals: 0,

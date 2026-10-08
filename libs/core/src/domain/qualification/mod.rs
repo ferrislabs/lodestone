@@ -485,6 +485,14 @@ pub struct QualificationResult {
     pub created_at: DateTime<Utc>,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct DueGates {
+    pub dossier: Option<DateTime<Utc>>,
+    pub enrichment: Option<DateTime<Utc>>,
+    pub http_probe: bool,
+    pub company_jobs: bool,
+}
+
 pub const SUMMARY_FAILED_AFTER: u32 = 5;
 pub const SUMMARY_ERROR_MAX_CHARS: usize = 200;
 

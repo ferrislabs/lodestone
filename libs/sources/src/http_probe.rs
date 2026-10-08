@@ -10,7 +10,7 @@ use lodestone_core::{
     ActiveProfile, CandidateHost, CandidateHosts, FetchError, FetchPurpose, FetchRequest,
     FetchResponse, Fetcher, Hostname, LodestoneUseCase, Observation, ProfileId, Provenance,
     RevisionNumber, SignalKind, Source, SourceError, SourceName, UnitInterval,
-    definition::{Agent, AgentId, DebtRule, Fingerprint, Matcher, VersionExtractor},
+    definition::{DebtRule, Fingerprint, Matcher, SourceTarget, VersionExtractor},
     transient_checked_at,
 };
 use regex::Regex;
@@ -223,7 +223,7 @@ pub struct HttpProbeSource<F: Fetcher, H: CandidateHosts, G: ProbeGuard> {
     hosts: Arc<H>,
     guard: Arc<G>,
     settings: HttpProbeSettings,
-    compiled: Mutex<HashMap<(ProfileId, RevisionNumber, AgentId), Arc<CompiledProfile>>>,
+    compiled: Mutex<HashMap<(ProfileId, RevisionNumber), Arc<CompiledProfile>>>,
     compilations: AtomicUsize,
 }
 
@@ -243,13 +243,13 @@ impl<F: Fetcher, H: CandidateHosts, G: ProbeGuard> HttpProbeSource<F, H, G> {
         self.compilations.load(Ordering::SeqCst)
     }
 
-    fn compiled_for(&self, profile: &ActiveProfile, agent: &Agent) -> Option<Arc<CompiledProfile>> {
-        let config = agent.http_probe()?;
-        let key = (
-            profile.profile.id,
-            profile.revision.number,
-            agent.id().clone(),
-        );
+    fn compiled_for(
+        &self,
+        profile: &ActiveProfile,
+        target: &SourceTarget<'_>,
+    ) -> Option<Arc<CompiledProfile>> {
+        let config = target.http_probe()?;
+        let key = (profile.profile.id, profile.revision.number);
         let mut cache = self.compiled.lock().ok()?;
         if let Some(found) = cache.get(&key) {
             return Some(Arc::clone(found));
@@ -283,9 +283,9 @@ fn probe_paths(profiles: &[ActiveProfile]) -> Vec<String> {
                 .revision
                 .definition
                 .definition()
-                .enabled_agents(SourceName::HttpProbe)
+                .targets(SourceName::HttpProbe)
         })
-        .filter_map(|agent| agent.http_probe())
+        .filter_map(|target| target.http_probe())
         .flat_map(|config| config.fingerprints.iter().map(|item| item.path.clone()))
         .collect();
     paths.sort();
@@ -402,6 +402,25 @@ where
         if paths.is_empty() {
             return Ok(Vec::new());
         }
+        for active in profiles {
+            let probe = &active
+                .revision
+                .definition
+                .definition()
+                .enrichment
+                .http_probe;
+            if probe.enabled {
+                self.hosts
+                    .seed_lead_hosts(
+                        active.profile.id,
+                        &probe.extra_subdomains,
+                        now,
+                        self.settings.batch_size,
+                    )
+                    .await
+                    .map_err(upstream)?;
+            }
+        }
         let interval = chrono::Duration::from_std(self.settings.revisit_interval)
             .map_err(|_| upstream("revisit interval is out of range"))?;
         let checked_before = now
@@ -469,9 +488,9 @@ where
         &self,
         item: &Self::Item,
         profile: &ActiveProfile,
-        agent: &Agent,
+        target: &SourceTarget<'_>,
     ) -> Vec<Observation> {
-        let Some(compiled) = self.compiled_for(profile, agent) else {
+        let Some(compiled) = self.compiled_for(profile, target) else {
             return Vec::new();
         };
         let (Ok(product_kind), Ok(debt_kind)) = (

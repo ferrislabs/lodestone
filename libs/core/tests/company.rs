@@ -13,14 +13,16 @@ use std::{
 use chrono::{DateTime, NaiveDate, Utc};
 use common::{EncryptionKey, Secret};
 use lodestone_core::{
-    ActiveProfile, Clock, CompanyBuilder, CompanyPage, CreateProfileCommand, DossierBuild,
-    DossierState, GenerationParams, Lead, LeadRepository, LlmError, LlmProvider, LlmRequest,
+    ActiveProfile, AtsTargets, CandidateHosts, Clock, CompanyBuilder, CompanyPage,
+    CreateProfileCommand, DossierBuild, DossierState, EnrichmentStatus, EnrichmentStep,
+    GenerationParams, Hostname, Lead, LeadRepository, LlmError, LlmProvider, LlmRequest,
     LlmResponse, LodestoneUseCase, NormalizedDomain, Observation, OfficialData, ProfileId,
     ProfileName, Provenance, ProviderDefinition, ProviderKind, SignalKind, Siren, SourceError,
-    SourceName, Tier, TokenPricing, TokenUsage, UnitInterval, ValidatedProfile,
+    SourceName, Tier, TokenPricing, TokenUsage, UnitInterval, ValidatedProfile, WaitingReason,
     company::{CompanyRunReport, CompanyRunSettings},
     evaluation::{EvaluationSettings, ProviderBuilder},
     infrastructure::{
+        candidate_host::PgCandidateHosts, contact_target::postgres::PgAtsTargets,
         crypto::AesGcmCipher, lead::postgres::PgLeadRepository, llm_cache::postgres::PgLlmCache,
         postgres::with_tx,
     },
@@ -35,6 +37,7 @@ const MODEL: &str = "model-a";
 const PAGE_URL: &str = "https://acme.com/a-propos";
 const PAGE_TEXT: &str = "Nous fabriquons des pieces mecaniques depuis 2010";
 const WAIT: Duration = Duration::from_secs(600);
+const ENRICHMENT_WAIT: Duration = Duration::from_secs(1_800);
 const NINETY_DAYS: Duration = Duration::from_secs(90 * 86_400);
 
 #[derive(Clone)]
@@ -311,6 +314,58 @@ impl Harness {
     fn waiting(mut self) -> Self {
         self.usecase = self.usecase.with_company_wait(WAIT);
         self
+    }
+
+    fn enriching(mut self) -> Self {
+        self.usecase = self.usecase.with_enrichment_wait(ENRICHMENT_WAIT);
+        self
+    }
+
+    async fn observe_kind(&self, host: &str, source: SourceName, kind: &str, seconds: i64) {
+        let active = self.active().await;
+        self.usecase
+            .record_observations(
+                &active,
+                source,
+                &[Observation {
+                    domain: domain(host),
+                    kind: SignalKind::parse(kind).unwrap(),
+                    value: Some(format!("{kind}-{host}")),
+                    raw: json!({}),
+                    provenance: Provenance::parse(&format!("https://{host}/{kind}")).unwrap(),
+                    strength: UnitInterval::new(0.3).unwrap(),
+                    observed_at: at(seconds),
+                    agent: None,
+                }],
+            )
+            .await
+            .unwrap();
+    }
+
+    async fn probe_every_lead_host(&self, profile: ProfileId, seconds: i64) {
+        let hosts = PgCandidateHosts::new(self.pool.clone());
+        hosts
+            .seed_lead_hosts(profile, &["sso".to_owned()], at(seconds), 50)
+            .await
+            .unwrap();
+        let due: Vec<Hostname> = hosts
+            .list_due(SourceName::HttpProbe, at(seconds), 50)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|candidate| candidate.host)
+            .collect();
+        hosts
+            .mark_checked(&due, SourceName::HttpProbe, at(seconds))
+            .await
+            .unwrap();
+    }
+
+    async fn read_company_jobs(&self, host: &str, seconds: i64) {
+        PgAtsTargets::new(self.pool.clone())
+            .mark_checked(&[domain(host)], at(seconds))
+            .await
+            .unwrap();
     }
 
     async fn defaults(&self) {
@@ -823,4 +878,105 @@ async fn leads_of_a_domain_share_one_dossier_across_profiles(pool: PgPool) {
         .await
         .unwrap();
     assert_eq!(leads, 2);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_agents_wait_for_the_enrichment_then_run_after_the_timeout(pool: PgPool) {
+    let harness = Harness::new(pool).enriching();
+    harness.defaults().await;
+    let profile = harness.profile().await;
+    harness
+        .observe_kind("mairie.fr", SourceName::Boamp, "public_tender", 10)
+        .await;
+    harness.created_at_clock_zero().await;
+
+    assert_eq!(harness.qualify().await, 0);
+    let lead = harness.lead(profile, "mairie.fr").await;
+    let detail = harness.usecase.lead_detail(lead.id).await.unwrap();
+    assert_eq!(detail.enrichment.status, EnrichmentStatus::Pending);
+    assert_eq!(
+        detail.enrichment.waiting_reason,
+        Some(WaitingReason::AwaitingEnrichment)
+    );
+    harness.set_time(1_799);
+    assert_eq!(harness.qualify().await, 0);
+    assert!(harness.calls(false).is_empty());
+
+    harness.set_time(1_801);
+    assert_eq!(harness.qualify().await, 1);
+    assert_eq!(harness.calls(false).len(), 1);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_agents_run_once_every_enabled_enrichment_step_ran(pool: PgPool) {
+    let harness = Harness::new(pool).enriching();
+    harness.defaults().await;
+    let profile = harness.profile().await;
+    harness
+        .observe_kind("mairie.fr", SourceName::Boamp, "public_tender", 10)
+        .await;
+    harness.created_at_clock_zero().await;
+
+    harness.probe_every_lead_host(profile, 20).await;
+    assert_eq!(harness.qualify().await, 0);
+    let lead = harness.lead(profile, "mairie.fr").await;
+    let detail = harness.usecase.lead_detail(lead.id).await.unwrap();
+    let ran: Vec<(EnrichmentStep, bool)> = detail
+        .enrichment
+        .steps
+        .iter()
+        .map(|step| (step.step, step.ran_at.is_some()))
+        .collect();
+    assert_eq!(
+        ran,
+        [
+            (EnrichmentStep::HttpProbe, true),
+            (EnrichmentStep::CompanyJobs, false)
+        ]
+    );
+
+    harness.read_company_jobs("mairie.fr", 30).await;
+    assert_eq!(harness.qualify().await, 1);
+    let detail = harness.usecase.lead_detail(lead.id).await.unwrap();
+    assert_eq!(detail.enrichment.status, EnrichmentStatus::Complete);
+    assert_eq!(detail.enrichment.waiting_reason, None);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_certificate_only_lead_waits_for_evidence_then_qualifies_on_a_new_signal(pool: PgPool) {
+    let harness = Harness::new(pool).enriching();
+    harness.defaults().await;
+    let profile = harness.profile().await;
+    harness
+        .observe_kind(
+            "acme.com",
+            SourceName::CertificateTransparency,
+            "certificate_seen",
+            10,
+        )
+        .await;
+    harness.created_at_clock_zero().await;
+    harness.probe_every_lead_host(profile, 20).await;
+    harness.read_company_jobs("acme.com", 30).await;
+    harness
+        .observe_kind("acme.com", SourceName::RoleGuess, "role_contact_found", 40)
+        .await;
+
+    harness.set_time(5_000);
+    assert_eq!(harness.qualify().await, 0);
+    assert!(harness.calls(false).is_empty());
+    let lead = harness.lead(profile, "acme.com").await;
+    let detail = harness.usecase.lead_detail(lead.id).await.unwrap();
+    assert_eq!(detail.enrichment.status, EnrichmentStatus::Complete);
+    assert_eq!(
+        detail.enrichment.waiting_reason,
+        Some(WaitingReason::AwaitingEnrichmentEvidence)
+    );
+
+    harness
+        .observe_kind("acme.com", SourceName::HttpProbe, "product_detected", 50)
+        .await;
+    assert_eq!(harness.qualify().await, 1);
+    let detail = harness.usecase.lead_detail(lead.id).await.unwrap();
+    assert_eq!(detail.enrichment.waiting_reason, None);
 }

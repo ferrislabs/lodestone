@@ -41,7 +41,7 @@ describe('agent wizard steps', () => {
 	})
 
 	it('asks nothing more of a signal agent than a name', () => {
-		const probe = newAgent('http_probe', [])
+		const probe = newAgent('dns', [])
 		expect(stepProblems('type', probe)).toEqual([])
 		expect(stepProblems('criteria', probe)).toEqual([])
 		expect(stepProblems('summary', probe)).toEqual([])

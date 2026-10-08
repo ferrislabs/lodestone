@@ -3,6 +3,7 @@ pub(crate) mod ats_target;
 pub(crate) mod calibration;
 pub(crate) mod company;
 pub(crate) mod contact;
+pub(crate) mod enrichment;
 pub(crate) mod facts;
 pub(crate) mod fetch;
 pub(crate) mod host;

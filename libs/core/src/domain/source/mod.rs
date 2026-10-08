@@ -8,7 +8,7 @@ use crate::domain::{
     fetch::FetchError,
     profile::{
         ActiveProfile,
-        definition::{Agent, AgentId},
+        definition::{AgentId, SourceTarget},
     },
     values::{Provenance, SignalKind, SourceName, UnitInterval},
 };
@@ -55,7 +55,7 @@ pub trait Source: Send + Sync {
         now: DateTime<Utc>,
     ) -> impl Future<Output = Result<Vec<Self::Item>, SourceError>> + Send;
 
-    fn serves(&self, _item: &Self::Item, _agent: &Agent) -> bool {
+    fn serves(&self, _item: &Self::Item, _target: &SourceTarget<'_>) -> bool {
         true
     }
 
@@ -63,6 +63,6 @@ pub trait Source: Send + Sync {
         &self,
         item: &Self::Item,
         profile: &ActiveProfile,
-        agent: &Agent,
+        target: &SourceTarget<'_>,
     ) -> Vec<Observation>;
 }

@@ -3,7 +3,7 @@ use std::{sync::Arc, time::Duration};
 use chrono::{DateTime, Utc};
 use lodestone_core::{
     ActiveProfile, AtsTargets, Candidate, FetchError, FetchPurpose, FetchRequest, FetchResponse,
-    Fetcher, NormalizedDomain, SourceError, SourceName, triage::CandidateSource,
+    Fetcher, NormalizedDomain, ProfileId, SourceError, SourceName, triage::CandidateSource,
 };
 use serde_json::Value;
 use tracing::{debug, info};
@@ -215,14 +215,27 @@ impl<F: Fetcher, T: AtsTargets> CandidateSource for AtsSource<F, T> {
 
     async fn collect(
         &self,
-        _profiles: &[ActiveProfile],
+        profiles: &[ActiveProfile],
         now: DateTime<Utc>,
     ) -> Result<Vec<Candidate>, SourceError> {
         let revisit = chrono::Duration::from_std(self.settings.revisit_interval)
             .map_err(|_| store_error("revisit interval out of range"))?;
+        let enriched: Vec<ProfileId> = profiles
+            .iter()
+            .filter(|active| {
+                active
+                    .revision
+                    .definition
+                    .definition()
+                    .enrichment
+                    .company_jobs
+                    .enabled
+            })
+            .map(|active| active.profile.id)
+            .collect();
         let domains = self
             .targets
-            .list_due(now - revisit, self.settings.batch_size)
+            .list_due(&enriched, now - revisit, self.settings.batch_size)
             .await
             .map_err(store_error)?;
         let mut candidates = Vec::new();

@@ -121,10 +121,11 @@ impl Harness {
         ])
         .expect("parse default args");
         let repository = FerrisKeyRepository::new(server.base_url(), Some("lodestone".to_owned()));
+        let enrichment_wait = args.enrichment.wait();
         let state = AppState {
             args: Arc::new(args),
             auth: AuthService::new(repository),
-            usecase: LodestoneUseCase::new(pool),
+            usecase: LodestoneUseCase::new(pool).with_enrichment_wait(enrichment_wait),
             rate_limit: RateLimitService::new(InMemoryRateLimiter::new()),
             rate_limit_quota: Quota::per_minute(1000),
             providers: Arc::new(

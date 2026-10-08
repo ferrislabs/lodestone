@@ -5,6 +5,7 @@ use thiserror::Error;
 use crate::domain::{
     NormalizedDomain,
     host::{CandidateHost, Hostname},
+    profile::ProfileId,
     values::SourceName,
 };
 
@@ -27,6 +28,14 @@ pub trait CandidateHosts: Send + Sync {
         source: SourceName,
         at: DateTime<Utc>,
     ) -> impl Future<Output = Result<(), CoreError>> + Send;
+
+    fn seed_lead_hosts(
+        &self,
+        profile: ProfileId,
+        subdomains: &[String],
+        at: DateTime<Utc>,
+        limit: u32,
+    ) -> impl Future<Output = Result<u64, CoreError>> + Send;
 }
 
 #[cfg_attr(test, mockall::automock)]

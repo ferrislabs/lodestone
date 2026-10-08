@@ -31,9 +31,9 @@ use crate::{
             definition::{ProfileDefinition, QualificationAgent},
         },
         qualification::{
-            AgentCallFailure, AgentFailure, AgentKind, AgentOpinion, Completion, EvidenceStrength,
-            Judgement, QualificationResult, ResultId, ResultStatus, SCORING_VERSION, ValidOutput,
-            Violations, exclusions, judge,
+            AgentCallFailure, AgentFailure, AgentKind, AgentOpinion, Completion, DueGates,
+            EvidenceStrength, Judgement, QualificationResult, ResultId, ResultStatus,
+            SCORING_VERSION, ValidOutput, Violations, exclusions, judge,
             ports::QualificationRepository,
             prompt::{AgentPrompt, build, lead_document, with_ungrounded, with_violations},
             sample_record, validate_answers, vote,
@@ -895,6 +895,15 @@ where
     }
 }
 
+fn wait_gate(wait: Duration, now: DateTime<Utc>) -> Option<DateTime<Utc>> {
+    if wait.is_zero() {
+        return None;
+    }
+    chrono::Duration::from_std(wait)
+        .ok()
+        .and_then(|wait| now.checked_sub_signed(wait))
+}
+
 impl LodestoneUseCase {
     pub async fn has_enabled_qualification_agent(&self) -> Result<bool, CoreError> {
         Ok(self.list_active_profiles().await?.iter().any(|active| {
@@ -946,7 +955,7 @@ impl LodestoneUseCase {
         let mut budget = RunBudget::new(settings.budget_cents);
         let mut providers = Providers::new();
         let mut remaining = settings.batch_size;
-        let gate = self.dossier_gate(clock.now());
+        let now = clock.now();
         let rescoring = self
             .rescore_stale_leads(RESCORE_BATCH_SIZE, clock.now())
             .await?;
@@ -955,7 +964,10 @@ impl LodestoneUseCase {
             if remaining == 0 {
                 break;
             }
-            let leads = self.due_leads(active, remaining, gate, clock.now()).await?;
+            let gates = self.due_gates(active, now);
+            let leads = self
+                .due_leads(active, remaining, gates, clock.now())
+                .await?;
             for lead in &leads {
                 let outcome = evaluator
                     .evaluate_lead(self, active, lead, &mut providers, &mut budget, clock)
@@ -979,28 +991,30 @@ impl LodestoneUseCase {
                 }
             }
         }
-        report.backlog = self.due_backlog(&profiles, gate, clock.now()).await? + rescoring.backlog;
+        report.backlog = self.due_backlog(&profiles, now, clock.now()).await? + rescoring.backlog;
         Ok(report)
     }
 
-    fn dossier_gate(&self, now: DateTime<Utc>) -> Option<DateTime<Utc>> {
-        if self.company_wait.is_zero() {
-            return None;
+    pub(crate) fn due_gates(&self, active: &ActiveProfile, now: DateTime<Utc>) -> DueGates {
+        let enrichment = &active.revision.definition.definition().enrichment;
+        DueGates {
+            dossier: wait_gate(self.company_wait, now),
+            enrichment: wait_gate(self.enrichment_wait, now).filter(|_| enrichment.any_enabled()),
+            http_probe: enrichment.http_probe.enabled,
+            company_jobs: enrichment.company_jobs.enabled,
         }
-        chrono::Duration::from_std(self.company_wait)
-            .ok()
-            .and_then(|wait| now.checked_sub_signed(wait))
     }
 
     async fn due_backlog(
         &self,
         profiles: &[ActiveProfile],
-        gate: Option<DateTime<Utc>>,
+        gated_at: DateTime<Utc>,
         now: DateTime<Utc>,
     ) -> Result<u64, CoreError> {
         let mut backlog = 0;
         for active in profiles {
-            backlog += self.count_due_leads(active, gate, now).await?;
+            let gates = self.due_gates(active, gated_at);
+            backlog += self.count_due_leads(active, gates, now).await?;
         }
         Ok(backlog)
     }
@@ -1010,11 +1024,11 @@ impl LodestoneUseCase {
         &self,
         active: &ActiveProfile,
         limit: u32,
-        gate: Option<DateTime<Utc>>,
+        gates: DueGates,
         now: DateTime<Utc>,
     ) -> Result<Vec<Lead>, CoreError> {
         let mut repo = qualification_repository;
-        repo.due_leads(active.profile.id, active.revision.number, limit, gate, now)
+        repo.due_leads(active.profile.id, active.revision.number, limit, gates, now)
             .await
     }
 
@@ -1022,11 +1036,11 @@ impl LodestoneUseCase {
     async fn count_due_leads(
         &self,
         active: &ActiveProfile,
-        gate: Option<DateTime<Utc>>,
+        gates: DueGates,
         now: DateTime<Utc>,
     ) -> Result<u64, CoreError> {
         let mut repo = qualification_repository;
-        repo.count_due(active.profile.id, active.revision.number, gate, now)
+        repo.count_due(active.profile.id, active.revision.number, gates, now)
             .await
     }
 

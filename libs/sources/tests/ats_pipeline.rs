@@ -225,8 +225,8 @@ async fn an_accepted_job_offer_raises_the_score_of_a_passively_detected_lead(poo
     let report = run(&pool, &fetcher, &FixedClock(100)).await;
 
     assert_eq!(report.candidates, 2);
-    assert_eq!(report.accepted_by_rules, 2);
-    assert_eq!(report.rejected_by_rules, 2);
+    assert_eq!(report.accepted_by_rules, 1);
+    assert_eq!(report.rejected_by_rules, 1);
     let offers: Vec<_> = signals(&pool, profile, "keycloakco.fr")
         .await
         .into_iter()
@@ -234,10 +234,7 @@ async fn an_accepted_job_offer_raises_the_score_of_a_passively_detected_lead(poo
         .collect();
     assert_eq!(offers.len(), 1);
     assert_eq!(offers[0].source, SourceName::Ats);
-    assert_eq!(
-        offers[0].agent,
-        Some(lodestone_core::definition::AgentId::new("ats-fr"))
-    );
+    assert_eq!(offers[0].agent, None);
     assert_eq!(offers[0].raw["route"], "keywords");
     assert_eq!(offers[0].raw["details"]["ats"], "lever");
     assert_eq!(offers[0].raw["details"]["board"], "keycloakco");
@@ -259,7 +256,7 @@ async fn an_accepted_job_offer_raises_the_score_of_a_passively_detected_lead(poo
 }
 
 #[sqlx::test(migrations = "../../migrations")]
-async fn only_passively_detected_unsuppressed_leads_are_scanned(pool: PgPool) {
+async fn every_unsuppressed_lead_is_scanned_whatever_its_source(pool: PgPool) {
     let profile = iam_profile(&pool).await;
     observe(
         &pool,
@@ -299,13 +296,17 @@ async fn only_passively_detected_unsuppressed_leads_are_scanned(pool: PgPool) {
             .iter()
             .any(|url| url.starts_with("https://keycloakco.fr/"))
     );
-    assert!(requested.iter().all(|url| !url.contains("tender.fr")));
+    assert!(
+        requested
+            .iter()
+            .any(|url| url.starts_with("https://tender.fr/"))
+    );
     assert!(requested.iter().all(|url| !url.contains("optout.io")));
     assert!(
         signals(&pool, profile, "tender.fr")
             .await
             .iter()
-            .all(|signal| signal.kind.as_str() != "job_offer")
+            .any(|signal| signal.kind.as_str() == "job_offer")
     );
     assert!(
         signals(&pool, profile, "optout.io")

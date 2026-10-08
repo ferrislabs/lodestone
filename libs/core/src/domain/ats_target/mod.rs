@@ -1,11 +1,12 @@
 use chrono::{DateTime, Utc};
 use common::CoreError;
 
-use crate::domain::NormalizedDomain;
+use crate::domain::{NormalizedDomain, profile::ProfileId};
 
 pub trait AtsTargets: Send + Sync {
     fn list_due(
         &self,
+        profiles: &[ProfileId],
         checked_before: DateTime<Utc>,
         limit: u32,
     ) -> impl Future<Output = Result<Vec<NormalizedDomain>, CoreError>> + Send;

@@ -92,7 +92,7 @@ describe('AgentCard run action', () => {
 describe('AgentCard continuous kinds', () => {
 	it('shows the listening state and last activity instead of the run button', () => {
 		renderCard({
-			kind: 'dns_cname',
+			kind: 'dns',
 			onRunSource: vi.fn(),
 			now: NOW,
 			listener: {
@@ -110,7 +110,7 @@ describe('AgentCard continuous kinds', () => {
 
 	it('says so when nothing was processed yet', () => {
 		renderCard({
-			kind: 'http_probe',
+			kind: 'certificates',
 			now: NOW,
 			listener: { state: 'idle', last_activity_at: null },
 		})
@@ -121,19 +121,19 @@ describe('AgentCard continuous kinds', () => {
 
 	it('shows the other listener states', () => {
 		renderCard({
-			kind: 'certificate_transparency',
+			kind: 'certificates',
 			now: NOW,
 			listener: { state: 'idle_no_agent' },
 		})
 		expect(screen.getByText('Inactif (aucun agent)')).toBeTruthy()
 		cleanup()
-		renderCard({ kind: 'certificate_transparency', now: NOW })
+		renderCard({ kind: 'certificates', now: NOW })
 		expect(screen.getByText('Écoute continue')).toBeTruthy()
 	})
 
 	it('flags a silent listener', () => {
 		renderCard({
-			kind: 'dns_cname',
+			kind: 'dns',
 			now: NOW,
 			listener: { state: 'stale', last_activity_at: null },
 		})

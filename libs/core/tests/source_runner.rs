@@ -7,7 +7,7 @@ use lodestone_core::{
     ActiveProfile, Clock, LeadRepository, LodestoneUseCase, NormalizedDomain, Observation,
     ProfileId, Provenance, RunRepository, RunStatus, SignalKind, SignalRepository, Source,
     SourceError, SourceName, UnitInterval,
-    definition::Agent,
+    definition::SourceTarget,
     infrastructure::{
         lead::postgres::PgLeadRepository, postgres::with_tx, run::postgres::PgRunRepository,
         signal::postgres::PgSignalRepository,
@@ -46,7 +46,7 @@ impl Source for FakeSource {
     type Item = &'static str;
 
     fn name(&self) -> SourceName {
-        SourceName::HttpProbe
+        SourceName::DnsCname
     }
 
     async fn collect(
@@ -65,7 +65,7 @@ impl Source for FakeSource {
         &self,
         item: &Self::Item,
         profile: &ActiveProfile,
-        _agent: &Agent,
+        _target: &SourceTarget<'_>,
     ) -> Vec<Observation> {
         let wanted = profile.profile.name.as_str() == "alpha" || item.contains("beta");
         if !wanted {
@@ -141,7 +141,7 @@ async fn one_fetch_feeds_every_profile_separately(pool: PgPool) {
     .await
     .unwrap();
     assert_eq!(signals.len(), 1);
-    assert_eq!(signals[0].source, SourceName::HttpProbe);
+    assert_eq!(signals[0].source, SourceName::DnsCname);
     assert_eq!(
         signals[0].provenance.as_str(),
         "https://auth.beta.io/realms/master"

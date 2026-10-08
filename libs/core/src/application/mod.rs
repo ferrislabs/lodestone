@@ -42,6 +42,7 @@ pub struct LodestoneUseCase {
     pub(crate) webhooks: Option<WebhookPolicy>,
     pub(crate) listener_stale_after: Duration,
     pub(crate) company_wait: Duration,
+    pub(crate) enrichment_wait: Duration,
 }
 
 impl LodestoneUseCase {
@@ -51,7 +52,13 @@ impl LodestoneUseCase {
             webhooks: None,
             listener_stale_after: crate::domain::listener::STALE_FLOOR,
             company_wait: Duration::ZERO,
+            enrichment_wait: Duration::ZERO,
         }
+    }
+
+    pub fn with_enrichment_wait(mut self, wait: Duration) -> Self {
+        self.enrichment_wait = wait;
+        self
     }
 
     pub fn with_company_wait(mut self, wait: Duration) -> Self {

@@ -14,6 +14,7 @@ pub mod domain {
     pub struct Company;
     pub struct Contact;
     pub struct Decision;
+    pub struct Enrichment;
     pub struct HostVisit;
     pub struct KnownHost;
     pub struct Lead;

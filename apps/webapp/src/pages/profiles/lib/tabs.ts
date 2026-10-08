@@ -52,7 +52,11 @@ export function tabOfPath(path: string): EditorTab | null {
 	if (belongsTo(path, 'identity') || belongsTo(path, 'language')) {
 		return 'identity'
 	}
-	if (belongsTo(path, 'agents') || belongsTo(path, 'contact_ranking')) {
+	if (
+		belongsTo(path, 'agents') ||
+		belongsTo(path, 'enrichment') ||
+		belongsTo(path, 'contact_ranking')
+	) {
 		return 'sourcing'
 	}
 	if (

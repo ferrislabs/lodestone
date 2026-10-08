@@ -238,6 +238,16 @@ export namespace Schemas {
     };
     pagination?: (null | PaginationMetadata) | undefined;
   };
+  export type EnrichmentStatus = "disabled" | "pending" | "complete" | "timed_out";
+  export type EnrichmentStep = "http_probe" | "company_jobs";
+  export type EnrichmentStepStateDto = { enabled: boolean; ran_at?: (string | null) | undefined; step: EnrichmentStep };
+  export type EnrichmentWaitingReason = "awaiting_enrichment" | "awaiting_enrichment_evidence";
+  export type EnrichmentDto = {
+    status: EnrichmentStatus;
+    steps: Array<EnrichmentStepStateDto>;
+    wait_until?: (string | null) | undefined;
+    waiting_reason?: (null | EnrichmentWaitingReason) | undefined;
+  };
   export type HostFactDto = { environment: string; host: string; signals: number };
   export type OfficialFactsDto = {
     head_office_country?: (string | null) | undefined;
@@ -403,6 +413,7 @@ export namespace Schemas {
       assessments: Array<AssessmentDto>;
       company?: (null | CompanyDto) | undefined;
       contacts: Array<ContactDto>;
+      enrichment: EnrichmentDto;
       facts: LeadFactsDto;
       lead: LeadDto;
       qualification_results: Array<QualificationResultDto>;
@@ -788,6 +799,7 @@ export namespace Schemas {
     assessments: Array<AssessmentDto>;
     company?: (null | CompanyDto) | undefined;
     contacts: Array<ContactDto>;
+    enrichment: EnrichmentDto;
     facts: LeadFactsDto;
     lead: LeadDto;
     qualification_results: Array<QualificationResultDto>;

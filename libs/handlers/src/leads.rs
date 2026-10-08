@@ -6,12 +6,12 @@ use axum::{
 };
 use lodestone_core::{
     AGENT_FAILED_AFTER, AgentFailure, AgentKind, Assessment, Calibrations, ContactEmail,
-    DraftMessage, DraftReview, DraftStatus, Exclusion, Lead, LeadDetail, LeadFacts, LeadId,
-    LeadQuery, LeadScoring, LeadSort, LeadStatus, LlmProviderRecord, Profile, ProfileId,
-    QualificationResult, Rejection, RejectionProblem, ResultStatus, RunProvenance,
-    SUMMARY_FAILED_AFTER, ScoringResult, Signal, SignalKind, SummaryState, Verdict, VerdictAnswer,
-    VerdictCap, VerdictFilter, VerdictProbabilities, VerdictReason, VerdictSource,
-    calibrate_verdict,
+    DraftMessage, DraftReview, DraftStatus, EnrichmentState, EnrichmentStatus, EnrichmentStep,
+    Exclusion, Lead, LeadDetail, LeadFacts, LeadId, LeadQuery, LeadScoring, LeadSort, LeadStatus,
+    LlmProviderRecord, Profile, ProfileId, QualificationResult, Rejection, RejectionProblem,
+    ResultStatus, RunProvenance, SUMMARY_FAILED_AFTER, ScoringResult, Signal, SignalKind,
+    SummaryState, Verdict, VerdictAnswer, VerdictCap, VerdictFilter, VerdictProbabilities,
+    VerdictReason, VerdictSource, WaitingReason, calibrate_verdict,
     definition::{QualificationAgent, Question, ScoringAgent},
     signal_sentence,
 };
@@ -888,6 +888,97 @@ impl SummaryStateDto {
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "snake_case")]
+#[schema(as = EnrichmentStep)]
+pub enum EnrichmentStepDto {
+    HttpProbe,
+    CompanyJobs,
+}
+
+impl From<EnrichmentStep> for EnrichmentStepDto {
+    fn from(step: EnrichmentStep) -> Self {
+        match step {
+            EnrichmentStep::HttpProbe => Self::HttpProbe,
+            EnrichmentStep::CompanyJobs => Self::CompanyJobs,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "snake_case")]
+#[schema(as = EnrichmentStatus)]
+pub enum EnrichmentStatusDto {
+    Disabled,
+    Pending,
+    Complete,
+    TimedOut,
+}
+
+impl From<EnrichmentStatus> for EnrichmentStatusDto {
+    fn from(status: EnrichmentStatus) -> Self {
+        match status {
+            EnrichmentStatus::Disabled => Self::Disabled,
+            EnrichmentStatus::Pending => Self::Pending,
+            EnrichmentStatus::Complete => Self::Complete,
+            EnrichmentStatus::TimedOut => Self::TimedOut,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "snake_case")]
+#[schema(as = EnrichmentWaitingReason)]
+pub enum WaitingReasonDto {
+    AwaitingEnrichment,
+    AwaitingEnrichmentEvidence,
+}
+
+impl From<WaitingReason> for WaitingReasonDto {
+    fn from(reason: WaitingReason) -> Self {
+        match reason {
+            WaitingReason::AwaitingEnrichment => Self::AwaitingEnrichment,
+            WaitingReason::AwaitingEnrichmentEvidence => Self::AwaitingEnrichmentEvidence,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq, ToSchema)]
+pub struct EnrichmentStepStateDto {
+    pub step: EnrichmentStepDto,
+    pub enabled: bool,
+    #[schema(format = DateTime)]
+    pub ran_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq, ToSchema)]
+pub struct EnrichmentDto {
+    pub status: EnrichmentStatusDto,
+    pub waiting_reason: Option<WaitingReasonDto>,
+    #[schema(format = DateTime)]
+    pub wait_until: Option<String>,
+    pub steps: Vec<EnrichmentStepStateDto>,
+}
+
+impl From<&EnrichmentState> for EnrichmentDto {
+    fn from(state: &EnrichmentState) -> Self {
+        Self {
+            status: state.status.into(),
+            waiting_reason: state.waiting_reason.map(WaitingReasonDto::from),
+            wait_until: state.wait_until.map(|at| at.to_rfc3339()),
+            steps: state
+                .steps
+                .iter()
+                .map(|step| EnrichmentStepStateDto {
+                    step: step.step.into(),
+                    enabled: step.enabled,
+                    ran_at: step.ran_at.map(|at| at.to_rfc3339()),
+                })
+                .collect(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "snake_case")]
 #[schema(as = AgentKind)]
 pub enum AgentKindDto {
     Qualification,
@@ -1084,6 +1175,7 @@ pub struct LeadDetailDto {
     pub agent_failures: Vec<AgentFailureDto>,
     /// Company dossier of the lead domain; null until the company research listener has seen the domain.
     pub company: Option<CompanyDto>,
+    pub enrichment: EnrichmentDto,
 }
 
 fn ordered_results(
@@ -1131,6 +1223,7 @@ fn ordered_scoring(detail: &LeadDetail, providers: &[LlmProviderRecord]) -> Vec<
 impl LeadDetailDto {
     pub fn new(detail: &LeadDetail, providers: &[LlmProviderRecord]) -> Self {
         Self {
+            enrichment: EnrichmentDto::from(&detail.enrichment),
             summary_state: detail.summary_state.as_ref().and_then(SummaryStateDto::new),
             agent_failures: detail
                 .agent_failures

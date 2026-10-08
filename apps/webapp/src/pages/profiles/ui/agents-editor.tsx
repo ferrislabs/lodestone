@@ -6,6 +6,7 @@ import {
 	agentField,
 	agentKind,
 	dependencyNote,
+	SIGNAL_PROVIDERS,
 } from '#/pages/profiles/lib/agents'
 import { AgentCard } from '#/pages/profiles/ui/agent-card'
 import type { ProviderSummary } from '#/pages/source-providers/lib/types'
@@ -77,7 +78,11 @@ export function AgentsEditor({
 							runPending={sourceTrigger?.pending}
 							runResults={sourceTrigger?.results}
 							onRunSource={sourceTrigger?.trigger}
-							listener={kind ? listeners?.[kind] : undefined}
+							listener={
+								kind && kind !== 'search'
+									? listeners?.[SIGNAL_PROVIDERS[kind]]
+									: undefined
+							}
 							now={now}
 							onEdit={() => onEdit(index)}
 							onEnabled={(enabled) => onEnabled(index, enabled)}
