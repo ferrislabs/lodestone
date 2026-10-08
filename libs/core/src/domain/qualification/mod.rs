@@ -487,8 +487,7 @@ pub struct QualificationResult {
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct DueGates {
-    pub dossier: Option<DateTime<Utc>>,
-    pub inspection: Option<DateTime<Utc>>,
+    pub requalify_max_per_day: u32,
 }
 
 pub const SUMMARY_FAILED_AFTER: u32 = 5;
@@ -573,6 +572,7 @@ pub struct Completion {
     pub scoring_version: i32,
     pub dossier_at: Option<DateTime<Utc>>,
     pub escalated_revision: Option<RevisionNumber>,
+    pub read_at: DateTime<Utc>,
     pub at: DateTime<Utc>,
 }
 

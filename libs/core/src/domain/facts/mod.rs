@@ -14,7 +14,7 @@ mod country;
 mod environment;
 mod sentence;
 
-pub use country::Country;
+pub use country::{Country, country_of};
 pub use environment::{Environment, environment_of};
 pub use sentence::signal_sentence;
 

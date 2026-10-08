@@ -26,6 +26,7 @@ pub(crate) mod scoring_agent;
 pub(crate) mod source;
 pub(crate) mod source_provider;
 pub(crate) mod suppression;
+pub(crate) mod territory;
 pub(crate) mod triage;
 pub(crate) mod user;
 pub(crate) mod values;

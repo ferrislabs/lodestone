@@ -15,11 +15,18 @@ use crate::{
             bounded_error, ports::CompanyRepository, settle,
         },
         ecosystem::hosting_platform,
+        facts::country_of,
         fetch::link::UnconfirmedLinks,
         job::{JobKind, NewJob, ports::Clock},
-        lead::{LeadId, ports::LeadRepository},
+        lead::{
+            LeadId,
+            ports::{LeadRepository, SignalRepository},
+        },
+        profile::ActiveProfile,
+        qualification::ports::QualificationRepository,
         source::SourceError,
         suppression::ports::SuppressionRepository,
+        territory::{OUT_OF_COUNTRY_REASON, out_of_country},
     },
 };
 
@@ -61,6 +68,7 @@ pub struct CompanyRunReport {
     pub domains: u64,
     pub changed: u64,
     pub failed: u64,
+    pub excluded_out_of_country: u64,
     pub backlog: u64,
     pub rate_limited: bool,
     pub unconfirmed_links: UnconfirmedLinks,
@@ -130,10 +138,15 @@ impl LodestoneUseCase {
             if dossier.error.is_some() {
                 report.failed += 1;
             }
-            if dossier.content_at == Some(now) {
+            let changed = dossier.content_at == Some(now);
+            if changed {
                 report.changed += 1;
             }
             self.save_company_dossier(&dossier).await?;
+            if changed {
+                self.mark_domain_requalification(domain, now).await?;
+            }
+            report.excluded_out_of_country += self.exclude_out_of_country(&dossier, now).await?;
             report.domains += 1;
             info!(
                 %domain,
@@ -185,6 +198,8 @@ impl LodestoneUseCase {
             report.unconfirmed_links.merge(&review.unconfirmed());
             if reviewed.content_at != dossier.content_at {
                 report.changed += 1;
+                self.mark_domain_requalification(&domain, clock.now())
+                    .await?;
             }
             info!(
                 %domain,
@@ -220,6 +235,73 @@ impl LodestoneUseCase {
             settled += 1;
         }
         Ok(settled)
+    }
+
+    #[transactional(qualification)]
+    pub(crate) async fn mark_domain_requalification(
+        &self,
+        domain: &NormalizedDomain,
+        now: DateTime<Utc>,
+    ) -> Result<u64, CoreError> {
+        let mut qualification = qualification_repository;
+        qualification
+            .mark_requalification(domain, self.requalify.requalify_after(now), now)
+            .await
+    }
+
+    pub async fn exclude_out_of_country(
+        &self,
+        dossier: &CompanyDossier,
+        now: DateTime<Utc>,
+    ) -> Result<u64, CoreError> {
+        let Some(head_office) = dossier.head_office_country_code() else {
+            return Ok(0);
+        };
+        if country_of(&dossier.domain).is_some() {
+            return Ok(0);
+        }
+        let profiles = self.list_active_profiles().await?;
+        let excluded = self
+            .exclude_leads_out_of(&dossier.domain, head_office, &profiles, now)
+            .await?;
+        if excluded > 0 {
+            info!(domain = %dossier.domain, head_office, excluded, "leads outside the target countries suppressed");
+        }
+        Ok(excluded)
+    }
+
+    #[transactional(lead, signal, suppression)]
+    async fn exclude_leads_out_of(
+        &self,
+        domain: &NormalizedDomain,
+        head_office: &str,
+        profiles: &[ActiveProfile],
+        now: DateTime<Utc>,
+    ) -> Result<u64, CoreError> {
+        let mut leads = lead_repository;
+        let mut signals = signal_repository;
+        let mut suppression = suppression_repository;
+        let mut excluded: Vec<LeadId> = Vec::new();
+        for lead in leads.list_by_domain(domain).await? {
+            let Some(active) = profiles
+                .iter()
+                .find(|active| active.profile.id == lead.profile_id)
+            else {
+                continue;
+            };
+            let found = signals.list_for_lead(lead.id).await?;
+            if out_of_country(
+                active.revision.definition.definition(),
+                domain,
+                &found,
+                head_office,
+            ) {
+                excluded.push(lead.id);
+            }
+        }
+        suppression
+            .exclude_leads(&excluded, OUT_OF_COUNTRY_REASON, now)
+            .await
     }
 
     #[transactional(company)]

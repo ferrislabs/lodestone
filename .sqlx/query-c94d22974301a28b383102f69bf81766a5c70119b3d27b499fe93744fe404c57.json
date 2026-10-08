@@ -1,0 +1,38 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT leads.domain,\n                COUNT(*) AS \"leads!\",\n                array_agg(DISTINCT leads.profile_id) AS \"profiles!\"\n            FROM leads\n            LEFT JOIN lead_ecosystem_modules state\n                ON state.domain = leads.domain AND state.module = $1\n            WHERE leads.profile_id = ANY($2)\n              AND leads.excluded_reason IS NULL\n              AND (state.domain IS NULL OR state.next_run_at <= $3)\n              AND NOT EXISTS (\n                  SELECT 1 FROM suppression_list sup\n                  WHERE sup.kind = 'domain'\n                    AND (sup.value = leads.domain OR right(leads.domain, length(sup.value) + 1) = '.' || sup.value)\n              )\n            GROUP BY leads.domain, state.domain, state.last_run\n            HAVING state.last_run IS NULL OR MAX(leads.created_at) > $4\n            ORDER BY MAX(leads.created_at) DESC, leads.domain ASC\n            LIMIT $5\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "domain",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "leads!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "profiles!",
+        "type_info": "UuidArray"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "UuidArray",
+        "Timestamptz",
+        "Timestamptz",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      null,
+      null
+    ]
+  },
+  "hash": "c94d22974301a28b383102f69bf81766a5c70119b3d27b499fe93744fe404c57"
+}

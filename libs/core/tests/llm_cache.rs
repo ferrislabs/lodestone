@@ -50,6 +50,7 @@ fn scope(profile: ProfileId, revision: u32) -> CacheScope {
         domain: NormalizedDomain::from_host("acme.com").unwrap(),
         agent: None,
         sample: 0,
+        fresh: false,
     }
 }
 

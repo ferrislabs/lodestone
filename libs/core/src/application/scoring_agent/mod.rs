@@ -93,6 +93,7 @@ struct Subject<'a> {
     lead: &'a Lead,
     documents: &'a [UntrustedDocument<'a>],
     grounding: &'a [UntrustedDocument<'a>],
+    fresh: bool,
     at: DateTime<Utc>,
 }
 
@@ -209,6 +210,7 @@ where
             domain: subject.lead.domain.clone(),
             agent: Some(agent.id.clone()),
             sample,
+            fresh: subject.fresh,
         };
         let call = SchemaCall {
             scope: &scope,
@@ -538,6 +540,7 @@ where
             lead,
             documents: &documents,
             grounding: &grounding,
+            fresh: usecase.lead_fresh_calls(lead.id).await?,
             at,
         };
         let reported = qualification

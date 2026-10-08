@@ -326,6 +326,7 @@ struct Subject<'a> {
     calibrations: &'a Calibrations,
     lead: &'a Lead,
     documents: &'a [UntrustedDocument<'a>],
+    fresh: bool,
     at: DateTime<Utc>,
 }
 
@@ -494,6 +495,7 @@ where
             domain: subject.lead.domain.clone(),
             agent: Some(agent.id.clone()),
             sample,
+            fresh: subject.fresh,
         };
         let call = SchemaCall {
             scope: &scope,
@@ -837,6 +839,8 @@ where
         budget: &mut RunBudget,
         clock: &K,
     ) -> Result<LeadOutcome, CoreError> {
+        let read_at = clock.now();
+        let fresh = usecase.lead_fresh_calls(lead.id).await?;
         let definition = active.revision.definition.definition();
         let calibrations = usecase.profile_calibrations(active).await?;
         let (signals, facts, dossier) = usecase.signals_with_facts(lead).await?;
@@ -864,6 +868,7 @@ where
             calibrations: &calibrations,
             lead,
             documents: &documents,
+            fresh,
             at: clock.now(),
         };
         let at = subject.at;
@@ -946,6 +951,7 @@ where
             scoring_version: SCORING_VERSION,
             dossier_at: dossier.as_ref().and_then(|dossier| dossier.content_at),
             escalated_revision,
+            read_at,
             at,
         };
         let works = qualification_works(usecase, active);
@@ -958,15 +964,6 @@ where
         usecase.store_evaluation(&pass.results, &completion).await?;
         Ok(LeadOutcome::Done { valid, invalid })
     }
-}
-
-fn wait_gate(wait: Duration, now: DateTime<Utc>) -> Option<DateTime<Utc>> {
-    if wait.is_zero() {
-        return None;
-    }
-    chrono::Duration::from_std(wait)
-        .ok()
-        .and_then(|wait| now.checked_sub_signed(wait))
 }
 
 impl LodestoneUseCase {
@@ -1020,7 +1017,6 @@ impl LodestoneUseCase {
         let mut budget = RunBudget::new(settings.budget_cents);
         let mut providers = Providers::new();
         let mut remaining = settings.batch_size;
-        let now = clock.now();
         let rescoring = self
             .rescore_stale_leads(RESCORE_BATCH_SIZE, clock.now())
             .await?;
@@ -1029,9 +1025,8 @@ impl LodestoneUseCase {
             if remaining == 0 {
                 break;
             }
-            let gates = self.due_gates(active, now);
             let leads = self
-                .due_leads(active, remaining, gates, clock.now())
+                .due_leads(active, remaining, self.due_gates(), clock.now())
                 .await?;
             let works = qualification_works(self, active);
             for lead in &leads {
@@ -1065,28 +1060,24 @@ impl LodestoneUseCase {
                 }
             }
         }
-        report.backlog = self.due_backlog(&profiles, now, clock.now()).await? + rescoring.backlog;
+        report.backlog = self.due_backlog(&profiles, clock.now()).await? + rescoring.backlog;
         Ok(report)
     }
 
-    pub(crate) fn due_gates(&self, active: &ActiveProfile, now: DateTime<Utc>) -> DueGates {
-        let inspection = &active.revision.definition.definition().inspection;
+    pub(crate) fn due_gates(&self) -> DueGates {
         DueGates {
-            dossier: wait_gate(self.company_wait, now),
-            inspection: wait_gate(self.enrichment_wait, now).filter(|_| inspection.enabled),
+            requalify_max_per_day: self.requalify.max_per_day,
         }
     }
 
     async fn due_backlog(
         &self,
         profiles: &[ActiveProfile],
-        gated_at: DateTime<Utc>,
         now: DateTime<Utc>,
     ) -> Result<u64, CoreError> {
         let mut backlog = 0;
         for active in profiles {
-            let gates = self.due_gates(active, gated_at);
-            backlog += self.count_due_leads(active, gates, now).await?;
+            backlog += self.count_due_leads(active, self.due_gates(), now).await?;
         }
         Ok(backlog)
     }
@@ -1113,6 +1104,22 @@ impl LodestoneUseCase {
     ) -> Result<u64, CoreError> {
         let mut repo = qualification_repository;
         repo.count_due(active.profile.id, active.revision.number, gates, now)
+            .await
+    }
+
+    #[transactional(qualification)]
+    pub(crate) async fn lead_fresh_calls(&self, lead_id: LeadId) -> Result<bool, CoreError> {
+        let mut repo = qualification_repository;
+        repo.fresh_calls(lead_id).await
+    }
+
+    #[transactional(qualification)]
+    pub async fn backfill_dossier_requalifications(
+        &self,
+        now: DateTime<Utc>,
+    ) -> Result<u64, CoreError> {
+        let mut repo = qualification_repository;
+        repo.backfill_dossier_requalifications(self.requalify.requalify_after(now), now)
             .await
     }
 

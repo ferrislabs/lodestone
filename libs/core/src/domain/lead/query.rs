@@ -5,7 +5,7 @@ use crate::domain::{
     calibration::Calibrations,
     company::{CompanyDossier, CompanyEntity, SiblingLead},
     ecosystem::DomainEcosystem,
-    enrichment::EnrichmentState,
+    enrichment::{EnrichmentState, EvaluationStatus},
     facts::LeadFacts,
     lead::{Assessment, ContactEmail, Lead, LeadId, LeadStatus, Signal},
     profile::{
@@ -129,13 +129,14 @@ pub struct LeadListing {
     pub page: LeadPage,
     pub summaries: HashMap<LeadId, String>,
     pub scorings: HashMap<LeadId, LeadScoring>,
-    pub enrichments: HashMap<LeadId, EnrichmentState>,
+    pub evaluations: HashMap<LeadId, EvaluationStatus>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct LeadDetail {
     pub lead: Lead,
     pub enrichment: EnrichmentState,
+    pub evaluation: EvaluationStatus,
     pub ecosystem: DomainEcosystem,
     pub profile: Profile,
     pub signals: Vec<Signal>,

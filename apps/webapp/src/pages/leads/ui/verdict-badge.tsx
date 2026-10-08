@@ -17,17 +17,16 @@ const STYLES: Record<VerdictKey, string> = {
 
 interface VerdictBadgeProps {
 	verdict: Verdict | null | undefined
-	waiting?: string | null
 }
 
-export function VerdictBadge({ verdict, waiting = null }: VerdictBadgeProps) {
+export function VerdictBadge({ verdict }: VerdictBadgeProps) {
 	return (
 		<Badge
 			variant="outline"
 			data-verdict={verdictKey(verdict)}
 			className={cn(STYLES[verdictKey(verdict)])}
 		>
-			{verdict ? verdictLabel(verdict) : (waiting ?? PENDING_SCORING_LABEL)}
+			{verdict ? verdictLabel(verdict) : PENDING_SCORING_LABEL}
 		</Badge>
 	)
 }

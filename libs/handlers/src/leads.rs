@@ -6,12 +6,12 @@ use axum::{
 };
 use lodestone_core::{
     AGENT_FAILED_AFTER, AgentFailure, AgentKind, AgentStop, Assessment, Calibrations, ContactEmail,
-    DraftMessage, DraftReview, DraftStatus, EcosystemReadiness, EnrichmentState, EnrichmentStatus,
-    Exclusion, Lead, LeadDetail, LeadFacts, LeadId, LeadQuery, LeadScoring, LeadSort, LeadStatus,
-    LlmProviderRecord, Profile, ProfileId, QualificationResult, Rejection, RejectionProblem,
-    ResultStatus, RunProvenance, SUMMARY_FAILED_AFTER, ScoringResult, Signal, SignalKind,
-    SummaryState, Verdict, VerdictAnswer, VerdictCap, VerdictFilter, VerdictProbabilities,
-    VerdictReason, VerdictSource, WaitingReason, WorkKind, calibrate_verdict,
+    DraftMessage, DraftReview, DraftStatus, EcosystemReadiness, EnrichmentState, EvaluationStage,
+    EvaluationStatus, Exclusion, Lead, LeadDetail, LeadFacts, LeadId, LeadQuery, LeadScoring,
+    LeadSort, LeadStatus, LlmProviderRecord, Profile, ProfileId, QualificationResult, Rejection,
+    RejectionProblem, ResultStatus, RunProvenance, SUMMARY_FAILED_AFTER, ScoringResult, Signal,
+    SignalKind, SummaryState, Verdict, VerdictAnswer, VerdictCap, VerdictFilter,
+    VerdictProbabilities, VerdictReason, VerdictSource, WorkKind, calibrate_verdict,
     definition::{QualificationAgent, Question, ScoringAgent},
     signal_sentence,
 };
@@ -276,24 +276,75 @@ pub struct LeadDto {
     pub last_seen_at: String,
     #[schema(format = DateTime)]
     pub updated_at: String,
-    /// Whether the lead waits for its enrichment before qualification. Present in the list and the detail, absent in status change answers.
-    pub enrichment_waiting: Option<EnrichmentWaitingDto>,
+    pub evaluation: Option<EvaluationDto>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "snake_case")]
+#[schema(as = EvaluationStage)]
+pub enum EvaluationStageDto {
+    NotEvaluated,
+    CertificateOnly,
+    RequalificationPlanned,
+    InspectionRunning,
+    InspectionComplete,
+    Evaluated,
+}
+
+impl From<EvaluationStage> for EvaluationStageDto {
+    fn from(stage: EvaluationStage) -> Self {
+        match stage {
+            EvaluationStage::NotEvaluated => Self::NotEvaluated,
+            EvaluationStage::CertificateOnly => Self::CertificateOnly,
+            EvaluationStage::RequalificationPlanned => Self::RequalificationPlanned,
+            EvaluationStage::InspectionRunning => Self::InspectionRunning,
+            EvaluationStage::InspectionComplete => Self::InspectionComplete,
+            EvaluationStage::Evaluated => Self::Evaluated,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "snake_case")]
+#[schema(as = RequalifyReason)]
+pub enum RequalifyReasonDto {
+    NewInformation,
+    Manual,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq, ToSchema)]
-pub struct EnrichmentWaitingDto {
-    /// `awaiting_enrichment` while a module of the ecosystem inspection has not run and the wait is not over, `awaiting_enrichment_evidence` for a lead whose only evidence is a certificate; null when the lead does not wait.
-    pub waiting_reason: Option<WaitingReasonDto>,
-    /// End of the wait while `awaiting_enrichment`.
+pub struct EvaluationDto {
+    pub stage: EvaluationStageDto,
     #[schema(format = DateTime)]
-    pub wait_until: Option<String>,
+    pub evaluated_at: Option<String>,
+    pub modules_done: u32,
+    pub modules_available: u32,
+    #[schema(format = DateTime)]
+    pub requalify_at: Option<String>,
+    pub requalify_reason: Option<RequalifyReasonDto>,
+    pub changed_modules: Vec<ModuleStateDto>,
 }
 
-impl From<&EnrichmentState> for EnrichmentWaitingDto {
-    fn from(state: &EnrichmentState) -> Self {
+impl From<&EvaluationStatus> for EvaluationDto {
+    fn from(status: &EvaluationStatus) -> Self {
         Self {
-            waiting_reason: state.waiting_reason.map(WaitingReasonDto::from),
-            wait_until: state.wait_until.map(|at| at.to_rfc3339()),
+            stage: status.stage.into(),
+            evaluated_at: status.evaluated_at.map(|at| at.to_rfc3339()),
+            modules_done: status.modules_done,
+            modules_available: status.modules_available,
+            requalify_at: status.requalify_at.map(|at| at.to_rfc3339()),
+            requalify_reason: status.requalify_at.map(|_| {
+                if status.requalify_forced {
+                    RequalifyReasonDto::Manual
+                } else {
+                    RequalifyReasonDto::NewInformation
+                }
+            }),
+            changed_modules: status
+                .changed_modules
+                .iter()
+                .map(ModuleStateDto::from)
+                .collect(),
         }
     }
 }
@@ -327,8 +378,8 @@ impl LeadDto {
         self
     }
 
-    fn waiting(mut self, state: Option<&EnrichmentState>) -> Self {
-        self.enrichment_waiting = state.map(EnrichmentWaitingDto::from);
+    fn evaluated(mut self, status: Option<&EvaluationStatus>) -> Self {
+        self.evaluation = status.map(EvaluationDto::from);
         self
     }
 
@@ -369,7 +420,7 @@ impl LeadDto {
             first_seen_at: lead.first_seen_at.to_rfc3339(),
             last_seen_at: lead.last_seen_at.to_rfc3339(),
             updated_at: lead.updated_at.to_rfc3339(),
-            enrichment_waiting: None,
+            evaluation: None,
         }
     }
 }
@@ -913,50 +964,8 @@ impl SummaryStateDto {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq, ToSchema)]
-#[serde(rename_all = "snake_case")]
-#[schema(as = EnrichmentStatus)]
-pub enum EnrichmentStatusDto {
-    Disabled,
-    Pending,
-    Complete,
-    TimedOut,
-}
-
-impl From<EnrichmentStatus> for EnrichmentStatusDto {
-    fn from(status: EnrichmentStatus) -> Self {
-        match status {
-            EnrichmentStatus::Disabled => Self::Disabled,
-            EnrichmentStatus::Pending => Self::Pending,
-            EnrichmentStatus::Complete => Self::Complete,
-            EnrichmentStatus::TimedOut => Self::TimedOut,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq, ToSchema)]
-#[serde(rename_all = "snake_case")]
-#[schema(as = EnrichmentWaitingReason)]
-pub enum WaitingReasonDto {
-    AwaitingEnrichment,
-    AwaitingEnrichmentEvidence,
-}
-
-impl From<WaitingReason> for WaitingReasonDto {
-    fn from(reason: WaitingReason) -> Self {
-        match reason {
-            WaitingReason::AwaitingEnrichment => Self::AwaitingEnrichment,
-            WaitingReason::AwaitingEnrichmentEvidence => Self::AwaitingEnrichmentEvidence,
-        }
-    }
-}
-
 #[derive(Debug, Clone, Serialize, PartialEq, Eq, ToSchema)]
 pub struct EnrichmentDto {
-    pub status: EnrichmentStatusDto,
-    pub waiting_reason: Option<WaitingReasonDto>,
-    #[schema(format = DateTime)]
-    pub wait_until: Option<String>,
     pub modules: Vec<ModuleStateDto>,
     pub hosting_platform: Option<String>,
 }
@@ -964,9 +973,6 @@ pub struct EnrichmentDto {
 impl From<&EnrichmentState> for EnrichmentDto {
     fn from(state: &EnrichmentState) -> Self {
         Self {
-            status: state.status.into(),
-            waiting_reason: state.waiting_reason.map(WaitingReasonDto::from),
-            wait_until: state.wait_until.map(|at| at.to_rfc3339()),
             modules: state.modules.iter().map(ModuleStateDto::from).collect(),
             hosting_platform: state.hosting_platform.map(str::to_owned),
         }
@@ -1298,7 +1304,7 @@ impl LeadDetailDto {
                     .map(|assessment| assessment.summary.as_str()),
                 detail.scoring.as_ref(),
             )
-            .waiting(Some(&detail.enrichment)),
+            .evaluated(Some(&detail.evaluation)),
             facts: LeadFactsDto::from(&detail.facts),
             signals: detail.signals.iter().map(SignalDto::from).collect(),
             contacts: detail.contacts.iter().map(ContactDto::from).collect(),
@@ -1559,7 +1565,7 @@ pub async fn list_leads(
                     .get(&lead.id)
                     .map_or(&[], Vec::as_slice),
             )
-            .waiting(listing.enrichments.get(&lead.id))
+            .evaluated(listing.evaluations.get(&lead.id))
         })
         .collect();
     let meta = PaginationMetadata::new(
@@ -1732,4 +1738,41 @@ pub async fn retry_lead_agents(
         summary,
         detail.scoring.as_ref(),
     )))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/leads/{lead_id}/reevaluate",
+    tag = "leads",
+    security(("bearer_auth" = [])),
+    params(("lead_id" = String, Path, description = "Lead identifier (UUID)")),
+    responses(
+        (status = 200, description = "The lead is due for a new evaluation by its qualification, scoring and aggregator agents at once, beyond the daily cap of automatic requalifications", body = crate::response::DataEnvelope<LeadDto>),
+        (status = 400, description = "Malformed lead identifier"),
+        (status = 401, description = "Missing, malformed, invalid or expired bearer token"),
+        (status = 403, description = "The caller is not a user"),
+        (status = 404, description = "Unknown lead, or its domain is suppressed"),
+    )
+)]
+pub async fn reevaluate_lead(
+    State(state): State<AppState>,
+    user: Option<Extension<AuthenticatedUser>>,
+    Path(lead_id_raw): Path<String>,
+) -> Result<Response<LeadDto>, ApiError> {
+    if user.is_none() {
+        return Err(ApiError::Forbidden);
+    }
+    let lead = state
+        .usecase
+        .request_lead_reevaluation(lead_id(&lead_id_raw)?)
+        .await?;
+    let detail = state.usecase.lead_detail(lead.id).await?;
+    let summary = detail
+        .assessments
+        .first()
+        .map(|assessment| assessment.summary.as_str());
+    Ok(Response::OK(
+        LeadDto::new(&lead, &detail.profile, summary, detail.scoring.as_ref())
+            .evaluated(Some(&detail.evaluation)),
+    ))
 }

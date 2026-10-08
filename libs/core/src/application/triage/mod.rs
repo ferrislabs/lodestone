@@ -319,7 +319,7 @@ impl LodestoneUseCase {
                 .await?;
             match recorded {
                 Ok(recorded) => {
-                    report.skipped_no_lead += recorded.skipped;
+                    report.skipped_no_lead += recorded.skipped.no_lead;
                     if let Some(reason) = recorded.stopped {
                         report.cancelled += 1;
                         report.cancel_reason.get_or_insert(reason);

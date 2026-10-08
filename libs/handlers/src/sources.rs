@@ -74,6 +74,8 @@ pub struct ListenerDto {
     #[schema(format = DateTime)]
     pub last_activity_at: Option<String>,
     pub last_error: Option<String>,
+    #[schema(format = DateTime)]
+    pub last_error_at: Option<String>,
     pub items_total: u64,
     pub signals_total: u64,
     /// Work waiting: lag in tiles (certificate transparency), due hosts, due contact targets, leads to qualify or leads to summarise.
@@ -91,6 +93,7 @@ impl ListenerDto {
                 holder: status.holder.clone(),
                 last_activity_at: status.last_activity_at.map(|at| at.to_rfc3339()),
                 last_error: status.last_error.clone(),
+                last_error_at: status.last_error_at.map(|at| at.to_rfc3339()),
                 items_total: status.items_total,
                 signals_total: status.signals_total,
                 backlog: status.backlog,
@@ -101,6 +104,7 @@ impl ListenerDto {
                 holder: None,
                 last_activity_at: None,
                 last_error: None,
+                last_error_at: None,
                 items_total: 0,
                 signals_total: 0,
                 backlog: None,

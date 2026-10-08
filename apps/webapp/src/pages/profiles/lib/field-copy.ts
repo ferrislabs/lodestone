@@ -65,6 +65,11 @@ export const FIELD_COPY: Readonly<Record<string, FieldCopy>> = {
 		description:
 			"Libellés de nom d'hôte à rechercher, par exemple auth ou sso.",
 	},
+	'agents[].countries': {
+		label: 'Pays',
+		description:
+			"Pays visés. Un hôte sous l'extension d'un autre pays ne crée pas de lead ; une extension générique en crée un, retiré du profil si le siège de l'entreprise est ailleurs.",
+	},
 	'agents[].patterns': {
 		label: 'Motifs CNAME',
 		description: 'Couples fournisseur et suffixe de cible.',

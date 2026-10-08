@@ -183,6 +183,7 @@ async fn the_aggregator_summarises_an_iam_lead_in_french_live() {
         domain: lodestone_core::NormalizedDomain::from_host("example-retail.fr").unwrap(),
         agent: None,
         sample: 0,
+        fresh: false,
     };
     let settings = CallSettings {
         max_retries: 2,

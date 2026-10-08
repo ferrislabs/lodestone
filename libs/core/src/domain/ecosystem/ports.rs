@@ -6,7 +6,8 @@ use common::CoreError;
 use crate::domain::{
     NormalizedDomain,
     ecosystem::{
-        DomainEcosystem, DueDomain, EcosystemModule, ModuleOutcome, ModuleRun, ModuleStats,
+        DomainEcosystem, DueBatch, DueDomain, EcosystemModule, ModuleOutcome, ModuleRun,
+        ModuleStats,
     },
     enrichment::ListedEnrichment,
     lead::LeadId,
@@ -19,7 +20,7 @@ pub trait EcosystemRepository: Send {
         module: EcosystemModule,
         profiles: &[ProfileId],
         now: DateTime<Utc>,
-        limit: u32,
+        batch: DueBatch,
     ) -> impl Future<Output = Result<Vec<DueDomain>, CoreError>> + Send;
 
     fn count_due(
@@ -36,7 +37,7 @@ pub trait EcosystemRepository: Send {
         outcome: &ModuleOutcome,
         ran_at: DateTime<Utc>,
         next_run_at: DateTime<Utc>,
-    ) -> impl Future<Output = Result<(), CoreError>> + Send;
+    ) -> impl Future<Output = Result<bool, CoreError>> + Send;
 
     fn postpone(
         &mut self,

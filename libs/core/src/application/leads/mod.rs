@@ -1,6 +1,7 @@
-use chrono::{Duration, Utc};
+use chrono::{DateTime, Utc};
 use common::CoreError;
 use lodestone_macros::transactional;
+use tracing::info;
 
 use crate::{
     UserId,
@@ -20,7 +21,8 @@ use crate::{
             EcosystemReadiness, ecosystem_documents, hosting_platform, ports::EcosystemRepository,
         },
         enrichment::{
-            EnrichmentState, InspectionRecord, enrichment_state, listed_enrichment_state,
+            InspectionRecord, ListedEnrichment, enrichment_state, evaluation_status,
+            only_certificates,
         },
         facts::{LeadFacts, SiblingSignals},
         host::{CandidateHost, ports::KnownHostRepository},
@@ -101,25 +103,19 @@ impl LodestoneUseCase {
         let ids: Vec<LeadId> = page.items.iter().map(|lead| lead.id).collect();
         let summaries = assessments.latest_summaries(&ids).await?;
         let scorings = qualification.scorings(&ids).await?;
-        let wait = self.wait_duration();
-        let now = Utc::now();
-        let enrichments = ecosystem
+        let max_per_day = self.requalify.max_per_day;
+        let evaluations = ecosystem
             .listed(&ids)
             .await?
             .into_iter()
-            .map(|(id, listed)| {
-                (
-                    id,
-                    listed_enrichment_state(&listed.record, listed.only_certificates, wait, now),
-                )
-            })
+            .map(|(id, listed)| (id, evaluation_status(&listed, max_per_day)))
             .collect();
         Ok(LeadListing {
             profile,
             page,
             summaries,
             scorings,
-            enrichments,
+            evaluations,
         })
     }
 
@@ -154,7 +150,9 @@ impl LodestoneUseCase {
         let mut stops = agent_work_repository;
 
         let lead = leads.find(lead_id).await?.ok_or(CoreError::NotFound)?;
-        if suppression.is_domain_suppressed(&lead.domain).await? {
+        if suppression.is_domain_suppressed(&lead.domain).await?
+            || suppression.lead_exclusion(lead_id).await?.is_some()
+        {
             return Err(CoreError::NotFound);
         }
         let profile = profiles
@@ -199,19 +197,23 @@ impl LodestoneUseCase {
         let scoring = qualification.scorings(&[lead_id]).await?.remove(&lead_id);
         let lead_signals = signals.list_for_lead(lead_id).await?;
         let ecosystem = ecosystems.of_domain(&lead.domain).await?;
-        let record = ecosystems
+        let listed = ecosystems
             .listed(&[lead_id])
             .await?
             .remove(&lead_id)
-            .map(|listed| listed.record)
-            .unwrap_or_else(|| InspectionRecord {
-                created_at: lead.first_seen_at,
-                enabled: true,
-                hosting_platform: hosting_platform(&lead.domain),
-                modules: ecosystem.modules.clone(),
-                readiness: EcosystemReadiness::default(),
+            .unwrap_or_else(|| ListedEnrichment {
+                record: InspectionRecord {
+                    enabled: true,
+                    hosting_platform: hosting_platform(&lead.domain),
+                    modules: ecosystem.modules.clone(),
+                    readiness: EcosystemReadiness::default(),
+                },
+                only_certificates: only_certificates(&lead_signals),
+                evaluated_at: lead.qualified_at,
+                requalification: None,
             });
-        let enrichment = self.lead_enrichment_state(&record, &lead_signals);
+        let enrichment = enrichment_state(&listed.record);
+        let evaluation = evaluation_status(&listed, self.requalify.max_per_day);
         let context = company_context(
             &mut signals,
             &mut known_hosts,
@@ -222,6 +224,7 @@ impl LodestoneUseCase {
         .await?;
         Ok(LeadDetail {
             enrichment,
+            evaluation,
             ecosystem,
             summary_state,
             agent_failures,
@@ -244,16 +247,28 @@ impl LodestoneUseCase {
         })
     }
 
-    fn lead_enrichment_state(
-        &self,
-        record: &InspectionRecord,
-        signals: &[Signal],
-    ) -> EnrichmentState {
-        enrichment_state(record, signals, self.wait_duration(), Utc::now())
+    pub async fn request_lead_reevaluation(&self, lead_id: LeadId) -> Result<Lead, CoreError> {
+        self.request_lead_reevaluation_at(lead_id, Utc::now()).await
     }
 
-    fn wait_duration(&self) -> Duration {
-        Duration::from_std(self.enrichment_wait).unwrap_or_default()
+    #[transactional(lead, suppression, qualification)]
+    pub async fn request_lead_reevaluation_at(
+        &self,
+        lead_id: LeadId,
+        now: DateTime<Utc>,
+    ) -> Result<Lead, CoreError> {
+        let mut leads = lead_repository;
+        let mut suppression = suppression_repository;
+        let mut qualification = qualification_repository;
+        let lead = leads.find(lead_id).await?.ok_or(CoreError::NotFound)?;
+        if suppression.is_domain_suppressed(&lead.domain).await?
+            || suppression.lead_exclusion(lead_id).await?.is_some()
+        {
+            return Err(CoreError::NotFound);
+        }
+        qualification.request_reevaluation(lead_id, now).await?;
+        info!(lead.id = %lead_id, "lead reevaluation requested");
+        Ok(lead)
     }
 
     #[transactional(ecosystem)]

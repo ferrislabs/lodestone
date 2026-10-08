@@ -82,7 +82,7 @@
       }
     },
     "schema_version": {
-      "description": "Profile format version. Must be 18.",
+      "description": "Profile format version. Must be 19.",
       "type": "integer",
       "format": "uint32",
       "minimum": 0
@@ -195,6 +195,14 @@
           "description": "Reads new certificates in the certificate transparency logs. A hostname with one of the labels creates or updates a lead for its registrable domain.",
           "type": "object",
           "properties": {
+            "countries": {
+              "description": "Target countries, as ISO 3166-1 alpha-2 codes, uppercase, for example FR. A host under the country-code top-level domain of another country creates no lead; a host under a generic top-level domain creates one, suppressed for this profile once the head office of the company is known to be elsewhere. Empty means every country.",
+              "type": "array",
+              "default": [],
+              "items": {
+                "$ref": "#/$defs/CountryCode"
+              }
+            },
             "enabled": {
               "description": "A disabled agent is kept but not run.",
               "type": "boolean",
@@ -233,6 +241,14 @@
           "description": "Resolves the CNAME chain of candidate hosts. A target matching a pattern creates or updates a lead for the registrable domain of the host.",
           "type": "object",
           "properties": {
+            "countries": {
+              "description": "Target countries, as ISO 3166-1 alpha-2 codes, uppercase, for example FR. A host under the country-code top-level domain of another country creates no lead; a host under a generic top-level domain creates one, suppressed for this profile once the head office of the company is known to be elsewhere. Empty means every country.",
+              "type": "array",
+              "default": [],
+              "items": {
+                "$ref": "#/$defs/CountryCode"
+              }
+            },
             "enabled": {
               "description": "A disabled agent is kept but not run.",
               "type": "boolean",

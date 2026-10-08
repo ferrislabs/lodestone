@@ -208,6 +208,7 @@ async fn the_scoring_agent_answers_the_imposed_contract_live() {
         domain: lodestone_core::NormalizedDomain::from_host("example-retail.fr").unwrap(),
         agent: Some(agent.id.clone()),
         sample: 0,
+        fresh: false,
     };
     let mut instruction = built.instruction.clone();
     let mut attempt = 0;

@@ -7,6 +7,7 @@ import {
 } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { formatDateTime } from '#/lib/format'
 import type { Source } from '#/pages/sources/lib/types'
 import { SourcesPage } from './sources-page'
 
@@ -102,9 +103,15 @@ const LISTENERS: Source[] = [
 	listening('public_page', {
 		state: 'error',
 		last_error: 'upstream error: dns down',
+		last_error_at: '2026-10-05T11:58:00Z',
 		backlog: 3,
 	}),
-	listening('role_guess', { state: 'idle', backlog: 5 }),
+	listening('role_guess', {
+		state: 'idle',
+		backlog: 5,
+		last_error: 'stale failure',
+		last_error_at: '2026-10-05T11:00:00Z',
+	}),
 	listening('qualification', { backlog: 7 }),
 ]
 
@@ -284,7 +291,15 @@ describe('SourcesPage', () => {
 			expect(
 				row('Page publique').getByText('upstream error: dns down'),
 			).toBeTruthy()
+			expect(
+				row('Page publique').getByText(
+					`(${formatDateTime('2026-10-05T11:58:00Z')})`,
+				),
+			).toBeTruthy()
 			expect(row('Adresse de rôle devinée').getByText('En écoute')).toBeTruthy()
+			expect(
+				row('Adresse de rôle devinée').queryByText('stale failure'),
+			).toBeNull()
 		})
 
 		it('shows the last activity relative to now', () => {

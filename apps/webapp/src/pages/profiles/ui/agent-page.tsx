@@ -22,9 +22,11 @@ import {
 	SIGNAL_PROVIDERS,
 	settingsSchema,
 } from '#/pages/profiles/lib/agents'
+import { withCountry, withoutCountry } from '#/pages/profiles/lib/countries'
 import { criteriaMatrix } from '#/pages/profiles/lib/matrix'
 import { providerTiles } from '#/pages/profiles/lib/provider-tiles'
 import {
+	agentCountries,
 	findProvider,
 	notReadyProviders,
 	providerName,
@@ -32,6 +34,7 @@ import {
 } from '#/pages/profiles/lib/search-agent'
 import { belongsToPath } from '#/pages/profiles/lib/tabs'
 import { AgentIdField } from '#/pages/profiles/ui/agent-id-field'
+import { CountryPicker } from '#/pages/profiles/ui/country-picker'
 import { CriteriaMatrix } from '#/pages/profiles/ui/criteria-matrix'
 import { DependencyNoteText } from '#/pages/profiles/ui/dependency-note'
 import {
@@ -95,6 +98,7 @@ export function AgentPage({
 	const nameProblems = exactly(problems, `${base}.name`)
 	const idProblems = exactly(problems, `${base}.id`)
 	const attached = agentProviders(agent)
+	const countries = agentCountries(agent)
 	const advancedOpen =
 		idProblems.length > 0 ||
 		exactly(problems, `${base}.accept_min_keywords`).length > 0
@@ -214,6 +218,36 @@ export function AgentPage({
 								path={['agents', index]}
 								value={agent}
 							/>
+							<div
+								data-host-countries={index}
+								className="flex flex-col gap-1.5"
+							>
+								<CountryPicker
+									id={`agent-${index}-countries`}
+									codes={countries}
+									query={countryQuery}
+									onQueryChange={actions.onCountryQuery}
+									onAdd={(code) => {
+										actions.onCountries(withCountry(countries, code))
+										actions.onCountryQuery('')
+									}}
+									onRemove={(code) =>
+										actions.onCountries(withoutCountry(countries, code))
+									}
+								/>
+								<p className="text-xs text-muted-foreground">
+									Un hôte sous l'extension d'un autre pays (.de, .es…) ne crée
+									pas de lead. Un hôte sous une extension générique (.com, .io…)
+									en crée un, retiré de ce profil avec la raison « hors pays
+									visé » dès que le siège de l'entreprise est connu ailleurs.
+								</p>
+								<FieldErrors
+									id={`agent-${index}-countries-problems`}
+									problems={problems.filter((problem) =>
+										belongsToPath(problem.path, `${base}.countries`),
+									)}
+								/>
+							</div>
 							<details
 								open={idProblems.length > 0}
 								className="rounded-md border px-3 py-2"

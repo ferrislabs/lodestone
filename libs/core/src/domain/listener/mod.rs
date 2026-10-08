@@ -76,6 +76,7 @@ pub struct ListenerStatus {
     pub state: ListenerState,
     pub last_activity_at: Option<DateTime<Utc>>,
     pub last_error: Option<String>,
+    pub last_error_at: Option<DateTime<Utc>>,
     pub items_total: u64,
     pub signals_total: u64,
     pub backlog: Option<u64>,
@@ -101,6 +102,7 @@ pub struct StatusUpdate<'a> {
     pub state: ListenerState,
     pub outcome: StepOutcome,
     pub error: Option<&'a str>,
+    pub succeeded: bool,
     pub at: DateTime<Utc>,
 }
 
@@ -140,6 +142,7 @@ mod tests {
             state,
             last_activity_at: None,
             last_error: None,
+            last_error_at: None,
             items_total: 0,
             signals_total: 0,
             backlog: None,

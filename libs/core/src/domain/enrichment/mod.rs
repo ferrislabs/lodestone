@@ -1,4 +1,6 @@
-use chrono::{DateTime, Duration, Utc};
+use std::time::Duration as StdDuration;
+
+use chrono::{DateTime, Duration, NaiveDate, Utc};
 
 use crate::domain::{
     ecosystem::{EcosystemModule, EcosystemReadiness, ModuleState},
@@ -8,6 +10,8 @@ use crate::domain::{
 };
 
 pub const CERTIFICATE_SEEN_KIND: &str = "certificate_seen";
+pub const DEFAULT_REQUALIFY_DEBOUNCE_SECONDS: u64 = 120;
+pub const DEFAULT_REQUALIFY_MAX_PER_DAY: u32 = 3;
 
 pub const CONTACT_SOURCES: [SourceName; 3] = [
     SourceName::SecurityTxt,
@@ -37,9 +41,66 @@ impl EnrichmentStep {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RequalifyPolicy {
+    pub debounce: Duration,
+    pub max_per_day: u32,
+}
+
+impl RequalifyPolicy {
+    pub fn new(debounce: Duration, max_per_day: u32) -> Self {
+        Self {
+            debounce,
+            max_per_day,
+        }
+    }
+
+    pub fn from_std(debounce: StdDuration, max_per_day: u32) -> Self {
+        Self {
+            debounce: Duration::from_std(debounce).unwrap_or_else(|_| Duration::zero()),
+            max_per_day,
+        }
+    }
+
+    pub fn requalify_after(&self, now: DateTime<Utc>) -> DateTime<Utc> {
+        now.checked_add_signed(self.debounce).unwrap_or(now)
+    }
+}
+
+impl Default for RequalifyPolicy {
+    fn default() -> Self {
+        Self {
+            debounce: Duration::zero(),
+            max_per_day: DEFAULT_REQUALIFY_MAX_PER_DAY,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Requalification {
+    pub after: Option<DateTime<Utc>>,
+    pub forced: bool,
+    pub daily_count: u32,
+    pub counted_on: Option<NaiveDate>,
+}
+
+impl Requalification {
+    pub fn due_at(&self, max_per_day: u32) -> Option<DateTime<Utc>> {
+        let after = self.after?;
+        let capped_until = self
+            .counted_on
+            .filter(|day| {
+                !self.forced && self.daily_count >= max_per_day && after.date_naive() <= *day
+            })
+            .and_then(|day| day.succ_opt())
+            .and_then(|day| day.and_hms_opt(0, 0, 0))
+            .map(|midnight| midnight.and_utc());
+        Some(capped_until.unwrap_or(after))
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InspectionRecord {
-    pub created_at: DateTime<Utc>,
     pub enabled: bool,
     pub hosting_platform: Option<&'static str>,
     pub modules: Vec<ModuleState>,
@@ -50,41 +111,44 @@ pub struct InspectionRecord {
 pub struct ListedEnrichment {
     pub record: InspectionRecord,
     pub only_certificates: bool,
+    pub evaluated_at: Option<DateTime<Utc>>,
+    pub requalification: Option<Requalification>,
 }
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum EnrichmentStatus {
-    Disabled,
-    Pending,
-    Complete,
-    TimedOut,
-}
-
-str_enum!(EnrichmentStatus {
-    Disabled => "disabled",
-    Pending => "pending",
-    Complete => "complete",
-    TimedOut => "timed_out",
-});
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum WaitingReason {
-    AwaitingEnrichment,
-    AwaitingEnrichmentEvidence,
-}
-
-str_enum!(WaitingReason {
-    AwaitingEnrichment => "awaiting_enrichment",
-    AwaitingEnrichmentEvidence => "awaiting_enrichment_evidence",
-});
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EnrichmentState {
     pub modules: Vec<ModuleState>,
     pub hosting_platform: Option<&'static str>,
-    pub status: EnrichmentStatus,
-    pub waiting_reason: Option<WaitingReason>,
-    pub wait_until: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EvaluationStage {
+    NotEvaluated,
+    CertificateOnly,
+    RequalificationPlanned,
+    InspectionRunning,
+    InspectionComplete,
+    Evaluated,
+}
+
+str_enum!(EvaluationStage {
+    NotEvaluated => "not_evaluated",
+    CertificateOnly => "certificate_only",
+    RequalificationPlanned => "requalification_planned",
+    InspectionRunning => "inspection_running",
+    InspectionComplete => "inspection_complete",
+    Evaluated => "evaluated",
+});
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EvaluationStatus {
+    pub stage: EvaluationStage,
+    pub evaluated_at: Option<DateTime<Utc>>,
+    pub modules_done: u32,
+    pub modules_available: u32,
+    pub requalify_at: Option<DateTime<Utc>>,
+    pub requalify_forced: bool,
+    pub changed_modules: Vec<ModuleState>,
 }
 
 pub fn is_enrichment_evidence(signal: &Signal) -> bool {
@@ -98,22 +162,8 @@ pub fn only_certificates(signals: &[Signal]) -> bool {
         && !signals.iter().any(is_enrichment_evidence)
 }
 
-pub fn enrichment_state(
-    record: &InspectionRecord,
-    signals: &[Signal],
-    wait: Duration,
-    now: DateTime<Utc>,
-) -> EnrichmentState {
-    listed_enrichment_state(record, only_certificates(signals), wait, now)
-}
-
-pub fn listed_enrichment_state(
-    record: &InspectionRecord,
-    certificates_only: bool,
-    wait: Duration,
-    now: DateTime<Utc>,
-) -> EnrichmentState {
-    let modules: Vec<ModuleState> = EcosystemModule::AVAILABLE
+fn all_modules(record: &InspectionRecord) -> Vec<ModuleState> {
+    EcosystemModule::AVAILABLE
         .into_iter()
         .map(|module| {
             record
@@ -123,193 +173,74 @@ pub fn listed_enrichment_state(
                 .cloned()
                 .unwrap_or_else(|| ModuleState::pending(module))
         })
-        .collect();
-    let wait_until = record.created_at.checked_add_signed(wait);
-    let status = if !record.enabled {
-        EnrichmentStatus::Disabled
-    } else if modules
-        .iter()
-        .all(|state| state.status.is_settled() || !record.readiness.is_ready(state.module))
-    {
-        EnrichmentStatus::Complete
-    } else if wait_until.is_none_or(|until| now >= until) {
-        EnrichmentStatus::TimedOut
-    } else {
-        EnrichmentStatus::Pending
-    };
-    let waiting_reason = if certificates_only {
-        Some(WaitingReason::AwaitingEnrichmentEvidence)
-    } else if status == EnrichmentStatus::Pending {
-        Some(WaitingReason::AwaitingEnrichment)
-    } else {
-        None
-    };
+        .collect()
+}
+
+fn count(value: usize) -> u32 {
+    u32::try_from(value).unwrap_or(u32::MAX)
+}
+
+pub fn enrichment_state(record: &InspectionRecord) -> EnrichmentState {
     EnrichmentState {
-        modules,
+        modules: all_modules(record),
         hosting_platform: record.hosting_platform,
-        status,
-        waiting_reason,
-        wait_until: (status == EnrichmentStatus::Pending)
-            .then_some(wait_until)
-            .flatten(),
+    }
+}
+
+pub fn evaluation_status(listed: &ListedEnrichment, max_per_day: u32) -> EvaluationStatus {
+    let record = &listed.record;
+    let modules = all_modules(record);
+    let ready: Vec<&ModuleState> = modules
+        .iter()
+        .filter(|state| record.enabled && record.readiness.is_ready(state.module))
+        .collect();
+    let modules_available = count(ready.len());
+    let modules_done = count(
+        ready
+            .iter()
+            .filter(|state| state.status.is_settled())
+            .count(),
+    );
+    let requalify_at = listed
+        .requalification
+        .as_ref()
+        .and_then(|requalification| requalification.due_at(max_per_day));
+    let changed_modules = listed
+        .evaluated_at
+        .map(|evaluated| {
+            modules
+                .iter()
+                .filter(|state| state.changed_at.is_some_and(|changed| changed > evaluated))
+                .cloned()
+                .collect()
+        })
+        .unwrap_or_default();
+    let stage = if listed.only_certificates {
+        EvaluationStage::CertificateOnly
+    } else if listed.evaluated_at.is_none() {
+        EvaluationStage::NotEvaluated
+    } else if requalify_at.is_some() {
+        EvaluationStage::RequalificationPlanned
+    } else if !record.enabled {
+        EvaluationStage::Evaluated
+    } else if modules_done >= modules_available {
+        EvaluationStage::InspectionComplete
+    } else {
+        EvaluationStage::InspectionRunning
+    };
+    EvaluationStatus {
+        stage,
+        evaluated_at: listed.evaluated_at,
+        modules_done,
+        modules_available,
+        requalify_at,
+        requalify_forced: listed
+            .requalification
+            .as_ref()
+            .is_some_and(|requalification| requalification.forced && requalify_at.is_some()),
+        changed_modules,
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use chrono::TimeZone;
-
-    use super::*;
-    use crate::domain::{
-        ecosystem::ModuleStatus,
-        lead::{LeadId, SignalId},
-        values::{Provenance, SignalKind, UnitInterval},
-    };
-
-    fn at(minute: u32) -> DateTime<Utc> {
-        Utc.with_ymd_and_hms(2026, 10, 8, 9, minute, 0).unwrap()
-    }
-
-    fn signal(kind: &str, source: SourceName) -> Signal {
-        Signal {
-            id: SignalId(uuid::Uuid::nil()),
-            lead_id: LeadId(uuid::Uuid::nil()),
-            kind: SignalKind::parse(kind).unwrap(),
-            value: None,
-            source,
-            raw: serde_json::Value::Null,
-            provenance: Provenance::parse("https://example.com").unwrap(),
-            strength: UnitInterval::new(0.3).unwrap(),
-            observed_at: at(0),
-            agent: None,
-        }
-    }
-
-    fn state(module: EcosystemModule, status: ModuleStatus, minute: u32) -> ModuleState {
-        ModuleState {
-            module,
-            status,
-            last_run: Some(at(minute)),
-            error: None,
-        }
-    }
-
-    fn record(enabled: bool, modules: &[ModuleState]) -> InspectionRecord {
-        InspectionRecord {
-            created_at: at(0),
-            enabled,
-            hosting_platform: None,
-            modules: modules.to_vec(),
-            readiness: EcosystemReadiness::default(),
-        }
-    }
-
-    #[test]
-    fn a_lead_waits_for_every_available_module_then_times_out() {
-        let signals = [signal("public_tender", SourceName::Boamp)];
-        let partial = [state(
-            EcosystemModule::OfficialIdentity,
-            ModuleStatus::Done,
-            3,
-        )];
-        let pending = enrichment_state(
-            &record(true, &partial),
-            &signals,
-            Duration::minutes(30),
-            at(10),
-        );
-        assert_eq!(pending.status, EnrichmentStatus::Pending);
-        assert_eq!(
-            pending.waiting_reason,
-            Some(WaitingReason::AwaitingEnrichment)
-        );
-        assert_eq!(pending.wait_until, Some(at(30)));
-        assert_eq!(pending.modules.len(), EcosystemModule::AVAILABLE.len());
-        assert_eq!(pending.modules[0].last_run, Some(at(3)));
-        assert_eq!(pending.modules[1].status, ModuleStatus::Pending);
-        let timed_out = enrichment_state(
-            &record(true, &partial),
-            &signals,
-            Duration::minutes(30),
-            at(30),
-        );
-        assert_eq!(timed_out.status, EnrichmentStatus::TimedOut);
-        assert_eq!(timed_out.waiting_reason, None);
-        let settled = [
-            state(EcosystemModule::OfficialIdentity, ModuleStatus::Done, 3),
-            state(EcosystemModule::LegalLife, ModuleStatus::NotApplicable, 3),
-            state(EcosystemModule::PublicContracts, ModuleStatus::Done, 3),
-            state(
-                EcosystemModule::WebsiteStack,
-                ModuleStatus::NotApplicable,
-                4,
-            ),
-            state(EcosystemModule::DnsEmail, ModuleStatus::Done, 4),
-            state(EcosystemModule::HiringActivity, ModuleStatus::Failed, 5),
-            state(EcosystemModule::RecentActivity, ModuleStatus::Done, 5),
-        ];
-        let complete = enrichment_state(
-            &record(true, &settled),
-            &signals,
-            Duration::minutes(30),
-            at(10),
-        );
-        assert_eq!(complete.status, EnrichmentStatus::Complete);
-        let without_bodacc = [
-            state(EcosystemModule::OfficialIdentity, ModuleStatus::Done, 3),
-            state(EcosystemModule::PublicContracts, ModuleStatus::Done, 3),
-            state(EcosystemModule::WebsiteStack, ModuleStatus::Done, 4),
-            state(EcosystemModule::DnsEmail, ModuleStatus::Done, 4),
-            state(EcosystemModule::HiringActivity, ModuleStatus::Done, 5),
-            state(EcosystemModule::RecentActivity, ModuleStatus::Done, 5),
-        ];
-        let mut waiting_record = record(true, &without_bodacc);
-        let still_waiting =
-            enrichment_state(&waiting_record, &signals, Duration::minutes(30), at(10));
-        assert_eq!(still_waiting.status, EnrichmentStatus::Pending);
-        waiting_record.readiness =
-            EcosystemReadiness::with_not_ready(vec![EcosystemModule::LegalLife]);
-        let not_ready = enrichment_state(&waiting_record, &signals, Duration::minutes(30), at(10));
-        assert_eq!(not_ready.status, EnrichmentStatus::Complete);
-        assert_eq!(not_ready.waiting_reason, None);
-        assert_eq!(
-            not_ready
-                .modules
-                .iter()
-                .find(|module| module.module == EcosystemModule::LegalLife)
-                .map(|module| module.status),
-            Some(ModuleStatus::Pending)
-        );
-        let disabled =
-            enrichment_state(&record(false, &[]), &signals, Duration::minutes(30), at(10));
-        assert_eq!(disabled.status, EnrichmentStatus::Disabled);
-        assert_eq!(disabled.waiting_reason, None);
-    }
-
-    #[test]
-    fn a_certificate_only_lead_waits_for_evidence_even_after_its_modules() {
-        let certificate = signal(CERTIFICATE_SEEN_KIND, SourceName::CertificateTransparency);
-        let guess = signal("role_contact_found", SourceName::RoleGuess);
-        let settled: Vec<ModuleState> = EcosystemModule::AVAILABLE
-            .into_iter()
-            .map(|module| state(module, ModuleStatus::Done, 3))
-            .collect();
-        let state = enrichment_state(
-            &record(true, &settled),
-            &[certificate.clone(), guess],
-            Duration::minutes(30),
-            at(40),
-        );
-        assert_eq!(state.status, EnrichmentStatus::Complete);
-        assert_eq!(
-            state.waiting_reason,
-            Some(WaitingReason::AwaitingEnrichmentEvidence)
-        );
-        let listed =
-            listed_enrichment_state(&record(true, &settled), true, Duration::minutes(30), at(40));
-        assert_eq!(listed, state);
-        let product = signal("product_detected", SourceName::HttpProbe);
-        assert!(!only_certificates(&[certificate, product]));
-        assert!(!only_certificates(&[]));
-    }
-}
+mod tests;

@@ -624,7 +624,7 @@ describe('definition tabs', () => {
 		expect(identity.getByText('Rien sur les 7 derniers jours.')).toBeTruthy()
 		const help = within(screen.getByTestId('help-panel'))
 		expect(help.getByText(/même inspection de son écosystème/)).toBeTruthy()
-		expect(help.getByText(/30 minutes/)).toBeTruthy()
+		expect(help.getByText(/sans attendre l'inspection/)).toBeTruthy()
 		expect(
 			screen.queryByRole('button', { name: 'Ajouter un agent' }),
 		).toBeNull()

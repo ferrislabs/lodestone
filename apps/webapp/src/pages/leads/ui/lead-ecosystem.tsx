@@ -1,23 +1,17 @@
 import { ModuleFindings } from '#/components/ecosystem/module-findings'
 import { ModuleStatusChip } from '#/components/ecosystem/module-status-chip'
 import { ProviderNotReady } from '#/components/ecosystem/provider-not-ready'
-import { Badge } from '#/components/ui/badge'
 import { platformNotice } from '#/lib/ecosystem'
-import {
-	enrichmentStatusLabel,
-	moduleSections,
-	waitingBadge,
-} from '#/pages/leads/lib/enrichment'
-import type { Ecosystem, Enrichment } from '#/pages/leads/lib/types'
+import { moduleSections } from '#/pages/leads/lib/enrichment'
+import type { Ecosystem } from '#/pages/leads/lib/types'
 
 interface LeadEcosystemProps {
 	ecosystem: Ecosystem
-	enrichment: Enrichment
+	progress: string | null
 }
 
-export function LeadEcosystem({ ecosystem, enrichment }: LeadEcosystemProps) {
+export function LeadEcosystem({ ecosystem, progress }: LeadEcosystemProps) {
 	const sections = moduleSections(ecosystem)
-	const waiting = waitingBadge(enrichment)
 	const notice = platformNotice(ecosystem.hosting_platform)
 	return (
 		<section
@@ -27,19 +21,13 @@ export function LeadEcosystem({ ecosystem, enrichment }: LeadEcosystemProps) {
 		>
 			<div className="flex flex-wrap items-center gap-3">
 				<h2 className="text-sm font-semibold">Écosystème</h2>
-				<span className="text-xs text-muted-foreground">
-					{enrichmentStatusLabel(enrichment.status)}
-				</span>
-				{waiting ? (
-					<Badge
-						variant="outline"
-						data-waiting={waiting.reason}
-						className="border-amber-200 bg-amber-50 text-amber-700"
+				{progress ? (
+					<span
+						data-part="inspection-progress"
+						className="text-xs text-muted-foreground"
 					>
-						{waiting.detail
-							? `${waiting.label} ${waiting.detail}`
-							: waiting.label}
-					</Badge>
+						{progress}
+					</span>
 				) : null}
 			</div>
 			{notice ? (

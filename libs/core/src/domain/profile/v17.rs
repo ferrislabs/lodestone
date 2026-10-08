@@ -202,7 +202,7 @@ mod tests {
                 "extra_subdomains": ["auth", "sso", "login", "id", "idp", "accounts"]
             }
         }));
-        assert_eq!(json["schema_version"], 18);
+        assert_eq!(json["schema_version"], 19);
         assert_eq!(json["inspection"]["enabled"], true);
         assert_eq!(json["enrichment"]["custom"]["extra_subdomains"], json!([]));
         assert_eq!(

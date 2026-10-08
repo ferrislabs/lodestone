@@ -156,6 +156,14 @@ impl CompanyDossier {
         self.official.is_some() || !self.pages.is_empty()
     }
 
+    pub fn head_office_country_code(&self) -> Option<&str> {
+        self.official
+            .as_ref()
+            .and_then(|official| official.head_office_country_code.as_deref())
+            .map(str::trim)
+            .filter(|code| !code.is_empty())
+    }
+
     pub fn documents(&self, page_chars: usize) -> Vec<DossierDocument> {
         let official = self.official.as_ref().map(|official| DossierDocument {
             source: official.source_url(),

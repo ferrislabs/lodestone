@@ -129,6 +129,7 @@ async fn an_llm_call_in_flight_is_dropped_when_its_agent_is_removed() {
         domain: NormalizedDomain::from_host("acme.com").unwrap(),
         agent: Some(AgentId::new("marche")),
         sample: 0,
+        fresh: false,
     };
     let mut budget = RunBudget::new(NonZeroU32::new(100).unwrap());
     let started = Instant::now();
@@ -194,6 +195,7 @@ async fn a_call_for_an_already_removed_agent_never_reaches_the_provider() {
         domain: NormalizedDomain::from_host("acme.com").unwrap(),
         agent: Some(AgentId::new("absent")),
         sample: 0,
+        fresh: false,
     };
     let mut budget = RunBudget::new(NonZeroU32::new(100).unwrap());
     let result = call_with_schema_until(

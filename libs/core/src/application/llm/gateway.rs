@@ -9,6 +9,7 @@ use tracing::warn;
 
 use aws_lc_rs::digest::{Context, SHA256};
 use chrono::Utc;
+use common::CoreError;
 use serde::Serialize;
 
 use crate::domain::{
@@ -251,7 +252,7 @@ where
         schema,
     } = call;
     let key = cache_key(scope, &prompt, schema);
-    match cache.get(&key).await {
+    match cached(cache, scope, &key).await {
         Ok(Some(hit)) if accept(&hit.output) => {
             return Ok(Structured {
                 value: hit.output,
@@ -301,6 +302,17 @@ where
 fn hash_field(context: &mut Context, field: &[u8]) {
     context.update(&(field.len() as u64).to_be_bytes());
     context.update(field);
+}
+
+async fn cached<C: LlmCache>(
+    cache: &C,
+    scope: &CacheScope,
+    key: &[u8],
+) -> Result<Option<CachedOutput>, CoreError> {
+    if scope.fresh {
+        return Ok(None);
+    }
+    cache.get(key).await
 }
 
 pub fn cache_key(scope: &CacheScope, prompt: &Prompt<'_>, schema: &serde_json::Value) -> Vec<u8> {
@@ -379,7 +391,7 @@ where
 {
     let schema = output_schema::<T>()?;
     let key = cache_key(scope, &prompt, &schema);
-    match cache.get(&key).await {
+    match cached(cache, scope, &key).await {
         Ok(Some(hit)) => match serde_json::from_value::<T>(hit.output) {
             Ok(value) => {
                 return Ok(Structured {
@@ -414,6 +426,8 @@ where
 #[cfg(test)]
 mod tests {
     use std::{collections::VecDeque, sync::Mutex};
+
+    use serde_json::json;
 
     use schemars::JsonSchema;
     use serde::Deserialize;
@@ -461,6 +475,7 @@ mod tests {
             domain: crate::domain::NormalizedDomain::from_host("acme.com").unwrap(),
             agent: agent.map(crate::domain::profile::definition::AgentId::new),
             sample: 0,
+            fresh: false,
         }
     }
 
@@ -725,10 +740,9 @@ mod tests {
             _scope: &CacheScope,
             entry: &CachedOutput,
         ) -> Result<(), common::CoreError> {
-            self.entries
-                .lock()
-                .unwrap()
-                .push((key.to_vec(), entry.clone()));
+            let mut entries = self.entries.lock().unwrap();
+            entries.retain(|(stored, _)| stored != key);
+            entries.push((key.to_vec(), entry.clone()));
             Ok(())
         }
     }
@@ -789,6 +803,45 @@ mod tests {
             assert_eq!(result.from_cache, expected_cache);
         }
         assert_eq!(provider.calls(), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_fresh_scope_calls_the_model_and_refreshes_the_cache() {
+        let provider = Scripted::new(vec![
+            Ok(json!({"free": "first"})),
+            Ok(json!({"free": "second"})),
+        ]);
+        let cache = MemoryCache::default();
+        let schema = dynamic_schema();
+        let scope = scope_of(Some("agent"));
+        let fresh = CacheScope {
+            fresh: true,
+            ..scope_of(Some("agent"))
+        };
+        let mut budget = budget(10);
+        let mut answers = Vec::new();
+        for current in [&scope, &fresh, &scope] {
+            let result = call_with_schema(
+                &provider,
+                &cache,
+                with_schema(current, &schema),
+                |_| true,
+                settings(0),
+                &mut budget,
+            )
+            .await
+            .unwrap();
+            answers.push((result.value["free"].clone(), result.from_cache));
+        }
+        assert_eq!(provider.calls(), 2);
+        assert_eq!(
+            answers,
+            [
+                (json!("first"), false),
+                (json!("second"), false),
+                (json!("second"), true),
+            ]
+        );
     }
 
     #[tokio::test(start_paused = true)]

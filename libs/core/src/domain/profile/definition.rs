@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 use crate::domain::values::SourceName;
 
-pub const PROFILE_SCHEMA_VERSION: u32 = 18;
+pub const PROFILE_SCHEMA_VERSION: u32 = 19;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -15,7 +15,7 @@ pub const PROFILE_SCHEMA_VERSION: u32 = 18;
     description = "Describes one market: what is sold, which agents scan which sources, which qualification agents judge a lead, which scoring agents decide its score and verdict, how an aggregator sums it up and which contacts to prefer."
 )]
 pub struct ProfileDefinition {
-    #[schemars(description = "Profile format version. Must be 18.")]
+    #[schemars(description = "Profile format version. Must be 19.")]
     pub schema_version: u32,
     pub identity: Identity,
     #[serde(default)]
@@ -661,6 +661,14 @@ impl Agent {
         }
     }
 
+    pub fn host_countries(&self) -> Option<&[CountryCode]> {
+        match self {
+            Self::Search(_) => None,
+            Self::Certificates(agent) => Some(&agent.countries),
+            Self::Dns(agent) => Some(&agent.countries),
+        }
+    }
+
     pub fn serves(&self, source: SourceName) -> bool {
         match self {
             Self::Search(agent) => agent.searches(source.as_str()),
@@ -686,6 +694,11 @@ pub struct CertificatesAgent {
     pub enabled: bool,
     #[schemars(description = "Hostname labels to look for, for example auth or sso.")]
     pub labels: Vec<String>,
+    #[serde(default)]
+    #[schemars(
+        description = "Target countries, as ISO 3166-1 alpha-2 codes, uppercase, for example FR. A host under the country-code top-level domain of another country creates no lead; a host under a generic top-level domain creates one, suppressed for this profile once the head office of the company is known to be elsewhere. Empty means every country."
+    )]
+    pub countries: Vec<CountryCode>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -704,6 +717,11 @@ pub struct DnsAgent {
     pub enabled: bool,
     #[schemars(description = "Provider and target suffix pairs.")]
     pub patterns: Vec<CnamePattern>,
+    #[serde(default)]
+    #[schemars(
+        description = "Target countries, as ISO 3166-1 alpha-2 codes, uppercase, for example FR. A host under the country-code top-level domain of another country creates no lead; a host under a generic top-level domain creates one, suppressed for this profile once the head office of the company is known to be elsewhere. Empty means every country."
+    )]
+    pub countries: Vec<CountryCode>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -790,6 +808,13 @@ impl<'a> SourceTarget<'a> {
     pub fn dns(&self) -> Option<&'a DnsAgent> {
         match self {
             Self::Agent(agent) => agent.dns(),
+            _ => None,
+        }
+    }
+
+    pub fn host_countries(&self) -> Option<&'a [CountryCode]> {
+        match self {
+            Self::Agent(agent) => agent.host_countries(),
             _ => None,
         }
     }
@@ -959,6 +984,11 @@ impl CountryCode {
 pub struct CertificateTransparency {
     #[schemars(description = "Hostname labels to look for, for example auth or sso.")]
     pub labels: Vec<String>,
+    #[serde(default)]
+    #[schemars(
+        description = "Target countries, as ISO 3166-1 alpha-2 codes, uppercase, for example FR. A host under the country-code top-level domain of another country creates no lead; a host under a generic top-level domain creates one, suppressed for this profile once the head office of the company is known to be elsewhere. Empty means every country."
+    )]
+    pub countries: Vec<CountryCode>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -1080,6 +1110,11 @@ pub enum DebtRule {
 pub struct DnsCname {
     #[schemars(description = "Provider and target suffix pairs.")]
     pub patterns: Vec<CnamePattern>,
+    #[serde(default)]
+    #[schemars(
+        description = "Target countries, as ISO 3166-1 alpha-2 codes, uppercase, for example FR. A host under the country-code top-level domain of another country creates no lead; a host under a generic top-level domain creates one, suppressed for this profile once the head office of the company is known to be elsewhere. Empty means every country."
+    )]
+    pub countries: Vec<CountryCode>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]

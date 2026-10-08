@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT domain, module, status, last_run, error FROM lead_ecosystem_modules WHERE domain = $1",
+  "query": "SELECT domain, module, status, last_run, changed_at, error FROM lead_ecosystem_modules WHERE domain = $1",
   "describe": {
     "columns": [
       {
@@ -25,6 +25,11 @@
       },
       {
         "ordinal": 4,
+        "name": "changed_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 5,
         "name": "error",
         "type_info": "Text"
       }
@@ -39,8 +44,9 @@
       false,
       false,
       true,
+      true,
       true
     ]
   },
-  "hash": "f22324cd68077b93e7f4b78d7860ee7db4b8cb2aedadaf4a66ac427f2266cfd4"
+  "hash": "7d68c1fd766ea8a6185431bbf38244b0966d19d1041713d5850895ecec1581d4"
 }

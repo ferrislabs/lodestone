@@ -1,4 +1,3 @@
-import { ENRICHMENT_WAIT_MINUTES } from '#/pages/profiles/lib/enrichment'
 import { HelpPanel } from '#/pages/profiles/ui/help-panel'
 
 interface EnrichmentHelpProps {
@@ -15,8 +14,12 @@ export function EnrichmentHelp({ collapsed, onToggle }: EnrichmentHelpProps) {
 				même domaine et lu par vos agents de qualification.
 			</p>
 			<p>
-				La qualification attend la fin de l'inspection, au plus{' '}
-				{ENRICHMENT_WAIT_MINUTES} minutes après la création du lead.
+				Un lead est évalué dès qu'il a une preuve, sans attendre l'inspection.
+				Quand un module trouve du nouveau, le lead est réévalué quelques minutes
+				plus tard, au plus trois fois par jour.
+			</p>
+			<p>
+				Le bouton « Réévaluer » de la page d'un lead le réévalue à la demande.
 			</p>
 			<p className="text-xs text-muted-foreground">
 				Un site hébergé sur une plateforme (github.io, vercel.app…) n'est pas lu

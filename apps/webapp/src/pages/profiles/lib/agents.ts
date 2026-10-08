@@ -144,11 +144,12 @@ function agentVariant(type: AgentKind) {
 }
 
 const COMMON_FIELDS = ['type', 'id', 'name', 'enabled']
+const OWN_EDITOR_FIELDS = ['countries']
 
 export function settingsSchema(kind: SignalKind): Schema {
 	const schema = agentVariant(kind)?.schema ?? {}
 	const keys = Object.keys(schema.properties ?? {}).filter(
-		(key) => !COMMON_FIELDS.includes(key),
+		(key) => !COMMON_FIELDS.includes(key) && !OWN_EDITOR_FIELDS.includes(key),
 	)
 	return pickProperties(
 		kind,

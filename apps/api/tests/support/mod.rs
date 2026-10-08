@@ -22,7 +22,7 @@ use http::{
 };
 use httpmock::{Method::GET, MockServer};
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
-use lodestone_core::{LodestoneUseCase, infrastructure::crypto::AesGcmCipher};
+use lodestone_core::{LodestoneUseCase, RequalifyPolicy, infrastructure::crypto::AesGcmCipher};
 use rate_limit::{InMemoryRateLimiter, Quota, RateLimitService};
 use rsa::{RsaPrivateKey, pkcs1::EncodeRsaPrivateKey, rand_core::OsRng, traits::PublicKeyParts};
 use serde_json::{Value, json};
@@ -144,8 +144,11 @@ impl Harness {
         ])
         .expect("parse default args");
         let repository = FerrisKeyRepository::new(server.base_url(), Some("lodestone".to_owned()));
-        let enrichment_wait = args.enrichment.wait();
-        let usecase = LodestoneUseCase::new(pool).with_enrichment_wait(enrichment_wait);
+        let requalify = RequalifyPolicy::from_std(
+            args.enrichment.requalify_debounce(),
+            args.enrichment.requalify_max_per_day,
+        );
+        let usecase = LodestoneUseCase::new(pool).with_requalify_policy(requalify);
         let ecosystem = EcosystemModules::new(
             Arc::new(test_fetcher()),
             Arc::new(HickoryResolver::from_system(DnsSettings::default()).expect("resolver")),

@@ -219,6 +219,7 @@ async fn a_failing_step_reports_the_error_and_backs_off(pool: PgPool) {
     .await;
     let row = status(&pool, "security_txt").await.unwrap();
     assert!(row.last_error.unwrap().contains("boom"));
+    assert!(row.last_error_at.is_some());
 
     eventually(|| async { runs.load(Ordering::SeqCst) >= 3 }).await;
     eventually(|| async {
@@ -227,13 +228,9 @@ async fn a_failing_step_reports_the_error_and_backs_off(pool: PgPool) {
             .is_some_and(|s| s.state == ListenerState::Idle)
     })
     .await;
-    assert!(
-        status(&pool, "security_txt")
-            .await
-            .unwrap()
-            .last_error
-            .is_some()
-    );
+    let cleared = status(&pool, "security_txt").await.unwrap();
+    assert_eq!(cleared.last_error, None);
+    assert_eq!(cleared.last_error_at, None);
 
     shutdown.send_replace(true);
     handle.await.unwrap();

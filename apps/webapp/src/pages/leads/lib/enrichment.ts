@@ -7,26 +7,7 @@ import {
 } from '#/lib/ecosystem'
 import { type ModuleView, moduleView } from '#/lib/ecosystem-views'
 import { formatDateTime } from '#/pages/leads/lib/format'
-import type {
-	Ecosystem,
-	Enrichment,
-	EnrichmentStatus,
-	EnrichmentWaiting,
-	EnrichmentWaitingReason,
-	Signal,
-} from '#/pages/leads/lib/types'
-
-const STATUS_LABELS: Readonly<Record<EnrichmentStatus, string>> = {
-	disabled: 'Inspection désactivée',
-	pending: 'En cours',
-	complete: 'Terminé',
-	timed_out: 'Délai dépassé',
-}
-
-const WAITING_LABELS: Readonly<Record<EnrichmentWaitingReason, string>> = {
-	awaiting_enrichment: "En attente d'enrichissement",
-	awaiting_enrichment_evidence: "En attente de preuve d'enrichissement",
-}
+import type { Ecosystem, Signal } from '#/pages/leads/lib/types'
 
 export interface ModuleSection {
 	module: string
@@ -52,39 +33,6 @@ export function moduleSections(ecosystem: Ecosystem): ModuleSection[] {
 		providerLink: providerLink(report.provider, report.provider_ready),
 		view: moduleView(report.module, report.findings),
 	}))
-}
-
-export function enrichmentStatusLabel(status: EnrichmentStatus): string {
-	return STATUS_LABELS[status]
-}
-
-export interface WaitingBadge {
-	reason: EnrichmentWaitingReason
-	label: string
-	detail: string | null
-}
-
-export function waitingBadge(
-	enrichment: Enrichment | null | undefined,
-): WaitingBadge | null {
-	const reason = enrichment?.waiting_reason ?? null
-	if (reason === null) return null
-	const until = enrichment?.wait_until ?? null
-	return {
-		reason,
-		label: WAITING_LABELS[reason],
-		detail:
-			reason === 'awaiting_enrichment' && until
-				? `jusqu'au ${formatDateTime(until)}`
-				: null,
-	}
-}
-
-export function listWaitingLabel(
-	waiting: EnrichmentWaiting | null | undefined,
-): string | null {
-	const reason = waiting?.waiting_reason ?? null
-	return reason === null ? null : WAITING_LABELS[reason]
 }
 
 export function signalTitle(signal: Signal): string {

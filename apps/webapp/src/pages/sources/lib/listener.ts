@@ -30,6 +30,20 @@ const LISTENER_BADGES: Readonly<Record<string, ListenerBadge>> = {
 	stale: { label: 'Sans nouvelles', tone: 'stale' },
 }
 
+export interface LatestError {
+	message: string
+	at: string
+}
+
+export function latestError(listener: Listener): LatestError | null {
+	const message = listener.last_error ?? null
+	const at = listener.last_error_at ?? null
+	if (message === null || at === null) return null
+	const activity = listener.last_activity_at ?? null
+	if (activity !== null && Date.parse(activity) > Date.parse(at)) return null
+	return { message, at }
+}
+
 export function isContinuous(source: Source): boolean {
 	return source.mode === 'continuous'
 }
