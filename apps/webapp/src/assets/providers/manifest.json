@@ -1,0 +1,32 @@
+{
+	"boamp": {
+		"file": "boamp.png",
+		"source_url": "https://www.boamp.fr/assets/favicon?tstamp=162505703329",
+		"retrieved_at": "2026-10-08"
+	},
+	"company_research": {
+		"file": "company_research.svg",
+		"source_url": "https://annuaire-entreprises.data.gouv.fr/favicons/favicon.svg",
+		"retrieved_at": "2026-10-08"
+	},
+	"decp": {
+		"file": "decp.svg",
+		"source_url": "https://www.data.gouv.fr/nuxt_images/favicon.svg",
+		"retrieved_at": "2026-10-08"
+	},
+	"france_travail": {
+		"file": "france_travail.svg",
+		"source_url": "https://cdn.francetravail.fr/studio/logos/marque/favicon/favicon.svg",
+		"retrieved_at": "2026-10-08"
+	},
+	"hacker_news_hiring": {
+		"file": "hacker_news_hiring.svg",
+		"source_url": "https://news.ycombinator.com/y18.svg",
+		"retrieved_at": "2026-10-08"
+	},
+	"ted": {
+		"file": "ted.png",
+		"source_url": "https://ted.europa.eu/documents/43503/1103116/favicon.ico/d3767476-8b80-a2c9-d9e8-245b087fde48",
+		"retrieved_at": "2026-10-08"
+	}
+}

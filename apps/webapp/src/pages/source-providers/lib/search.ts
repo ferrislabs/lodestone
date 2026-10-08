@@ -11,3 +11,11 @@ export const providerSearchSchema = z.object({
 })
 
 export type ProviderSearch = z.infer<typeof providerSearchSchema>
+
+export const catalogSearchSchema = z.object({
+	category: z.string().max(64).optional().catch(undefined),
+	status: z.string().max(32).optional().catch(undefined),
+	q: z.string().max(100).optional().catch(undefined),
+})
+
+export type CatalogSearch = z.infer<typeof catalogSearchSchema>
