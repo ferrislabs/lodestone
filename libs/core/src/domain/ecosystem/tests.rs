@@ -47,15 +47,11 @@ fn every_module_has_french_copy_and_a_stable_key() {
         assert!(module.learns().len() > 20);
         assert!(module.refresh_interval() > Duration::zero());
     }
-    assert_eq!(
-        EcosystemModule::AVAILABLE,
-        [
-            EcosystemModule::OfficialIdentity,
-            EcosystemModule::LegalLife,
-            EcosystemModule::PublicContracts,
-            EcosystemModule::WebsiteStack,
-            EcosystemModule::HiringActivity
-        ]
+    assert_eq!(EcosystemModule::AVAILABLE, EcosystemModule::ALL);
+    assert!(
+        EcosystemModule::ALL
+            .into_iter()
+            .all(EcosystemModule::is_available)
     );
     assert_eq!(
         EcosystemModule::LegalLife.refresh_interval(),
@@ -70,7 +66,12 @@ fn every_module_has_french_copy_and_a_stable_key() {
     assert!(EcosystemModule::OfficialIdentity.needs_siren());
     assert!(!EcosystemModule::WebsiteStack.needs_siren());
     assert!(EcosystemModule::WebsiteStack.reads_site());
+    assert!(EcosystemModule::HiringActivity.reads_site());
+    assert!(EcosystemModule::RecentActivity.reads_site());
     assert!(!EcosystemModule::LegalLife.reads_site());
+    assert!(!EcosystemModule::DnsEmail.reads_site());
+    assert!(EcosystemModule::HiringActivity.keeps_history());
+    assert!(!EcosystemModule::WebsiteStack.keeps_history());
     assert!(!ModuleStatus::Pending.is_settled());
     assert!(ModuleStatus::NotApplicable.is_settled());
 }
@@ -292,6 +293,8 @@ fn the_official_modules_depend_on_their_catalog_provider() {
     assert_eq!(EcosystemModule::PublicContracts.provider(), Some("decp"));
     assert_eq!(EcosystemModule::WebsiteStack.provider(), None);
     assert_eq!(EcosystemModule::HiringActivity.provider(), None);
+    assert_eq!(EcosystemModule::DnsEmail.provider(), None);
+    assert_eq!(EcosystemModule::RecentActivity.provider(), None);
     let readiness = EcosystemReadiness::with_not_ready(vec![EcosystemModule::LegalLife]);
     assert!(!readiness.is_ready(EcosystemModule::LegalLife));
     assert!(readiness.is_ready(EcosystemModule::PublicContracts));
@@ -310,4 +313,77 @@ fn readiness_comes_from_the_ready_provider_keys() {
         EcosystemReadiness::with_not_ready(vec![EcosystemModule::LegalLife])
     );
     assert!(readiness.is_ready(EcosystemModule::WebsiteStack));
+}
+
+fn module_finding(module: EcosystemModule, index: usize) -> EcosystemFinding {
+    EcosystemFinding::new(
+        module,
+        "technology",
+        "Autre",
+        format!("Outil {index}"),
+        "https://acme.fr/",
+        at(1),
+    )
+}
+
+#[test]
+fn the_website_document_keeps_more_lines_than_the_other_modules() {
+    let findings: Vec<EcosystemFinding> = (0..40)
+        .map(|index| module_finding(EcosystemModule::WebsiteStack, index))
+        .chain((0..40).map(|index| module_finding(EcosystemModule::RecentActivity, index)))
+        .collect();
+    let documents = ecosystem_documents(&findings);
+    let lines: Vec<usize> = documents
+        .iter()
+        .map(|document| document.content.lines().count() - 1)
+        .collect();
+    assert_eq!(
+        lines,
+        [
+            EcosystemModule::WebsiteStack.document_limit(),
+            MAX_DOCUMENT_FINDINGS
+        ]
+    );
+    assert!(EcosystemModule::WebsiteStack.document_limit() > MAX_DOCUMENT_FINDINGS);
+}
+
+#[test]
+fn the_new_modules_give_concise_agent_lines() {
+    let lines: Vec<String> = [
+        EcosystemFinding::new(
+            EcosystemModule::DnsEmail,
+            "mail_provider",
+            "Messagerie",
+            "Microsoft 365 (MX)",
+            "dns:acme.fr?type=MX",
+            at(1),
+        ),
+        EcosystemFinding::new(
+            EcosystemModule::WebsiteStack,
+            "technology",
+            "CMS",
+            "WordPress 6.4",
+            "https://acme.fr/",
+            at(1),
+        ),
+        EcosystemFinding::new(
+            EcosystemModule::RecentActivity,
+            "latest_news",
+            "Dernière actualité",
+            "Nouvelle version (2026-10-01)",
+            "https://acme.fr/blog/nouvelle-version",
+            at(1),
+        ),
+    ]
+    .iter()
+    .map(EcosystemFinding::document_line)
+    .collect();
+    assert_eq!(
+        lines,
+        [
+            "- Messagerie: Microsoft 365 (MX)",
+            "- CMS: WordPress 6.4",
+            "- Dernière actualité: Nouvelle version (2026-10-01)",
+        ]
+    );
 }

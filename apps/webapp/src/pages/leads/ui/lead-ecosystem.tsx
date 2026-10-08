@@ -1,4 +1,4 @@
-import { FindingList } from '#/components/ecosystem/finding-list'
+import { ModuleFindings } from '#/components/ecosystem/module-findings'
 import { ModuleStatusChip } from '#/components/ecosystem/module-status-chip'
 import { ProviderNotReady } from '#/components/ecosystem/provider-not-ready'
 import { Badge } from '#/components/ui/badge'
@@ -85,7 +85,7 @@ export function LeadEcosystem({ ecosystem, enrichment }: LeadEcosystemProps) {
 								{section.note}
 							</p>
 						) : null}
-						<FindingList rows={section.rows} empty="Aucun élément trouvé." />
+						<ModuleFindings view={section.view} empty="Aucun élément trouvé." />
 					</article>
 				))}
 			</div>

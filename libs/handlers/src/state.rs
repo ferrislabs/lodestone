@@ -1,4 +1,5 @@
 use common::Config;
+use dns::{DnsSettings, HickoryResolver};
 use fetch::{FetchSettings, PoliteFetcher};
 use lodestone_core::{
     BODACC, COMPANY_RESEARCH, DECP, LodestoneAuthService, LodestoneRateLimitService,
@@ -31,17 +32,21 @@ pub struct AppState {
     pub rate_limit_quota: Quota,
     pub cipher: Arc<AesGcmCipher>,
     pub providers: Arc<ProviderEngine<PoliteFetcher>>,
-    pub ecosystem: Arc<EcosystemModules<PoliteFetcher>>,
+    pub ecosystem: Arc<Ecosystem>,
 }
+
+pub type Ecosystem = EcosystemModules<PoliteFetcher, HickoryResolver>;
 
 pub fn ecosystem_modules(
     args: &Args,
     usecase: &LodestoneUseCase,
     fetcher: Arc<PoliteFetcher>,
-) -> EcosystemModules<PoliteFetcher> {
+    resolver: Arc<HickoryResolver>,
+) -> Ecosystem {
     let wait = args.contacts.max_rate_limit_wait();
     EcosystemModules::new(
         fetcher,
+        resolver,
         EcosystemConfig {
             company: CompanySettings {
                 entreprises_url: Endpoint::catalog(
@@ -114,7 +119,14 @@ pub async fn state(args: Arc<Args>) -> Result<AppState, ServerError> {
     let company_wait = args.company.wait();
     let enrichment_wait = args.enrichment.wait();
     let service = create_service(config).await.unwrap();
-    let ecosystem = ecosystem_modules(&args, &service.usecase, ecosystem_fetcher);
+    let resolver = HickoryResolver::from_system(DnsSettings::default())
+        .map_err(|e| ServerError::Configuration(e.to_string()))?;
+    let ecosystem = ecosystem_modules(
+        &args,
+        &service.usecase,
+        ecosystem_fetcher,
+        Arc::new(resolver),
+    );
 
     Ok(AppState {
         args,

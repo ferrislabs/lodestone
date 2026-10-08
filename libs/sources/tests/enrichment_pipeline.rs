@@ -4,10 +4,10 @@ use chrono::{DateTime, TimeZone, Utc};
 use fetch::{FetchSettings, PoliteFetcher};
 use httpmock::{Method::GET, MockServer};
 use lodestone_core::{
-    Clock, CreateProfileCommand, EcosystemModule, EnrichmentStatus, FetchError, FetchRequest,
-    FetchResponse, Fetcher, LeadRepository, LodestoneUseCase, ModuleStatus, NormalizedDomain,
-    Observation, ProfileId, ProfileName, Provenance, SignalKind, SignalRepository, SourceName,
-    UnitInterval, ValidatedProfile,
+    Clock, CreateProfileCommand, DnsError, DnsRecords, DnsResolver, EcosystemModule,
+    EnrichmentStatus, FetchError, FetchRequest, FetchResponse, Fetcher, Hostname, LeadRepository,
+    LodestoneUseCase, ModuleStatus, NormalizedDomain, Observation, ProfileId, ProfileName,
+    Provenance, SignalKind, SignalRepository, SourceName, UnitInterval, ValidatedProfile,
     ecosystem::InspectionRunSettings,
     infrastructure::{
         candidate_host::PgCandidateHosts, contact_target::postgres::PgAtsTargets,
@@ -63,6 +63,25 @@ fn polite() -> PoliteFetcher {
         allow_private_targets: true,
     })
     .unwrap()
+}
+
+#[derive(Default)]
+struct NoRecords;
+
+impl DnsRecords for NoRecords {
+    async fn mx_hosts(&self, _domain: &NormalizedDomain) -> Result<Vec<Hostname>, DnsError> {
+        Ok(Vec::new())
+    }
+
+    async fn txt_records(&self, _name: &str) -> Result<Vec<String>, DnsError> {
+        Ok(Vec::new())
+    }
+}
+
+impl DnsResolver for NoRecords {
+    async fn cname_chain(&self, _host: &Hostname) -> Result<Vec<Hostname>, DnsError> {
+        Ok(Vec::new())
+    }
 }
 
 struct MockedWeb {
@@ -276,6 +295,7 @@ async fn a_boamp_lead_is_enriched_by_the_http_probe_and_its_job_offers(pool: PgP
             inner: polite(),
             base: server.base_url(),
         }),
+        Arc::new(NoRecords),
         EcosystemConfig {
             company: CompanySettings {
                 entreprises_url: Endpoint::from(
@@ -309,7 +329,7 @@ async fn a_boamp_lead_is_enriched_by_the_http_probe_and_its_job_offers(pool: PgP
         )
         .await
         .unwrap();
-    assert_eq!(inspection.domains, 5);
+    assert_eq!(inspection.domains, 7);
     assert_eq!(inspection.not_applicable, 3);
     assert!(site_realm.hits() >= 1);
     let detail = usecase.lead_detail(lead.id).await.unwrap();
@@ -328,7 +348,21 @@ async fn a_boamp_lead_is_enriched_by_the_http_probe_and_its_job_offers(pool: PgP
         .findings_of(EcosystemModule::WebsiteStack)
         .map(|found| (found.kind.as_str(), found.value.as_str()))
         .collect();
-    assert!(website.contains(&("generator", "Drupal 10")));
+    assert!(website.contains(&("technology", "Drupal 10")));
+    for module in [EcosystemModule::DnsEmail, EcosystemModule::RecentActivity] {
+        assert_eq!(
+            detail.ecosystem.state_of(module).status,
+            ModuleStatus::Done,
+            "{module:?}"
+        );
+    }
+    let mut dns: Vec<&str> = detail
+        .ecosystem
+        .findings_of(EcosystemModule::DnsEmail)
+        .map(|found| found.kind.as_str())
+        .collect();
+    dns.sort_unstable();
+    assert_eq!(dns, ["dmarc", "no_mx", "spf"]);
     assert!(
         website
             .iter()

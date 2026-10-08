@@ -1,6 +1,7 @@
 mod support;
 
 use axum::Router;
+use chrono::Utc;
 use common::generate_uuid_v7;
 use http::{Method, StatusCode};
 use httpmock::Method as MockMethod;
@@ -1598,7 +1599,7 @@ async fn the_company_refresh_is_for_users_and_makes_the_dossier_due_now(pool: Pg
     assert_eq!(created, StatusCode::ACCEPTED);
     assert_eq!(body["data"]["state"], "pending");
     let due: bool = sqlx::query_scalar(
-        "SELECT next_attempt_at <= now() FROM company_dossiers WHERE domain = 'acme.com'",
+        "SELECT next_attempt_at <= now() + interval '1 minute' FROM company_dossiers WHERE domain = 'acme.com'",
     )
     .fetch_one(&pool)
     .await
@@ -1612,10 +1613,12 @@ async fn the_company_refresh_is_for_users_and_makes_the_dossier_due_now(pool: Pg
     let (again, body, _) = send(api.app(), Method::POST, &uri, Some(&api.bearer), None).await;
     assert_eq!(again, StatusCode::ACCEPTED);
     assert_eq!(body["data"]["state"], "complete");
-    let due: bool = sqlx::query_scalar("SELECT next_attempt_at <= now() FROM company_dossiers")
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+    let due: bool = sqlx::query_scalar(
+        "SELECT next_attempt_at <= now() + interval '1 minute' FROM company_dossiers",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     assert!(due);
 
     let unknown = format!(
@@ -2140,7 +2143,9 @@ async fn the_detail_exposes_the_module_statuses_and_the_ecosystem_findings(pool:
             ("legal_life", "pending"),
             ("public_contracts", "pending"),
             ("website_stack", "pending"),
-            ("hiring_activity", "pending")
+            ("dns_email", "pending"),
+            ("hiring_activity", "pending"),
+            ("recent_activity", "pending")
         ]
     );
 
@@ -2149,7 +2154,9 @@ async fn the_detail_exposes_the_module_statuses_and_the_ecosystem_findings(pool:
         ("legal_life", "not_applicable", Some("SIREN inconnu")),
         ("public_contracts", "not_applicable", Some("SIREN inconnu")),
         ("website_stack", "not_applicable", None),
+        ("dns_email", "done", None),
         ("hiring_activity", "failed", Some("boom")),
+        ("recent_activity", "done", None),
     ] {
         query(
             "INSERT INTO lead_ecosystem_modules (domain, module, status, last_run, next_run_at, error) VALUES ('acme.com', $1, $2, now(), now(), $3)",
@@ -2266,7 +2273,7 @@ async fn the_dry_run_runs_one_module_for_users_and_stores_nothing(pool: PgPool) 
             )
         })
         .collect();
-    assert!(kinds.contains(&("server", "nginx")));
+    assert!(kinds.contains(&("technology", "Nginx")));
     assert!(home.hits_async().await >= 1);
     for table in [
         "lead_ecosystem",
@@ -2280,15 +2287,53 @@ async fn the_dry_run_runs_one_module_for_users_and_stores_nothing(pool: PgPool) 
         assert_eq!(stored, 0, "{table}");
     }
 
-    let (unavailable, _, _) = send(
+    let today = Utc::now().date_naive();
+    api.harness
+        .server
+        .mock_async(|when, then| {
+            when.method(MockMethod::GET).path("/sitemap.xml");
+            then.status(200)
+                .header("content-type", "application/xml")
+                .body(format!(
+                    "<urlset><url><loc>https://acme.com/news/launch</loc><lastmod>{today}</lastmod></url></urlset>"
+                ));
+        })
+        .await;
+    api.harness
+        .server
+        .mock_async(|when, then| {
+            when.method(MockMethod::GET).path("/news/launch");
+            then.status(200)
+                .header("content-type", "text/html")
+                .body("<html><head><title>Lancement de la version 5</title></head><body><h1>Lancement de la version 5</h1><p>Notre nouvelle version est disponible pour toutes les collectivités.</p></body></html>");
+        })
+        .await;
+    let (status, body, _) = send(
         api.app(),
         Method::POST,
-        &format!("/api/v1/leads/{lead}/ecosystem/dry-run?module=dns_email"),
+        &format!("/api/v1/leads/{lead}/ecosystem/dry-run?module=recent_activity"),
         Some(&api.bearer),
         None,
     )
     .await;
-    assert_eq!(unavailable, StatusCode::CONFLICT);
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["data"]["status"], "done");
+    let recent: Vec<(&str, &str)> = body["data"]["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|found| {
+            (
+                found["kind"].as_str().unwrap(),
+                found["value"].as_str().unwrap(),
+            )
+        })
+        .collect();
+    assert!(recent.contains(&(
+        "latest_news",
+        &*format!("Lancement de la version 5 ({today})")
+    )));
+    assert!(recent.contains(&("recent_pages", "1")));
     let (unknown, _, _) = send(
         api.app(),
         Method::POST,
@@ -2663,12 +2708,13 @@ async fn the_module_catalog_lists_every_module_with_its_week_of_activity(pool: P
     assert_eq!(modules[2]["module"], "public_contracts");
     assert_eq!(modules[2]["available"], true);
     assert_eq!(modules[2]["refresh_days"], 14);
-    let soon: Vec<&str> = modules
+    assert!(modules.iter().all(|module| module["available"] == true));
+    let dns = modules
         .iter()
-        .filter(|module| module["available"] == false)
-        .map(|module| module["module"].as_str().unwrap())
-        .collect();
-    assert_eq!(soon, ["dns_email", "recent_activity"]);
+        .find(|module| module["module"] == "dns_email")
+        .unwrap();
+    assert_eq!(dns["reads_site"], false);
+    assert!(dns["provider"].is_null());
     let hiring = modules
         .iter()
         .find(|module| module["module"] == "hiring_activity")

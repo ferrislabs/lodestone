@@ -1,9 +1,10 @@
 use std::{collections::HashSet, sync::LazyLock};
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveDate, Utc};
 use lodestone_core::{Candidate, NormalizedDomain, Provenance, SignalKind, SourceName};
 use regex::Regex;
-use serde_json::{Value, json};
+use serde_json::{Value, from_str, json};
+use url::Url;
 
 use super::discover::{Board, Vendor};
 use crate::contact_pages::extract::decode_entities;
@@ -24,6 +25,10 @@ static BREAK: LazyLock<Regex> = LazyLock::new(|| {
 });
 static TAG: LazyLock<Regex> = LazyLock::new(|| compile(r"<[^>]*>"));
 static SPACES: LazyLock<Regex> = LazyLock::new(|| compile(r"[ \t\u{a0}]+"));
+static JSON_LD: LazyLock<Regex> = LazyLock::new(|| {
+    compile(r#"(?is)<script[^>]*type\s*=\s*["']application/ld\+json["'][^>]*>(.*?)</script\s*>"#)
+});
+const MAX_JSON_LD_DEPTH: usize = 4;
 
 fn typographic(text: &str) -> String {
     text.replace("&rsquo;", "\u{2019}")
@@ -88,6 +93,8 @@ struct Posting {
     text: String,
     location: Option<String>,
     team: Option<String>,
+    contract: Option<String>,
+    remote: Option<bool>,
     observed_at: Option<DateTime<Utc>>,
 }
 
@@ -109,6 +116,8 @@ fn greenhouse(job: &Value) -> Option<Posting> {
             .and_then(Value::as_array)
             .and_then(|departments| departments.iter().find_map(|d| text_of(d, "name")))
             .map(str::to_owned),
+        contract: None,
+        remote: None,
         observed_at: parse_time(text_of(job, "first_published"))
             .or_else(|| parse_time(text_of(job, "updated_at"))),
     })
@@ -144,6 +153,10 @@ fn lever(job: &Value) -> Option<Posting> {
         team: categories
             .and_then(|c| text_of(c, "team"))
             .map(str::to_owned),
+        contract: categories
+            .and_then(|c| text_of(c, "commitment"))
+            .map(str::to_owned),
+        remote: text_of(job, "workplaceType").map(|kind| kind.eq_ignore_ascii_case("remote")),
         observed_at: job
             .get("createdAt")
             .and_then(Value::as_i64)
@@ -172,6 +185,10 @@ fn ashby(job: &Value) -> Option<Posting> {
         team: text_of(job, "team")
             .or_else(|| text_of(job, "department"))
             .map(str::to_owned),
+        contract: text_of(job, "employmentType").map(str::to_owned),
+        remote: job.get("isRemote").and_then(Value::as_bool).or_else(|| {
+            text_of(job, "workplaceType").map(|kind| kind.eq_ignore_ascii_case("remote"))
+        }),
         observed_at: parse_time(text_of(job, "publishedAt")),
     })
 }
@@ -226,8 +243,136 @@ pub fn parse_board(
                 "job_id": posting.id,
                 "location": posting.location,
                 "team": posting.team,
+                "contract": posting.contract,
+                "remote": posting.remote,
+                "posted_at": posting.observed_at.map(|time| time.to_rfc3339()),
             }),
         });
     }
     candidates
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PagePosting {
+    pub title: String,
+    pub url: Url,
+    pub location: Option<String>,
+    pub contract: Option<String>,
+    pub remote: bool,
+    pub posted_at: Option<DateTime<Utc>>,
+}
+
+fn has_type(value: &Value, wanted: &str) -> bool {
+    match value.get("@type") {
+        Some(Value::String(kind)) => kind == wanted,
+        Some(Value::Array(kinds)) => kinds.iter().any(|kind| kind.as_str() == Some(wanted)),
+        _ => false,
+    }
+}
+
+fn place_text(value: &Value) -> Option<String> {
+    match value {
+        Value::String(text) => Some(text.trim().to_owned()).filter(|text| !text.is_empty()),
+        Value::Object(_) => text_of(value, "name").map(str::to_owned),
+        _ => None,
+    }
+}
+
+fn location_of(value: &Value) -> Option<String> {
+    let place = match value {
+        Value::Array(places) => places.first()?,
+        other => other,
+    };
+    let address = place.get("address").unwrap_or(place);
+    if let Some(text) = place_text(address).filter(|_| address.is_string()) {
+        return Some(text);
+    }
+    let parts: Vec<String> = ["addressLocality", "addressRegion", "addressCountry"]
+        .iter()
+        .filter_map(|key| address.get(*key).and_then(place_text))
+        .collect();
+    (!parts.is_empty()).then(|| parts.join(", "))
+}
+
+fn contract_text(value: Option<&Value>) -> Option<String> {
+    match value? {
+        Value::String(text) => Some(text.trim().to_owned()).filter(|text| !text.is_empty()),
+        Value::Array(items) => {
+            let parts: Vec<&str> = items.iter().filter_map(Value::as_str).collect();
+            (!parts.is_empty()).then(|| parts.join(", "))
+        }
+        _ => None,
+    }
+}
+
+fn posted_on(raw: Option<&str>) -> Option<DateTime<Utc>> {
+    let raw = raw?.trim();
+    parse_time(Some(raw)).or_else(|| {
+        NaiveDate::parse_from_str(raw.get(..10).unwrap_or(raw), "%Y-%m-%d")
+            .ok()
+            .and_then(|day| day.and_hms_opt(0, 0, 0))
+            .map(|naive| naive.and_utc())
+    })
+}
+
+fn job_posting(value: &Value, page: &Url) -> Option<PagePosting> {
+    let title = text_of(value, "title")?;
+    let url = text_of(value, "url")
+        .and_then(|raw| page.join(raw).ok())
+        .filter(|url| matches!(url.scheme(), "http" | "https"))
+        .unwrap_or_else(|| page.clone());
+    let remote = text_of(value, "jobLocationType")
+        .is_some_and(|kind| kind.eq_ignore_ascii_case("TELECOMMUTE"))
+        || value.get("applicantLocationRequirements").is_some();
+    Some(PagePosting {
+        title: decode_entities(title),
+        url,
+        location: value.get("jobLocation").and_then(location_of),
+        contract: contract_text(value.get("employmentType")),
+        remote,
+        posted_at: posted_on(text_of(value, "datePosted")),
+    })
+}
+
+fn collect_postings(value: &Value, page: &Url, depth: usize, found: &mut Vec<PagePosting>) {
+    if depth > MAX_JSON_LD_DEPTH {
+        return;
+    }
+    match value {
+        Value::Array(items) => {
+            for item in items {
+                collect_postings(item, page, depth + 1, found);
+            }
+        }
+        Value::Object(map) => {
+            if has_type(value, "JobPosting") {
+                if let Some(posting) = job_posting(value, page) {
+                    found.push(posting);
+                }
+                return;
+            }
+            for key in ["@graph", "itemListElement", "item"] {
+                if let Some(nested) = map.get(key) {
+                    collect_postings(nested, page, depth + 1, found);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+pub fn page_postings(html: &str, page: &Url) -> Vec<PagePosting> {
+    let mut found: Vec<PagePosting> = Vec::new();
+    for captures in JSON_LD.captures_iter(html) {
+        let Some(raw) = captures.get(1) else {
+            continue;
+        };
+        let Ok(value) = from_str::<Value>(raw.as_str().trim()) else {
+            continue;
+        };
+        collect_postings(&value, page, 0, &mut found);
+    }
+    let mut seen: HashSet<(String, String)> = HashSet::new();
+    found.retain(|posting| seen.insert((posting.title.clone(), posting.url.to_string())));
+    found
 }

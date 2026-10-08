@@ -244,7 +244,9 @@ mod tests {
                 ModuleStatus::NotApplicable,
                 4,
             ),
+            state(EcosystemModule::DnsEmail, ModuleStatus::Done, 4),
             state(EcosystemModule::HiringActivity, ModuleStatus::Failed, 5),
+            state(EcosystemModule::RecentActivity, ModuleStatus::Done, 5),
         ];
         let complete = enrichment_state(
             &record(true, &settled),
@@ -257,7 +259,9 @@ mod tests {
             state(EcosystemModule::OfficialIdentity, ModuleStatus::Done, 3),
             state(EcosystemModule::PublicContracts, ModuleStatus::Done, 3),
             state(EcosystemModule::WebsiteStack, ModuleStatus::Done, 4),
+            state(EcosystemModule::DnsEmail, ModuleStatus::Done, 4),
             state(EcosystemModule::HiringActivity, ModuleStatus::Done, 5),
+            state(EcosystemModule::RecentActivity, ModuleStatus::Done, 5),
         ];
         let mut waiting_record = record(true, &without_bodacc);
         let still_waiting =
