@@ -1,5 +1,5 @@
 use std::{
-    num::NonZeroU32,
+    num::{NonZeroU32, NonZeroUsize},
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
@@ -299,6 +299,7 @@ pub struct QualificationStep {
     pub cipher: AesGcmCipher,
     pub cache: PgLlmCache,
     pub budget_cents: NonZeroU32,
+    pub concurrency: NonZeroUsize,
     pub cooldowns: Mutex<Cooldowns>,
 }
 
@@ -346,6 +347,7 @@ impl ListenerStep for QualificationStep {
             budget_cents: self.budget_cents,
             batch_size: QUALIFICATION_BATCH_SIZE,
             base_delay: QUALIFICATION_BASE_DELAY,
+            concurrency: self.concurrency,
         };
         let [skip_evaluation, skip_scoring, skip_aggregation] = self.paused(Instant::now());
         let evaluation = if skip_evaluation {

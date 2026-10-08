@@ -472,3 +472,15 @@ fn the_findings_hash_ignores_order_observation_time_and_pass_relative_values() {
         findings_hash(&[summary(4, 1)])
     );
 }
+
+#[test]
+fn only_the_modules_reading_the_recorded_siren_wait_for_the_identity() {
+    let waiting: Vec<EcosystemModule> = EcosystemModule::ALL
+        .into_iter()
+        .filter(|module| module.waits_for_identity())
+        .collect();
+    assert_eq!(
+        waiting,
+        [EcosystemModule::LegalLife, EcosystemModule::PublicContracts]
+    );
+}

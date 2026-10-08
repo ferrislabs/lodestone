@@ -91,11 +91,10 @@ async fn run_case<P: LlmProvider>(provider: &P) -> Result<(), String> {
         },
         base_delay: Duration::from_secs(2),
     };
-    let mut budget = RunBudget::new(NonZeroU32::new(100).unwrap());
-    let structured =
-        call_structured::<AggregatorOutput, _>(provider, prompt, settings, &mut budget)
-            .await
-            .map_err(|error| error.to_string())?;
+    let budget = RunBudget::new(NonZeroU32::new(100).unwrap());
+    let structured = call_structured::<AggregatorOutput, _>(provider, prompt, settings, &budget)
+        .await
+        .map_err(|error| error.to_string())?;
     let check = check_evidence(&structured.value.evidence, &untrusted);
     println!(
         "evidence={} verbatim={} rejected={}",

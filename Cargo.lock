@@ -2407,6 +2407,7 @@ dependencies = [
  "aws-lc-rs",
  "chrono",
  "common",
+ "futures-util",
  "idna",
  "lodestone-macros",
  "mockall",

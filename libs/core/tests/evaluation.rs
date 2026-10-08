@@ -2,7 +2,7 @@ mod support;
 
 use std::{
     collections::{HashMap, VecDeque},
-    num::NonZeroU32,
+    num::{NonZeroU32, NonZeroUsize},
     sync::{Arc, Mutex},
     time::Duration,
 };
@@ -12,23 +12,24 @@ use common::{EncryptionKey, Secret};
 use lodestone_core::{
     ActiveProfile, AgentRegistry, CancelReason, Clock, CompanyDossier, CompanyRepository,
     CreateProfileCommand, DossierState, GenerationParams, Lead, LeadId, LeadRepository,
-    LeadScoring, LlmError, LlmProvider, LlmRequest, LlmResponse, LodestoneUseCase, Observation,
-    OfficialData, ProfileId, ProfileName, Provenance, ProviderDefinition, ProviderId, ProviderKind,
-    QualificationResult, ReasoningEffort, ResultId, ResultStatus, ReviseProfileCommand,
-    RevisionNumber, SCORING_VERSION, SignalKind, Siren, SourceName, SuppressionTarget, Tier,
-    TokenPricing, TokenUsage, UnitInterval, ValidatedProfile, Verdict, VerdictCap, VerdictReason,
-    WorkKind,
+    LeadScoring, LlmError, LlmProvider, LlmRequest, LlmResponse, LodestoneUseCase, MaxConcurrency,
+    Observation, OfficialData, ProfileId, ProfileName, Provenance, ProviderDefinition, ProviderId,
+    ProviderKind, QualificationResult, ReasoningEffort, ResultId, ResultStatus,
+    ReviseProfileCommand, RevisionNumber, SCORING_VERSION, SignalKind, Siren, SourceName,
+    SuppressionTarget, Tier, TokenPricing, TokenUsage, UnitInterval, ValidatedProfile, Verdict,
+    VerdictCap, VerdictReason, WorkKind,
     evaluation::{EvaluationReport, EvaluationSettings, ProviderBuilder},
     infrastructure::{
         company::postgres::PgCompanyRepository, crypto::AesGcmCipher,
         lead::postgres::PgLeadRepository, llm_cache::postgres::PgLlmCache, postgres::with_tx,
     },
-    llm::CreateLlmProvider,
+    llm::{CreateLlmProvider, KeyChange, UpdateLlmProvider},
     verdict_for,
 };
 use serde_json::{Value, json};
 use sqlx::PgPool;
 use support::{at, domain};
+use tokio::time::sleep;
 
 const IAM: &str = include_str!("../../../docs/examples/profiles/iam-ferriskey.json");
 
@@ -64,6 +65,9 @@ struct Shared {
     seen: Mutex<Vec<Seen>>,
     input_tokens: u64,
     on_call: Mutex<Option<(LodestoneUseCase, ActiveProfile)>>,
+    delays: Mutex<VecDeque<Duration>>,
+    pace: Mutex<Duration>,
+    running: Mutex<(u32, u32)>,
 }
 
 struct Scripted {
@@ -167,6 +171,22 @@ impl LlmProvider for Scripted {
             .get_mut(&self.model)
             .and_then(VecDeque::pop_front)
             .unwrap_or(Reply::Best);
+        let delay = self
+            .shared
+            .delays
+            .lock()
+            .unwrap()
+            .pop_front()
+            .unwrap_or(*self.shared.pace.lock().unwrap());
+        {
+            let mut running = self.shared.running.lock().unwrap();
+            running.0 += 1;
+            running.1 = running.1.max(running.0);
+        }
+        if !delay.is_zero() {
+            sleep(delay).await;
+        }
+        self.shared.running.lock().unwrap().0 -= 1;
         let output = match reply {
             Reply::Best => answers_from(request.schema, Pick::First, &quote_of(request)),
             Reply::Middle => answers_from(request.schema, Pick::Middle, &quote_of(request)),
@@ -198,6 +218,14 @@ fn settings(budget_cents: u32, batch_size: u32) -> EvaluationSettings {
         budget_cents: NonZeroU32::new(budget_cents).unwrap(),
         batch_size,
         base_delay: Duration::ZERO,
+        concurrency: NonZeroUsize::MIN,
+    }
+}
+
+fn concurrent(budget_cents: u32, batch_size: u32, concurrency: usize) -> EvaluationSettings {
+    EvaluationSettings {
+        concurrency: NonZeroUsize::new(concurrency).unwrap(),
+        ..settings(budget_cents, batch_size)
     }
 }
 
@@ -264,6 +292,9 @@ impl Harness {
                 seen: Mutex::new(Vec::new()),
                 input_tokens,
                 on_call: Mutex::new(None),
+                delays: Mutex::new(VecDeque::new()),
+                pace: Mutex::new(Duration::ZERO),
+                running: Mutex::new((0, 0)),
             }),
         }
     }
@@ -278,6 +309,7 @@ impl Harness {
                     model: model.to_owned(),
                     timeout: Duration::from_secs(30),
                     max_retries: 0,
+                    max_concurrency: None,
                     pricing: TokenPricing {
                         input_cents_per_mtok,
                         output_cents_per_mtok: 0,
@@ -291,6 +323,49 @@ impl Harness {
             .await
             .unwrap()
             .id
+    }
+
+    async fn limited_provider(
+        &self,
+        model: &str,
+        input_cents_per_mtok: u32,
+        limit: u8,
+    ) -> ProviderId {
+        let id = self.provider(model, input_cents_per_mtok).await;
+        let current = self.usecase.get_llm_provider(id).await.unwrap();
+        self.usecase
+            .update_llm_provider(
+                UpdateLlmProvider {
+                    id,
+                    name: current.name,
+                    kind: current.kind,
+                    base_url: current.base_url,
+                    model: current.model,
+                    timeout: current.timeout,
+                    max_retries: current.max_retries,
+                    max_concurrency: MaxConcurrency::new(limit).unwrap(),
+                    pricing: current.pricing,
+                    api_key: KeyChange::Keep,
+                    reasoning_effort: current.reasoning_effort,
+                    generation: current.generation,
+                },
+                &self.cipher,
+            )
+            .await
+            .unwrap();
+        id
+    }
+
+    fn pace(&self, delay: Duration) {
+        *self.shared.pace.lock().unwrap() = delay;
+    }
+
+    fn delay(&self, delays: Vec<Duration>) {
+        *self.shared.delays.lock().unwrap() = delays.into();
+    }
+
+    fn peak(&self) -> u32 {
+        self.shared.running.lock().unwrap().1
     }
 
     async fn default_provider(&self, model: &str) -> ProviderId {
@@ -538,6 +613,7 @@ async fn each_result_stores_the_provider_model_prompt_and_generation_settings(po
                 model: "model-tuned".to_owned(),
                 timeout: Duration::from_secs(30),
                 max_retries: 0,
+                max_concurrency: None,
                 pricing: TokenPricing {
                     input_cents_per_mtok: 0,
                     output_cents_per_mtok: 0,
@@ -2325,4 +2401,167 @@ async fn disabling_an_agent_during_a_pass_stops_the_lead_and_stores_nothing(pool
     assert_eq!(detail.agent_stops[0].target.kind, WorkKind::Qualification);
     assert_eq!(detail.agent_stops[0].target.agent.as_str(), "maturite");
     assert_eq!(detail.agent_stops[0].reason, CancelReason::AgentDisabled);
+}
+
+const HOSTS: [&str; 4] = ["acme.com", "globex.com", "initech.com", "umbrella.com"];
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn leads_agents_and_samples_run_at_once_within_the_provider_limit(pool: PgPool) {
+    let harness = Harness::new(pool, 10);
+    let provider = harness.limited_provider("model-a", 0, 3).await;
+    let profile = harness
+        .profile(vec![
+            sampled(agent("first", Some(provider), "q"), 2),
+            sampled(agent("second", Some(provider), "r"), 2),
+        ])
+        .await;
+    for host in &HOSTS[..3] {
+        harness.observe(host, SourceName::HttpProbe, 10).await;
+    }
+    harness.pace(Duration::from_millis(40));
+
+    let report = harness.step(concurrent(100, 10, 4)).await;
+
+    assert_eq!((report.leads, report.valid, report.invalid), (3, 6, 0));
+    assert_eq!(harness.calls(), 12);
+    let peak = harness.peak();
+    assert!(peak > 1, "calls never overlapped");
+    assert!(peak <= 3, "the provider limit was exceeded: {peak}");
+    assert_eq!(harness.usecase.llm_in_flight(provider), 0);
+    for host in &HOSTS[..3] {
+        assert_eq!(harness.results(profile, host).await.len(), 2);
+    }
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_lower_provider_limit_serialises_the_calls(pool: PgPool) {
+    let harness = Harness::new(pool, 10);
+    let provider = harness.limited_provider("model-a", 0, 1).await;
+    harness
+        .profile(vec![
+            agent("first", Some(provider), "q"),
+            agent("second", Some(provider), "r"),
+        ])
+        .await;
+    for host in &HOSTS[..2] {
+        harness.observe(host, SourceName::HttpProbe, 10).await;
+    }
+    harness.pace(Duration::from_millis(20));
+
+    let report = harness.step(concurrent(100, 10, 4)).await;
+
+    assert_eq!(report.leads, 2);
+    assert_eq!(harness.calls(), 4);
+    assert_eq!(harness.peak(), 1);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn votes_and_records_follow_the_sample_order_whatever_the_completion_order(pool: PgPool) {
+    let harness = Harness::new(pool, 10);
+    let provider = harness.limited_provider("model-a", 0, 3).await;
+    let profile = harness
+        .profile(vec![sampled(agent("solo", Some(provider), "q"), 3)])
+        .await;
+    harness.observe("acme.com", SourceName::HttpProbe, 10).await;
+    harness.script("model-a", vec![Reply::Worst, Reply::Best, Reply::Best]);
+    harness.delay(vec![
+        Duration::from_millis(90),
+        Duration::from_millis(60),
+        Duration::from_millis(30),
+    ]);
+
+    let report = harness.step(concurrent(100, 10, 4)).await;
+
+    assert_eq!((report.leads, report.valid), (1, 1));
+    assert!(harness.peak() > 1);
+    let results = harness.results(profile, "acme.com").await;
+    let result = &results[0];
+    assert_eq!(result.answers["q"]["choice"], "forte");
+    let agreement = result.answers["q"]["agreement"].as_f64().unwrap();
+    assert!((agreement - 2.0 / 3.0).abs() < 1e-9);
+    let indexes: Vec<u64> = result
+        .raw_samples
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|sample| sample["index"].as_u64().unwrap())
+        .collect();
+    assert_eq!(indexes, [0, 1, 2]);
+    let choices: Vec<&str> = result
+        .raw_samples
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|sample| sample["answers"]["q"]["choice"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        choices.iter().filter(|choice| **choice == "forte").count(),
+        2
+    );
+    assert_eq!(
+        choices.iter().filter(|choice| **choice == "faible").count(),
+        1
+    );
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn concurrent_leads_stop_at_the_budget_exactly(pool: PgPool) {
+    let harness = Harness::new(pool, 4_000);
+    let pricey = harness.limited_provider("model-pricey", 1_000, 8).await;
+    let profile = harness
+        .profile(vec![agent("solo", Some(pricey), "q")])
+        .await;
+    for host in HOSTS {
+        harness.observe(host, SourceName::HttpProbe, 10).await;
+    }
+    harness.pace(Duration::from_millis(30));
+
+    let report = harness.step(concurrent(10, 10, 4)).await;
+
+    assert!(report.budget_exhausted);
+    assert_eq!(harness.calls(), 3);
+    assert_eq!(report.leads, 3);
+    let mut qualified = 0;
+    for host in HOSTS {
+        if harness.lead(profile, host).await.qualified_at.is_some() {
+            qualified += 1;
+        }
+    }
+    assert_eq!(qualified, 3);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn disabling_an_agent_mid_flight_drops_the_running_calls_and_stores_nothing(pool: PgPool) {
+    let harness = Harness::new(pool, 10);
+    harness.default_provider("model-default").await;
+    let profile = harness
+        .profile(vec![
+            agent("pertinence", None, "pertinence"),
+            agent("maturite", None, "maturite"),
+        ])
+        .await;
+    for host in &HOSTS[..3] {
+        harness.observe(host, SourceName::HttpProbe, 10).await;
+    }
+    let mut changed = harness.active().await;
+    let mut disabled = agent("maturite", None, "maturite");
+    disabled["enabled"] = json!(false);
+    changed.revision.number = changed.revision.number.next().unwrap();
+    changed.revision.definition = ValidatedProfile::parse(definition(vec![
+        agent("pertinence", None, "pertinence"),
+        disabled,
+    ]))
+    .unwrap();
+    *harness.shared.on_call.lock().unwrap() = Some((harness.usecase.clone(), changed));
+    harness.pace(Duration::from_millis(200));
+
+    let report = harness.step(concurrent(100, 10, 4)).await;
+
+    assert_eq!(report.leads, 0);
+    assert!(report.stopped >= 1);
+    assert!(harness.peak() > 1);
+    for host in &HOSTS[..3] {
+        assert!(harness.results(profile, host).await.is_empty());
+        assert!(harness.lead(profile, host).await.qualified_at.is_none());
+    }
 }

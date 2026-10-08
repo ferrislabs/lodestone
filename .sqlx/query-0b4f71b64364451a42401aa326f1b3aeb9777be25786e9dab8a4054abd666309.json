@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO llm_providers (\n                id, name, kind, base_url, model, timeout_ms, max_retries,\n                input_cents_per_mtok, output_cents_per_mtok,\n                api_key_nonce, api_key_ciphertext, enabled, created_at, updated_at,\n                reasoning_effort, max_tokens, temperature, frequency_penalty, presence_penalty,\n                repeat_penalty, max_concurrency\n            )\n            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Int4",
+        "Int2",
+        "Int4",
+        "Int4",
+        "Bytea",
+        "Bytea",
+        "Bool",
+        "Timestamptz",
+        "Timestamptz",
+        "Text",
+        "Int4",
+        "Float8",
+        "Float8",
+        "Float8",
+        "Float8",
+        "Int2"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "0b4f71b64364451a42401aa326f1b3aeb9777be25786e9dab8a4054abd666309"
+}

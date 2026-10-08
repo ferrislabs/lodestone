@@ -200,7 +200,7 @@ async fn the_scoring_agent_answers_the_imposed_contract_live() {
         },
         base_delay: Duration::from_secs(2),
     };
-    let mut budget = RunBudget::new(NonZeroU32::new(10).unwrap());
+    let budget = RunBudget::new(NonZeroU32::new(10).unwrap());
     let scope = CacheScope {
         profile_id: NIL.parse::<ProfileId>().unwrap(),
         revision: RevisionNumber::FIRST,
@@ -232,7 +232,7 @@ async fn the_scoring_agent_answers_the_imposed_contract_live() {
             call,
             |value| validate_scoring(agent, value, &grounding).is_ok(),
             settings,
-            &mut budget,
+            &budget,
         )
         .await
         .unwrap();

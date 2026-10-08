@@ -24,6 +24,7 @@ import {
 import { TierPanel } from '#/pages/llm/ui/tier-panel'
 
 const NO_PROVIDERS: Provider[] = []
+const IN_FLIGHT_REFRESH_MS = 5_000
 const NO_TIERS: TierAssignment[] = []
 
 export function LlmOverviewFeature() {
@@ -38,9 +39,10 @@ export function LlmOverviewFeature() {
 	)
 	const [testOutcome, setTestOutcome] = useState<TestOutcome | null>(null)
 
-	const providersQuery = useQuery(
-		lodestoneApi().get('/api/v1/llm/providers').queryOptions,
-	)
+	const providersQuery = useQuery({
+		...lodestoneApi().get('/api/v1/llm/providers').queryOptions,
+		refetchInterval: IN_FLIGHT_REFRESH_MS,
+	})
 	const tiersQuery = useQuery(
 		lodestoneApi().get('/api/v1/llm/tiers').queryOptions,
 	)

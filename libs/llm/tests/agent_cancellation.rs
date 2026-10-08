@@ -131,7 +131,7 @@ async fn an_llm_call_in_flight_is_dropped_when_its_agent_is_removed() {
         sample: 0,
         fresh: false,
     };
-    let mut budget = RunBudget::new(NonZeroU32::new(100).unwrap());
+    let budget = RunBudget::new(NonZeroU32::new(100).unwrap());
     let started = Instant::now();
     let result = call_with_schema_until(
         &llm,
@@ -156,7 +156,7 @@ async fn an_llm_call_in_flight_is_dropped_when_its_agent_is_removed() {
             },
             base_delay: Duration::from_millis(10),
         },
-        &mut budget,
+        &budget,
         &work,
     )
     .await;
@@ -197,7 +197,7 @@ async fn a_call_for_an_already_removed_agent_never_reaches_the_provider() {
         sample: 0,
         fresh: false,
     };
-    let mut budget = RunBudget::new(NonZeroU32::new(100).unwrap());
+    let budget = RunBudget::new(NonZeroU32::new(100).unwrap());
     let result = call_with_schema_until(
         &provider(&server),
         &cache,
@@ -221,7 +221,7 @@ async fn a_call_for_an_already_removed_agent_never_reaches_the_provider() {
             },
             base_delay: Duration::from_millis(10),
         },
-        &mut budget,
+        &budget,
         &work,
     )
     .await;

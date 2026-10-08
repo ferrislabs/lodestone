@@ -475,6 +475,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             settings: InspectionRunSettings {
                 batch_size: INSPECTION_BATCH_SIZE,
                 priority_batch_size: args.enrichment.inspection_priority_batch,
+                concurrency: args.listeners.inspection_concurrency,
             },
         },
         pool.clone(),
@@ -487,6 +488,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             cipher: AesGcmCipher::new(&llm_config.encryption_key)?,
             cache: PgLlmCache::new(pool.clone()),
             budget_cents: llm_config.run_budget_cents,
+            concurrency: args.listeners.evaluation_concurrency,
             cooldowns: Default::default(),
         },
         pool,

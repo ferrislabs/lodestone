@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
 	buildCreateBody,
 	buildUpdateBody,
+	defaultConcurrency,
 	EMPTY_PROVIDER_VALUES,
 	fieldErrorsFromPaths,
 	numericErrors,
@@ -19,6 +20,8 @@ const provider: Provider = {
 	enabled: true,
 	has_api_key: true,
 	max_retries: 2,
+	max_concurrency: 4,
+	in_flight: 0,
 	timeout_seconds: 30,
 	pricing: { input_cents_per_mtok: 300, output_cents_per_mtok: 1500 },
 	reasoning_effort: null,
@@ -232,5 +235,51 @@ describe('field mapping', () => {
 			numericErrors({ ...EMPTY_PROVIDER_VALUES, max_retries: '2x' }),
 		).toEqual({ max_retries: 'Doit être un entier positif ou nul' })
 		expect(numericErrors(EMPTY_PROVIDER_VALUES)).toEqual({})
+	})
+})
+
+describe('max concurrency', () => {
+	it('loads the stored limit and sends it on create and update', () => {
+		const values = valuesFromProvider({ ...provider, max_concurrency: 6 })
+		expect(values.max_concurrency).toBe('6')
+		expect(buildUpdateBody(values, 'keep').max_concurrency).toBe(6)
+		expect(
+			buildCreateBody({ ...EMPTY_PROVIDER_VALUES, max_concurrency: '3' })
+				.max_concurrency,
+		).toBe(3)
+	})
+
+	it('leaves the server default when the field is empty', () => {
+		expect('max_concurrency' in buildCreateBody(EMPTY_PROVIDER_VALUES)).toBe(
+			false,
+		)
+	})
+
+	it('maps the server path and rejects a non integer', () => {
+		expect(
+			fieldErrorsFromPaths({ max_concurrency: 'doit être entre 1 et 32' })
+				.max_concurrency,
+		).toBe('doit être entre 1 et 32')
+		expect(
+			numericErrors({ ...EMPTY_PROVIDER_VALUES, max_concurrency: '2,5' })
+				.max_concurrency,
+		).toBeDefined()
+	})
+
+	it('defaults to 2 for a local OpenAI-compatible server and 4 otherwise', () => {
+		expect(
+			defaultConcurrency('openai_compatible', 'http://localhost:11434'),
+		).toBe(2)
+		expect(
+			defaultConcurrency('openai_compatible', 'http://127.0.0.1:11434/v1'),
+		).toBe(2)
+		expect(defaultConcurrency('openai_compatible', 'http://[::1]:11434')).toBe(
+			2,
+		)
+		expect(
+			defaultConcurrency('openai_compatible', 'https://llm.example/v1'),
+		).toBe(4)
+		expect(defaultConcurrency('mistral', 'http://localhost:11434')).toBe(4)
+		expect(defaultConcurrency('openai_compatible', 'pas une url')).toBe(4)
 	})
 })

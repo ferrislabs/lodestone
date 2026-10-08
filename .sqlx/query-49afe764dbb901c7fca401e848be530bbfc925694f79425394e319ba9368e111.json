@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT p.id, p.name, p.kind, p.base_url, p.model, p.timeout_ms, p.max_retries,\n                   p.input_cents_per_mtok, p.output_cents_per_mtok,\n                   p.api_key_nonce, p.api_key_ciphertext, p.enabled, p.created_at, p.updated_at,\n                   p.reasoning_effort, p.max_tokens, p.temperature, p.frequency_penalty,\n                   p.presence_penalty, p.repeat_penalty\n            FROM llm_tiers t\n            JOIN llm_providers p ON p.id = t.provider_id\n            WHERE t.tier = $1\n            ",
+  "query": "\n            SELECT id, name, kind, base_url, model, timeout_ms, max_retries,\n                   input_cents_per_mtok, output_cents_per_mtok,\n                   api_key_nonce, api_key_ciphertext, enabled, created_at, updated_at,\n                   reasoning_effort, max_tokens, temperature, frequency_penalty,\n                   presence_penalty, repeat_penalty, max_concurrency\n            FROM llm_providers\n            WHERE id = $1\n            ",
   "describe": {
     "columns": [
       {
@@ -102,11 +102,16 @@
         "ordinal": 19,
         "name": "repeat_penalty",
         "type_info": "Float8"
+      },
+      {
+        "ordinal": 20,
+        "name": "max_concurrency",
+        "type_info": "Int2"
       }
     ],
     "parameters": {
       "Left": [
-        "Text"
+        "Uuid"
       ]
     },
     "nullable": [
@@ -129,8 +134,9 @@
       true,
       true,
       true,
-      true
+      true,
+      false
     ]
   },
-  "hash": "b2df5a331d43cf626bed82072030a5519e0ad66762812391f505e4e018914461"
+  "hash": "49afe764dbb901c7fca401e848be530bbfc925694f79425394e319ba9368e111"
 }

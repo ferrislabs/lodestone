@@ -99,8 +99,8 @@ pub use domain::{
         RunProvenance, TokenUsage, UntrustedDocument,
         cache::{CacheScope, CachedOutput, LlmCache},
         provider::{
-            CipherError, LlmProviderRecord, LlmProviderRepository, ProviderId, ResolvedProvider,
-            SealedSecret, SecretCipher, Tier, TierError, TokenPricing,
+            CipherError, LlmProviderRecord, LlmProviderRepository, MaxConcurrency, ProviderId,
+            ResolvedProvider, SealedSecret, SecretCipher, Tier, TierError, TokenPricing,
         },
         render_user_content,
     },

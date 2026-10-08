@@ -89,6 +89,8 @@ Common flags / env vars (see `libs/args/src/`):
 | `LISTENER_LOCK_RETRY_SECONDS` | `--listener-lock-retry-seconds` | `15` |
 | `PROBE_CONCURRENCY` | `--probe-concurrency` | `8` |
 | `DNS_CONCURRENCY` | `--dns-concurrency` | `16` |
+| `EVALUATION_CONCURRENCY` | `--evaluation-concurrency` | `4` |
+| `INSPECTION_CONCURRENCY` | `--inspection-concurrency` | `8` |
 | `OUTBOUND_CONTACT` | `--outbound-contact` | required, email or https URL |
 | `OUTBOUND_REQUESTS_PER_HOST_PER_MINUTE` | `--outbound-requests-per-host-per-minute` | `6` |
 | `OUTBOUND_REVISIT_INTERVAL_HOURS` | `--outbound-revisit-interval-hours` | `720` |
@@ -112,6 +114,12 @@ Every data source is a provider of the catalog (Sources > Catalogue): BOAMP, DEC
 - **France Travail** needs an OAuth2 client id and secret entered in the catalog. `FRANCE_TRAVAIL_CLIENT_ID`, `FRANCE_TRAVAIL_CLIENT_SECRET`, `FRANCE_TRAVAIL_TOKEN_URL` and `FRANCE_TRAVAIL_API_BASE_URL` are an optional seed only: on the first start, when no France Travail configuration exists yet, they create it (the secret is stored encrypted) and the connection is tested. Once the configuration exists the variables are ignored, so edit credentials in the catalog.
 - The URL variables of BOAMP, DECP, TED, Hacker News (`HACKER_NEWS_BASE_URL`), certificate transparency and the company registry seed the catalog URL used by the connection test the same way; collections still read the variables.
 - "Lancer maintenant" on a source whose provider is not ready answers `409` with a French message.
+
+## LLM concurrency
+
+Qualification, scoring and aggregation evaluate up to `EVALUATION_CONCURRENCY` leads at once, and the agents and samples of a lead run at the same time. The ecosystem inspection runs the modules of a domain together (the official identity first, then the modules reading its SIREN) and up to `INSPECTION_CONCURRENCY` domains at once; per-host rate limits and robots.txt still apply.
+
+Each LLM provider caps its simultaneous model calls with « Requêtes simultanées » (`max_concurrency`, 1 to 32), shared by every pass of the process. It defaults to 2 for an OpenAI-compatible server on localhost, 127.0.0.1 or ::1, and to 4 otherwise. Cached answers never take a slot. With Ollama, keep it at most `OLLAMA_NUM_PARALLEL` (set on the Ollama server): extra requests queue inside Ollama and may hit the provider timeout. The LLM providers page shows « En cours : n / max » and the `llm_calls_in_flight` metric (attribute `provider`) follows the same count.
 
 ## Database migrations
 
