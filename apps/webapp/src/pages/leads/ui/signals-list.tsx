@@ -1,6 +1,7 @@
 import { Badge } from '#/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '#/components/ui/card'
 import { sourceLabel } from '#/lib/labels'
+import { signalTitle } from '#/pages/leads/lib/enrichment'
 import { formatDateTime, formatRatio } from '#/pages/leads/lib/format'
 import type { Signal } from '#/pages/leads/lib/types'
 import { ProvenanceLink } from './provenance-link'
@@ -24,7 +25,7 @@ export function SignalsList({ signals }: SignalsListProps) {
 							<li key={signal.id} className="flex flex-col gap-1 py-3">
 								<div className="flex flex-wrap items-baseline gap-x-3">
 									<span className="font-medium">
-										{signal.sentence ?? `${signal.kind} : ${signal.value}`}
+										{signalTitle(signal) || `${signal.kind} : ${signal.value}`}
 									</span>
 									{signal.agent ? (
 										<Badge variant="secondary">{signal.agent}</Badge>

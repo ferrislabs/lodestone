@@ -133,9 +133,6 @@ export function AgentPage({
 						{kind ? (
 							<Badge variant="secondary">{agentTypeLabel(agent)}</Badge>
 						) : null}
-						{kind && kind !== 'search' ? (
-							<Badge variant="outline">{KIND_META[kind].label}</Badge>
-						) : null}
 						{own.length > 0 ? (
 							<Badge variant="destructive">
 								{own.length} {own.length > 1 ? 'problèmes' : 'problème'}

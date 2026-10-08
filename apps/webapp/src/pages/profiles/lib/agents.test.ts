@@ -112,11 +112,13 @@ describe('agents', () => {
 				{ path: 'agents[1].source.keywords[0]', message: 'x' },
 				{ path: 'contact_ranking.preferred_local_parts[0]', message: 'x' },
 				{ path: 'language', message: 'x' },
+				{ path: 'enrichment.company_jobs.keywords', message: 'x' },
 				{ path: '$', message: 'x' },
 			]),
 		).toEqual({
 			identity: 1,
 			sourcing: 2,
+			enrichment: 1,
 			qualification: 0,
 			scoring: 0,
 		})
@@ -169,7 +171,8 @@ describe('agent types', () => {
 		expect(agentProviders(search)).toEqual(['boamp', 'decp'])
 		const certificates = newAgent('certificates', [])
 		expect(agentKind(certificates)).toBe('certificates')
-		expect(agentTypeLabel(certificates)).toBe('Signal')
+		expect(agentTypeLabel(certificates)).toBe('Certificats')
+		expect(agentTypeLabel(newAgent('dns', []))).toBe('DNS')
 		expect(agentProviders(certificates)).toEqual(['certificate_transparency'])
 		expect(agentProviders(newAgent('dns', []))).toEqual(['dns_cname'])
 		expect(agentKind({ type: 'search' })).toBe('search')

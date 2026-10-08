@@ -4,6 +4,8 @@ import { Badge } from '#/components/ui/badge'
 import { Button } from '#/components/ui/button'
 import { Switch } from '#/components/ui/switch'
 import type { JsonValue, Problem } from '#/lib/schema-form'
+import { cn } from '#/lib/utils'
+import { type AgentRunState, IDLE_RUN } from '#/pages/profiles/lib/agent-run'
 import {
 	agentEnabled,
 	agentField,
@@ -12,24 +14,25 @@ import {
 	agentSummary,
 	agentTypeLabel,
 	type DependencyNote,
-	KIND_META,
 } from '#/pages/profiles/lib/agents'
-import { providerName } from '#/pages/profiles/lib/search-agent'
+import {
+	providerName,
+	providerStatusOf,
+} from '#/pages/profiles/lib/search-agent'
 import { belongsToPath } from '#/pages/profiles/lib/tabs'
 import { DependencyNoteText } from '#/pages/profiles/ui/dependency-note'
-import { ProviderChips } from '#/pages/profiles/ui/provider-chips'
+import { ProviderLogo } from '#/pages/profiles/ui/provider-tiles'
+import { statusLabel } from '#/pages/source-providers/lib/labels'
 import type { ProviderSummary } from '#/pages/source-providers/lib/types'
+import { statusBorder } from '#/pages/source-providers/ui/provider-card'
 import {
 	agentListenerLine,
 	isContinuousKind,
 	listenerBadge,
 } from '#/pages/sources/lib/listener'
-import { triggerResultLabel } from '#/pages/sources/lib/state'
-import type { ListenerSummary, TriggerResult } from '#/pages/sources/lib/types'
+import type { ListenerSummary } from '#/pages/sources/lib/types'
 
 const NO_CATALOG: readonly ProviderSummary[] = []
-const NO_PENDING: ReadonlySet<string> = new Set()
-const NO_RESULTS: Readonly<Record<string, TriggerResult>> = {}
 
 interface AgentCardProps {
 	agent: JsonValue
@@ -39,9 +42,8 @@ interface AgentCardProps {
 	highlighted: boolean
 	confirmingRemove: boolean
 	catalog?: readonly ProviderSummary[]
-	runPending?: ReadonlySet<string>
-	runResults?: Readonly<Record<string, TriggerResult>>
-	onRunSource?: (provider: string) => void
+	run?: AgentRunState
+	onRunAgent?: () => void
 	listener?: ListenerSummary
 	now?: number
 	onEdit: () => void
@@ -49,6 +51,39 @@ interface AgentCardProps {
 	onRequestRemove: () => void
 	onConfirmRemove: () => void
 	onCancelRemove: () => void
+}
+
+function ProviderLogos({
+	keys,
+	catalog,
+}: {
+	keys: readonly string[]
+	catalog: readonly ProviderSummary[]
+}) {
+	if (keys.length === 0) {
+		return (
+			<p className="text-xs text-muted-foreground">Aucune source choisie.</p>
+		)
+	}
+	return (
+		<ul aria-label="Sources de l'agent" className="flex flex-wrap gap-1.5">
+			{keys.map((key) => {
+				const name = providerName(catalog, key)
+				const status = providerStatusOf(catalog, key)
+				return (
+					<li
+						key={key}
+						data-provider-logo={key}
+						data-status={status}
+						title={`${name} · ${statusLabel(status)}`}
+						className={cn('rounded-xl border-2', statusBorder(status))}
+					>
+						<ProviderLogo providerKey={key} name={name} />
+					</li>
+				)
+			})}
+		</ul>
+	)
 }
 
 export function AgentCard({
@@ -59,9 +94,8 @@ export function AgentCard({
 	highlighted,
 	confirmingRemove,
 	catalog = NO_CATALOG,
-	runPending = NO_PENDING,
-	runResults = NO_RESULTS,
-	onRunSource,
+	run = IDLE_RUN,
+	onRunAgent,
 	listener,
 	now = 0,
 	onEdit,
@@ -72,9 +106,11 @@ export function AgentCard({
 }: AgentCardProps) {
 	const kind = agentKind(agent)
 	const name = agentField(agent, 'name')
+	const providers = agentProviders(agent)
 	const own = problems.filter((problem) =>
 		belongsToPath(problem.path, `agents[${index}]`),
 	)
+	const continuous = kind !== null && isContinuousKind(kind)
 
 	return (
 		<li
@@ -85,7 +121,7 @@ export function AgentCard({
 			}`}
 		>
 			<div className="flex items-start justify-between gap-2">
-				<p className="text-sm font-medium">{name || 'Agent sans nom'}</p>
+				<h3 className="text-sm font-medium">{name || 'Agent sans nom'}</h3>
 				<Switch
 					aria-label={`Agent ${name || index + 1} activé`}
 					checked={agentEnabled(agent)}
@@ -96,21 +132,18 @@ export function AgentCard({
 				{kind ? (
 					<Badge variant="secondary">{agentTypeLabel(agent)}</Badge>
 				) : null}
-				{kind && kind !== 'search' ? (
-					<Badge variant="outline">{KIND_META[kind].label}</Badge>
-				) : null}
 				{own.length > 0 ? (
 					<Badge variant="destructive">
 						{own.length} {own.length > 1 ? 'problèmes' : 'problème'}
 					</Badge>
 				) : null}
 			</div>
-			<p className="text-xs text-muted-foreground">{agentSummary(agent)}</p>
 			{kind === 'search' ? (
-				<ProviderChips keys={agentProviders(agent)} catalog={catalog} />
+				<ProviderLogos keys={providers} catalog={catalog} />
 			) : null}
+			<p className="text-xs text-muted-foreground">{agentSummary(agent)}</p>
 			{note ? <DependencyNoteText note={note} /> : null}
-			<div className="mt-auto flex items-center gap-1 pt-1">
+			<div className="mt-auto flex flex-wrap items-center gap-1 pt-1">
 				{confirmingRemove ? (
 					<>
 						<Button
@@ -132,6 +165,20 @@ export function AgentCard({
 					</>
 				) : (
 					<>
+						{onRunAgent && kind && !continuous ? (
+							<Button
+								type="button"
+								variant="secondary"
+								size="sm"
+								disabled={run.pending || providers.length === 0}
+								aria-label={`Lancer l'agent ${name || index + 1}`}
+								title="Lance maintenant chaque source de l'agent, pour tous les profils, avec la dernière version enregistrée"
+								onClick={onRunAgent}
+							>
+								<PlayIcon />
+								Lancer l'agent
+							</Button>
+						) : null}
 						<Button
 							type="button"
 							variant="outline"
@@ -154,7 +201,14 @@ export function AgentCard({
 					</>
 				)}
 			</div>
-			{kind && isContinuousKind(kind) ? (
+			{run.message !== null ? (
+				<output
+					className={`text-xs ${run.error ? 'text-destructive' : 'text-muted-foreground'}`}
+				>
+					{run.message}
+				</output>
+			) : null}
+			{continuous ? (
 				<p
 					data-listener-line
 					data-tone={listenerBadge(listener?.state ?? '').tone}
@@ -163,34 +217,6 @@ export function AgentCard({
 					{agentListenerLine(listener, now)}
 				</p>
 			) : null}
-			{onRunSource && kind && !isContinuousKind(kind)
-				? agentProviders(agent).map((provider) => {
-						const result = runResults[provider]
-						return (
-							<div key={provider} className="flex items-center gap-2">
-								<Button
-									type="button"
-									variant="secondary"
-									size="sm"
-									disabled={runPending.has(provider)}
-									aria-label={`Lancer la source ${providerName(catalog, provider)} de ${name || 'agent'}`}
-									title="Lance la source maintenant pour tous les profils, avec la dernière version enregistrée"
-									onClick={() => onRunSource(provider)}
-								>
-									<PlayIcon />
-									Lancer {providerName(catalog, provider)}
-								</Button>
-								{result ? (
-									<output
-										className={`text-xs ${result.kind === 'error' ? 'text-destructive' : 'text-muted-foreground'}`}
-									>
-										{triggerResultLabel(result)}
-									</output>
-								) : null}
-							</div>
-						)
-					})
-				: null}
 		</li>
 	)
 }

@@ -97,7 +97,7 @@ export const FIELD_COPY: Readonly<Record<string, FieldCopy>> = {
 		description: 'Sonde les hôtes de chaque lead.',
 	},
 	'enrichment.http_probe.extra_subdomains': {
-		label: 'Sous-domaines sondés',
+		label: 'Sous-domaines supplémentaires',
 		description:
 			'Sous-domaines du domaine du lead sondés en plus, par exemple auth ou sso.',
 	},
@@ -117,7 +117,7 @@ export const FIELD_COPY: Readonly<Record<string, FieldCopy>> = {
 	'enrichment.company_jobs.keywords': {
 		label: 'Mots-clés',
 		description:
-			'Mots-clés cherchés dans les offres. Vide : les mots-clés des agents de recherche activés.',
+			'Vide : les mots-clés des agents de recherche activés. Sinon, seuls ces mots-clés sont cherchés dans les offres.',
 	},
 	'enrichment.company_jobs.accept_min_keywords': {
 		label: 'Mots-clés distincts pour un signal fort',
@@ -128,6 +128,7 @@ export const FIELD_COPY: Readonly<Record<string, FieldCopy>> = {
 		label: 'Empreinte',
 		description:
 			"Empreinte d'un produit : chemin à requêter, conditions, extracteur de version facultatif et marqueurs de dette.",
+		add: 'Ajouter une empreinte',
 	},
 	[`${FINGERPRINT}.id`]: {
 		label: 'Identifiant',

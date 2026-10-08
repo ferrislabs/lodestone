@@ -22,13 +22,14 @@ export const SOURCE_GROUPS: readonly {
 }[] = [
 	{
 		title: 'Infrastructure',
-		sources: ['certificate_transparency', 'dns_cname', 'http_probe'],
+		sources: ['certificate_transparency', 'dns_cname'],
 	},
 	{ title: 'Marchés publics', sources: ['boamp', 'decp', 'ted'] },
 	{
 		title: "Offres d'emploi",
-		sources: ['france_travail', 'hacker_news_hiring', 'ats'],
+		sources: ['france_travail', 'hacker_news_hiring'],
 	},
+	{ title: 'Enrichissement', sources: ['http_probe', 'ats'] },
 	{
 		title: 'Contacts',
 		sources: ['public_page', 'security_txt', 'role_guess'],

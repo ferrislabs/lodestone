@@ -52,19 +52,18 @@ describe('groupedSources', () => {
 			source('role_guess'),
 		])
 		expect(groups.map((group) => group.title)).toEqual([
-			'Infrastructure',
 			'Marchés publics',
+			'Enrichissement',
 			'Contacts',
 			'Qualification',
 		])
-		expect(groups[0]?.sources.map((item) => item.source)).toEqual([
+		expect(groups[1]?.sources.map((item) => item.source)).toEqual([
 			'http_probe',
 		])
 	})
 
 	it('lists Hacker News with the job offer sources', () => {
 		const groups = groupedSources([
-			source('ats'),
 			source('hacker_news_hiring'),
 			source('france_travail'),
 		])
@@ -72,6 +71,23 @@ describe('groupedSources', () => {
 		expect(groups[0]?.sources.map((item) => item.source)).toEqual([
 			'france_travail',
 			'hacker_news_hiring',
+		])
+	})
+
+	it('groups the company job offers and the HTTP probe under Enrichissement', () => {
+		const groups = groupedSources([
+			source('ats'),
+			source('france_travail'),
+			source('http_probe'),
+			source('certificate_transparency'),
+		])
+		expect(groups.map((group) => group.title)).toEqual([
+			'Infrastructure',
+			"Offres d'emploi",
+			'Enrichissement',
+		])
+		expect(groups[2]?.sources.map((item) => item.source)).toEqual([
+			'http_probe',
 			'ats',
 		])
 	})

@@ -122,6 +122,7 @@ describe('qualification tab', () => {
 		expect(labels).toEqual([
 			TAB_LABELS.identity,
 			'Sourcing',
+			'Enrichissement',
 			'Qualification',
 			'Scoring',
 		])

@@ -34,8 +34,8 @@ pub use domain::{
     },
     enrichment::{
         CERTIFICATE_SEEN_KIND, EnrichmentState, EnrichmentStatus, EnrichmentStep,
-        LeadEnrichmentRecord, StepRun, StepState, WaitingReason, enrichment_state,
-        only_certificates,
+        LeadEnrichmentRecord, ListedEnrichment, StepRun, StepState, WaitingReason,
+        enrichment_state, listed_enrichment_state, only_certificates,
     },
     facts::{
         CompanyFacts, Country, CountryBasis, Environment, HostFact, IndependentSignal, LeadFacts,

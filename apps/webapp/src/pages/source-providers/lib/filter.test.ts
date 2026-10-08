@@ -11,8 +11,8 @@ import { summary } from '#/pages/source-providers/lib/fixtures'
 const PROVIDERS = [
 	summary({
 		key: 'ats',
-		name: 'Pages carrières',
-		category: 'jobs_and_missions',
+		name: "Offres d'emploi de l'entreprise",
+		category: 'companies',
 	}),
 	summary({
 		key: 'boamp',
@@ -49,7 +49,7 @@ describe('matchesQuery', () => {
 	})
 
 	it('ignores accents and case in name and description', () => {
-		expect(matchesQuery(PROVIDERS[0], 'CARRIERES')).toBe(true)
+		expect(matchesQuery(PROVIDERS[0], 'ENTREPRISE')).toBe(true)
 		expect(matchesQuery(PROVIDERS[1], 'marche')).toBe(true)
 	})
 
@@ -72,7 +72,7 @@ describe('filterProviders', () => {
 			status: null,
 			query: '',
 		}).map((provider) => provider.key)
-		expect(keys).toEqual(['boamp', 'ted', 'ats', 'dns_cname'])
+		expect(keys).toEqual(['boamp', 'ted', 'dns_cname', 'ats'])
 	})
 
 	it('combines the category and the query', () => {
@@ -105,12 +105,22 @@ describe('filterProviders', () => {
 		).toEqual([])
 	})
 
-	it('returns nothing when no provider matches', () => {
+	it('keeps the company job offers under Entreprises', () => {
 		expect(
 			filterProviders(PROVIDERS, {
 				category: 'companies',
 				status: null,
 				query: '',
+			}).map((provider) => provider.key),
+		).toEqual(['ats'])
+	})
+
+	it('returns nothing when no provider matches', () => {
+		expect(
+			filterProviders(PROVIDERS, {
+				category: 'technical_signals',
+				status: null,
+				query: 'boamp',
 			}),
 		).toEqual([])
 	})
@@ -122,8 +132,8 @@ describe('categoryCounts', () => {
 			categoryCounts(PROVIDERS, '').map((c) => [c.category, c.count]),
 		).toEqual([
 			['public_procurement', 2],
-			['jobs_and_missions', 1],
 			['technical_signals', 1],
+			['companies', 1],
 		])
 		expect(categoryCounts(PROVIDERS, 'ted')[0]).toMatchObject({
 			title: 'Marchés publics',

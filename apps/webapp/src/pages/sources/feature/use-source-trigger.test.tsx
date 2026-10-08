@@ -8,6 +8,7 @@ import {
 } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { agentRunState, runAgent } from '#/pages/profiles/lib/agent-run'
 import { newAgent } from '#/pages/profiles/lib/agents'
 import { AgentCard } from '#/pages/profiles/ui/agent-card'
 import { useSourceTrigger } from './use-source-trigger'
@@ -23,9 +24,13 @@ function Harness() {
 				note={null}
 				highlighted={false}
 				confirmingRemove={false}
-				runPending={sourceTrigger.pending}
-				runResults={sourceTrigger.results}
-				onRunSource={sourceTrigger.trigger}
+				run={agentRunState(
+					['boamp'],
+					sourceTrigger.pending,
+					sourceTrigger.results,
+					[],
+				)}
+				onRunAgent={() => runAgent(['boamp'], sourceTrigger.trigger)}
 				onEdit={() => undefined}
 				onEnabled={() => undefined}
 				onRequestRemove={() => undefined}
@@ -72,7 +77,7 @@ describe('agent card run action', () => {
 	it('runs the source of the agent and shows it as scheduled', async () => {
 		const calls = stubRun(202, { data: {} })
 		renderHarness()
-		fireEvent.click(screen.getByRole('button', { name: /Lancer la source/ }))
+		fireEvent.click(screen.getByRole('button', { name: /Lancer l'agent/ }))
 		await waitFor(() =>
 			expect(screen.getByRole('status').textContent).toBe('Planifié'),
 		)
@@ -86,7 +91,7 @@ describe('agent card run action', () => {
 			status: 409,
 		})
 		renderHarness()
-		fireEvent.click(screen.getByRole('button', { name: /Lancer la source/ }))
+		fireEvent.click(screen.getByRole('button', { name: /Lancer l'agent/ }))
 		await waitFor(() =>
 			expect(screen.getByRole('status').textContent).toBe('Déjà en cours'),
 		)
@@ -99,7 +104,7 @@ describe('agent card run action', () => {
 			status: 404,
 		})
 		renderHarness()
-		fireEvent.click(screen.getByRole('button', { name: /Lancer la source/ }))
+		fireEvent.click(screen.getByRole('button', { name: /Lancer l'agent/ }))
 		await waitFor(() =>
 			expect(screen.getByRole('status').textContent).toBe(
 				"La source n'a pas de tâche planifiée",
@@ -115,7 +120,7 @@ describe('agent card run action', () => {
 			status: 409,
 		})
 		renderHarness()
-		fireEvent.click(screen.getByRole('button', { name: /Lancer la source/ }))
+		fireEvent.click(screen.getByRole('button', { name: /Lancer l'agent/ }))
 		await waitFor(() =>
 			expect(screen.getByRole('status').textContent).toBe(
 				"Le fournisseur « BOAMP » n'est pas prêt : configurez-le et testez-le dans le catalogue avant de lancer la source.",

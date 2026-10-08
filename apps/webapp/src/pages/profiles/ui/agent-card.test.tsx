@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { JsonValue } from '#/lib/schema-form'
 import { type AgentKind, newAgent } from '#/pages/profiles/lib/agents'
+import { summary } from '#/pages/source-providers/lib/fixtures'
 import { AgentCard } from './agent-card'
 
 afterEach(cleanup)
@@ -38,54 +39,109 @@ function renderCard(
 	return props
 }
 
+describe('AgentCard content', () => {
+	it('titles the card with the agent name and badges its type', () => {
+		renderCard({
+			agent: { ...newAgent('search', [], ['boamp']), name: 'Marchés IAM' },
+		})
+		expect(screen.getByRole('heading', { name: 'Marchés IAM' })).toBeTruthy()
+		expect(screen.getByText('Recherche')).toBeTruthy()
+		cleanup()
+		renderCard({ kind: 'certificates' })
+		expect(screen.getAllByText('Certificats').length).toBeGreaterThan(0)
+		expect(screen.queryByText('Signal')).toBeNull()
+		cleanup()
+		renderCard({ kind: 'dns' })
+		expect(screen.getAllByText('DNS').length).toBeGreaterThan(0)
+	})
+
+	it('shows the providers of a search agent as logos with a status border', () => {
+		renderCard({
+			agent: newAgent('search', [], ['boamp', 'ted']),
+			catalog: [
+				summary({ key: 'boamp', name: 'BOAMP', status: 'ready' }),
+				summary({ key: 'ted', name: 'TED', status: 'failing' }),
+			],
+		})
+		const row = screen.getByRole('list', { name: "Sources de l'agent" })
+		const logos = row.querySelectorAll('[data-provider-logo]')
+		expect([...logos].map((logo) => logo.getAttribute('title'))).toEqual([
+			'BOAMP · Prêt',
+			'TED · En échec',
+		])
+		expect(logos[0]?.className).toContain('border-emerald-500')
+		expect(screen.getByRole('img', { name: 'BOAMP' })).toBeTruthy()
+	})
+
+	it('counts the labels and patterns of signal agents', () => {
+		renderCard({
+			agent: { ...newAgent('certificates', []), labels: ['auth', 'sso'] },
+		})
+		expect(screen.getByText('2 labels')).toBeTruthy()
+		expect(
+			screen.queryByRole('list', { name: "Sources de l'agent" }),
+		).toBeNull()
+		cleanup()
+		renderCard({ agent: { ...newAgent('dns', []), patterns: [] } })
+		expect(screen.getByText('0 motif CNAME')).toBeTruthy()
+	})
+
+	it('edits and removes the agent', () => {
+		const props = renderCard()
+		fireEvent.click(screen.getByRole('button', { name: /Modifier/ }))
+		fireEvent.click(screen.getByRole('button', { name: /Supprimer/ }))
+		expect(props.onEdit).toHaveBeenCalled()
+		expect(props.onRequestRemove).toHaveBeenCalled()
+	})
+})
+
 describe('AgentCard run action', () => {
 	it('has no run action without a handler', () => {
 		renderCard()
-		expect(
-			screen.queryByRole('button', { name: /Lancer la source/ }),
-		).toBeNull()
+		expect(screen.queryByRole('button', { name: /Lancer l'agent/ })).toBeNull()
 	})
 
-	it('triggers the source of the agent', () => {
-		const onRunSource = vi.fn()
-		renderCard({ onRunSource })
-		fireEvent.click(screen.getByRole('button', { name: /Lancer la source/ }))
-		expect(onRunSource).toHaveBeenCalledWith('boamp')
+	it('runs the whole agent from one button', () => {
+		const onRunAgent = vi.fn()
+		renderCard({ onRunAgent })
+		fireEvent.click(screen.getByRole('button', { name: /Lancer l'agent/ }))
+		expect(onRunAgent).toHaveBeenCalledTimes(1)
+		expect(screen.queryByRole('button', { name: /Lancer BOAMP/ })).toBeNull()
 	})
 
-	it('disables the action while the request is pending', () => {
-		renderCard({ onRunSource: vi.fn(), runPending: new Set(['boamp']) })
-		const button = screen.getByRole('button', { name: /Lancer la source/ })
+	it('disables the action while a request is pending', () => {
+		renderCard({
+			onRunAgent: vi.fn(),
+			run: { pending: true, message: null, error: false },
+		})
+		const button = screen.getByRole('button', { name: /Lancer l'agent/ })
 		expect((button as HTMLButtonElement).disabled).toBe(true)
 	})
 
-	it('shows the scheduled and already running results inline', () => {
-		renderCard({
-			onRunSource: vi.fn(),
-			runResults: { boamp: { kind: 'scheduled' } },
-		})
-		expect(screen.getByRole('status').textContent).toBe('Planifié')
-		cleanup()
-		renderCard({
-			onRunSource: vi.fn(),
-			runResults: { boamp: { kind: 'running' } },
-		})
-		expect(screen.getByRole('status').textContent).toBe('Déjà en cours')
+	it('disables the action without any provider', () => {
+		renderCard({ agent: newAgent('search', []), onRunAgent: vi.fn() })
+		const button = screen.getByRole('button', { name: /Lancer l'agent/ })
+		expect((button as HTMLButtonElement).disabled).toBe(true)
 	})
 
-	it('shows an error result', () => {
+	it('shows one combined result', () => {
 		renderCard({
-			onRunSource: vi.fn(),
-			runResults: {
-				boamp: {
-					kind: 'error',
-					message: "La source n'a pas de tâche planifiée",
-				},
+			onRunAgent: vi.fn(),
+			run: {
+				pending: false,
+				message: 'Agent lancé : 2 sources planifiées',
+				error: false,
 			},
 		})
 		expect(screen.getByRole('status').textContent).toBe(
-			"La source n'a pas de tâche planifiée",
+			'Agent lancé : 2 sources planifiées',
 		)
+		cleanup()
+		renderCard({
+			onRunAgent: vi.fn(),
+			run: { pending: false, message: 'TED : Non prêt', error: true },
+		})
+		expect(screen.getByRole('status').className).toContain('text-destructive')
 	})
 })
 
@@ -93,16 +149,14 @@ describe('AgentCard continuous kinds', () => {
 	it('shows the listening state and last activity instead of the run button', () => {
 		renderCard({
 			kind: 'dns',
-			onRunSource: vi.fn(),
+			onRunAgent: vi.fn(),
 			now: NOW,
 			listener: {
 				state: 'listening',
 				last_activity_at: '2026-10-05T11:57:00Z',
 			},
 		})
-		expect(
-			screen.queryByRole('button', { name: /Lancer la source/ }),
-		).toBeNull()
+		expect(screen.queryByRole('button', { name: /Lancer l'agent/ })).toBeNull()
 		expect(
 			screen.getByText('En écoute · dernière activité il y a 3 minutes'),
 		).toBeTruthy()
@@ -145,10 +199,8 @@ describe('AgentCard continuous kinds', () => {
 	})
 
 	it('keeps the run button on scheduled kinds', () => {
-		renderCard({ onRunSource: vi.fn(), now: NOW })
-		expect(
-			screen.getByRole('button', { name: /Lancer la source/ }),
-		).toBeTruthy()
+		renderCard({ onRunAgent: vi.fn(), now: NOW })
+		expect(screen.getByRole('button', { name: /Lancer l'agent/ })).toBeTruthy()
 		expect(document.querySelector('[data-listener-line]')).toBeNull()
 	})
 })

@@ -2,9 +2,11 @@ import { PlusIcon } from 'lucide-react'
 
 import { FieldErrors } from '#/components/schema-form/field-frame'
 import type { JsonValue, Problem } from '#/lib/schema-form'
+import { agentRunState, runAgent } from '#/pages/profiles/lib/agent-run'
 import {
 	agentField,
 	agentKind,
+	agentProviders,
 	dependencyNote,
 	SIGNAL_PROVIDERS,
 } from '#/pages/profiles/lib/agents'
@@ -63,6 +65,7 @@ export function AgentsEditor({
 					const index = Number(slot)
 					const agent = agents[index]
 					const kind = agentKind(agent)
+					const providers = agentProviders(agent)
 					return (
 						<AgentCard
 							key={slot}
@@ -75,9 +78,21 @@ export function AgentsEditor({
 							}
 							confirmingRemove={confirmingRemove === index}
 							catalog={catalog}
-							runPending={sourceTrigger?.pending}
-							runResults={sourceTrigger?.results}
-							onRunSource={sourceTrigger?.trigger}
+							run={
+								sourceTrigger
+									? agentRunState(
+											providers,
+											sourceTrigger.pending,
+											sourceTrigger.results,
+											catalog,
+										)
+									: undefined
+							}
+							onRunAgent={
+								sourceTrigger
+									? () => runAgent(providers, sourceTrigger.trigger)
+									: undefined
+							}
 							listener={
 								kind && kind !== 'search'
 									? listeners?.[SIGNAL_PROVIDERS[kind]]

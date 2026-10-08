@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { formatDateTime } from '#/pages/leads/lib/format'
 import type { LeadDetailData, ScoringResult } from '#/pages/leads/lib/types'
 import { LeadDetail } from './lead-detail'
 
@@ -405,6 +406,128 @@ describe('LeadDetail', () => {
 		expect(facts?.textContent).toContain('Première détection')
 		expect(facts?.textContent).toContain('Dernière détection')
 		expect(facts?.textContent).toContain('Pays probableFrance')
+	})
+
+	it('shows the enrichment steps next to the facts', () => {
+		const { container } = renderDetail({
+			detail: {
+				...detail,
+				enrichment: {
+					status: 'pending',
+					steps: [
+						{
+							step: 'http_probe',
+							enabled: true,
+							ran_at: '2026-02-01T10:00:00Z',
+						},
+						{ step: 'company_jobs', enabled: false, ran_at: null },
+					],
+					waiting_reason: 'awaiting_enrichment',
+					wait_until: '2026-02-01T10:30:00Z',
+				},
+			},
+		})
+		const facts = container.querySelector('[data-section="facts"]')
+		const block = container.querySelector('[data-section="enrichment"]')
+		expect(block).toBeTruthy()
+		expect(
+			facts && block
+				? facts.compareDocumentPosition(block) &
+						Node.DOCUMENT_POSITION_FOLLOWING
+				: 0,
+		).toBeTruthy()
+		const probe = block?.querySelector('[data-step="http_probe"]')
+		expect(probe?.getAttribute('data-state')).toBe('done')
+		expect(probe?.textContent).toContain('Sonde HTTP')
+		expect(probe?.textContent).toContain('Fait')
+		expect(probe?.textContent).toContain(formatDateTime('2026-02-01T10:00:00Z'))
+		const jobs = block?.querySelector('[data-step="company_jobs"]')
+		expect(jobs?.getAttribute('data-state')).toBe('disabled')
+		expect(jobs?.textContent).toContain("Offres d'emploi de l'entreprise")
+		expect(jobs?.textContent).toContain('Désactivé')
+		const waiting = block?.querySelector('[data-waiting]')
+		expect(waiting?.textContent).toBe(
+			`En attente d'enrichissement jusqu'au ${formatDateTime('2026-02-01T10:30:00Z')}`,
+		)
+	})
+
+	it('flags a certificate-only lead waiting for other evidence', () => {
+		const { container } = renderDetail({
+			detail: {
+				...detail,
+				lead: pendingScoring,
+				enrichment: {
+					status: 'complete',
+					steps: [
+						{
+							step: 'http_probe',
+							enabled: true,
+							ran_at: '2026-02-01T10:00:00Z',
+						},
+					],
+					waiting_reason: 'awaiting_enrichment_evidence',
+					wait_until: null,
+				},
+			},
+		})
+		expect(
+			container.querySelector('[data-section="enrichment"] [data-waiting]')
+				?.textContent,
+		).toBe("En attente de preuve d'enrichissement")
+		expect(container.querySelector('[data-verdict]')?.textContent).toBe(
+			"En attente de preuve d'enrichissement",
+		)
+	})
+
+	it('shows the wait in the header verdict while the lead has no verdict', () => {
+		const { container } = renderDetail({
+			detail: {
+				...detail,
+				lead: pendingScoring,
+				enrichment: {
+					status: 'pending',
+					steps: [{ step: 'http_probe', enabled: true, ran_at: null }],
+					waiting_reason: 'awaiting_enrichment',
+					wait_until: null,
+				},
+			},
+		})
+		expect(container.querySelector('[data-verdict]')?.textContent).toBe(
+			"En attente d'enrichissement",
+		)
+	})
+
+	it('says so when the profile enables no enrichment step', () => {
+		const { container } = renderDetail()
+		const block = container.querySelector('[data-section="enrichment"]')
+		expect(block?.textContent).toContain('Aucune étape activée')
+		expect(block?.querySelector('[data-waiting]')).toBeNull()
+	})
+
+	it('names the host of a certificate signal', () => {
+		renderDetail({
+			detail: {
+				...detail,
+				signals: [
+					{
+						id: 'c1',
+						kind: 'certificate_seen',
+						value: 'sso.acme.test',
+						sentence:
+							'sso.acme.test apparaît dans les certificats publics (Certificate Transparency)',
+						source: 'certificate_transparency',
+						agent: 'certificats',
+						provenance: 'https://crt.sh/?q=sso.acme.test',
+						strength: 0.3,
+						observed_at: '2026-02-01T00:00:00Z',
+						raw: {},
+					},
+				],
+			},
+		})
+		expect(
+			screen.getByText('Certificat observé pour sso.acme.test'),
+		).toBeTruthy()
 	})
 
 	it('warns when no signal comes from a production host', () => {

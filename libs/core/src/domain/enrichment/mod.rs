@@ -51,6 +51,12 @@ pub struct LeadEnrichmentRecord {
     pub settings: Enrichment,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct ListedEnrichment {
+    pub record: LeadEnrichmentRecord,
+    pub only_certificates: bool,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EnrichmentStatus {
     Disabled,
@@ -109,6 +115,15 @@ pub fn enrichment_state(
     wait: Duration,
     now: DateTime<Utc>,
 ) -> EnrichmentState {
+    listed_enrichment_state(record, only_certificates(signals), wait, now)
+}
+
+pub fn listed_enrichment_state(
+    record: &LeadEnrichmentRecord,
+    certificates_only: bool,
+    wait: Duration,
+    now: DateTime<Utc>,
+) -> EnrichmentState {
     let enrichment = &record.settings;
     let steps: Vec<StepState> = EnrichmentStep::ALL
         .into_iter()
@@ -133,7 +148,7 @@ pub fn enrichment_state(
     } else {
         EnrichmentStatus::Pending
     };
-    let waiting_reason = if only_certificates(signals) {
+    let waiting_reason = if certificates_only {
         Some(WaitingReason::AwaitingEnrichmentEvidence)
     } else if status == EnrichmentStatus::Pending {
         Some(WaitingReason::AwaitingEnrichment)
@@ -264,6 +279,13 @@ mod tests {
             state.waiting_reason,
             Some(WaitingReason::AwaitingEnrichmentEvidence)
         );
+        let listed = listed_enrichment_state(
+            &record(enrichment(true, false), &[(EnrichmentStep::HttpProbe, 3)]),
+            true,
+            Duration::minutes(30),
+            at(40),
+        );
+        assert_eq!(listed, state);
         let product = signal("product_detected", SourceName::HttpProbe);
         assert!(!only_certificates(&[certificate, product]));
         assert!(!only_certificates(&[]));

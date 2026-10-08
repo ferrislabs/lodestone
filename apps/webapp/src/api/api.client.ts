@@ -276,6 +276,10 @@ export namespace Schemas {
     source_count: number;
     sources: Array<string>;
   };
+  export type EnrichmentWaitingDto = Partial<{
+    wait_until: string | null;
+    waiting_reason: null | EnrichmentWaitingReason;
+  }>;
   export type EvidenceComponentsDto = { diversity: number; environment: number; strength: number; volume: number };
   export type EvidenceStrengthDto = {
     components: EvidenceComponentsDto;
@@ -312,6 +316,7 @@ export namespace Schemas {
   export type LeadDto = {
     confidence?: (number | null) | undefined;
     domain: string;
+    enrichment_waiting?: (null | EnrichmentWaitingDto) | undefined;
     evidence?: (null | EvidenceStrengthDto) | undefined;
     exclusions: Array<ExclusionDto>;
     first_seen_at: string;
@@ -427,6 +432,7 @@ export namespace Schemas {
     data: {
       confidence?: (number | null) | undefined;
       domain: string;
+      enrichment_waiting?: (null | EnrichmentWaitingDto) | undefined;
       evidence?: (null | EvidenceStrengthDto) | undefined;
       exclusions: Array<ExclusionDto>;
       first_seen_at: string;
@@ -676,6 +682,7 @@ export namespace Schemas {
     data: Array<{
       confidence?: (number | null) | undefined;
       domain: string;
+      enrichment_waiting?: (null | EnrichmentWaitingDto) | undefined;
       evidence?: (null | EvidenceStrengthDto) | undefined;
       exclusions: Array<ExclusionDto>;
       first_seen_at: string;

@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT lead_id, step, ran_at FROM lead_enrichments WHERE lead_id = ANY($1)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "lead_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "step",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "ran_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "8ab0e51428ce411960501c7a96a85a8c4050eeabf0784e601fd1007459d6edc1"
+}

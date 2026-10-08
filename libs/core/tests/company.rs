@@ -14,11 +14,12 @@ use chrono::{DateTime, NaiveDate, Utc};
 use common::{EncryptionKey, Secret};
 use lodestone_core::{
     ActiveProfile, AtsTargets, CandidateHosts, Clock, CompanyBuilder, CompanyPage,
-    CreateProfileCommand, DossierBuild, DossierState, EnrichmentStatus, EnrichmentStep,
-    GenerationParams, Hostname, Lead, LeadRepository, LlmError, LlmProvider, LlmRequest,
-    LlmResponse, LodestoneUseCase, NormalizedDomain, Observation, OfficialData, ProfileId,
-    ProfileName, Provenance, ProviderDefinition, ProviderKind, SignalKind, Siren, SourceError,
-    SourceName, Tier, TokenPricing, TokenUsage, UnitInterval, ValidatedProfile, WaitingReason,
+    CreateProfileCommand, DossierBuild, DossierState, EnrichmentState, EnrichmentStatus,
+    EnrichmentStep, GenerationParams, Hostname, Lead, LeadQuery, LeadRepository, LlmError,
+    LlmProvider, LlmRequest, LlmResponse, LodestoneUseCase, NormalizedDomain, Observation,
+    OfficialData, ProfileId, ProfileName, Provenance, ProviderDefinition, ProviderKind, SignalKind,
+    Siren, SourceError, SourceName, Tier, TokenPricing, TokenUsage, UnitInterval, ValidatedProfile,
+    WaitingReason,
     company::{CompanyRunReport, CompanyRunSettings},
     evaluation::{EvaluationSettings, ProviderBuilder},
     infrastructure::{
@@ -319,6 +320,21 @@ impl Harness {
     fn enriching(mut self) -> Self {
         self.usecase = self.usecase.with_enrichment_wait(ENRICHMENT_WAIT);
         self
+    }
+
+    async fn listed_enrichment(&self, profile: ProfileId, lead: &Lead) -> EnrichmentState {
+        let listing = self
+            .usecase
+            .list_leads(
+                profile,
+                LeadQuery {
+                    limit: 50,
+                    ..LeadQuery::default()
+                },
+            )
+            .await
+            .unwrap();
+        listing.enrichments.get(&lead.id).cloned().unwrap()
     }
 
     async fn observe_kind(&self, host: &str, source: SourceName, kind: &str, seconds: i64) {
@@ -898,6 +914,10 @@ async fn the_agents_wait_for_the_enrichment_then_run_after_the_timeout(pool: PgP
         detail.enrichment.waiting_reason,
         Some(WaitingReason::AwaitingEnrichment)
     );
+    let listed = harness.listed_enrichment(profile, &lead).await;
+    assert_eq!(listed.waiting_reason, detail.enrichment.waiting_reason);
+    assert_eq!(listed.wait_until, detail.enrichment.wait_until);
+    assert!(listed.wait_until.is_some());
     harness.set_time(1_799);
     assert_eq!(harness.qualify().await, 0);
     assert!(harness.calls(false).is_empty());
@@ -940,6 +960,9 @@ async fn the_agents_run_once_every_enabled_enrichment_step_ran(pool: PgPool) {
     let detail = harness.usecase.lead_detail(lead.id).await.unwrap();
     assert_eq!(detail.enrichment.status, EnrichmentStatus::Complete);
     assert_eq!(detail.enrichment.waiting_reason, None);
+    let listed = harness.listed_enrichment(profile, &lead).await;
+    assert_eq!(listed.status, EnrichmentStatus::Complete);
+    assert_eq!(listed.waiting_reason, None);
 }
 
 #[sqlx::test(migrations = "../../migrations")]
@@ -972,6 +995,10 @@ async fn a_certificate_only_lead_waits_for_evidence_then_qualifies_on_a_new_sign
         detail.enrichment.waiting_reason,
         Some(WaitingReason::AwaitingEnrichmentEvidence)
     );
+    assert_eq!(
+        harness.listed_enrichment(profile, &lead).await,
+        detail.enrichment
+    );
 
     harness
         .observe_kind("acme.com", SourceName::HttpProbe, "product_detected", 50)
@@ -979,4 +1006,11 @@ async fn a_certificate_only_lead_waits_for_evidence_then_qualifies_on_a_new_sign
     assert_eq!(harness.qualify().await, 1);
     let detail = harness.usecase.lead_detail(lead.id).await.unwrap();
     assert_eq!(detail.enrichment.waiting_reason, None);
+    assert_eq!(
+        harness
+            .listed_enrichment(profile, &lead)
+            .await
+            .waiting_reason,
+        None
+    );
 }

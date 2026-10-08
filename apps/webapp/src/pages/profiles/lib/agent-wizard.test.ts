@@ -40,10 +40,32 @@ describe('agent wizard steps', () => {
 		])
 	})
 
-	it('asks nothing more of a signal agent than a name', () => {
-		const probe = newAgent('dns', [])
-		expect(stepProblems('type', probe)).toEqual([])
-		expect(stepProblems('criteria', probe)).toEqual([])
-		expect(stepProblems('summary', probe)).toEqual([])
+	it('requires a label for a certificates agent', () => {
+		const empty = { ...newAgent('certificates', []), labels: [] }
+		expect(stepProblems('type', empty)).toEqual([])
+		expect(stepProblems('criteria', empty)).toEqual([
+			'Ajouter au moins un libellé.',
+		])
+		expect(stepProblems('summary', { ...empty, labels: ['auth'] })).toEqual([])
+	})
+
+	it('requires a complete pattern for a dns agent', () => {
+		const empty = newAgent('dns', [])
+		expect(stepProblems('type', empty)).toEqual([])
+		expect(stepProblems('criteria', empty)).toEqual([
+			'Ajouter au moins un motif CNAME.',
+		])
+		expect(
+			stepProblems('criteria', {
+				...empty,
+				patterns: [{ provider: 'Okta', target_suffix: '' }],
+			}),
+		).toEqual(['Ajouter au moins un motif CNAME.'])
+		expect(
+			stepProblems('summary', {
+				...empty,
+				patterns: [{ provider: 'Okta', target_suffix: 'okta.com' }],
+			}),
+		).toEqual([])
 	})
 })
