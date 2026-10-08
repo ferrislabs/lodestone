@@ -1424,6 +1424,7 @@ describe('LeadDetail', () => {
 			{ url: 'https://acme.test/' },
 			{ url: 'https://acme.test/mentions-legales' },
 		],
+		ignored_links: 0,
 		built_at: '2026-10-06T10:00:00Z',
 		next_attempt_at: '2027-01-04T10:00:00Z',
 		error: null,
@@ -1460,6 +1461,58 @@ describe('LeadDetail', () => {
 			'https://acme.test/mentions-legales',
 		])
 		expect(text).toContain('Dernière mise à jour')
+	})
+
+	it('lists only the confirmed pages and counts the ignored links', () => {
+		const { container } = renderDetail({
+			detail: {
+				...detail,
+				company: {
+					...completeCompany,
+					pages: [{ url: 'https://acme.test/' }],
+					ignored_links: 4,
+				},
+			},
+		})
+		const card = container.querySelector('[data-section="company"]')
+		const pages = card?.querySelectorAll('[data-company-pages] a') ?? []
+		expect([...pages].map((link) => link.getAttribute('href'))).toEqual([
+			'https://acme.test/',
+		])
+		expect(card?.querySelector('[data-company-ignored]')?.textContent).toBe(
+			'4 liens ignorés : pages introuvables, vides ou redirigées vers l’accueil.',
+		)
+		expect(card?.querySelector('[data-company-no-pages]')).toBeNull()
+	})
+
+	it('says that no usable page was found when none was confirmed', () => {
+		const { container } = renderDetail({
+			detail: {
+				...detail,
+				company: { ...completeCompany, pages: [], ignored_links: 2 },
+			},
+		})
+		const card = container.querySelector('[data-section="company"]')
+		expect(card?.querySelector('[data-company-pages]')).toBeNull()
+		expect(card?.querySelector('[data-company-no-pages]')?.textContent).toBe(
+			'Aucune page exploitable trouvée',
+		)
+		expect(card?.textContent).toContain('Pages lues')
+		expect(card?.querySelector('[data-company-ignored]')?.textContent).toBe(
+			'2 liens ignorés : pages introuvables, vides ou redirigées vers l’accueil.',
+		)
+	})
+
+	it('does not announce missing pages while the dossier is pending', () => {
+		const { container } = renderDetail({
+			detail: {
+				...detail,
+				company: { ...completeCompany, state: 'pending', pages: [] },
+			},
+		})
+		const card = container.querySelector('[data-section="company"]')
+		expect(card?.querySelector('[data-company-no-pages]')).toBeNull()
+		expect(card?.querySelector('[data-company-ignored]')).toBeNull()
 	})
 
 	it('shows an explicit notice when the SIREN was not found', () => {
@@ -1688,6 +1741,7 @@ describe('LeadDetail', () => {
 			legal_name: 'ACME SAS',
 			official: null,
 			pages: [],
+			ignored_links: 0,
 			built_at: '2026-10-06T10:00:00Z',
 			next_attempt_at: '2027-01-04T10:00:00Z',
 			error: null,

@@ -15,6 +15,7 @@ use super::{
     jobs::{html_to_text, parse_board},
     *,
 };
+use crate::link_check::BASELINE_PATH_PREFIX;
 
 const LINEAR: &str = include_str!("../../tests/fixtures/ats/linear-careers.html");
 const QONTO: &str = include_str!("../../tests/fixtures/ats/qonto-careers.html");
@@ -331,6 +332,7 @@ type Reply = Result<(u16, &'static str, String), FetchError>;
 
 struct FakeFetcher {
     script: HashMap<String, Reply>,
+    missing: Option<String>,
     requests: Mutex<Vec<(String, FetchPurpose, SourceName)>>,
 }
 
@@ -341,8 +343,14 @@ impl FakeFetcher {
                 .into_iter()
                 .map(|(url, reply)| (url.to_owned(), reply))
                 .collect(),
+            missing: None,
             requests: Mutex::new(Vec::new()),
         }
+    }
+
+    fn answering_missing_pages_with(mut self, body: &str) -> Self {
+        self.missing = Some(body.to_owned());
+        self
     }
 
     fn urls(&self) -> Vec<String> {
@@ -371,6 +379,17 @@ impl Fetcher for FakeFetcher {
             .lock()
             .unwrap()
             .push((key.clone(), request.purpose, request.source));
+        if let Some(body) = &self.missing
+            && key.contains(BASELINE_PATH_PREFIX)
+        {
+            return Ok(FetchResponse {
+                status: 200,
+                headers: vec![("content-type".to_owned(), "text/html".to_owned())],
+                body: body.clone().into_bytes(),
+                final_url: request.url.clone(),
+                truncated: false,
+            });
+        }
         match self.script.get(&key) {
             Some(Ok((status, content_type, body))) => Ok(FetchResponse {
                 status: *status,
@@ -555,6 +574,89 @@ async fn an_api_failure_or_bad_json_yields_no_candidates() {
         .await
         .unwrap();
     assert!(scan.boards.is_empty());
+}
+
+const HOME: &str = "<html><body><h1>Acme</h1><p>Logiciels de gestion des identités pour les hôpitaux.</p></body></html>";
+const CAREERS: &str = r#"<html><body><h1>Rejoignez-nous</h1><p>Nous recrutons des ingénieurs passionnés.</p><a href="https://jobs.lever.co/acme">Offres</a></body></html>"#;
+const MISSING: &str = r#"<html><body><h1>Oups</h1><p>Le contenu demandé a peut-être été déplacé, retournez à l'accueil.</p><a href="https://jobs.lever.co/acme">Offres</a></body></html>"#;
+
+#[tokio::test]
+async fn a_confirmed_career_page_is_listed_and_gives_its_board() {
+    let fetcher = Arc::new(
+        FakeFetcher::new(vec![
+            ("https://acme.io/", html(HOME)),
+            ("https://acme.io/careers", html(CAREERS)),
+            (LEVER_API, api(LEVER_JOBS)),
+        ])
+        .answering_missing_pages_with(MISSING),
+    );
+    let scan = scanner(&fetcher, 6)
+        .scan(&domain("acme.io"), now())
+        .await
+        .unwrap();
+    assert_eq!(scan.boards.len(), 1);
+    assert_eq!(
+        scan.pages.iter().map(Url::as_str).collect::<Vec<_>>(),
+        ["https://acme.io/", "https://acme.io/careers"]
+    );
+    assert_eq!(scan.unconfirmed.total(), 0);
+}
+
+#[tokio::test]
+async fn soft_404_and_missing_career_paths_are_not_listed_nor_read_for_boards() {
+    let fetcher = Arc::new(
+        FakeFetcher::new(vec![
+            ("https://acme.io/", html(HOME)),
+            ("https://acme.io/careers", html(MISSING)),
+            (
+                "https://acme.io/jobs",
+                html("<title>Page introuvable</title><p>Cette page n'existe pas.</p><a href=\"https://jobs.lever.co/acme\">Offres</a>"),
+            ),
+            ("https://acme.io/carrieres", Ok((500, "text/html", String::new()))),
+            (LEVER_API, api(LEVER_JOBS)),
+        ])
+        .answering_missing_pages_with(MISSING),
+    );
+    let scan = scanner(&fetcher, 4)
+        .scan(&domain("acme.io"), now())
+        .await
+        .unwrap();
+    assert!(scan.boards.is_empty());
+    assert_eq!(
+        scan.pages.iter().map(Url::as_str).collect::<Vec<_>>(),
+        ["https://acme.io/"]
+    );
+    assert_eq!(scan.unconfirmed.soft_404_baseline, 1);
+    assert_eq!(scan.unconfirmed.soft_404_marker, 1);
+    assert_eq!(scan.unconfirmed.status, 2);
+    assert!(!fetcher.urls().contains(&LEVER_API.to_owned()));
+}
+
+#[tokio::test]
+async fn a_javascript_career_page_is_not_listed_but_its_embedded_board_is_read() {
+    let fetcher = Arc::new(FakeFetcher::new(vec![
+        ("https://acme.io/", html(HOME)),
+        (
+            "https://acme.io/careers",
+            html(
+                r#"<div id="jobs"></div><script src="https://boards.greenhouse.io/embed/job_board/js?for=acme"></script>"#,
+            ),
+        ),
+        (
+            "https://boards-api.greenhouse.io/v1/boards/acme/jobs?content=true",
+            api(r#"{"jobs":[]}"#),
+        ),
+    ]));
+    let scan = scanner(&fetcher, 6)
+        .scan(&domain("acme.io"), now())
+        .await
+        .unwrap();
+    assert_eq!(scan.boards.len(), 1);
+    assert_eq!(
+        scan.pages.iter().map(Url::as_str).collect::<Vec<_>>(),
+        ["https://acme.io/"]
+    );
+    assert_eq!(scan.unconfirmed.empty_content, 1);
 }
 
 #[tokio::test]

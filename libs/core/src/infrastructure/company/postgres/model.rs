@@ -27,6 +27,8 @@ pub struct DossierRow {
     pub attempts: i32,
     pub next_attempt_at: DateTime<Utc>,
     pub error: Option<String>,
+    pub ignored_links: i32,
+    pub pages_checked_at: Option<DateTime<Utc>>,
 }
 
 fn invalid(what: &str) -> CoreError {
@@ -61,6 +63,8 @@ impl TryFrom<DossierRow> for CompanyDossier {
             attempts: u32::try_from(row.attempts).unwrap_or_default(),
             next_attempt_at: row.next_attempt_at,
             error: row.error,
+            ignored_links: u32::try_from(row.ignored_links).unwrap_or_default(),
+            pages_checked_at: row.pages_checked_at,
         })
     }
 }

@@ -3,7 +3,10 @@ use std::{error::Error, net::SocketAddr, num::NonZeroU32, sync::Arc, time::Durat
 use api::{
     fetchers::ct_fetch_settings,
     internal_router::internal_router,
-    jobs::{Intervals, JobRouter, WiredSources, schedule_calibration, schedule_wired_sources},
+    jobs::{
+        Intervals, JobRouter, WiredSources, schedule_calibration, schedule_page_recheck,
+        schedule_wired_sources,
+    },
     listeners::{CompanyStep, ContactStep, CtStep, HostStep, QualificationStep},
     logger::init_tracing_and_logging,
     providers::{CatalogAccess, ProviderSeed, provision_providers},
@@ -304,7 +307,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
             hacker_news: args.hacker_news.interval(),
         },
     )
-    .with_webhook(webhook);
+    .with_webhook(webhook)
+    .with_page_verifier(company_research.clone());
     provision_providers(
         &app_state.usecase,
         &app_state.providers,
@@ -314,6 +318,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     .await?;
     schedule_wired_sources(&queue).await?;
     schedule_calibration(&queue).await?;
+    schedule_page_recheck(&queue, &app_state.usecase).await?;
 
     let usecase = app_state.usecase.clone();
     let router = router(app_state)?;

@@ -15,12 +15,12 @@ use common::{EncryptionKey, Secret};
 use lodestone_core::{
     ActiveProfile, AtsTargets, CandidateHosts, Clock, CompanyBuilder, CompanyPage,
     CreateProfileCommand, DossierBuild, DossierState, EnrichmentState, EnrichmentStatus,
-    EnrichmentStep, GenerationParams, Hostname, Lead, LeadQuery, LeadRepository, LlmError,
-    LlmProvider, LlmRequest, LlmResponse, LodestoneUseCase, NormalizedDomain, Observation,
-    OfficialData, ProfileId, ProfileName, Provenance, ProviderDefinition, ProviderKind, SignalKind,
-    Siren, SourceError, SourceName, Tier, TokenPricing, TokenUsage, UnitInterval, ValidatedProfile,
-    WaitingReason,
-    company::{CompanyRunReport, CompanyRunSettings},
+    EnrichmentStep, GenerationParams, Hostname, Lead, LeadQuery, LeadRepository, LinkRejection,
+    LlmError, LlmProvider, LlmRequest, LlmResponse, LodestoneUseCase, NormalizedDomain,
+    Observation, OfficialData, PageReview, PageVerifier, ProfileId, ProfileName, Provenance,
+    ProviderDefinition, ProviderKind, SignalKind, Siren, SourceError, SourceName, Tier,
+    TokenPricing, TokenUsage, UnconfirmedLinks, UnitInterval, ValidatedProfile, WaitingReason,
+    company::{CompanyRunReport, CompanyRunSettings, PageRecheckReport},
     evaluation::{EvaluationSettings, ProviderBuilder},
     infrastructure::{
         candidate_host::PgCandidateHosts, contact_target::postgres::PgAtsTargets,
@@ -226,6 +226,7 @@ fn complete_build() -> DossierBuild {
         pages: pages(PAGE_TEXT),
         reachable: true,
         failure: None,
+        unconfirmed: UnconfirmedLinks::default(),
     }
 }
 
@@ -236,6 +237,52 @@ fn unreachable_build() -> DossierBuild {
         pages: Vec::new(),
         reachable: false,
         failure: Some("robots.txt disallows the home page".to_owned()),
+        unconfirmed: UnconfirmedLinks::default(),
+    }
+}
+
+struct FakeVerifier {
+    rejected: Vec<(String, LinkRejection)>,
+    rate_limited: bool,
+    calls: Mutex<Vec<Vec<String>>>,
+}
+
+impl FakeVerifier {
+    fn rejecting(rejected: &[(&str, LinkRejection)]) -> Self {
+        Self {
+            rejected: rejected
+                .iter()
+                .map(|(url, reason)| ((*url).to_owned(), *reason))
+                .collect(),
+            rate_limited: false,
+            calls: Mutex::new(Vec::new()),
+        }
+    }
+
+    fn calls(&self) -> usize {
+        self.calls.lock().unwrap().len()
+    }
+}
+
+impl PageVerifier for FakeVerifier {
+    async fn review(&self, pages: &[CompanyPage]) -> Result<PageReview, SourceError> {
+        self.calls
+            .lock()
+            .unwrap()
+            .push(pages.iter().map(|page| page.url.clone()).collect());
+        if self.rate_limited {
+            return Err(SourceError::RateLimited {
+                retry_after: Duration::from_secs(30),
+            });
+        }
+        Ok(PageReview {
+            rejected: self
+                .rejected
+                .iter()
+                .filter(|(url, _)| pages.iter().any(|page| &page.url == url))
+                .cloned()
+                .collect(),
+        })
     }
 }
 
@@ -497,6 +544,20 @@ impl Harness {
             .listen_company_research(builder, research(), &self.clock)
             .await
             .unwrap()
+    }
+
+    async fn recheck(&self, verifier: &FakeVerifier) -> PageRecheckReport {
+        self.usecase
+            .recheck_company_pages(verifier, 10, &self.clock)
+            .await
+            .unwrap()
+    }
+
+    async fn forget_page_checks(&self) {
+        sqlx::query("UPDATE company_dossiers SET pages_checked_at = NULL")
+            .execute(&self.pool)
+            .await
+            .unwrap();
     }
 
     async fn qualify(&self) -> u64 {
@@ -1013,4 +1074,126 @@ async fn a_certificate_only_lead_waits_for_evidence_then_qualifies_on_a_new_sign
             .waiting_reason,
         None
     );
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_build_reports_its_unconfirmed_links_and_stores_their_count(pool: PgPool) {
+    let harness = Harness::new(pool);
+    harness.profile().await;
+    harness.observe("acme.com", SourceName::HttpProbe, 10).await;
+    let mut build = complete_build();
+    build.unconfirmed.record(LinkRejection::Soft404Baseline);
+    build.unconfirmed.record(LinkRejection::Status);
+    let report = harness.research(&FakeCompany::new(vec![build])).await;
+    assert_eq!(report.unconfirmed_links.total(), 2);
+    assert_eq!(report.unconfirmed_links.soft_404_baseline, 1);
+    let dossier = harness
+        .usecase
+        .company_dossier(&domain("acme.com"))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(dossier.ignored_links, 2);
+    assert!(dossier.pages_checked_at.is_some());
+    assert_eq!(
+        harness
+            .usecase
+            .count_unchecked_company_pages()
+            .await
+            .unwrap(),
+        0
+    );
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_page_recheck_removes_unconfirmed_pages_once_and_requalifies_the_lead(pool: PgPool) {
+    let harness = Harness::new(pool);
+    harness.defaults().await;
+    harness.profile().await;
+    harness.observe("acme.com", SourceName::HttpProbe, 10).await;
+    harness.research(&FakeCompany::new(Vec::new())).await;
+    assert_eq!(harness.qualify().await, 1);
+    harness.forget_page_checks().await;
+    assert_eq!(
+        harness
+            .usecase
+            .count_unchecked_company_pages()
+            .await
+            .unwrap(),
+        1
+    );
+
+    harness.set_time(60);
+    let verifier = FakeVerifier::rejecting(&[(PAGE_URL, LinkRejection::Soft404Baseline)]);
+    let report = harness.recheck(&verifier).await;
+
+    assert_eq!(report.dossiers, 1);
+    assert_eq!(report.changed, 1);
+    assert_eq!(report.unconfirmed_links.soft_404_baseline, 1);
+    assert_eq!(report.remaining, 0);
+    assert_eq!(report.retry_after, None);
+    let dossier = harness
+        .usecase
+        .company_dossier(&domain("acme.com"))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        dossier
+            .pages
+            .iter()
+            .map(|page| page.url.as_str())
+            .collect::<Vec<_>>(),
+        ["https://acme.com/"]
+    );
+    assert_eq!(dossier.ignored_links, 1);
+    assert_eq!(dossier.content_at, Some(at(1_060)));
+    assert_eq!(harness.qualify().await, 1);
+
+    let again = harness.recheck(&verifier).await;
+    assert_eq!(again.dossiers, 0);
+    assert_eq!(verifier.calls(), 1);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_recheck_that_confirms_every_page_does_not_requalify(pool: PgPool) {
+    let harness = Harness::new(pool);
+    harness.defaults().await;
+    harness.profile().await;
+    harness.observe("acme.com", SourceName::HttpProbe, 10).await;
+    harness.research(&FakeCompany::new(Vec::new())).await;
+    assert_eq!(harness.qualify().await, 1);
+    harness.forget_page_checks().await;
+
+    harness.set_time(60);
+    let report = harness.recheck(&FakeVerifier::rejecting(&[])).await;
+
+    assert_eq!(report.dossiers, 1);
+    assert_eq!(report.changed, 0);
+    assert_eq!(report.unconfirmed_links.total(), 0);
+    assert_eq!(harness.qualify().await, 0);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_rate_limited_recheck_keeps_the_pages_and_asks_to_retry(pool: PgPool) {
+    let harness = Harness::new(pool);
+    harness.profile().await;
+    harness.observe("acme.com", SourceName::HttpProbe, 10).await;
+    harness.research(&FakeCompany::new(Vec::new())).await;
+    harness.forget_page_checks().await;
+    let mut verifier = FakeVerifier::rejecting(&[(PAGE_URL, LinkRejection::Status)]);
+    verifier.rate_limited = true;
+
+    let report = harness.recheck(&verifier).await;
+
+    assert_eq!(report.dossiers, 0);
+    assert_eq!(report.retry_after, Some(Duration::from_secs(30)));
+    assert_eq!(report.remaining, 1);
+    let dossier = harness
+        .usecase
+        .company_dossier(&domain("acme.com"))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(dossier.pages.len(), 2);
 }

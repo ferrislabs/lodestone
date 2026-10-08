@@ -5,6 +5,7 @@ use url::Url;
 
 use crate::domain::values::SourceName;
 
+pub mod link;
 pub mod ports;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

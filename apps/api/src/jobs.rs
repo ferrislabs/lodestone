@@ -1,12 +1,13 @@
 use std::{sync::Arc, time::Duration};
 
-use chrono::{Duration as Delta, Utc};
+use chrono::{DateTime, Duration as Delta, Utc};
 use common::CoreError;
 use fetch::PoliteFetcher;
 use lodestone_core::{
     CALIBRATION_JOB_KIND, Clock, Job, JobQueue, LodestoneUseCase, PartnerAward, SourceName,
     WEBHOOK_JOB_KIND,
     calibration::{calibration_job, is_recurring_calibration, next_calibration},
+    company::{PAGE_RECHECK_JOB_KIND, page_recheck_job},
     infrastructure::{contact_target::postgres::PgAtsTargets, job::postgres::PgJobQueue},
     is_continuous,
     jobs::{JobError, JobHandler, JobOutcome, SystemClock},
@@ -16,6 +17,7 @@ use lodestone_core::{
 use sources::{
     ats::AtsSource,
     boamp::BoampSource,
+    company::CompanyResearch,
     decp::{DecpSource, partner_awards},
     france_travail::FranceTravailSource,
     hacker_news::HackerNewsSource,
@@ -38,6 +40,8 @@ pub const WIRED_SOURCES: [SourceName; 6] = [
 ];
 
 pub const REMOVED_QUALIFICATION_JOB_KIND: &str = "llm.qualify";
+pub const PAGE_RECHECK_BATCH: u32 = 20;
+const PAGE_RECHECK_PAUSE: Delta = Delta::minutes(1);
 
 pub type Boamp = BoampSource<PoliteFetcher>;
 pub type Decp = DecpSource<PoliteFetcher>;
@@ -45,6 +49,7 @@ pub type Ted = TedSource<PoliteFetcher>;
 pub type FranceTravail = FranceTravailSource<PoliteFetcher, CatalogAccess>;
 pub type HackerNews = HackerNewsSource<PoliteFetcher>;
 pub type Ats = AtsSource<PoliteFetcher, PgAtsTargets>;
+pub type CompanyPages = CompanyResearch<PoliteFetcher>;
 
 pub struct WiredSources {
     pub boamp: Boamp,
@@ -66,6 +71,7 @@ pub struct JobRouter {
     sources: WiredSources,
     intervals: Intervals,
     webhook: Option<WebhookSink>,
+    pages: Option<CompanyPages>,
 }
 
 impl JobRouter {
@@ -75,7 +81,13 @@ impl JobRouter {
             sources,
             intervals,
             webhook: None,
+            pages: None,
         }
+    }
+
+    pub fn with_page_verifier(mut self, pages: CompanyPages) -> Self {
+        self.pages = Some(pages);
+        self
     }
 
     pub fn with_webhook(mut self, webhook: Option<WebhookSink>) -> Self {
@@ -189,6 +201,32 @@ impl JobRouter {
         }
     }
 
+    async fn run_page_recheck(&self) -> Result<JobOutcome, JobError> {
+        let Some(pages) = &self.pages else {
+            return Err(JobError::Permanent(
+                "no page verifier is wired for the dossier page recheck".to_owned(),
+            ));
+        };
+        let report = self
+            .usecase
+            .recheck_company_pages(pages, PAGE_RECHECK_BATCH, &SystemClock)
+            .await
+            .map_err(JobError::from)?;
+        info!(
+            dossiers = report.dossiers,
+            changed = report.changed,
+            remaining = report.remaining,
+            unconfirmed_links = report.unconfirmed_links.total(),
+            unconfirmed_by_reason = %report.unconfirmed_links,
+            "dossier page recheck batch finished"
+        );
+        Ok(recheck_outcome(
+            report.remaining,
+            report.retry_after,
+            SystemClock.now(),
+        ))
+    }
+
     async fn run_source(&self, job: &Job) -> Result<JobOutcome, JobError> {
         let source = source_of_job(job)?;
         if is_continuous(source) {
@@ -256,6 +294,18 @@ pub fn recheck_delay(interval: Duration) -> Delta {
     delay_of(interval.min(NOT_READY_RECHECK))
 }
 
+pub fn recheck_outcome(
+    remaining: u64,
+    retry_after: Option<Duration>,
+    now: DateTime<Utc>,
+) -> JobOutcome {
+    match retry_after {
+        Some(wait) => JobOutcome::RescheduleAt(now + delay_of(wait).max(PAGE_RECHECK_PAUSE)),
+        None if remaining > 0 => JobOutcome::RescheduleAt(now),
+        None => JobOutcome::Done,
+    }
+}
+
 pub fn removed_job_reason(kind: &str) -> Option<&'static str> {
     (kind == REMOVED_QUALIFICATION_JOB_KIND).then_some(
         "the llm.qualify job is removed, qualification runs in the qualification listener",
@@ -271,6 +321,7 @@ impl JobHandler for JobRouter {
             SOURCE_JOB_KIND => self.run_source(job).await,
             WEBHOOK_JOB_KIND => run_webhook_job(&self.usecase, self.webhook.as_ref(), job).await,
             CALIBRATION_JOB_KIND => self.run_calibration(job).await,
+            PAGE_RECHECK_JOB_KIND => self.run_page_recheck().await,
             other => Err(JobError::Permanent(format!(
                 "no handler for job kind `{other}`"
             ))),
@@ -304,6 +355,21 @@ pub async fn schedule_calibration(queue: &Arc<PgJobQueue>) -> Result<(), CoreErr
         .is_some()
     {
         info!("scheduled first calibration run");
+    }
+    Ok(())
+}
+
+pub async fn schedule_page_recheck(
+    queue: &Arc<PgJobQueue>,
+    usecase: &LodestoneUseCase,
+) -> Result<(), CoreError> {
+    let unchecked = usecase.count_unchecked_company_pages().await?;
+    if unchecked == 0 {
+        return Ok(());
+    }
+    let now = Utc::now();
+    if queue.enqueue(&page_recheck_job(now)?, now).await?.is_some() {
+        info!(unchecked, "scheduled the recheck of stored dossier pages");
     }
     Ok(())
 }
@@ -413,6 +479,24 @@ mod tests {
         assert_eq!(
             provider_key_of_source(SourceName::HackerNewsHiring.as_str()),
             Some(HACKER_NEWS_HIRING)
+        );
+    }
+
+    #[test]
+    fn the_page_recheck_job_is_deduplicated_and_runs_until_no_page_is_left() {
+        let now = Utc::now();
+        let job = page_recheck_job(now).unwrap();
+        assert_eq!(job.kind.as_str(), PAGE_RECHECK_JOB_KIND);
+        assert_eq!(job.dedup_key.as_deref(), Some("company:recheck_pages"));
+        assert_eq!(recheck_outcome(0, None, now), JobOutcome::Done);
+        assert_eq!(recheck_outcome(3, None, now), JobOutcome::RescheduleAt(now));
+        assert_eq!(
+            recheck_outcome(3, Some(Duration::from_secs(5)), now),
+            JobOutcome::RescheduleAt(now + Delta::minutes(1))
+        );
+        assert_eq!(
+            recheck_outcome(3, Some(Duration::from_secs(600)), now),
+            JobOutcome::RescheduleAt(now + Delta::minutes(10))
         );
     }
 

@@ -3,13 +3,15 @@ use std::{sync::Arc, time::Duration};
 use chrono::{DateTime, Utc};
 use lodestone_core::{
     ActiveProfile, AtsTargets, Candidate, FetchError, FetchPurpose, FetchRequest, FetchResponse,
-    Fetcher, NormalizedDomain, ProfileId, SourceError, SourceName, triage::CandidateSource,
+    Fetcher, LinkRejection, NormalizedDomain, ProfileId, SourceError, SourceName, UnconfirmedLinks,
+    triage::CandidateSource,
 };
 use serde_json::Value;
 use tracing::{debug, info};
 use url::Url;
 
 use self::discover::{Board, careers_links, extract_boards};
+use crate::link_check::{LinkChecker, LinkOrigin, LinkVerdict, fetch_waiting, rejection_of};
 
 pub mod discover;
 pub mod jobs;
@@ -23,7 +25,6 @@ pub const CAREER_PATHS: [&str; 6] = [
     "/join-us",
 ];
 pub const MAX_BOARDS_PER_DOMAIN: usize = 3;
-const FETCH_ATTEMPTS: usize = 3;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AtsSettings {
@@ -43,6 +44,7 @@ pub struct BoardJobs {
 pub struct DomainScan {
     pub pages: Vec<Url>,
     pub boards: Vec<BoardJobs>,
+    pub unconfirmed: UnconfirmedLinks,
 }
 
 pub struct AtsScanner<F: Fetcher> {
@@ -55,22 +57,10 @@ fn page_url(domain: &NormalizedDomain, path: &str) -> Option<Url> {
     Url::parse(&format!("https://{}{path}", domain.as_str())).ok()
 }
 
-fn is_parsable(response: &FetchResponse) -> bool {
-    match response.header("content-type") {
-        None => true,
-        Some(value) => {
-            let media = value
-                .split(';')
-                .next()
-                .unwrap_or("")
-                .trim()
-                .to_ascii_lowercase();
-            matches!(
-                media.as_str(),
-                "text/html" | "text/plain" | "application/xhtml+xml"
-            )
-        }
-    }
+enum Visit {
+    Confirmed(FetchResponse),
+    Shell(FetchResponse),
+    Skipped,
 }
 
 impl<F: Fetcher> AtsScanner<F> {
@@ -79,21 +69,6 @@ impl<F: Fetcher> AtsScanner<F> {
             fetcher,
             max_career_paths,
             max_rate_limit_wait,
-        }
-    }
-
-    async fn fetch_waiting(&self, request: &FetchRequest) -> Result<FetchResponse, FetchError> {
-        let mut attempt = 1;
-        loop {
-            match self.fetcher.fetch(request).await {
-                Err(FetchError::RateLimited { retry_after })
-                    if attempt < FETCH_ATTEMPTS && retry_after <= self.max_rate_limit_wait =>
-                {
-                    attempt += 1;
-                    tokio::time::sleep(retry_after).await;
-                }
-                other => return other,
-            }
         }
     }
 
@@ -107,7 +82,7 @@ impl<F: Fetcher> AtsScanner<F> {
             purpose,
             source: SourceName::Ats,
         };
-        match self.fetch_waiting(&request).await {
+        match fetch_waiting(self.fetcher.as_ref(), &request, self.max_rate_limit_wait).await {
             Ok(response) if response.status == 200 && !response.truncated => Ok(Some(response)),
             Ok(response) => {
                 debug!(url = %request.url, status = response.status, "ats fetch ignored");
@@ -123,11 +98,70 @@ impl<F: Fetcher> AtsScanner<F> {
         }
     }
 
-    async fn page(&self, url: Url) -> Result<Option<FetchResponse>, SourceError> {
-        Ok(self
-            .fetch_ok(url, FetchPurpose::Crawl)
-            .await?
-            .filter(is_parsable))
+    async fn visit(
+        &self,
+        checker: &mut LinkChecker<'_, F>,
+        url: &Url,
+        origin: LinkOrigin,
+    ) -> Result<Visit, SourceError> {
+        let request = FetchRequest {
+            url: url.clone(),
+            purpose: FetchPurpose::Crawl,
+            source: SourceName::Ats,
+        };
+        let response =
+            match fetch_waiting(self.fetcher.as_ref(), &request, self.max_rate_limit_wait).await {
+                Ok(response) => response,
+                Err(FetchError::RateLimited { retry_after }) => {
+                    return Err(SourceError::RateLimited { retry_after });
+                }
+                Err(error) => {
+                    if let Some(reason) = rejection_of(&error) {
+                        checker.reject(reason);
+                    }
+                    debug!(%url, %error, "career page skipped");
+                    return Ok(Visit::Skipped);
+                }
+            };
+        if response.truncated {
+            debug!(%url, "career page exceeded the body cap");
+            return Ok(Visit::Skipped);
+        }
+        let verdict =
+            checker
+                .confirm(url, origin, &response)
+                .await
+                .map_err(|error| match error {
+                    FetchError::RateLimited { retry_after } => {
+                        SourceError::RateLimited { retry_after }
+                    }
+                    other => SourceError::Fetch(other),
+                })?;
+        Ok(match verdict {
+            LinkVerdict::Confirmed(_) => Visit::Confirmed(response),
+            LinkVerdict::NotFound(LinkRejection::EmptyContent) => Visit::Shell(response),
+            LinkVerdict::NotFound(reason) => {
+                debug!(%url, reason = reason.as_str(), "career page not confirmed");
+                Visit::Skipped
+            }
+        })
+    }
+
+    async fn boards_of(
+        &self,
+        checker: &mut LinkChecker<'_, F>,
+        scan: &mut DomainScan,
+        url: Url,
+        origin: LinkOrigin,
+    ) -> Result<Option<FetchResponse>, SourceError> {
+        Ok(match self.visit(checker, &url, origin).await? {
+            Visit::Confirmed(response) => {
+                scan.pages.push(url);
+                Some(response)
+            }
+            Visit::Shell(response) => Some(response),
+            Visit::Skipped => None,
+        })
     }
 
     pub async fn scan(
@@ -136,29 +170,38 @@ impl<F: Fetcher> AtsScanner<F> {
         now: DateTime<Utc>,
     ) -> Result<DomainScan, SourceError> {
         let mut scan = DomainScan::default();
+        let mut checker = LinkChecker::new(
+            self.fetcher.as_ref(),
+            SourceName::Ats,
+            self.max_rate_limit_wait,
+        );
         let mut boards: Vec<Board> = Vec::new();
         let mut linked: Vec<Url> = Vec::new();
-        if let Some(home) = page_url(domain, "/") {
-            scan.pages.push(home.clone());
-            if let Some(response) = self.page(home).await? {
-                let text = response.text();
-                boards = extract_boards(&text);
-                linked = careers_links(&text, &response.final_url, domain);
-            }
+        if let Some(home) = page_url(domain, "/")
+            && let Some(response) = self
+                .boards_of(&mut checker, &mut scan, home, LinkOrigin::Home)
+                .await?
+        {
+            let text = response.text();
+            boards = extract_boards(&text);
+            linked = careers_links(&text, &response.final_url, domain);
         }
         if boards.is_empty() {
-            let mut pages = linked;
+            let mut pages: Vec<(Url, LinkOrigin)> = linked
+                .into_iter()
+                .map(|url| (url, LinkOrigin::Linked))
+                .collect();
             for path in CAREER_PATHS {
                 if let Some(url) = page_url(domain, path)
-                    && !pages.contains(&url)
+                    && !pages.iter().any(|(known, _)| *known == url)
                 {
-                    pages.push(url);
+                    pages.push((url, LinkOrigin::Guessed));
                 }
             }
             pages.truncate(self.max_career_paths);
-            for url in pages {
-                scan.pages.push(url.clone());
-                if let Some(response) = self.page(url).await? {
+            for (url, origin) in pages {
+                if let Some(response) = self.boards_of(&mut checker, &mut scan, url, origin).await?
+                {
                     boards = extract_boards(&response.text());
                     if !boards.is_empty() {
                         break;
@@ -180,6 +223,7 @@ impl<F: Fetcher> AtsScanner<F> {
             let candidates = jobs::parse_board(&board, &body, domain, now);
             scan.boards.push(BoardJobs { board, candidates });
         }
+        scan.unconfirmed = checker.unconfirmed();
         Ok(scan)
     }
 }
@@ -240,6 +284,7 @@ impl<F: Fetcher, T: AtsTargets> CandidateSource for AtsSource<F, T> {
             .map_err(store_error)?;
         let mut candidates = Vec::new();
         let (mut scanned, mut with_board, mut jobs) = (0u64, 0u64, 0u64);
+        let mut unconfirmed_links = UnconfirmedLinks::default();
         for domain in &domains {
             let scan = match self.scanner.scan(domain, now).await {
                 Ok(scan) => scan,
@@ -257,6 +302,7 @@ impl<F: Fetcher, T: AtsTargets> CandidateSource for AtsSource<F, T> {
                 .await
                 .map_err(store_error)?;
             scanned += 1;
+            unconfirmed_links.merge(&scan.unconfirmed);
             with_board += u64::from(!scan.boards.is_empty());
             for board in scan.boards {
                 jobs += u64::try_from(board.candidates.len()).unwrap_or(u64::MAX);
@@ -265,7 +311,12 @@ impl<F: Fetcher, T: AtsTargets> CandidateSource for AtsSource<F, T> {
         }
         info!(
             due = domains.len(),
-            scanned, with_board, jobs, "ats scan finished"
+            scanned,
+            with_board,
+            jobs,
+            unconfirmed_links = unconfirmed_links.total(),
+            unconfirmed_by_reason = %unconfirmed_links,
+            "ats scan finished"
         );
         Ok(candidates)
     }

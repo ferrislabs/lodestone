@@ -1,6 +1,7 @@
 use chrono::{DateTime, Utc};
 use common::CoreError;
 use lodestone_macros::repository;
+use serde_json::to_value;
 
 use crate::{
     LeadId, NormalizedDomain,
@@ -37,7 +38,85 @@ const DUE_TAIL: &str = r#"
     WHERE d.domain IS NULL OR d.next_attempt_at <= $1
 "#;
 
+const UNCHECKED: &str = r#"
+    FROM company_dossiers d
+    WHERE d.pages_checked_at IS NULL
+      AND jsonb_array_length(d.pages) > 0
+      AND NOT EXISTS (
+          SELECT 1 FROM suppression_list sup
+          WHERE sup.kind = 'domain'
+            AND (sup.value = d.domain OR right(d.domain, length(sup.value) + 1) = '.' || sup.value)
+      )
+"#;
+
+fn ignored_links(dossier: &CompanyDossier) -> i32 {
+    i32::try_from(dossier.ignored_links).unwrap_or(i32::MAX)
+}
+
 impl<'tx> CompanyRepository for PgCompanyRepository<'tx> {
+    #[tracing::instrument(skip(self), fields(db.system = "postgresql", db.operation = "select", db.table = "company_dossiers"), err)]
+    async fn unchecked_domains(&mut self, limit: u32) -> Result<Vec<NormalizedDomain>, CoreError> {
+        let query = format!("SELECT d.domain {UNCHECKED} ORDER BY d.domain LIMIT $1");
+        let mut tx = self.tx.lock().await;
+        let rows: Vec<String> = sqlx::query_scalar(&query)
+            .bind(i64::from(limit))
+            .fetch_all(&mut ***tx)
+            .await
+            .map_err(map_sqlx_error)?;
+        rows.iter()
+            .map(|domain| {
+                NormalizedDomain::from_host(domain)
+                    .map_err(|_| CoreError::Internal("stored dossier domain is invalid".to_owned()))
+            })
+            .collect()
+    }
+
+    #[tracing::instrument(skip(self), fields(db.system = "postgresql", db.operation = "select", db.table = "company_dossiers"), err)]
+    async fn count_unchecked(&mut self) -> Result<u64, CoreError> {
+        let query = format!("SELECT COUNT(*) {UNCHECKED}");
+        let mut tx = self.tx.lock().await;
+        let count: i64 = sqlx::query_scalar(&query)
+            .fetch_one(&mut ***tx)
+            .await
+            .map_err(map_sqlx_error)?;
+        Ok(u64::try_from(count).unwrap_or_default())
+    }
+
+    #[tracing::instrument(skip(self, dossier, built_at), fields(db.system = "postgresql", db.operation = "update", db.table = "company_dossiers", domain = %dossier.domain.as_str()), err)]
+    async fn save_review(
+        &mut self,
+        dossier: &CompanyDossier,
+        built_at: Option<DateTime<Utc>>,
+    ) -> Result<bool, CoreError> {
+        let pages =
+            to_value(&dossier.pages).map_err(|error| CoreError::Internal(error.to_string()))?;
+        let mut tx = self.tx.lock().await;
+        let result = sqlx::query(
+            r#"
+            UPDATE company_dossiers SET
+                pages            = $2,
+                content_hash     = $3,
+                content_at       = $4,
+                ignored_links    = $5,
+                pages_checked_at = $6
+            WHERE domain = $1
+              AND pages_checked_at IS NULL
+              AND built_at IS NOT DISTINCT FROM $7
+            "#,
+        )
+        .bind(dossier.domain.as_str())
+        .bind(pages)
+        .bind(dossier.content_hash.as_deref())
+        .bind(dossier.content_at)
+        .bind(ignored_links(dossier))
+        .bind(dossier.pages_checked_at)
+        .bind(built_at)
+        .execute(&mut ***tx)
+        .await
+        .map_err(map_sqlx_error)?;
+        Ok(result.rows_affected() == 1)
+    }
+
     #[tracing::instrument(skip(self), fields(db.system = "postgresql", db.operation = "select", db.table = "company_dossiers"), err)]
     async fn due_domains(
         &mut self,
@@ -81,7 +160,7 @@ impl<'tx> CompanyRepository for PgCompanyRepository<'tx> {
     ) -> Result<Option<CompanyDossier>, CoreError> {
         let mut tx = self.tx.lock().await;
         let row = sqlx::query_as::<_, DossierRow>(
-            "SELECT domain, state, siren, official, pages, content_hash, content_at, built_at, attempts, next_attempt_at, error FROM company_dossiers WHERE domain = $1",
+            "SELECT domain, state, siren, official, pages, content_hash, content_at, built_at, attempts, next_attempt_at, error, ignored_links, pages_checked_at FROM company_dossiers WHERE domain = $1",
         )
         .bind(domain.as_str())
         .fetch_optional(&mut ***tx)
@@ -126,9 +205,10 @@ impl<'tx> CompanyRepository for PgCompanyRepository<'tx> {
             r#"
             INSERT INTO company_dossiers (
                 domain, state, siren, official, pages, content_hash, content_at,
-                built_at, attempts, next_attempt_at, error, company_siren
+                built_at, attempts, next_attempt_at, error, company_siren,
+                ignored_links, pages_checked_at
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
             ON CONFLICT (domain) DO UPDATE SET
                 state           = EXCLUDED.state,
                 siren           = EXCLUDED.siren,
@@ -140,7 +220,9 @@ impl<'tx> CompanyRepository for PgCompanyRepository<'tx> {
                 attempts        = EXCLUDED.attempts,
                 next_attempt_at = EXCLUDED.next_attempt_at,
                 error           = EXCLUDED.error,
-                company_siren   = EXCLUDED.company_siren
+                company_siren   = EXCLUDED.company_siren,
+                ignored_links   = EXCLUDED.ignored_links,
+                pages_checked_at = EXCLUDED.pages_checked_at
             "#,
         )
         .bind(dossier.domain.as_str())
@@ -155,6 +237,8 @@ impl<'tx> CompanyRepository for PgCompanyRepository<'tx> {
         .bind(dossier.next_attempt_at)
         .bind(dossier.error.as_deref())
         .bind(company.map(|(siren, _)| siren))
+        .bind(ignored_links(dossier))
+        .bind(dossier.pages_checked_at)
         .execute(&mut ***tx)
         .await
         .map_err(map_sqlx_error)?;

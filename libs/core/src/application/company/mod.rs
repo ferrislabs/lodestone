@@ -1,8 +1,9 @@
-use std::time::Duration;
+use std::{num::NonZeroU16, time::Duration};
 
 use chrono::{DateTime, Utc};
 use common::CoreError;
 use lodestone_macros::transactional;
+use serde_json::json;
 use tracing::{debug, info};
 
 use crate::{
@@ -10,10 +11,11 @@ use crate::{
     domain::{
         NormalizedDomain,
         company::{
-            CompanyBuilder, CompanyDossier, DossierBuild, bounded_error, ports::CompanyRepository,
-            settle,
+            CompanyBuilder, CompanyDossier, DossierBuild, PageReview, PageVerifier, bounded_error,
+            ports::CompanyRepository, settle,
         },
-        job::ports::Clock,
+        fetch::link::UnconfirmedLinks,
+        job::{JobKind, NewJob, ports::Clock},
         lead::{LeadId, ports::LeadRepository},
         source::SourceError,
         suppression::ports::SuppressionRepository,
@@ -21,7 +23,31 @@ use crate::{
 };
 
 pub const COMPANY_RESEARCH_LISTENER: &str = "company_research";
+pub const PAGE_RECHECK_JOB_KIND: &str = "company.recheck_pages";
+const PAGE_RECHECK_DEDUP_KEY: &str = "company:recheck_pages";
+const PAGE_RECHECK_MAX_ATTEMPTS: NonZeroU16 = NonZeroU16::new(5).unwrap();
 const MIN_RATE_LIMIT_PAUSE: chrono::Duration = chrono::Duration::minutes(1);
+
+pub fn page_recheck_job(run_at: DateTime<Utc>) -> Result<NewJob, CoreError> {
+    let kind = JobKind::parse(PAGE_RECHECK_JOB_KIND)
+        .map_err(|_| CoreError::Internal("invalid page recheck job kind".to_owned()))?;
+    Ok(NewJob {
+        kind,
+        payload: json!({}),
+        run_at,
+        max_attempts: PAGE_RECHECK_MAX_ATTEMPTS,
+        dedup_key: Some(PAGE_RECHECK_DEDUP_KEY.to_owned()),
+    })
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PageRecheckReport {
+    pub dossiers: u64,
+    pub changed: u64,
+    pub unconfirmed_links: UnconfirmedLinks,
+    pub remaining: u64,
+    pub retry_after: Option<Duration>,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CompanyRunSettings {
@@ -36,6 +62,7 @@ pub struct CompanyRunReport {
     pub failed: u64,
     pub backlog: u64,
     pub rate_limited: bool,
+    pub unconfirmed_links: UnconfirmedLinks,
 }
 
 fn failed_build(error: &SourceError) -> DossierBuild {
@@ -45,6 +72,7 @@ fn failed_build(error: &SourceError) -> DossierBuild {
         pages: Vec::new(),
         reachable: false,
         failure: Some(bounded_error(&error.to_string())),
+        unconfirmed: UnconfirmedLinks::default(),
     }
 }
 
@@ -86,6 +114,7 @@ impl LodestoneUseCase {
                 }
             };
             let now = clock.now();
+            report.unconfirmed_links.merge(&built.unconfirmed);
             let dossier = settle(domain.clone(), built, previous.as_ref(), now, refresh);
             if dossier.error.is_some() {
                 report.failed += 1;
@@ -99,12 +128,87 @@ impl LodestoneUseCase {
                 %domain,
                 state = dossier.state.as_str(),
                 pages = dossier.pages.len(),
+                ignored_links = dossier.ignored_links,
                 official = dossier.official.is_some(),
                 "company dossier stored"
             );
         }
         report.backlog = self.count_due_company_domains(clock.now()).await?;
         Ok(report)
+    }
+
+    pub async fn recheck_company_pages<V, C>(
+        &self,
+        verifier: &V,
+        batch_size: u32,
+        clock: &C,
+    ) -> Result<PageRecheckReport, SourceRunError>
+    where
+        V: PageVerifier,
+        C: Clock,
+    {
+        let mut report = PageRecheckReport::default();
+        for domain in self.unchecked_company_domains(batch_size).await? {
+            let Some(dossier) = self.company_dossier(&domain).await? else {
+                continue;
+            };
+            let review = match verifier.review(&dossier.pages).await {
+                Ok(review) => review,
+                Err(SourceError::RateLimited { retry_after }) => {
+                    report.retry_after = Some(retry_after);
+                    break;
+                }
+                Err(error) => {
+                    debug!(%domain, %error, "dossier pages could not be rechecked, they are kept");
+                    PageReview::default()
+                }
+            };
+            let reviewed = dossier.reviewed(&review, clock.now());
+            if !self
+                .save_company_review(&reviewed, dossier.built_at)
+                .await?
+            {
+                continue;
+            }
+            report.dossiers += 1;
+            report.unconfirmed_links.merge(&review.unconfirmed());
+            if reviewed.content_at != dossier.content_at {
+                report.changed += 1;
+            }
+            info!(
+                %domain,
+                kept = reviewed.pages.len(),
+                removed = review.rejected.len(),
+                "dossier pages rechecked"
+            );
+        }
+        report.remaining = self.count_unchecked_company_pages().await?;
+        Ok(report)
+    }
+
+    #[transactional(company)]
+    pub async fn count_unchecked_company_pages(&self) -> Result<u64, CoreError> {
+        let mut repo = company_repository;
+        repo.count_unchecked().await
+    }
+
+    #[transactional(company)]
+    async fn unchecked_company_domains(
+        &self,
+        limit: u32,
+    ) -> Result<Vec<NormalizedDomain>, CoreError> {
+        let mut repo = company_repository;
+        repo.unchecked_domains(limit).await
+    }
+
+    #[transactional(company)]
+    async fn save_company_review(
+        &self,
+        dossier: &CompanyDossier,
+        built_at: Option<DateTime<Utc>>,
+    ) -> Result<bool, CoreError> {
+        let mut repo = company_repository;
+        repo.save_review(dossier, built_at).await
     }
 
     pub async fn request_company_refresh(

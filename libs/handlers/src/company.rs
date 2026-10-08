@@ -94,6 +94,7 @@ pub struct CompanyDto {
     pub siblings: Vec<SiblingLeadDto>,
     /// Pages of the company site that were read.
     pub pages: Vec<CompanyPageDto>,
+    pub ignored_links: u32,
     #[schema(format = DateTime)]
     pub built_at: Option<String>,
     #[schema(format = DateTime)]
@@ -117,6 +118,7 @@ impl From<&CompanyDossier> for CompanyDto {
                     url: page.url.clone(),
                 })
                 .collect(),
+            ignored_links: dossier.ignored_links,
             built_at: dossier.built_at.map(|at| at.to_rfc3339()),
             next_attempt_at: dossier.next_attempt_at.to_rfc3339(),
             error: dossier.error.clone(),
