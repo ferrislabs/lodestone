@@ -28,5 +28,10 @@
 		"file": "ted.png",
 		"source_url": "https://ted.europa.eu/documents/43503/1103116/favicon.ico/d3767476-8b80-a2c9-d9e8-245b087fde48",
 		"retrieved_at": "2026-10-08"
+	},
+	"welcome_to_the_jungle": {
+		"file": "welcome_to_the_jungle.png",
+		"source_url": "https://www.welcometothejungle.com/icon.png",
+		"retrieved_at": "2026-10-08"
 	}
 }

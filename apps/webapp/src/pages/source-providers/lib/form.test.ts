@@ -2,13 +2,45 @@ import { describe, expect, it } from 'vitest'
 
 import { detail } from '#/pages/source-providers/lib/fixtures'
 import {
+	attestations,
 	buildBody,
 	fieldErrors,
 	initialValues,
 	isDirty,
 } from '#/pages/source-providers/lib/form'
 
+const AUTHORISED = {
+	key: 'authorised',
+	label: 'Accès autorisé par Welcome to the Jungle',
+	kind: 'bool',
+	required: true,
+	default: null,
+	help: '',
+	options: [],
+}
+
 describe('provider form', () => {
+	it('lists the dated attestations of the stored settings', () => {
+		const jungle = detail({
+			fields: [AUTHORISED],
+			settings: {
+				authorised: true,
+				authorised_at: '2026-10-09T08:00:00+00:00',
+			},
+		})
+		expect(attestations(jungle)).toEqual([
+			{
+				key: 'authorised',
+				label: 'Accès autorisé par Welcome to the Jungle',
+				at: '2026-10-09T08:00:00+00:00',
+			},
+		])
+		expect(
+			attestations(detail({ fields: [AUTHORISED], settings: {} })),
+		).toEqual([])
+		expect(attestations(detail())).toEqual([])
+	})
+
 	it('starts from the stored settings and never from a secret', () => {
 		expect(initialValues(detail())).toEqual({
 			client_id: 'client-1',

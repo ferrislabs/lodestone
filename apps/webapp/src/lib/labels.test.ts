@@ -28,6 +28,7 @@ describe('labels', () => {
 		expect(sourceLabel('hacker_news_hiring')).toBe(
 			'Hacker News — Who is hiring?',
 		)
+		expect(sourceLabel('welcome_to_the_jungle')).toBe('Welcome to the Jungle')
 		expect(sourceLabel('other')).toBe('other')
 	})
 

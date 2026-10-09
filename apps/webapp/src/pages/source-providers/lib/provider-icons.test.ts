@@ -29,6 +29,7 @@ describe('providerIcon', () => {
 			'decp',
 			'france_travail',
 			'hacker_news_hiring',
+			'welcome_to_the_jungle',
 			'company_research',
 		]) {
 			expect(providerIcon(key).kind).toBe('logo')
@@ -42,6 +43,10 @@ describe('providerIcon', () => {
 	it('shows the legal announcements of the BODACC with scales', () => {
 		expect(CATALOG_KEYS).toContain('bodacc')
 		expect(providerIcon('bodacc')).toEqual({ kind: 'lucide', Icon: Scale })
+	})
+
+	it('lists Welcome to the Jungle in the catalog keys', () => {
+		expect(CATALOG_KEYS).toContain('welcome_to_the_jungle')
 	})
 
 	it('falls back to a lucide icon', () => {

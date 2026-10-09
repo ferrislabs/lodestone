@@ -48,6 +48,19 @@ fn check(spec: &FieldSpec, value: &Value, allow_http: bool) -> Result<Value, Str
             }
             _ => Err("must be a string".to_owned()),
         },
+        FieldKind::Url if !spec.hosts.is_empty() => match value {
+            Value::String(text) => match Url::parse(text.trim()) {
+                Ok(url)
+                    if url.scheme() == "https"
+                        && url.host_str().is_some_and(|host| spec.accepts_host(host))
+                        && text.trim().chars().count() <= 2000 =>
+                {
+                    Ok(Value::String(text.trim().to_owned()))
+                }
+                _ => Err(format!("must be an https URL on {}", spec.hosts.join(", "))),
+            },
+            _ => Err("must be a string".to_owned()),
+        },
         FieldKind::Url => match value {
             Value::String(text) => match Url::parse(text.trim()) {
                 Ok(url)
@@ -71,11 +84,24 @@ fn check(spec: &FieldSpec, value: &Value, allow_http: bool) -> Result<Value, Str
             Value::String(_) => Err(format!("must be one of {}", spec.options.join(", "))),
             _ => Err("must be a string".to_owned()),
         },
-        FieldKind::Number => match value {
-            Value::Number(number) if number.as_f64().is_some_and(f64::is_finite) => {
+        FieldKind::Number => match (value, spec.range) {
+            (Value::Number(number), Some((min, max))) => match number.as_f64() {
+                Some(found)
+                    if found.fract() == 0.0 && found >= min as f64 && found <= max as f64 =>
+                {
+                    Ok(Value::Number(number.clone()))
+                }
+                _ => Err(format!("must be a whole number from {min} to {max}")),
+            },
+            (Value::Number(number), None) if number.as_f64().is_some_and(f64::is_finite) => {
                 Ok(Value::Number(number.clone()))
             }
             _ => Err("must be a number".to_owned()),
+        },
+        FieldKind::Bool if spec.is_attestation() => match value {
+            Value::Bool(true) => Ok(Value::Bool(true)),
+            Value::Bool(false) => Err("must be checked".to_owned()),
+            _ => Err("must be a boolean".to_owned()),
         },
         FieldKind::Bool => match value {
             Value::Bool(flag) => Ok(Value::Bool(*flag)),
@@ -259,6 +285,105 @@ mod tests {
         let number = spec(FieldKind::Number);
         assert!(check(&number, &json!(3), true).is_ok());
         assert!(check(&number, &json!("3"), true).is_err());
+    }
+
+    fn jungle() -> &'static SourceProviderDescriptor {
+        descriptor("welcome_to_the_jungle").expect("catalog entry")
+    }
+
+    fn jungle_input(changes: Value) -> Map<String, Value> {
+        let mut input = object(json!({
+            "authorised": true,
+            "authorisation_reference": "Courriel du 9 octobre 2026",
+            "referer": "https://www.welcometothejungle.com/",
+        }));
+        input.extend(object(changes));
+        input
+    }
+
+    fn problem_fields(problems: &[FieldProblem]) -> Vec<&str> {
+        problems.iter().map(|p| p.field.as_str()).collect()
+    }
+
+    #[test]
+    fn the_jungle_needs_an_authorisation_its_reference_and_a_referer() {
+        let problems = validate_settings(jungle(), &Map::new(), true).unwrap_err();
+        assert_eq!(
+            problem_fields(&problems),
+            ["authorised", "authorisation_reference", "referer"]
+        );
+    }
+
+    #[test]
+    fn an_unchecked_attestation_is_refused() {
+        let problems =
+            validate_settings(jungle(), &jungle_input(json!({"authorised": false})), true)
+                .unwrap_err();
+        assert_eq!(
+            problems,
+            vec![FieldProblem::new("authorised", "must be checked")]
+        );
+    }
+
+    #[test]
+    fn the_jungle_defaults_to_ten_requests_a_minute_and_three_pages() {
+        let settings = validate_settings(jungle(), &jungle_input(json!({})), true).unwrap();
+        assert_eq!(settings["requests_per_minute"].as_f64(), Some(10.0));
+        assert_eq!(settings["max_pages"].as_f64(), Some(3.0));
+        assert!(!settings.contains_key("jobs_index"));
+        assert_eq!(settings["referer"], "https://www.welcometothejungle.com/");
+    }
+
+    #[test]
+    fn the_referer_must_be_an_https_url_of_the_jungle() {
+        for bad in [
+            "https://example.com/",
+            "https://notwelcometothejungle.com/",
+            "https://welcometothejungle.com.example.com/",
+            "http://www.welcometothejungle.com/",
+            "www.welcometothejungle.com",
+        ] {
+            let problems =
+                validate_settings(jungle(), &jungle_input(json!({"referer": bad})), true)
+                    .unwrap_err();
+            assert_eq!(problem_fields(&problems), ["referer"], "{bad}");
+        }
+        for good in [
+            "https://www.welcometothejungle.com/fr/jobs",
+            "https://welcometothejungle.com/",
+        ] {
+            assert!(
+                validate_settings(jungle(), &jungle_input(json!({"referer": good})), true).is_ok(),
+                "{good}"
+            );
+        }
+    }
+
+    #[test]
+    fn numbers_with_a_range_must_be_whole_and_inside_it() {
+        for bad in [json!(0), json!(31), json!(2.5)] {
+            let problems = validate_settings(
+                jungle(),
+                &jungle_input(json!({"requests_per_minute": bad})),
+                true,
+            )
+            .unwrap_err();
+            assert_eq!(
+                problems,
+                vec![FieldProblem::new(
+                    "requests_per_minute",
+                    "must be a whole number from 1 to 30"
+                )]
+            );
+        }
+        let settings = validate_settings(
+            jungle(),
+            &jungle_input(json!({"requests_per_minute": 30, "max_pages": 1})),
+            true,
+        )
+        .unwrap();
+        assert_eq!(settings["requests_per_minute"], 30);
+        assert!(validate_settings(jungle(), &jungle_input(json!({"max_pages": 4})), true).is_err());
     }
 
     #[test]

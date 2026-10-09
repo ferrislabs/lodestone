@@ -24,6 +24,9 @@ use sources::{
     france_travail::{FranceTravailSettings, FranceTravailSource},
     hacker_news::{HackerNewsSettings, HackerNewsSource},
     ted::{TedSettings, TedSource},
+    welcome_to_the_jungle::{
+        AccessSource, Endpoints, WelcomeToTheJungleSettings, WelcomeToTheJungleSource,
+    },
 };
 use sqlx::PgPool;
 use support::Harness;
@@ -111,6 +114,17 @@ fn router(harness: &Harness, pool: &PgPool, site: &MockServer) -> JobRouter {
                 HackerNewsSettings {
                     base_url: url("/hn/").into(),
                     max_pages: 1,
+                },
+            ),
+            welcome_to_the_jungle: WelcomeToTheJungleSource::new(
+                Arc::clone(&fetcher),
+                WelcomeToTheJungleSettings {
+                    endpoints: Endpoints {
+                        site: url("/wttj/"),
+                        search: None,
+                    },
+                    access: AccessSource::Catalog(harness.state.usecase.clone()),
+                    max_company_lookups: 1,
                 },
             ),
             ats: AtsSource::new(

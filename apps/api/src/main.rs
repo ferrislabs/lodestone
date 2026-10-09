@@ -56,6 +56,10 @@ use sources::{
     role_guess::RoleGuessFinder,
     security_txt::SecurityTxtFinder,
     ted::{TedSettings, TedSource},
+    welcome_to_the_jungle::{
+        AccessSource, DEFAULT_COMPANY_LOOKUPS, Endpoints, MAX_REQUESTS_PER_MINUTE,
+        WelcomeToTheJungleSettings, WelcomeToTheJungleSource,
+    },
 };
 use tokio::sync::watch;
 use tracing::{error, info};
@@ -72,6 +76,7 @@ const FRANCE_TRAVAIL_MAX_BODY_BYTES: usize = 16 * 1024 * 1024;
 const FRANCE_TRAVAIL_REQUESTS_PER_MINUTE: u32 = 180;
 const HACKER_NEWS_MAX_BODY_BYTES: usize = 8 * 1024 * 1024;
 const HACKER_NEWS_REQUESTS_PER_MINUTE: u32 = 30;
+const WELCOME_TO_THE_JUNGLE_MAX_BODY_BYTES: usize = 4 * 1024 * 1024;
 const ATS_MAX_BODY_BYTES: usize = 16 * 1024 * 1024;
 const ATS_MAX_RATE_LIMIT_WAIT: Duration = Duration::from_secs(75);
 const DECP_REQUESTS_PER_MINUTE: u32 = 120;
@@ -174,6 +179,18 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 args.hacker_news.base_url.clone(),
             ),
             max_pages: args.hacker_news.max_pages.get(),
+        },
+    );
+    let mut welcome_to_the_jungle_fetch = FetchSettings::from_outbound(&outbound_config);
+    welcome_to_the_jungle_fetch.max_body_bytes = WELCOME_TO_THE_JUNGLE_MAX_BODY_BYTES;
+    welcome_to_the_jungle_fetch.requests_per_host_per_minute =
+        NonZeroU32::new(MAX_REQUESTS_PER_MINUTE.saturating_mul(2)).unwrap_or(NonZeroU32::MIN);
+    let welcome_to_the_jungle = WelcomeToTheJungleSource::new(
+        Arc::new(PoliteFetcher::new(welcome_to_the_jungle_fetch)?),
+        WelcomeToTheJungleSettings {
+            endpoints: Endpoints::official()?,
+            access: AccessSource::Catalog(app_state.usecase.clone()),
+            max_company_lookups: DEFAULT_COMPANY_LOOKUPS,
         },
     );
     let mut ats_fetch = FetchSettings::from_outbound(&outbound_config);
@@ -306,6 +323,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             france_travail,
             ats,
             hacker_news,
+            welcome_to_the_jungle,
         },
         Intervals {
             other_sources: jobs_config.source_interval,

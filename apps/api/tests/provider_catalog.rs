@@ -22,6 +22,7 @@ use lodestone_core::{
     ActiveProfile, BOAMP, BODACC, CERTIFICATE_TRANSPARENCY, COMPANY_RESEARCH, DECP,
     DECP_HOLDERS_DEFAULT_URL, HACKER_NEWS_HIRING, Job, JobId, JobKind, JobStatus, Profile,
     ProfileId, ProfileName, ProfileRevision, ProviderStatus, RevisionNumber, TED, ValidatedProfile,
+    WELCOME_TO_THE_JUNGLE,
     infrastructure::contact_target::postgres::PgAtsTargets,
     jobs::{JobHandler, JobOutcome},
     provider_descriptor,
@@ -36,6 +37,9 @@ use sources::{
     france_travail::{FranceTravailSettings, FranceTravailSource},
     hacker_news::{HackerNewsSettings, HackerNewsSource},
     ted::{TedSettings, TedSource},
+    welcome_to_the_jungle::{
+        AccessSource, Endpoints, WelcomeToTheJungleSettings, WelcomeToTheJungleSource,
+    },
 };
 use sqlx::PgPool;
 use support::Harness;
@@ -202,16 +206,19 @@ async fn public_providers_are_created_and_tested_on_first_start(pool: PgPool) {
             "{key}"
         );
     }
-    assert!(status_of(&report, "france_travail").is_none());
-    assert!(
-        harness
-            .state
-            .usecase
-            .get_provider_configuration("france_travail")
-            .await
-            .unwrap()
-            .is_none()
-    );
+    for key in ["france_travail", "welcome_to_the_jungle"] {
+        assert!(status_of(&report, key).is_none(), "{key}");
+        assert!(
+            harness
+                .state
+                .usecase
+                .get_provider_configuration(key)
+                .await
+                .unwrap()
+                .is_none(),
+            "{key}"
+        );
+    }
 }
 
 #[sqlx::test(migrations = "../../migrations")]
@@ -517,6 +524,17 @@ fn router(harness: &Harness, pool: &PgPool, upstream: &MockServer) -> JobRouter 
                     max_pages: 1,
                 },
             ),
+            welcome_to_the_jungle: WelcomeToTheJungleSource::new(
+                Arc::clone(&fetcher),
+                WelcomeToTheJungleSettings {
+                    endpoints: Endpoints {
+                        site: url("/wttj/"),
+                        search: Some(url("/wttj-search/")),
+                    },
+                    access: AccessSource::Catalog(harness.state.usecase.clone()),
+                    max_company_lookups: 1,
+                },
+            ),
             ats: AtsSource::new(
                 fetcher,
                 PgAtsTargets::new(pool.clone()),
@@ -703,6 +721,75 @@ async fn hacker_news_reads_its_url_from_the_catalog_on_every_run(pool: PgPool) {
 
     moved.assert_hits(1);
     from_env.assert_hits(0);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn welcome_to_the_jungle_waits_for_a_declared_authorisation_and_a_passing_test(pool: PgPool) {
+    let harness = Harness::new(pool.clone()).await;
+    let upstream = MockServer::start_async().await;
+    public_upstreams(&upstream).await;
+    let env = upstream
+        .mock_async(|when, then| {
+            when.method(GET).path("/wttj/api/env");
+            then.status(200).body("window.env = {};");
+        })
+        .await;
+    let router = router(&harness, &pool, &upstream);
+    provision(&harness, &public_seed(&upstream)).await;
+
+    let blocked = router
+        .handle(&source_job("welcome_to_the_jungle"))
+        .await
+        .unwrap();
+
+    assert!(rescheduled(blocked) <= Utc::now() + Delta::minutes(6));
+    assert_eq!(
+        blocking_provider(&harness.state.usecase, "welcome_to_the_jungle")
+            .await
+            .unwrap(),
+        Some(WELCOME_TO_THE_JUNGLE)
+    );
+    let usecase = &harness.state.usecase;
+    usecase
+        .save_provider_configuration(
+            provider_descriptor(WELCOME_TO_THE_JUNGLE).unwrap(),
+            SaveProviderConfiguration {
+                settings: object(json!({
+                    "authorised": true,
+                    "authorisation_reference": "Courriel du 9 octobre 2026",
+                    "referer": "https://www.welcometothejungle.com/",
+                })),
+                secrets: BTreeMap::new(),
+            },
+            true,
+            harness.state.cipher.as_ref(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        blocking_provider(usecase, "welcome_to_the_jungle")
+            .await
+            .unwrap(),
+        Some(WELCOME_TO_THE_JUNGLE)
+    );
+    usecase
+        .record_provider_status(
+            WELCOME_TO_THE_JUNGLE,
+            ProviderStatus::Ready,
+            None,
+            Utc::now(),
+        )
+        .await
+        .unwrap();
+    let before = Utc::now();
+
+    let ran = router
+        .handle(&source_job("welcome_to_the_jungle"))
+        .await
+        .unwrap();
+
+    assert!(rescheduled(ran) >= before + Delta::hours(5));
+    env.assert_hits_async(0).await;
 }
 
 async fn reconfigure(harness: &Harness, key: &'static str, settings: Value) {

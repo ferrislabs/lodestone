@@ -42,6 +42,8 @@ Agents use configured providers. Issue 190 delivered the machinery with two prov
 
 Issue 193 adds `hacker_news_hiring` (no authentication, field `base_url`, keyword search, no native filters). Its test lists the monthly threads and requires a "Who is hiring?" thread in the answer. Its source is scheduled once a day (`HACKER_NEWS_INTERVAL_HOURS`).
 
+Issue 222 adds `welcome_to_the_jungle` (no authentication, keyword search, no native filters). Its required fields have no default (`authorised`, which must be checked and is dated in `authorised_at`, `authorisation_reference` and `referer`), so it is never created at startup and stays `not_configured` until the operator fills them. A required boolean is an attestation: saving it unchecked is refused. Number fields can carry a range and URL fields a list of allowed hosts. Its test reads `/api/env` and runs one search with the operator's Referer, on the jobs index when known, otherwise on the organisation index. A refused Referer, a block or a challenge during a run marks the provider `failing`.
+
 ## Consequences
 
 - An operator sees every provider, its status and the last test message in one place, and a broken credential is found when it is entered rather than at the next run.

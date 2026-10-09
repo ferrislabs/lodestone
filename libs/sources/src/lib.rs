@@ -17,3 +17,4 @@ pub mod role_guess;
 pub mod search;
 pub mod security_txt;
 pub mod ted;
+pub mod welcome_to_the_jungle;
