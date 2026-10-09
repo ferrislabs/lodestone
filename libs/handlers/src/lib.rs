@@ -16,6 +16,7 @@ pub mod settings;
 pub mod source_providers;
 pub mod sources;
 pub mod state;
+pub mod timeline;
 
 pub use auth::AuthenticatedUser;
 pub use errors::{ApiError, MiddlewareError};

@@ -35,6 +35,8 @@ interface LeadDetailProps {
 	onOpenLead: (leadId: string) => void
 	onChangeStatus: (status: LeadStatus) => void
 	rejectionDialog: ReactNode
+	pipeline?: ReactNode
+	chronology?: ReactNode
 	onOpenDraft: (assessmentId: string) => void
 	onRetrySummary: () => void
 	retryingSummary: boolean
@@ -61,6 +63,8 @@ export function LeadDetail({
 	onOpenLead,
 	onChangeStatus,
 	rejectionDialog,
+	pipeline = null,
+	chronology = null,
 	onOpenDraft,
 	onRetrySummary,
 	retryingSummary,
@@ -108,6 +112,7 @@ export function LeadDetail({
 						changing={changing}
 						changeError={changeError}
 					/>
+					{pipeline}
 					<LeadEvaluation
 						stage={detail.lead.evaluation?.stage ?? null}
 						label={evaluationLabel(detail.lead.evaluation)}
@@ -158,6 +163,7 @@ export function LeadDetail({
 					/>
 					<SignalsList signals={detail.signals} />
 					<ContactsList contacts={detail.contacts} />
+					{chronology}
 					{detail.assessments.length > 1 ? (
 						<AssessmentsList assessments={detail.assessments.slice(1)} />
 					) : null}

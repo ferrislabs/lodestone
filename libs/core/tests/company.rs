@@ -16,12 +16,13 @@ use common::{EncryptionKey, Secret};
 use lodestone_core::{
     ActiveProfile, BODACC, COMPANY_RESEARCH, Clock, CompanyBuilder, CompanyPage,
     CreateProfileCommand, DECP, DossierBuild, DossierState, EcosystemFinding, EcosystemModule,
-    EvaluationStage, EvaluationStatus, GenerationParams, Inspection, InspectionTarget, Lead,
-    LeadQuery, LeadRepository, LinkRejection, LlmError, LlmProvider, LlmRequest, LlmResponse,
+    EvaluationStage, EvaluationStatus, EventStatus, GenerationParams, Inspection, InspectionTarget,
+    Lead, LeadQuery, LeadRepository, LinkRejection, LlmError, LlmProvider, LlmRequest, LlmResponse,
     LodestoneUseCase, ModuleRunner, ModuleStatus, NormalizedDomain, Observation, OfficialData,
     PageReview, PageVerifier, ProfileId, ProfileName, Provenance, ProviderDefinition, ProviderKind,
-    RequalifyPolicy, SignalKind, Siren, SourceError, SourceName, Tier, TokenPricing, TokenUsage,
-    UnconfirmedLinks, UnitInterval, ValidatedProfile,
+    RequalifyPolicy, RoundTrigger, SignalKind, Siren, SourceError, SourceName, Stage, StageReason,
+    StageStatus, Tier, TimelineEvent, TimelineStep, TokenPricing, TokenUsage, UnconfirmedLinks,
+    UnitInterval, ValidatedProfile,
     company::{CompanyRunReport, CompanyRunSettings, PageRecheckReport},
     definition::AgentId,
     ecosystem::{InspectionReport, InspectionRunSettings},
@@ -32,6 +33,7 @@ use lodestone_core::{
     },
     llm::CreateLlmProvider,
     sources::{LeadCreation, Skipped},
+    timeline_kind,
 };
 use serde_json::{Value, json};
 use sqlx::{PgPool, query, query_as, query_scalar};
@@ -2209,4 +2211,110 @@ async fn a_rate_limited_module_pauses_alone_for_the_rest_of_the_pass(pool: PgPoo
         .find(|stat| stat.module == EcosystemModule::DnsEmail)
         .unwrap();
     assert_eq!(dns.leads_inspected, 0);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn inspection_modules_and_requalification_marks_are_on_the_timeline(pool: PgPool) {
+    let harness = Harness::new(pool).requalifying(DEBOUNCE, 3);
+    harness.defaults().await;
+    let profile = harness.profile().await;
+    harness
+        .observe_kind("mairie.fr", SourceName::Boamp, "public_tender", 10)
+        .await;
+    harness.created_at_clock_zero().await;
+    assert_eq!(harness.qualify().await, 1);
+    let lead = harness.lead(profile, "mairie.fr").await;
+
+    harness.set_time(10);
+    harness.inspect(&[EcosystemModule::WebsiteStack]).await;
+
+    let timeline = harness.usecase.lead_timeline(lead.id).await.unwrap();
+    let numbers: Vec<u32> = timeline.rounds.iter().map(|round| round.number).collect();
+    assert_eq!(numbers, vec![2, 1]);
+    let next: Vec<&TimelineEvent> = timeline.rounds[0].events.iter().collect();
+    let module = next
+        .iter()
+        .find(|event| event.kind == timeline_kind::MODULE)
+        .unwrap();
+    assert_eq!(module.step, TimelineStep::Inspection);
+    assert_eq!(module.status, EventStatus::Succeeded);
+    assert_eq!(module.actor.module.as_deref(), Some("website_stack"));
+    assert_eq!(module.detail["changed"], true);
+    assert!(next.iter().any(|event| {
+        event.step == TimelineStep::Requalification && event.kind == timeline_kind::PLANNED
+    }));
+    assert_eq!(timeline.rounds[0].trigger, RoundTrigger::Pending);
+    let qualification = timeline
+        .pipeline
+        .stages
+        .iter()
+        .find(|state| state.stage == Stage::Qualification)
+        .unwrap();
+    assert_eq!(qualification.status, StageStatus::Waiting);
+    assert_eq!(
+        qualification.reason_code,
+        Some(StageReason::RequalificationPlanned)
+    );
+    assert_eq!(qualification.next_at, Some(at(1_000 + 10 + 120)));
+
+    harness.set_time(200);
+    assert_eq!(harness.qualify().await, 1);
+    let requalified = harness.usecase.lead_timeline(lead.id).await.unwrap();
+    assert_eq!(requalified.rounds[0].number, 2);
+    assert_eq!(requalified.rounds[0].trigger, RoundTrigger::NewInformation);
+    assert_eq!(
+        requalified.rounds[0].sources,
+        vec!["website_stack".to_owned()]
+    );
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_capped_requalification_and_a_manual_reevaluation_show_in_the_pipeline(pool: PgPool) {
+    let harness = Harness::new(pool).requalifying(Duration::ZERO, 1);
+    harness.defaults().await;
+    let profile = harness.profile().await;
+    harness
+        .observe_kind("mairie.fr", SourceName::Boamp, "public_tender", 10)
+        .await;
+    harness.created_at_clock_zero().await;
+    assert_eq!(harness.qualify().await, 1);
+    let lead = harness.lead(profile, "mairie.fr").await;
+    let round = Arc::new(AtomicI64::new(1));
+    let runners = [ChangingModule(
+        EcosystemModule::WebsiteStack,
+        Arc::clone(&round),
+    )];
+    harness.set_time(100);
+    harness.modules_due_again().await;
+    harness.inspect_with(&runners).await;
+    assert_eq!(harness.qualify().await, 1);
+    round.store(2, Ordering::SeqCst);
+    harness.set_time(200);
+    harness.modules_due_again().await;
+    harness.inspect_with(&runners).await;
+    assert_eq!(harness.qualify().await, 0);
+
+    let capped = harness.usecase.lead_timeline(lead.id).await.unwrap();
+    let qualification = capped
+        .pipeline
+        .stages
+        .iter()
+        .find(|state| state.stage == Stage::Qualification)
+        .unwrap();
+    assert_eq!(
+        qualification.reason_code,
+        Some(StageReason::RequalificationCapped)
+    );
+    assert_eq!(qualification.next_at, Some(at(1_000 + NEXT_UTC_DAY)));
+
+    harness.set_time(210);
+    harness
+        .usecase
+        .request_lead_reevaluation_at(lead.id, harness.clock.now())
+        .await
+        .unwrap();
+    assert_eq!(harness.qualify().await, 1);
+    let manual = harness.usecase.lead_timeline(lead.id).await.unwrap();
+    assert_eq!(manual.rounds[0].number, 3);
+    assert_eq!(manual.rounds[0].trigger, RoundTrigger::Manual);
 }

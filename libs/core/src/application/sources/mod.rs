@@ -8,7 +8,11 @@ use tokio::select;
 use tracing::info;
 
 use crate::{
-    application::{LodestoneUseCase, jobs::JobError},
+    application::{
+        LodestoneUseCase,
+        jobs::JobError,
+        timeline::{exclusion_lifted, record_signal},
+    },
     domain::{
         NormalizedDomain,
         agent_work::{AgentWork, CancelReason, WorkTarget, all_cancelled},
@@ -28,6 +32,7 @@ use crate::{
         source::{Observation, Source, SourceError},
         suppression::ports::SuppressionRepository,
         territory::{HostAdmission, OUT_OF_COUNTRY_REASON, Territory, admit_host, territory_of},
+        timeline::ports::TimelineRepository,
         values::SourceName,
     },
 };
@@ -449,7 +454,7 @@ impl LodestoneUseCase {
             .map(drop)
     }
 
-    #[transactional(lead, signal, suppression, company)]
+    #[transactional(lead, signal, suppression, company, timeline)]
     pub async fn record_observations_with(
         &self,
         active: &ActiveProfile,
@@ -463,6 +468,7 @@ impl LodestoneUseCase {
         let mut signals = signal_repository;
         let mut suppressions = suppression_repository;
         let mut company = company_repository;
+        let mut timeline = timeline_repository;
         let mut touched = Vec::new();
         let mut suppressed: Vec<(NormalizedDomain, bool)> = Vec::new();
         for observation in observations {
@@ -528,21 +534,25 @@ impl LodestoneUseCase {
                     .await?
             {
                 info!(lead.id = %lead.id, "lead back in the target countries");
+                timeline
+                    .record(lead.id, &exclusion_lifted(OUT_OF_COUNTRY_REASON, now))
+                    .await?;
             }
-            signals
-                .record(&Signal {
-                    id: SignalId(generate_uuid_v7()),
-                    lead_id: lead.id,
-                    kind: observation.kind.clone(),
-                    value: observation.value.clone(),
-                    source,
-                    raw: observation.raw.clone(),
-                    provenance: observation.provenance.clone(),
-                    strength: observation.strength,
-                    observed_at: observation.observed_at,
-                    agent: observation.agent.clone(),
-                })
-                .await?;
+            let signal = Signal {
+                id: SignalId(generate_uuid_v7()),
+                lead_id: lead.id,
+                kind: observation.kind.clone(),
+                value: observation.value.clone(),
+                source,
+                raw: observation.raw.clone(),
+                provenance: observation.provenance.clone(),
+                strength: observation.strength,
+                observed_at: observation.observed_at,
+                agent: observation.agent.clone(),
+            };
+            if signals.record(&signal).await? {
+                record_signal(&mut timeline, &signal, now).await?;
+            }
         }
         let evidence = &active.revision.definition.definition().evidence;
         for lead_id in touched {

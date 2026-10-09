@@ -547,6 +547,70 @@ export namespace Schemas {
     };
     pagination?: (null | PaginationMetadata) | undefined;
   };
+  export type EventActorDto = Partial<{
+    agent_id: string | null;
+    agent_name: string | null;
+    model: string | null;
+    module: string | null;
+    module_label: string | null;
+    provider: string | null;
+    source: string | null;
+  }>;
+  export type TimelineStepDto =
+    | "detection"
+    | "exclusion"
+    | "inspection"
+    | "qualification"
+    | "escalation"
+    | "scoring"
+    | "combination"
+    | "aggregation"
+    | "requalification"
+    | "stop"
+    | "decision";
+  export type InFlightDto = { actor: EventActorDto; started_at: string; step: TimelineStepDto };
+  export type StageDto = "detection" | "inspection" | "qualification" | "scoring" | "synthesis" | "draft" | "decision";
+  export type StageStatusDto = "done" | "running" | "waiting" | "blocked" | "skipped";
+  export type PipelineStageDto = {
+    label: string;
+    next_action?: (string | null) | undefined;
+    next_at?: (string | null) | undefined;
+    reason?: (string | null) | undefined;
+    reason_code?: (string | null) | undefined;
+    since?: (string | null) | undefined;
+    stage: StageDto;
+    status: StageStatusDto;
+  };
+  export type PipelineDto = { current?: (null | StageDto) | undefined; stages: Array<PipelineStageDto> };
+  export type EventStatusDto = "started" | "succeeded" | "failed" | "skipped" | "waiting";
+  export type TimelineEventDto = {
+    actor: EventActorDto;
+    detail: Record<string, unknown>;
+    duration_ms?: (number | null) | undefined;
+    error?: (string | null) | undefined;
+    finished_at?: (string | null) | undefined;
+    id: string;
+    kind: string;
+    reconstructed: boolean;
+    round: number;
+    started_at: string;
+    status: EventStatusDto;
+    step: TimelineStepDto;
+  };
+  export type RoundTriggerDto = "detection" | "new_information" | "manual" | "requalification" | "pending";
+  export type TimelineRoundDto = {
+    events: Array<TimelineEventDto>;
+    number: number;
+    reconstructed: boolean;
+    source_labels: Array<string>;
+    sources: Array<string>;
+    started_at?: (string | null) | undefined;
+    trigger: RoundTriggerDto;
+  };
+  export type DataEnvelope_LeadTimelineDto = {
+    data: { in_flight: Array<InFlightDto>; lead_id: string; pipeline: PipelineDto; rounds: Array<TimelineRoundDto> };
+    pagination?: (null | PaginationMetadata) | undefined;
+  };
   export type UserId = string;
   export type DataEnvelope_MeResponse = {
     data: { kind: "user"; subject: string; user_id: UserId } | { client_id: string; kind: "client" };
@@ -976,6 +1040,12 @@ export namespace Schemas {
     signals: Array<SignalRecord>;
     status: string;
   };
+  export type LeadTimelineDto = {
+    in_flight: Array<InFlightDto>;
+    lead_id: string;
+    pipeline: PipelineDto;
+    rounds: Array<TimelineRoundDto>;
+  };
   export type MeResponse = { kind: "user"; subject: string; user_id: UserId } | { client_id: string; kind: "client" };
   export type ProfileDetailDto = ProfileDto & { definition: Record<string, unknown>; revision: number };
   export type ProfileSummaryDto = {
@@ -1257,6 +1327,15 @@ export namespace Endpoints {
       404: unknown;
       409: unknown;
     };
+  };
+  export type get_Lead_timeline = {
+    method: "GET";
+    path: "/api/v1/leads/{lead_id}/timeline";
+    requestFormat: "json";
+    parameters: {
+      path: { lead_id: string };
+    };
+    responses: { 200: Schemas.DataEnvelope_LeadTimelineDto; 400: unknown; 401: unknown; 403: unknown; 404: unknown };
   };
   export type get_List_providers = {
     method: "GET";
@@ -1684,6 +1763,7 @@ export type EndpointByMethod = {
     "/api/v1/drafts/{assessment_id}": Endpoints.get_Get_draft;
     "/api/v1/ecosystem/modules": Endpoints.get_List_ecosystem_modules;
     "/api/v1/leads/{lead_id}": Endpoints.get_Lead_detail;
+    "/api/v1/leads/{lead_id}/timeline": Endpoints.get_Lead_timeline;
     "/api/v1/llm/providers": Endpoints.get_List_providers;
     "/api/v1/llm/providers/{provider_id}": Endpoints.get_Get_provider;
     "/api/v1/llm/tiers": Endpoints.get_List_tiers;

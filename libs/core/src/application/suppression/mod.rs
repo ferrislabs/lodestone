@@ -12,6 +12,7 @@ use crate::{
         suppression::{
             SuppressionEntry, SuppressionId, SuppressionTarget, ports::SuppressionRepository,
         },
+        timeline::ports::TimelineRepository,
         values::EmailAddress,
     },
 };
@@ -27,15 +28,21 @@ impl LodestoneUseCase {
         self.exclude_tenant_leads(&profiles, now).await
     }
 
-    #[transactional(suppression)]
+    #[transactional(suppression, timeline)]
     async fn exclude_tenant_leads(
         &self,
         profiles: &[ProfileId],
         now: DateTime<Utc>,
     ) -> Result<u64, CoreError> {
         let mut repo = suppression_repository;
-        repo.exclude_leads_under(profiles, &SAAS_TENANT_DOMAINS, SAAS_TENANT_REASON, now)
-            .await
+        let mut timeline = timeline_repository;
+        let excluded = repo
+            .exclude_leads_under(profiles, &SAAS_TENANT_DOMAINS, SAAS_TENANT_REASON, now)
+            .await?;
+        if excluded > 0 {
+            timeline.record_exclusions(SAAS_TENANT_REASON, now).await?;
+        }
+        Ok(excluded)
     }
 
     #[transactional(suppression)]

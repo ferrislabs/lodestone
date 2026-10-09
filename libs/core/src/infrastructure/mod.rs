@@ -27,4 +27,5 @@ pub mod scoring_agent;
 pub mod signal;
 pub mod source_provider;
 pub mod suppression;
+pub mod timeline;
 pub mod user;

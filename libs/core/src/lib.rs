@@ -172,6 +172,16 @@ pub use domain::{
     suppression::{
         SuppressionEntry, SuppressionId, SuppressionTarget, ports::SuppressionRepository,
     },
+    timeline::{
+        DEFAULT_RETENTION_DAYS, EventActor, EventStatus, InFlightStep, RECONSTRUCTED,
+        ROUND_STARTED, RoundSlot, RoundTrigger, TimelineEntry, TimelineEvent, TimelineRound,
+        TimelineStep, collapse, kind as timeline_kind,
+        pipeline::{
+            Pipeline, PipelineInput, Stage, StageReason, StageState, StageStatus, pipeline,
+        },
+        ports::TimelineRepository,
+        rounds,
+    },
     triage::{Candidate, Route, countries::alpha3_of, passes_filters, route},
     user::commands::CreateUserCommand,
     values::{EmailAddress, Provenance, SignalKind, SourceName, UnitInterval, ValueError},

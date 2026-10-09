@@ -7,7 +7,7 @@ use serde_json::json;
 use tracing::{debug, info};
 
 use crate::{
-    application::{LodestoneUseCase, sources::SourceRunError},
+    application::{LodestoneUseCase, sources::SourceRunError, timeline::requalification_planned},
     domain::{
         NormalizedDomain,
         company::{
@@ -27,6 +27,7 @@ use crate::{
         source::SourceError,
         suppression::ports::SuppressionRepository,
         territory::{OUT_OF_COUNTRY_REASON, out_of_country},
+        timeline::ports::TimelineRepository,
     },
 };
 
@@ -237,16 +238,27 @@ impl LodestoneUseCase {
         Ok(settled)
     }
 
-    #[transactional(qualification)]
+    #[transactional(qualification, timeline)]
     pub(crate) async fn mark_domain_requalification(
         &self,
         domain: &NormalizedDomain,
         now: DateTime<Utc>,
     ) -> Result<u64, CoreError> {
         let mut qualification = qualification_repository;
-        qualification
-            .mark_requalification(domain, self.requalify.requalify_after(now), now)
-            .await
+        let mut timeline = timeline_repository;
+        let after = self.requalify.requalify_after(now);
+        let marked = qualification
+            .mark_requalification(domain, after, now)
+            .await?;
+        if marked > 0 {
+            timeline
+                .record_for_domain(
+                    domain,
+                    &requalification_planned(after, now, "dossier", None),
+                )
+                .await?;
+        }
+        Ok(marked)
     }
 
     pub async fn exclude_out_of_country(
@@ -270,7 +282,7 @@ impl LodestoneUseCase {
         Ok(excluded)
     }
 
-    #[transactional(lead, signal, suppression)]
+    #[transactional(lead, signal, suppression, timeline)]
     async fn exclude_leads_out_of(
         &self,
         domain: &NormalizedDomain,
@@ -299,9 +311,16 @@ impl LodestoneUseCase {
                 excluded.push(lead.id);
             }
         }
-        suppression
+        let mut timeline = timeline_repository;
+        let count = suppression
             .exclude_leads(&excluded, OUT_OF_COUNTRY_REASON, now)
-            .await
+            .await?;
+        if count > 0 {
+            timeline
+                .record_exclusions(OUT_OF_COUNTRY_REASON, now)
+                .await?;
+        }
+        Ok(count)
     }
 
     #[transactional(company)]

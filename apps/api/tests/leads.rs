@@ -1,5 +1,6 @@
 mod support;
 
+use api::openapi::ApiDoc;
 use axum::Router;
 use chrono::Utc;
 use common::generate_uuid_v7;
@@ -2848,4 +2849,95 @@ async fn the_detail_reports_agents_whose_work_was_stopped(pool: PgPool) {
     assert_eq!(stops[0]["reason"], "agent_disabled");
     assert_eq!(stops[0]["profile_revision"], 1);
     assert!(stops[0]["stopped_at"].is_string());
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_timeline_of_a_lead_is_for_users_with_its_pipeline(pool: PgPool) {
+    let seed = Seed { pool: pool.clone() };
+    let profile = generate_uuid_v7().to_string();
+    query("INSERT INTO profiles (id, name, active, created_at, updated_at) VALUES ($1::uuid, 'iam', true, now(), now())")
+        .bind(&profile)
+        .execute(&pool)
+        .await
+        .unwrap();
+    query("INSERT INTO profile_revisions (profile_id, revision, definition, created_at) VALUES ($1::uuid, 1, $2::jsonb, now())")
+        .bind(&profile)
+        .bind(IAM)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let lead = seed.lead(&profile, "acme.com", "new", 5.0, 1).await;
+    seed.signal(&lead, "product_detected").await;
+    query(
+        "INSERT INTO lead_events (id, lead_id, profile_id, round, step, kind, status, actor, detail, started_at, finished_at, dedupe_key)
+         VALUES ($1, $2::uuid, $3::uuid, 1, 'qualification', 'agent', 'succeeded', '{\"agent_id\": \"stack\", \"model\": \"qwen\"}', '{}', now() - interval '3 seconds', now(), 'agent:end'),
+                ($4, $2::uuid, $3::uuid, 1, 'detection', 'signal', 'succeeded', '{\"source\": \"http_probe\"}', '{\"reconstructed\": true}', now() - interval '1 minute', NULL, 'signal')",
+    )
+    .bind(generate_uuid_v7())
+    .bind(&lead)
+    .bind(&profile)
+    .bind(generate_uuid_v7())
+    .execute(&pool)
+    .await
+    .unwrap();
+    let api = Api::new(pool.clone()).await;
+    let client = format!("Bearer {}", api.harness.valid_client_token());
+    let uri = format!("/api/v1/leads/{lead}/timeline");
+
+    let (forbidden, _, _) = call(api.app(), &uri, Some(&client)).await;
+    assert_eq!(forbidden, StatusCode::FORBIDDEN);
+    let (anonymous, _, _) = call(api.app(), &uri, None).await;
+    assert_eq!(anonymous, StatusCode::UNAUTHORIZED);
+    let (not_found, _) = api
+        .get(&format!("/api/v1/leads/{}/timeline", generate_uuid_v7()))
+        .await;
+    assert_eq!(not_found, StatusCode::NOT_FOUND);
+    let (malformed, _) = api.get("/api/v1/leads/nope/timeline").await;
+    assert_eq!(malformed, StatusCode::BAD_REQUEST);
+
+    let (status, body) = api.get(&uri).await;
+
+    assert_eq!(status, StatusCode::OK);
+    let data = &body["data"];
+    assert_eq!(data["lead_id"], lead.as_str());
+    let labels: Vec<&str> = data["pipeline"]["stages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|stage| stage["label"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        labels,
+        [
+            "Détection",
+            "Inspection",
+            "Qualification",
+            "Scoring",
+            "Synthèse",
+            "Brouillon",
+            "Décision"
+        ]
+    );
+    assert_eq!(data["pipeline"]["stages"][0]["status"], "done");
+    assert_eq!(data["pipeline"]["stages"][2]["status"], "waiting");
+    assert_eq!(data["pipeline"]["stages"][2]["reason_code"], "queued");
+    let round = &data["rounds"][0];
+    assert_eq!(round["number"], 1);
+    let events = round["events"].as_array().unwrap();
+    assert_eq!(events.len(), 2);
+    assert_eq!(events[0]["step"], "qualification");
+    assert_eq!(events[0]["actor"]["model"], "qwen");
+    assert!(events[0]["duration_ms"].as_i64().unwrap() >= 2_000);
+    assert_eq!(events[1]["reconstructed"], true);
+    assert_eq!(data["in_flight"], json!([]));
+}
+
+#[test]
+fn the_timeline_is_documented() {
+    let spec = ApiDoc::openapi();
+    assert!(
+        spec.paths
+            .paths
+            .contains_key("/api/v1/leads/{lead_id}/timeline")
+    );
 }

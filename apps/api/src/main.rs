@@ -6,7 +6,7 @@ use api::{
     internal_router::internal_router,
     jobs::{
         Intervals, JobRouter, WiredSources, schedule_calibration, schedule_page_recheck,
-        schedule_wired_sources,
+        schedule_timeline_purge, schedule_wired_sources,
     },
     listeners::{CompanyStep, ContactStep, CtStep, HostStep, InspectionStep, QualificationStep},
     logger::init_tracing_and_logging,
@@ -332,7 +332,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
         },
     )
     .with_webhook(webhook)
-    .with_page_verifier(company_research.clone());
+    .with_page_verifier(company_research.clone())
+    .with_timeline_retention(u32::from(args.jobs.lead_events_retention_days.get()));
     provision_providers(
         &app_state.usecase,
         &app_state.providers,
@@ -343,6 +344,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     schedule_wired_sources(&queue).await?;
     schedule_calibration(&queue).await?;
     schedule_page_recheck(&queue, &app_state.usecase).await?;
+    schedule_timeline_purge(&queue).await?;
     let platform_dossiers = app_state
         .usecase
         .settle_platform_dossiers(args.company.refresh_interval(), &SystemClock)
@@ -361,6 +363,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
         info!(
             tenant_leads,
             "leads on the domain of a SaaS provider suppressed"
+        );
+    }
+    let reconstructed = app_state.usecase.backfill_lead_events().await?;
+    if reconstructed > 0 {
+        info!(
+            reconstructed,
+            "timeline events reconstructed for the leads seen before the timeline"
         );
     }
     let dossier_requalifications = app_state

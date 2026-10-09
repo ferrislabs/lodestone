@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            DELETE FROM lead_events event\n            WHERE event.started_at < $1\n              AND NOT (\n                  event.kind = 'round_started'\n                  AND event.round = (\n                      SELECT MAX(latest.round) FROM lead_events latest\n                      WHERE latest.lead_id = event.lead_id AND latest.kind = 'round_started'\n                  )\n              )\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "0a7d965a10e4aecc2705966fb1e37172048c88e05e0ddd0c279a34a26c503f91"
+}
