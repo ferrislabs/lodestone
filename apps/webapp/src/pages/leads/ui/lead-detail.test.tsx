@@ -1336,6 +1336,31 @@ describe('LeadDetail', () => {
 		expect(onOpenDraft).toHaveBeenCalledWith('a1')
 	})
 
+	it('labels the link to a decided draft "Ouvrir le brouillon"', () => {
+		const first = detail.assessments[0]
+		if (!first) throw new Error('fixture without assessment')
+		const onOpenDraft = vi.fn()
+		renderDetail({
+			onOpenDraft,
+			detail: {
+				...detail,
+				assessments: [
+					{
+						...first,
+						draft: { subject: 'Hello', body: 'Body text', status: 'approved' },
+					},
+				],
+			},
+		})
+		expect(
+			screen.queryByRole('button', {
+				name: 'Ouvrir dans la file de validation',
+			}),
+		).toBeNull()
+		fireEvent.click(screen.getByRole('button', { name: 'Ouvrir le brouillon' }))
+		expect(onOpenDraft).toHaveBeenCalledWith('a1')
+	})
+
 	it('shows a failed summary with its reason and a retry button', () => {
 		const onRetrySummary = vi.fn()
 		const { container } = renderDetail({
