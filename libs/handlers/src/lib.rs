@@ -12,6 +12,7 @@ pub mod profiles;
 pub mod quality;
 pub mod rate_limit;
 pub mod response;
+pub mod settings;
 pub mod source_providers;
 pub mod sources;
 pub mod state;

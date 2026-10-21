@@ -37,3 +37,15 @@ Adding a source to this list requires amending this ADR.
 - The exemption is per request kind and cannot be applied to arbitrary web pages by accident: pages fetched from company sites stay `Crawl` or `Probe`.
 - The rate limit stays the only brake on API traffic, so each such source must keep a quota and respect upstream quota headers.
 - If the publisher later asks for crawlers to stay away from the API, the source is disabled rather than worked around.
+
+## Amendment (2026-10-09): operator override for site reading (#221)
+
+Some company sites disallow every agent in robots.txt, so their dossier stays unreachable (« robots.txt disallows the home page ») and the lead is qualified without its site. The operator may decide to read those sites anyway. This is an explicit, organisation-wide decision, never a silent default.
+
+- Setting `RobotsPolicy`: `respect` (default) or `ignore`. `CRAWL_ROBOTS_POLICY` seeds it; once an operator saves it in the web UI (Catalogue des sources → Règles de collecte, `PUT /api/v1/settings/crawl`), the saved value wins. The saved value is stored in `organisation_settings` with the user who saved it and the time.
+- Scope: only `FetchPurpose::Crawl` changes, which covers the pages read from company sites (company dossier, ecosystem site modules, career pages, contact pages). `FetchPurpose::Probe` (HTTP probe, well-known files) never consulted robots.txt and is unchanged. `FetchPurpose::Api` is unchanged and the list above still governs it. With `ignore`, robots.txt is not requested at all.
+- What stays enforced: public-target check, per-host and per-source rate limits, same-site redirect policy, body cap, confirmed links, and the identifying `User-Agent` with a contact.
+- The fetcher reads the policy at request time from an in-memory value refreshed on save and every minute from the database, so every instance converges.
+- Requests that a robots.txt rule already known to the process would have refused are counted as `robots_ignored`, logged, and returned by `GET /api/v1/settings/crawl`.
+- Saving `ignore` schedules the dossiers left unreachable by robots.txt for a new attempt; a successful rebuild clears the robots.txt error shown on the lead page.
+- The web UI shows a warning next to the switch: robots.txt can carry the site owner's text-and-data-mining opt-out (Directive (EU) 2019/790 art. 4; French CPI art. L.122-5-3). Ignoring it is the operator's responsibility, and enabling it asks for confirmation.

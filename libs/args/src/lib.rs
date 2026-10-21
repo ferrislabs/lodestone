@@ -3,7 +3,7 @@ use common::{Config, SettingsError};
 
 use crate::{
     ats::AtsArgs, auth::AuthArgs, boamp::BoampArgs, bodacc::BodaccArgs, company::CompanyArgs,
-    contacts::ContactArgs, ct::CtArgs, database::DatabaseArgs, decp::DecpArgs,
+    contacts::ContactArgs, crawl::CrawlArgs, ct::CtArgs, database::DatabaseArgs, decp::DecpArgs,
     enrichment::EnrichmentArgs, france_travail::FranceTravailArgs, hacker_news::HackerNewsArgs,
     jobs::JobsArgs, listeners::ListenerArgs, llm::LlmArgs, log::LogArgs,
     observability::ObservabilityArgs, outbound::OutboundArgs, rate_limit::RateLimitArgs,
@@ -16,6 +16,7 @@ pub mod boamp;
 pub mod bodacc;
 pub mod company;
 pub mod contacts;
+pub mod crawl;
 pub mod ct;
 pub mod database;
 pub mod decp;
@@ -100,6 +101,9 @@ pub struct Args {
 
     #[command(flatten)]
     pub webhook: WebhookArgs,
+
+    #[command(flatten)]
+    pub crawl: CrawlArgs,
 }
 
 impl TryFrom<Args> for Config {

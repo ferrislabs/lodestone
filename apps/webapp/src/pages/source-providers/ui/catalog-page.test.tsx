@@ -63,6 +63,7 @@ function renderPage(
 		onReset: vi.fn(),
 		onOpen: vi.fn(),
 		onSelectTab: vi.fn(),
+		onOpenRules: vi.fn(),
 		...overrides,
 	}
 	render(<CatalogPage {...props} />)
@@ -75,6 +76,12 @@ describe('CatalogPage', () => {
 		expect(
 			screen.getByRole('heading', { name: 'Catalogue des sources', level: 1 }),
 		).toBeTruthy()
+	})
+
+	it('opens the collection rules from the header', () => {
+		const props = renderPage()
+		fireEvent.click(screen.getByRole('button', { name: 'Règles de collecte' }))
+		expect(props.onOpenRules).toHaveBeenCalled()
 	})
 
 	it('renders one grid of all the cards that fills the row', () => {

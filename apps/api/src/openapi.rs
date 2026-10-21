@@ -62,6 +62,8 @@ impl Modify for SecurityAddon {
         handlers::source_providers::source_provider_oauth_callback,
         handlers::source_providers::disconnect_source_provider,
         handlers::source_providers::delete_source_provider,
+        handlers::settings::get_crawl_settings,
+        handlers::settings::put_crawl_settings,
         handlers::llm::list_providers,
         handlers::llm::get_provider,
         handlers::llm::create_provider,

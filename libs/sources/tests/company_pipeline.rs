@@ -1,6 +1,7 @@
 use std::{num::NonZeroU32, sync::Arc, time::Duration};
 
-use fetch::{FetchSettings, PoliteFetcher};
+use common::RobotsPolicy;
+use fetch::{FetchSettings, PoliteFetcher, RobotsGate};
 use httpmock::{Method::GET, Mock, MockServer};
 use lodestone_core::{
     CompanyBuilder, CompanyPage, DossierBuild, DossierState, LinkRejection, NormalizedDomain,
@@ -467,4 +468,43 @@ async fn the_review_of_stored_pages_rejects_only_the_unconfirmed_ones() {
             (site.url("/legal"), LinkRejection::Status),
         ]
     );
+}
+
+#[tokio::test]
+async fn with_the_ignore_policy_a_site_refused_by_robots_txt_is_read() {
+    let site = MockServer::start_async().await;
+    let register = MockServer::start_async().await;
+    let robots = site.mock(|when, then| {
+        when.method(GET).path("/robots.txt");
+        then.status(200).body("User-agent: *\nDisallow: /\n");
+    });
+    let home = page(
+        &site,
+        "/",
+        "<a href=\"/mentions-legales\">Mentions légales</a>",
+    );
+    page(&site, "/mentions-legales", "<p>SIRET 123 456 782 00019</p>");
+    register_answer(&register);
+    let fetcher =
+        PoliteFetcher::clone(&fetcher()).with_robots_gate(RobotsGate::new(RobotsPolicy::Ignore));
+    let research = CompanyResearch::new(
+        Arc::new(fetcher),
+        CompanySettings {
+            entreprises_url: Url::parse(&register.url("/search")).unwrap().into(),
+            max_pages: 5,
+            max_rate_limit_wait: Duration::from_secs(1),
+            origin: Some(Url::parse(&site.base_url()).unwrap()),
+        },
+    );
+    let build = built(&research).await;
+    assert!(build.reachable);
+    assert!(!build.pages.is_empty());
+    assert!(
+        build
+            .failure
+            .as_deref()
+            .is_none_or(|failure| !failure.contains("robots"))
+    );
+    home.assert_hits(1);
+    robots.assert_hits(0);
 }

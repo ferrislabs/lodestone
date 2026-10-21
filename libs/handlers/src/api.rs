@@ -14,7 +14,7 @@ use crate::{
     errors::ApiError,
     exports, leads, llm, profiles, quality,
     response::{DataEnvelope, Response},
-    source_providers, sources,
+    settings, source_providers, sources,
     state::AppState,
 };
 
@@ -107,6 +107,10 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route(
             "/source-providers/{key}/disconnect",
             post(source_providers::disconnect_source_provider),
+        )
+        .route(
+            "/settings/crawl",
+            get(settings::get_crawl_settings).put(settings::put_crawl_settings),
         )
         .route("/sources", get(sources::list_sources))
         .route("/sources/{source}/run", post(sources::run_source))

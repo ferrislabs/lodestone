@@ -14,7 +14,7 @@ use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use clap::Parser;
 use common::{EncryptionKey, Secret};
 use dns::{DnsSettings, HickoryResolver};
-use fetch::{FetchSettings, PoliteFetcher};
+use fetch::{FetchSettings, PoliteFetcher, RobotsGate};
 use handlers::AppState;
 use http::{
     Method, Request, StatusCode,
@@ -191,6 +191,7 @@ impl Harness {
                 ProviderEngine::new(Arc::new(test_fetcher())).with_allow_http(true),
             ),
             ecosystem: Arc::new(ecosystem),
+            robots: RobotsGate::default(),
             cipher: Arc::new(
                 AesGcmCipher::new(&EncryptionKey::from_base64(&Secret::new(KEY)).expect("key"))
                     .expect("cipher"),

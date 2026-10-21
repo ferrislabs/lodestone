@@ -1,6 +1,7 @@
 use std::{error::Error, net::SocketAddr, num::NonZeroU32, sync::Arc, time::Duration};
 
 use api::{
+    crawl::keep_robots_policy_fresh,
     fetchers::ct_fetch_settings,
     internal_router::internal_router,
     jobs::{
@@ -100,9 +101,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
             revisit_interval: outbound_config.revisit_interval,
         },
     );
-    let fetcher = Arc::new(PoliteFetcher::new(FetchSettings::from_outbound(
-        &outbound_config,
-    ))?);
+    let robots = app_state.robots.clone();
+    let fetcher = Arc::new(
+        PoliteFetcher::new(FetchSettings::from_outbound(&outbound_config))?
+            .with_robots_gate(robots.clone()),
+    );
     let mut boamp_fetch = FetchSettings::from_outbound(&outbound_config);
     boamp_fetch.max_body_bytes = BOAMP_MAX_BODY_BYTES;
     boamp_fetch.requests_per_host_per_minute = boamp_fetch
@@ -176,7 +179,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let mut ats_fetch = FetchSettings::from_outbound(&outbound_config);
     ats_fetch.max_body_bytes = ATS_MAX_BODY_BYTES;
     let ats = AtsSource::new(
-        Arc::new(PoliteFetcher::new(ats_fetch)?),
+        Arc::new(PoliteFetcher::new(ats_fetch)?.with_robots_gate(robots.clone())),
         PgAtsTargets::new(pool.clone()),
         AtsSettings {
             batch_size: args.ats.batch_size.get(),
@@ -354,6 +357,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
 
     let usecase = app_state.usecase.clone();
+    let robots_usecase = app_state.usecase.clone();
     let ecosystem = Arc::clone(&app_state.ecosystem);
     let router = router(app_state)?;
     let internal_router = internal_router()?;
@@ -522,7 +526,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
         role_guess_listener.run(shutdown_rx.clone()),
         company_listener.run(shutdown_rx.clone()),
         inspection_listener.run(shutdown_rx.clone()),
-        qualification_listener.run(shutdown_rx),
+        qualification_listener.run(shutdown_rx.clone()),
+        keep_robots_policy_fresh(
+            robots_usecase,
+            robots,
+            args.crawl.robots_policy,
+            shutdown_rx
+        ),
     );
 
     observability.shutdown();

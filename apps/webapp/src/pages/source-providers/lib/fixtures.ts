@@ -1,4 +1,5 @@
 import type {
+	CrawlSettings,
 	ProviderDetail,
 	ProviderSummary,
 } from '#/pages/source-providers/lib/types'
@@ -75,6 +76,21 @@ export function detail(
 		last_test_message: 'Jeton obtenu et API accessible.',
 		terms_note: "Respecter les conditions d'utilisation de l'API.",
 		oauth_redirect_uri: null,
+		...overrides,
+	}
+}
+
+export function crawlSettings(
+	overrides: Partial<CrawlSettings> = {},
+): CrawlSettings {
+	return {
+		robots_policy: 'respect',
+		origin: 'environment',
+		environment_default: 'respect',
+		updated_by: null,
+		updated_by_name: null,
+		updated_at: null,
+		robots_ignored: 0,
 		...overrides,
 	}
 }

@@ -168,6 +168,16 @@ export namespace Schemas {
   };
   export type ContactRecord = { address: string; confidence: number; method: string; provenance: string };
   export type CountryDto = { code: string; name: string };
+  export type CrawlSettingsDto = {
+    environment_default: string;
+    origin: string;
+    robots_ignored: number;
+    robots_policy: string;
+    updated_at?: (string | null) | undefined;
+    updated_by?: (string | null) | undefined;
+    updated_by_name?: (string | null) | undefined;
+  };
+  export type CrawlSettingsUpdateDto = { dossiers_retried: number; settings: CrawlSettingsDto };
   export type CreateProfileRequest = { definition: Record<string, unknown>; name?: (string | null) | undefined };
   export type PricingRequest = Partial<{ input_cents_per_mtok: number | null; output_cents_per_mtok: number | null }>;
   export type ReasoningEffort = "none" | "low" | "medium" | "high";
@@ -223,6 +233,22 @@ export namespace Schemas {
       siren?: (string | null) | undefined;
       state: string;
     };
+    pagination?: (null | PaginationMetadata) | undefined;
+  };
+  export type DataEnvelope_CrawlSettingsDto = {
+    data: {
+      environment_default: string;
+      origin: string;
+      robots_ignored: number;
+      robots_policy: string;
+      updated_at?: (string | null) | undefined;
+      updated_by?: (string | null) | undefined;
+      updated_by_name?: (string | null) | undefined;
+    };
+    pagination?: (null | PaginationMetadata) | undefined;
+  };
+  export type DataEnvelope_CrawlSettingsUpdateDto = {
+    data: { dossiers_retried: number; settings: CrawlSettingsDto };
     pagination?: (null | PaginationMetadata) | undefined;
   };
   export type DraftContactDto = { address: string; confidence: number; method: string };
@@ -1029,6 +1055,7 @@ export namespace Schemas {
     ok: boolean;
   };
   export type TierDto = { provider_id?: (string | null) | undefined; tier: string };
+  export type UpdateCrawlSettingsRequest = { robots_policy: string };
   export type UpdateProfileRequest = { definition: Record<string, unknown> };
   export type UpdateProviderRequest = Partial<{
     api_key: string | null;
@@ -1535,6 +1562,22 @@ export namespace Endpoints {
     parameters: never;
     responses: { 202: Schemas.DataEnvelope_CalibrationRunDto; 401: unknown; 403: unknown };
   };
+  export type get_Get_crawl_settings = {
+    method: "GET";
+    path: "/api/v1/settings/crawl";
+    requestFormat: "json";
+    parameters: never;
+    responses: { 200: Schemas.DataEnvelope_CrawlSettingsDto; 401: unknown; 403: unknown };
+  };
+  export type put_Put_crawl_settings = {
+    method: "PUT";
+    path: "/api/v1/settings/crawl";
+    requestFormat: "json";
+    parameters: {
+      body: Schemas.UpdateCrawlSettingsRequest;
+    };
+    responses: { 200: Schemas.DataEnvelope_CrawlSettingsUpdateDto; 401: unknown; 403: unknown; 422: unknown };
+  };
   export type get_List_source_providers = {
     method: "GET";
     path: "/api/v1/source-providers";
@@ -1654,6 +1697,7 @@ export type EndpointByMethod = {
     "/api/v1/profiles/{profile_id}/revisions/{number}": Endpoints.get_Get_revision;
     "/api/v1/quality": Endpoints.get_Quality;
     "/api/v1/quality/calibration": Endpoints.get_Calibration;
+    "/api/v1/settings/crawl": Endpoints.get_Get_crawl_settings;
     "/api/v1/source-providers": Endpoints.get_List_source_providers;
     "/api/v1/source-providers/oauth/callback": Endpoints.get_Source_provider_oauth_callback;
     "/api/v1/source-providers/{key}": Endpoints.get_Get_source_provider;
@@ -1695,6 +1739,7 @@ export type EndpointByMethod = {
   put: {
     "/api/v1/llm/tiers/{tier}": Endpoints.put_Assign_tier;
     "/api/v1/profiles/{profile_id}": Endpoints.put_Update_profile;
+    "/api/v1/settings/crawl": Endpoints.put_Put_crawl_settings;
     "/api/v1/source-providers/{key}": Endpoints.put_Put_source_provider;
   };
 };
