@@ -14,7 +14,7 @@ fn agent_of(profile: &ActiveProfile, kind: SourceName) -> Agent {
         .definition()
         .agents
         .iter()
-        .find(|agent| agent.source.source_name() == kind)
+        .find(|agent| agent.serves(kind))
         .cloned()
         .unwrap()
 }
@@ -304,7 +304,7 @@ fn observe(source: &TestSource, item: &ProbedHost, profile: &ActiveProfile) -> V
     let agents = &profile.revision.definition.definition().agents;
     let agent = agents
         .iter()
-        .find(|agent| agent.source.source_name() == SourceName::HttpProbe)
+        .find(|agent| agent.serves(SourceName::HttpProbe))
         .unwrap_or(&agents[0]);
     source.evaluate(item, profile, agent)
 }
@@ -989,7 +989,7 @@ fn agent_named(profile: &ActiveProfile, id: &str) -> Agent {
         .definition()
         .agents
         .iter()
-        .find(|agent| agent.id.as_str() == id)
+        .find(|agent| agent.id().as_str() == id)
         .cloned()
         .unwrap()
 }

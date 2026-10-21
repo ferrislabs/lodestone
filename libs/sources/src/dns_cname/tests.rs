@@ -27,7 +27,7 @@ fn agent_of(profile: &ActiveProfile, kind: SourceName) -> Agent {
         .definition()
         .agents
         .iter()
-        .find(|agent| agent.source.source_name() == kind)
+        .find(|agent| agent.serves(kind))
         .cloned()
         .unwrap()
 }

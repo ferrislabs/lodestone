@@ -102,7 +102,7 @@ function Harness({
 function addAgent(kind: AgentKind) {
 	fireEvent.click(screen.getByRole('button', { name: 'Ajouter un agent' }))
 	fireEvent.click(
-		within(screen.getByLabelText('Choisir une source')).getByText(
+		within(screen.getByLabelText("Choisir un type d'agent")).getByText(
 			KIND_META[kind].label,
 		),
 	)
@@ -134,14 +134,14 @@ describe('definition tabs', () => {
 	})
 
 	it('badges the agents tab for a server problem inside an agent', () => {
-		const first = newAgent('ats', [])
-		const second = newAgent('ats', [first])
+		const first = newAgent('search', [])
+		const second = newAgent('search', [first])
 		render(
 			<Harness
 				initial={{ ...blank(), agents: [first, second] }}
 				problems={[
 					{
-						path: 'agents[1].source.keywords[0]',
+						path: 'agents[1].keywords[0]',
 						message: 'Ne doit pas être vide',
 					},
 				]}
@@ -155,15 +155,14 @@ describe('definition tabs', () => {
 	})
 
 	it('shows the problem under the keyword field on the agents tab', () => {
-		const agent = newAgent('ats', [])
-		const source = { ...(agent.source as JsonObject), keywords: [''] }
+		const agent = newAgent('search', [])
 		render(
 			<Harness
 				startTab="sourcing"
-				initial={{ ...blank(), agents: [{ ...agent, source }] }}
+				initial={{ ...blank(), agents: [{ ...agent, keywords: [''] }] }}
 				problems={[
 					{
-						path: 'agents[0].source.keywords[0]',
+						path: 'agents[0].keywords[0]',
 						message: 'Ne doit pas être vide',
 					},
 				]}
@@ -185,7 +184,7 @@ describe('definition tabs', () => {
 			),
 		).toBeTruthy()
 		expect(screen.queryByRole('button', { name: 'Créer le profil' })).toBeNull()
-		addAgent('boamp')
+		addAgent('search')
 		closeSheet()
 		expect(
 			screen
@@ -232,24 +231,27 @@ describe('definition tabs', () => {
 
 	it('suffixes ids of agents of the same kind', () => {
 		render(<Harness startTab="sourcing" />)
-		addAgent('ats')
+		addAgent('search')
 		closeSheet()
-		addAgent('ats')
+		addAgent('search')
 		expect(sheet().getByLabelText('Identifiant')).toHaveProperty(
 			'value',
-			'ats-2',
+			'recherche-2',
 		)
 		closeSheet()
 		fireEvent.click(
 			screen.getAllByRole('button', { name: /Modifier/ })[0] as HTMLElement,
 		)
-		expect(sheet().getByLabelText('Identifiant')).toHaveProperty('value', 'ats')
+		expect(sheet().getByLabelText('Identifiant')).toHaveProperty(
+			'value',
+			'recherche',
+		)
 	})
 
 	it('lays agents out as grid cells with the add card last', () => {
-		const first = newAgent('ats', [])
-		const second = newAgent('ats', [first])
-		const third = newAgent('ats', [first, second])
+		const first = newAgent('search', [])
+		const second = newAgent('search', [first])
+		const third = newAgent('search', [first, second])
 		render(
 			<Harness
 				startTab="sourcing"
@@ -274,13 +276,13 @@ describe('definition tabs', () => {
 
 	it('follows the name with the id until the id is edited', () => {
 		render(<Harness startTab="sourcing" />)
-		addAgent('ats')
+		addAgent('search')
 		fireEvent.change(screen.getByLabelText('Nom'), {
-			target: { value: 'ATS anglais' },
+			target: { value: 'Recherche anglais' },
 		})
 		expect(screen.getByLabelText('Identifiant')).toHaveProperty(
 			'value',
-			'ats-anglais',
+			'recherche-anglais',
 		)
 		fireEvent.change(screen.getByLabelText('Identifiant'), {
 			target: { value: 'mine' },
@@ -291,7 +293,7 @@ describe('definition tabs', () => {
 
 	it('removes an agent after an inline confirmation', () => {
 		render(<Harness startTab="sourcing" />)
-		addAgent('ats')
+		addAgent('search')
 		closeSheet()
 		fireEvent.click(screen.getByRole('button', { name: /Supprimer l'agent/ }))
 		fireEvent.click(screen.getByRole('button', { name: 'Conserver' }))
@@ -305,7 +307,7 @@ describe('definition tabs', () => {
 	})
 
 	it('opens the sheet with the agent name and closes it on Escape or Fermer', () => {
-		const agent = { ...newAgent('ats', []), name: 'ATS français' }
+		const agent = { ...newAgent('search', []), name: 'ATS français' }
 		render(
 			<Harness startTab="sourcing" initial={{ ...blank(), agents: [agent] }} />,
 		)
@@ -318,7 +320,7 @@ describe('definition tabs', () => {
 			'ATS français',
 		)
 		expect(within(dialog).getByRole('heading').textContent).toContain(
-			KIND_META.ats.label,
+			KIND_META.search.label,
 		)
 		expect(dialog.className).toContain('sm:max-w-2xl')
 		closeSheet()
@@ -335,7 +337,7 @@ describe('definition tabs', () => {
 
 	it('keeps the identifier behind a collapsed advanced section', () => {
 		render(<Harness startTab="sourcing" />)
-		addAgent('ats')
+		addAgent('search')
 		const advanced = sheet().getByText('Avancé').closest('details')
 		expect(advanced?.hasAttribute('open')).toBe(false)
 		expect(advanced?.contains(sheet().getByLabelText('Identifiant'))).toBe(true)
@@ -343,7 +345,7 @@ describe('definition tabs', () => {
 
 	it('lays a keyword agent out with a 1 to 5 choice and two tag inputs', () => {
 		render(<Harness startTab="sourcing" />)
-		addAgent('boamp')
+		addAgent('search')
 		const scoped = sheet()
 		const keywords = scoped.getByLabelText('Mots-clés')
 		const exclusions = scoped.getByLabelText('Exclusions')
@@ -418,7 +420,7 @@ describe('definition tabs', () => {
 	it('shows the save bar only when dirty and cancel resets after a confirmation', () => {
 		render(<Harness startTab="sourcing" />)
 		expect(screen.queryByTestId('save-bar')).toBeNull()
-		addAgent('ats')
+		addAgent('search')
 		closeSheet()
 		const bar = within(screen.getByTestId('save-bar'))
 		expect(bar.getByText('Modifications non enregistrées')).toBeTruthy()

@@ -28,6 +28,7 @@ import { QualificationEditor } from '#/pages/profiles/ui/qualification-editor'
 import { QualificationHelp } from '#/pages/profiles/ui/qualification-help'
 import { ScoringAgentsEditor } from '#/pages/profiles/ui/scoring-agents-editor'
 import { ScoringHelp } from '#/pages/profiles/ui/scoring-help'
+import type { ProviderSummary } from '#/pages/source-providers/lib/types'
 import type { SourceTrigger } from '#/pages/sources/feature/use-source-trigger'
 import type { ListenerSummary } from '#/pages/sources/lib/types'
 
@@ -48,10 +49,14 @@ interface DefinitionTabContentProps {
 	listeners?: Readonly<Record<string, ListenerSummary>>
 	now?: number
 	providers?: readonly ProviderOption[]
+	catalog?: readonly ProviderSummary[]
+	onOpenProvider?: (key: string) => void
 	calibration?: CalibrationStates
 }
 
 const NO_PROVIDERS: readonly ProviderOption[] = []
+const NO_CATALOG: readonly ProviderSummary[] = []
+const NO_OPEN = () => undefined
 
 function section(key: string) {
 	return resolve(PROFILE_SCHEMA, PROFILE_SCHEMA.properties?.[key] ?? {})
@@ -74,9 +79,11 @@ export function DefinitionTabContent({
 	listeners,
 	now,
 	providers = NO_PROVIDERS,
+	catalog = NO_CATALOG,
+	onOpenProvider = NO_OPEN,
 	calibration = NO_CALIBRATION_STATES,
 }: DefinitionTabContentProps) {
-	const agents = useAgentsUi(value, onChange)
+	const agents = useAgentsUi(value, onChange, catalog)
 	const qualification = useQualificationUi(value, onChange)
 	const scoringAgents = useScoringAgentsUi(value, onChange)
 	const [helpCollapsed, setHelpCollapsed] = useState(false)
@@ -180,6 +187,13 @@ export function DefinitionTabContent({
 							editing={agents.editing}
 							confirmingRemove={agents.confirmingRemove}
 							picking={agents.picking}
+							search={{
+								catalog,
+								onProvider: agents.setProvider,
+								onRemote: agents.setRemote,
+								onContract: agents.setContract,
+								onOpenProvider,
+							}}
 							sourceTrigger={sourceTrigger}
 							listeners={listeners}
 							now={now}

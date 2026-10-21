@@ -142,7 +142,7 @@ pub use domain::{
     suppression::{
         SuppressionEntry, SuppressionId, SuppressionTarget, ports::SuppressionRepository,
     },
-    triage::{Candidate, Route, route},
+    triage::{Candidate, Route, countries::alpha3_of, passes_filters, route},
     user::commands::CreateUserCommand,
     values::{EmailAddress, Provenance, SignalKind, SourceName, UnitInterval, ValueError},
 };

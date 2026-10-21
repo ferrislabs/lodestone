@@ -17,6 +17,7 @@ export function ConnectionPanel({
 	onTest,
 }: ConnectionPanelProps) {
 	const { summary } = detail
+	const automatic = summary.auth_kind === 'none'
 	return (
 		<section
 			aria-label="Connexion"
@@ -46,16 +47,23 @@ export function ConnectionPanel({
 					{detail.last_test_message}
 				</output>
 			) : null}
-			<div>
-				<Button
-					type="button"
-					variant="outline"
-					disabled={!canTest || testing}
-					onClick={onTest}
-				>
-					{testing ? 'Test en cours…' : 'Tester la connexion'}
-				</Button>
-			</div>
+			{automatic && summary.status === 'failing' ? (
+				<p className="text-xs text-muted-foreground">
+					Testé automatiquement au démarrage et à chaque enregistrement.
+				</p>
+			) : null}
+			{automatic ? null : (
+				<div>
+					<Button
+						type="button"
+						variant="outline"
+						disabled={!canTest || testing}
+						onClick={onTest}
+					>
+						{testing ? 'Test en cours…' : 'Tester la connexion'}
+					</Button>
+				</div>
+			)}
 		</section>
 	)
 }

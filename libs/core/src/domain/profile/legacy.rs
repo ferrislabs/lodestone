@@ -3,14 +3,16 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, de::IgnoredAny};
 use uuid::Uuid;
 
-use super::definition::{
-    Agent, AgentId, AgentSource, Aggregator, CertificateTransparency, ContactRanking,
-    DEFAULT_EXCLUSION_THRESHOLD, DEFAULT_SAMPLES, DEFAULT_SAMPLING_TEMPERATURE,
-    DEFAULT_SCORING_SAMPLES, DnsCname, Escalation, EvidenceSettings, EvidenceWeights, HttpProbe,
-    Identity, KeywordSource, Language, MAX_DESCRIPTION_CHARS, MAX_PROMPT_CHARS,
-    PROFILE_SCHEMA_VERSION, ProfileDefinition, QualificationAgent, Question, QuestionOption,
-    ScoringAgent, VerdictThresholds, default_exclusion_threshold, default_half_life_days,
-    default_influence, default_samples, default_sampling_temperature,
+use super::{
+    definition::{
+        AgentId, Aggregator, CertificateTransparency, ContactRanking, DEFAULT_EXCLUSION_THRESHOLD,
+        DEFAULT_SAMPLES, DEFAULT_SAMPLING_TEMPERATURE, DEFAULT_SCORING_SAMPLES, DnsCname,
+        Escalation, EvidenceSettings, EvidenceWeights, HttpProbe, Identity, Language,
+        MAX_DESCRIPTION_CHARS, MAX_PROMPT_CHARS, ProfileDefinition, QualificationAgent, Question,
+        QuestionOption, ScoringAgent, VerdictThresholds, default_exclusion_threshold,
+        default_half_life_days, default_influence, default_samples, default_sampling_temperature,
+    },
+    v15::{AgentSourceV15, AgentV15, KeywordSourceV15, ProfileDefinitionV15},
 };
 
 #[derive(Debug, Deserialize)]
@@ -27,7 +29,7 @@ struct AgentV13 {
     name: String,
     #[serde(default = "default_enabled")]
     enabled: bool,
-    source: AgentSource,
+    source: AgentSourceV15,
     #[serde(default)]
     llm: Option<AgentLlmV13>,
 }
@@ -809,18 +811,18 @@ struct SourcesV1 {
     #[serde(default)]
     dns_cname: Option<DnsCname>,
     #[serde(default)]
-    boamp: Option<KeywordSource>,
+    boamp: Option<KeywordSourceV15>,
     #[serde(default)]
-    decp: Option<KeywordSource>,
+    decp: Option<KeywordSourceV15>,
     #[serde(default)]
-    ted: Option<KeywordSource>,
+    ted: Option<KeywordSourceV15>,
     #[serde(default)]
-    france_travail: Option<KeywordSource>,
+    france_travail: Option<KeywordSourceV15>,
     #[serde(default)]
-    ats: Option<KeywordSource>,
+    ats: Option<KeywordSourceV15>,
 }
 
-fn agent(id: &str, name: &str, source: AgentSource) -> AgentV13 {
+fn agent(id: &str, name: &str, source: AgentSourceV15) -> AgentV13 {
     AgentV13 {
         id: AgentId::new(id),
         name: name.to_owned(),
@@ -837,41 +839,41 @@ impl SourcesV1 {
             agents.push(agent(
                 "certificate-transparency",
                 "Certificate transparency",
-                AgentSource::CertificateTransparency(rules),
+                AgentSourceV15::CertificateTransparency(rules),
             ));
         }
         if let Some(rules) = self.http_probe {
             agents.push(agent(
                 "http-probe",
                 "HTTP probe",
-                AgentSource::HttpProbe(rules),
+                AgentSourceV15::HttpProbe(rules),
             ));
         }
         if let Some(rules) = self.dns_cname {
             agents.push(agent(
                 "dns-cname",
                 "DNS CNAME",
-                AgentSource::DnsCname(rules),
+                AgentSourceV15::DnsCname(rules),
             ));
         }
         if let Some(rules) = self.boamp {
-            agents.push(agent("boamp", "BOAMP", AgentSource::Boamp(rules)));
+            agents.push(agent("boamp", "BOAMP", AgentSourceV15::Boamp(rules)));
         }
         if let Some(rules) = self.decp {
-            agents.push(agent("decp", "DECP", AgentSource::Decp(rules)));
+            agents.push(agent("decp", "DECP", AgentSourceV15::Decp(rules)));
         }
         if let Some(rules) = self.ted {
-            agents.push(agent("ted", "TED", AgentSource::Ted(rules)));
+            agents.push(agent("ted", "TED", AgentSourceV15::Ted(rules)));
         }
         if let Some(rules) = self.france_travail {
             agents.push(agent(
                 "france-travail",
                 "France Travail",
-                AgentSource::FranceTravail(rules),
+                AgentSourceV15::FranceTravail(rules),
             ));
         }
         if let Some(rules) = self.ats {
-            agents.push(agent("ats", "ATS", AgentSource::Ats(rules)));
+            agents.push(agent("ats", "ATS", AgentSourceV15::Ats(rules)));
         }
         agents
     }
@@ -1113,13 +1115,13 @@ impl ProfileDefinitionV13 {
         for agent in &mut scoring_agents {
             agent.learned_calibration = calibration.learned;
         }
-        ProfileDefinition {
-            schema_version: PROFILE_SCHEMA_VERSION,
+        ProfileDefinitionV15 {
+            _schema_version: 15,
             identity,
             language: llm.language,
             agents: agents
                 .into_iter()
-                .map(|agent| Agent {
+                .map(|agent| AgentV15 {
                     id: agent.id,
                     name: agent.name,
                     enabled: agent.enabled,
@@ -1134,6 +1136,7 @@ impl ProfileDefinitionV13 {
             evidence,
             contact_ranking,
         }
+        .upgrade()
     }
 }
 
@@ -1145,7 +1148,7 @@ pub(super) struct ProfileDefinitionV14 {
     identity: Identity,
     #[serde(default)]
     language: Language,
-    agents: Vec<Agent>,
+    agents: Vec<AgentV15>,
     qualification_agents: Vec<QualificationAgentV14>,
     #[serde(default)]
     scoring_agents: Vec<ScoringAgent>,
@@ -1161,8 +1164,8 @@ pub(super) struct ProfileDefinitionV14 {
 
 impl ProfileDefinitionV14 {
     pub(super) fn upgrade(self) -> ProfileDefinition {
-        ProfileDefinition {
-            schema_version: PROFILE_SCHEMA_VERSION,
+        ProfileDefinitionV15 {
+            _schema_version: 15,
             identity: self.identity,
             language: self.language,
             agents: self.agents,
@@ -1178,5 +1181,6 @@ impl ProfileDefinitionV14 {
             evidence: self.evidence,
             contact_ranking: self.contact_ranking,
         }
+        .upgrade()
     }
 }

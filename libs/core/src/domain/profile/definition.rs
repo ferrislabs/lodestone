@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 use crate::domain::values::SourceName;
 
-pub const PROFILE_SCHEMA_VERSION: u32 = 15;
+pub const PROFILE_SCHEMA_VERSION: u32 = 16;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -15,7 +15,7 @@ pub const PROFILE_SCHEMA_VERSION: u32 = 15;
     description = "Describes one market: what is sold, which agents scan which sources, which qualification agents judge a lead, which scoring agents decide its score and verdict, how an aggregator sums it up and which contacts to prefer."
 )]
 pub struct ProfileDefinition {
-    #[schemars(description = "Profile format version. Must be 15.")]
+    #[schemars(description = "Profile format version. Must be 16.")]
     pub schema_version: u32,
     pub identity: Identity,
     #[serde(default)]
@@ -595,21 +595,73 @@ impl Default for EvidenceSettings {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[serde(tag = "type", rename_all = "snake_case")]
 #[schemars(
     title = "Agent",
-    description = "Searches one source with its own settings."
+    description = "A detection agent, selected by type. A search agent looks for keywords across catalog providers. A signal agent reads one technical signal provider with its own settings."
 )]
-pub struct Agent {
-    #[schemars(description = "Unique slug in the profile, for example ats-en.")]
-    pub id: AgentId,
-    #[schemars(description = "Display name.")]
-    pub name: String,
-    #[serde(default = "default_enabled")]
-    #[schemars(description = "A disabled agent is kept but not run.")]
-    pub enabled: bool,
-    #[schemars(description = "The source searched and its settings.")]
-    pub source: AgentSource,
+pub enum Agent {
+    #[schemars(title = "Search agent")]
+    Search(SearchAgent),
+    #[schemars(title = "Signal agent")]
+    Signal(SignalAgent),
+}
+
+impl Agent {
+    pub fn id(&self) -> &AgentId {
+        match self {
+            Self::Search(agent) => &agent.id,
+            Self::Signal(agent) => &agent.id,
+        }
+    }
+
+    pub fn name(&self) -> &str {
+        match self {
+            Self::Search(agent) => &agent.name,
+            Self::Signal(agent) => &agent.name,
+        }
+    }
+
+    pub fn enabled(&self) -> bool {
+        match self {
+            Self::Search(agent) => agent.enabled,
+            Self::Signal(agent) => agent.enabled,
+        }
+    }
+
+    pub fn as_search(&self) -> Option<&SearchAgent> {
+        match self {
+            Self::Search(agent) => Some(agent),
+            Self::Signal(_) => None,
+        }
+    }
+
+    pub fn as_signal(&self) -> Option<&SignalAgent> {
+        match self {
+            Self::Search(_) => None,
+            Self::Signal(agent) => Some(agent),
+        }
+    }
+
+    pub fn certificate_transparency(&self) -> Option<&CertificateTransparency> {
+        self.as_signal()
+            .and_then(|agent| agent.source.certificate_transparency())
+    }
+
+    pub fn dns_cname(&self) -> Option<&DnsCname> {
+        self.as_signal().and_then(|agent| agent.source.dns_cname())
+    }
+
+    pub fn http_probe(&self) -> Option<&HttpProbe> {
+        self.as_signal().and_then(|agent| agent.source.http_probe())
+    }
+
+    pub fn serves(&self, source: SourceName) -> bool {
+        match self {
+            Self::Search(agent) => agent.searches(source.as_str()),
+            Self::Signal(agent) => agent.source.source_name() == source,
+        }
+    }
 }
 
 fn default_enabled() -> bool {
@@ -617,42 +669,181 @@ fn default_enabled() -> bool {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(tag = "kind", rename_all = "snake_case")]
+#[serde(deny_unknown_fields)]
 #[schemars(
-    title = "Agent source",
-    description = "The source an agent searches, selected by kind."
+    title = "Search agent",
+    description = "Looks for keywords across one or several catalog providers. Keywords, exclusions and filters are defined once and every provider translates them into its own API, or applies them after collection when it cannot filter natively."
 )]
-pub enum AgentSource {
+pub struct SearchAgent {
+    #[schemars(description = "Unique slug in the profile, for example marches-publics.")]
+    pub id: AgentId,
+    #[schemars(description = "Display name.")]
+    pub name: String,
+    #[serde(default = "default_enabled")]
+    #[schemars(description = "A disabled agent is kept but not run.")]
+    pub enabled: bool,
+    #[schemars(
+        length(min = 1),
+        description = "Catalog provider keys searched by this agent, for example boamp, decp, ted, france_travail or ats. Each one must exist in the catalog and support keyword search. A provider that is not ready is skipped at run time."
+    )]
+    pub providers: Vec<String>,
+    #[schemars(description = "Keywords to search for.")]
+    pub keywords: Vec<String>,
+    #[serde(default)]
+    #[schemars(description = "Keywords that send a candidate to LLM triage when present.")]
+    pub exclusions: Vec<String>,
+    #[serde(default)]
+    pub filters: SearchFilters,
+    #[serde(default = "default_accept_min_keywords")]
+    #[schemars(
+        description = "Distinct keywords needed to accept a candidate without the LLM. Fewer, or any exclusion, sends it to LLM triage."
+    )]
+    pub accept_min_keywords: u8,
+}
+
+pub(super) fn default_accept_min_keywords() -> u8 {
+    2
+}
+
+impl SearchAgent {
+    pub fn new(
+        id: AgentId,
+        name: impl Into<String>,
+        providers: &[&str],
+        keywords: &[&str],
+        exclusions: &[&str],
+    ) -> Self {
+        Self {
+            id,
+            name: name.into(),
+            enabled: true,
+            providers: providers.iter().map(|key| (*key).to_owned()).collect(),
+            keywords: keywords.iter().map(|word| (*word).to_owned()).collect(),
+            exclusions: exclusions.iter().map(|word| (*word).to_owned()).collect(),
+            filters: SearchFilters::default(),
+            accept_min_keywords: default_accept_min_keywords(),
+        }
+    }
+
+    pub fn searches(&self, provider: &str) -> bool {
+        self.providers.iter().any(|key| key == provider)
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(
+    title = "Search filters",
+    description = "Criteria shared by every provider of a search agent. A provider filters natively what its API supports and the rest is applied on the candidate text after collection."
+)]
+pub struct SearchFilters {
+    #[serde(default)]
+    #[schemars(description = "Remote work requirement. Default any.")]
+    pub remote: RemoteFilter,
+    #[serde(default)]
+    #[schemars(
+        description = "ISO 3166-1 alpha-2 country codes, uppercase, for example FR. Empty means every country."
+    )]
+    pub countries: Vec<CountryCode>,
+    #[serde(default)]
+    #[schemars(description = "Accepted contract types. Empty, or any, means every contract type.")]
+    pub contracts: Vec<ContractFilter>,
+}
+
+impl SearchFilters {
+    pub fn is_open(&self) -> bool {
+        self.remote == RemoteFilter::Any
+            && self.countries.is_empty()
+            && self
+                .contracts
+                .iter()
+                .all(|kind| *kind == ContractFilter::Any)
+    }
+
+    pub fn wants_any_contract(&self) -> bool {
+        self.contracts.is_empty() || self.contracts.contains(&ContractFilter::Any)
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+#[schemars(
+    title = "Remote filter",
+    description = "any keeps every candidate, full_remote keeps fully remote ones, remote_or_hybrid keeps remote and hybrid ones."
+)]
+pub enum RemoteFilter {
+    #[default]
+    Any,
+    FullRemote,
+    RemoteOrHybrid,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+#[schemars(title = "Contract filter")]
+pub enum ContractFilter {
+    Freelance,
+    Employee,
+    PublicContract,
+    Any,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(transparent)]
+#[schemars(
+    title = "Country code",
+    description = "ISO 3166-1 alpha-2 country code, uppercase."
+)]
+pub struct CountryCode(#[schemars(length(min = 2, max = 2), regex(pattern = "^[A-Z]{2}$"))] String);
+
+impl CountryCode {
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn is_valid(&self) -> bool {
+        self.0.len() == 2 && self.0.bytes().all(|byte| byte.is_ascii_uppercase())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(
+    title = "Signal agent",
+    description = "Reads one technical signal provider with its own settings. The provider is its catalog key."
+)]
+pub struct SignalAgent {
+    #[schemars(description = "Unique slug in the profile, for example certificate-transparency.")]
+    pub id: AgentId,
+    #[schemars(description = "Display name.")]
+    pub name: String,
+    #[serde(default = "default_enabled")]
+    #[schemars(description = "A disabled agent is kept but not run.")]
+    pub enabled: bool,
+    #[schemars(description = "The signal provider and its settings.")]
+    pub source: SignalSource,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "provider", rename_all = "snake_case")]
+#[schemars(
+    title = "Signal source",
+    description = "The signal provider an agent reads, selected by its catalog key."
+)]
+pub enum SignalSource {
     #[schemars(title = "Certificate transparency")]
     CertificateTransparency(CertificateTransparency),
     #[schemars(title = "DNS CNAME")]
     DnsCname(DnsCname),
     #[schemars(title = "HTTP probe")]
     HttpProbe(HttpProbe),
-    #[schemars(title = "BOAMP")]
-    Boamp(KeywordSource),
-    #[schemars(title = "DECP")]
-    Decp(KeywordSource),
-    #[schemars(title = "TED")]
-    Ted(KeywordSource),
-    #[schemars(title = "France Travail")]
-    FranceTravail(KeywordSource),
-    #[schemars(title = "ATS")]
-    Ats(KeywordSource),
 }
 
-impl AgentSource {
-    pub fn keyword_rules(&self) -> Option<&KeywordSource> {
-        match self {
-            Self::Boamp(rules)
-            | Self::Decp(rules)
-            | Self::Ted(rules)
-            | Self::FranceTravail(rules)
-            | Self::Ats(rules) => Some(rules),
-            _ => None,
-        }
-    }
-
+impl SignalSource {
     pub fn certificate_transparency(&self) -> Option<&CertificateTransparency> {
         match self {
             Self::CertificateTransparency(rules) => Some(rules),
@@ -679,11 +870,6 @@ impl AgentSource {
             Self::CertificateTransparency(_) => SourceName::CertificateTransparency,
             Self::DnsCname(_) => SourceName::DnsCname,
             Self::HttpProbe(_) => SourceName::HttpProbe,
-            Self::Boamp(_) => SourceName::Boamp,
-            Self::Decp(_) => SourceName::Decp,
-            Self::Ted(_) => SourceName::Ted,
-            Self::FranceTravail(_) => SourceName::FranceTravail,
-            Self::Ats(_) => SourceName::Ats,
         }
     }
 }
@@ -836,29 +1022,6 @@ pub struct CnamePattern {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[schemars(
-    title = "Keyword source",
-    description = "Source searched with keywords and exclusions."
-)]
-pub struct KeywordSource {
-    #[schemars(description = "Keywords to search for.")]
-    pub keywords: Vec<String>,
-    #[serde(default)]
-    #[schemars(description = "Keywords that send a candidate to LLM triage when present.")]
-    pub exclusions: Vec<String>,
-    #[serde(default = "default_accept_min_keywords")]
-    #[schemars(
-        description = "Distinct keywords needed to accept a candidate without the LLM. Fewer, or any exclusion, sends it to LLM triage."
-    )]
-    pub accept_min_keywords: u8,
-}
-
-fn default_accept_min_keywords() -> u8 {
-    2
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-#[schemars(
     title = "Contact ranking",
     description = "Preferred email local parts, most preferred first."
 )]
@@ -895,14 +1058,20 @@ impl ProfileDefinition {
     pub fn enabled_agents(&self, source: SourceName) -> impl Iterator<Item = &Agent> {
         self.agents
             .iter()
-            .filter(move |agent| agent.enabled && agent.source.source_name() == source)
+            .filter(move |agent| agent.enabled() && agent.serves(source))
     }
 
-    pub fn enabled_keyword_rules(
-        &self,
-        source: SourceName,
-    ) -> impl Iterator<Item = &KeywordSource> {
-        self.enabled_agents(source)
-            .filter_map(|agent| agent.source.keyword_rules())
+    pub fn enabled_search_agents(&self, source: SourceName) -> impl Iterator<Item = &SearchAgent> {
+        self.agents
+            .iter()
+            .filter_map(Agent::as_search)
+            .filter(move |agent| agent.enabled && agent.searches(source.as_str()))
+    }
+
+    pub fn enabled_signal_agents(&self, source: SourceName) -> impl Iterator<Item = &SignalAgent> {
+        self.agents
+            .iter()
+            .filter_map(Agent::as_signal)
+            .filter(move |agent| agent.enabled && agent.source.source_name() == source)
     }
 }

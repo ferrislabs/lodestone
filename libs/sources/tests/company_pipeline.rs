@@ -32,7 +32,7 @@ fn research(
     CompanyResearch::new(
         fetcher(),
         CompanySettings {
-            entreprises_url: Url::parse(&register.url("/search")).unwrap(),
+            entreprises_url: Url::parse(&register.url("/search")).unwrap().into(),
             max_pages,
             max_rate_limit_wait: Duration::from_secs(1),
             origin: Some(Url::parse(&site.base_url()).unwrap()),

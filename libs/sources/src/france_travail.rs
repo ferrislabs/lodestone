@@ -1,18 +1,23 @@
-use std::{collections::HashSet, sync::Arc, time::Duration as StdDuration};
+use std::{collections::BTreeSet, collections::HashSet, sync::Arc, time::Duration as StdDuration};
 
 use chrono::{DateTime, Utc};
 use common::Secret;
 use fetch::{ApiFetcher, ApiRequest};
 use lodestone_core::{
     ActiveProfile, Candidate, FetchError, FetchResponse, Provenance, SignalKind, SourceError,
-    SourceName, triage::CandidateSource,
+    SourceName,
+    definition::{ContractFilter, SearchAgent},
+    triage::CandidateSource,
 };
 use serde_json::{Value, json};
 use tokio::time::sleep;
 use tracing::{debug, info};
 use url::Url;
 
-use crate::buyer_domain::{domain_of_email, domain_of_url};
+use crate::{
+    buyer_domain::{domain_of_email, domain_of_url},
+    search::query_groups,
+};
 
 pub const PAGE_SIZE: usize = 150;
 pub const LAST_INDEX_CAP: usize = 3149;
@@ -81,24 +86,45 @@ pub fn closest_published_since(days: u32) -> u32 {
         .unwrap_or(7)
 }
 
-pub fn query_keywords(profiles: &[ActiveProfile]) -> Vec<String> {
-    let mut seen: HashSet<String> = HashSet::new();
-    let mut queries = Vec::new();
-    for rules in profiles.iter().flat_map(|active| {
-        active
-            .revision
-            .definition
-            .definition()
-            .enabled_keyword_rules(SourceName::FranceTravail)
-    }) {
-        for keyword in &rules.keywords {
-            let keyword = keyword.trim();
-            if !keyword.is_empty() && seen.insert(keyword.to_lowercase()) {
-                queries.push(keyword.to_owned());
-            }
+const FREELANCE_CODES: [&str; 2] = ["LIB", "FRA"];
+const EMPLOYEE_CODES: [&str; 4] = ["CDI", "CDD", "MIS", "SAI"];
+
+pub fn native_contract(agent: &SearchAgent) -> Option<String> {
+    if agent.filters.wants_any_contract() {
+        return None;
+    }
+    let mut codes: BTreeSet<&str> = BTreeSet::new();
+    for contract in &agent.filters.contracts {
+        match contract {
+            ContractFilter::Freelance => codes.extend(FREELANCE_CODES),
+            ContractFilter::Employee => codes.extend(EMPLOYEE_CODES),
+            ContractFilter::PublicContract | ContractFilter::Any => {}
         }
     }
-    queries
+    if codes.is_empty() {
+        None
+    } else {
+        Some(codes.into_iter().collect::<Vec<_>>().join(","))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Query {
+    pub keyword: String,
+    pub contract: Option<String>,
+}
+
+pub fn query_plan(profiles: &[ActiveProfile]) -> Vec<Query> {
+    query_groups(profiles, SourceName::FranceTravail, native_contract)
+        .into_iter()
+        .flat_map(|group| {
+            let contract = group.native;
+            group.keywords.into_iter().map(move |keyword| Query {
+                keyword,
+                contract: contract.clone(),
+            })
+        })
+        .collect()
 }
 
 pub fn content_range_total(header: &str) -> Option<u64> {
@@ -207,7 +233,7 @@ impl<F: ApiFetcher, A: AccessProvider> FranceTravailSource<F, A> {
         }
     }
 
-    fn search_url(&self, base: &Url, keyword: &str, first: usize) -> Result<Url, SourceError> {
+    fn search_url(&self, base: &Url, query: &Query, first: usize) -> Result<Url, SourceError> {
         let mut url = base.clone();
         url.path_segments_mut()
             .map_err(|_| upstream("france travail api base url cannot carry a path"))?
@@ -216,22 +242,25 @@ impl<F: ApiFetcher, A: AccessProvider> FranceTravailSource<F, A> {
             .push("search");
         let last = first + PAGE_SIZE - 1;
         url.query_pairs_mut()
-            .append_pair("motsCles", keyword)
+            .append_pair("motsCles", &query.keyword)
             .append_pair("range", &format!("{first}-{last}"))
             .append_pair(
                 "publieeDepuis",
                 &closest_published_since(self.settings.published_since_days).to_string(),
             );
+        if let Some(contract) = &query.contract {
+            url.query_pairs_mut().append_pair("typeContrat", contract);
+        }
         Ok(url)
     }
 
-    async fn fetch_page(&self, keyword: &str, first: usize) -> Result<Page, SourceError> {
+    async fn fetch_page(&self, query: &Query, first: usize) -> Result<Page, SourceError> {
         let mut refreshed = false;
         let mut throttled: u8 = 0;
         loop {
             let access = self.access.access().await?;
             let request = ApiRequest {
-                url: self.search_url(&access.api_base_url, keyword, first)?,
+                url: self.search_url(&access.api_base_url, query, first)?,
                 source: SourceName::FranceTravail,
                 bearer: Some(access.token),
                 headers: Vec::new(),
@@ -282,7 +311,7 @@ impl<F: ApiFetcher, A: AccessProvider> FranceTravailSource<F, A> {
         let mut stats = FranceTravailStats::default();
         let mut seen: HashSet<String> = HashSet::new();
         let mut candidates = Vec::new();
-        for keyword in query_keywords(profiles) {
+        for query in query_plan(profiles) {
             stats.queries += 1;
             for page in 0..self.settings.max_pages {
                 let first = usize::try_from(page)
@@ -292,7 +321,7 @@ impl<F: ApiFetcher, A: AccessProvider> FranceTravailSource<F, A> {
                     break;
                 }
                 stats.requests += 1;
-                let (offers, total) = match self.fetch_page(&keyword, first).await? {
+                let (offers, total) = match self.fetch_page(&query, first).await? {
                     Page::Empty => break,
                     Page::Offers { offers, total } => (offers, total),
                 };

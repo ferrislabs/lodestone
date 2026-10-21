@@ -13,11 +13,13 @@ import type { JsonValue, Problem } from '#/lib/schema-form'
 import {
 	agentField,
 	agentKind,
+	agentTypeLabel,
 	type DependencyNote,
 	KIND_META,
 } from '#/pages/profiles/lib/agents'
 import { belongsToPath } from '#/pages/profiles/lib/tabs'
 import { AgentForm } from '#/pages/profiles/ui/agent-form'
+import type { SearchActions } from '#/pages/profiles/ui/search-agent-fields'
 
 interface AgentSheetProps {
 	context: FormContext
@@ -25,6 +27,7 @@ interface AgentSheetProps {
 	index: number
 	problems: readonly Problem[]
 	note: DependencyNote | null
+	search: SearchActions
 	onClose: () => void
 	onEnabled: (enabled: boolean) => void
 	onName: (name: string) => void
@@ -37,6 +40,7 @@ export function AgentSheet({
 	index,
 	problems,
 	note,
+	search,
 	onClose,
 	onEnabled,
 	onName,
@@ -59,7 +63,10 @@ export function AgentSheet({
 					<SheetTitle className="flex flex-wrap items-center gap-2 text-base">
 						{name || 'Agent sans nom'}
 						{kind ? (
-							<Badge variant="secondary">{KIND_META[kind].label}</Badge>
+							<Badge variant="secondary">{agentTypeLabel(agent)}</Badge>
+						) : null}
+						{kind && kind !== 'search' ? (
+							<Badge variant="outline">{KIND_META[kind].label}</Badge>
 						) : null}
 						{own.length > 0 ? (
 							<Badge variant="destructive">
@@ -78,6 +85,7 @@ export function AgentSheet({
 						index={index}
 						problems={problems}
 						note={note}
+						search={search}
 						onEnabled={onEnabled}
 						onName={onName}
 						onId={onId}

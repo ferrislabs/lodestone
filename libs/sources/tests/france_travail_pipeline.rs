@@ -13,10 +13,11 @@ use lodestone_core::{
     ActiveProfile, Profile, ProfileId, ProfileName, ProfileRevision, RevisionNumber, SourceError,
     ValidatedProfile,
 };
-use serde_json::json;
+use serde_json::{Value, json};
 use sources::france_travail::{
     AccessProvider, FranceTravailAccess, FranceTravailSettings, FranceTravailSource,
 };
+use tracing::callsite::rebuild_interest_cache;
 use tracing_subscriber::fmt::MakeWriter;
 use url::Url;
 use uuid::Uuid;
@@ -61,15 +62,22 @@ impl<'a> MakeWriter<'a> for Sink {
     }
 }
 
-fn profile() -> ActiveProfile {
-    let value = json!({
+fn legacy_value() -> Value {
+    json!({
         "schema_version": 1,
         "identity": {"offer": "Managed IAM", "target_customer": "Companies"},
         "sources": {"france_travail": {"keywords": ["keycloak"]}},
         "scoring": {"factors": [{"signal": "saas_provider", "weight": 10.0}]},
         "contact_ranking": {"preferred_local_parts": ["security"]},
         "llm": {"qualification_threshold": 50.0, "relevance_criteria": "Uses an IAM"}
-    });
+    })
+}
+
+fn profile() -> ActiveProfile {
+    active(ValidatedProfile::parse(legacy_value()).unwrap())
+}
+
+fn active(definition: ValidatedProfile) -> ActiveProfile {
     let profile_id = ProfileId(Uuid::from_u128(1));
     let epoch = Utc.timestamp_opt(0, 0).unwrap();
     ActiveProfile {
@@ -83,7 +91,7 @@ fn profile() -> ActiveProfile {
         revision: ProfileRevision {
             profile_id,
             number: RevisionNumber::new(1).unwrap(),
-            definition: ValidatedProfile::parse(value).unwrap(),
+            definition,
             created_by: None,
             created_at: epoch,
         },
@@ -98,6 +106,7 @@ async fn the_source_searches_over_http_with_its_access_and_never_logs_the_token(
         .with_max_level(tracing::Level::TRACE)
         .finish();
     let _guard = tracing::subscriber::set_default(subscriber);
+    rebuild_interest_cache();
     let server = MockServer::start_async().await;
     let search = server
         .mock_async(|when, then| {

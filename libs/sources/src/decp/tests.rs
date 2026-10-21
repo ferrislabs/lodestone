@@ -7,6 +7,7 @@ use chrono::{DateTime, TimeZone, Utc};
 use lodestone_core::{
     ActiveProfile, FetchError, FetchPurpose, FetchRequest, FetchResponse, Fetcher, Profile,
     ProfileId, ProfileName, ProfileRevision, RevisionNumber, SourceName, ValidatedProfile,
+    definition::{AgentId, SearchAgent},
 };
 use serde_json::{Value, json};
 use url::Url;
@@ -70,9 +71,9 @@ fn now() -> DateTime<Utc> {
 
 fn settings() -> DecpSettings {
     DecpSettings {
-        dataset_api_url: Url::parse(DATASET_API_URL).unwrap(),
+        dataset_api_url: Url::parse(DATASET_API_URL).unwrap().into(),
         annuaire_url: Url::parse(ANNUAIRE_URL).unwrap(),
-        entreprises_url: Url::parse(ENTREPRISES_URL).unwrap(),
+        entreprises_url: Url::parse(ENTREPRISES_URL).unwrap().into(),
         lookback_days: DEFAULT_LOOKBACK_DAYS,
         notified_within_days: 31,
         max_body_bytes: 1024 * 1024,
@@ -389,10 +390,9 @@ async fn partner_awards_follow_the_routing_of_each_profile() {
     let (source, _) = source(FixtureFetcher::new());
     source.collect_with_stats(&[iam()], now()).await.unwrap();
     let contracts = source.take_awards();
-    let rules = KeywordSource {
-        keywords: vec!["MFA".to_owned()],
-        exclusions: Vec::new(),
+    let rules = SearchAgent {
         accept_min_keywords: 1,
+        ..SearchAgent::new(AgentId::new("mfa"), "MFA", &["decp"], &["MFA"], &[])
     };
     let awards = partner_awards(&rules, &contracts);
     assert_eq!(awards.len(), 1);
@@ -414,7 +414,7 @@ async fn ambiguous_contracts_still_produce_partner_awards() {
         .revision
         .definition
         .definition()
-        .enabled_keyword_rules(SourceName::Decp)
+        .enabled_search_agents(SourceName::Decp)
         .next()
         .cloned()
         .unwrap();

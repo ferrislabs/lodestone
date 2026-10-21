@@ -10,8 +10,13 @@ import {
 	agentField,
 	agentKind,
 	type DependencyNote,
+	isSignalKind,
 	sourceSchema,
 } from '#/pages/profiles/lib/agents'
+import {
+	type SearchActions,
+	SearchAgentFields,
+} from '#/pages/profiles/ui/search-agent-fields'
 
 interface AgentFormProps {
 	context: FormContext
@@ -19,6 +24,7 @@ interface AgentFormProps {
 	index: number
 	problems: readonly Problem[]
 	note: DependencyNote | null
+	search: SearchActions
 	onEnabled: (enabled: boolean) => void
 	onName: (name: string) => void
 	onId: (id: string) => void
@@ -52,6 +58,7 @@ export function AgentForm({
 	index,
 	problems,
 	note,
+	search,
 	onEnabled,
 	onName,
 	onId,
@@ -109,7 +116,16 @@ export function AgentForm({
 					<FieldErrors id={idId} problems={idProblems} />
 				</div>
 			</details>
-			{kind ? (
+			{kind === 'search' ? (
+				<SearchAgentFields
+					context={context}
+					agent={agent}
+					index={index}
+					problems={problems}
+					actions={search}
+				/>
+			) : null}
+			{isSignalKind(kind) ? (
 				<ObjectFields
 					context={context}
 					schema={sourceSchema(kind)}

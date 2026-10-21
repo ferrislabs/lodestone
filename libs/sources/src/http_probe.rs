@@ -244,11 +244,11 @@ impl<F: Fetcher, H: CandidateHosts, G: ProbeGuard> HttpProbeSource<F, H, G> {
     }
 
     fn compiled_for(&self, profile: &ActiveProfile, agent: &Agent) -> Option<Arc<CompiledProfile>> {
-        let config = agent.source.http_probe()?;
+        let config = agent.http_probe()?;
         let key = (
             profile.profile.id,
             profile.revision.number,
-            agent.id.clone(),
+            agent.id().clone(),
         );
         let mut cache = self.compiled.lock().ok()?;
         if let Some(found) = cache.get(&key) {
@@ -285,7 +285,7 @@ fn probe_paths(profiles: &[ActiveProfile]) -> Vec<String> {
                 .definition()
                 .enabled_agents(SourceName::HttpProbe)
         })
-        .filter_map(|agent| agent.source.http_probe())
+        .filter_map(|agent| agent.http_probe())
         .flat_map(|config| config.fingerprints.iter().map(|item| item.path.clone()))
         .collect();
     paths.sort();

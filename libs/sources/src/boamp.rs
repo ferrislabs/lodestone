@@ -9,7 +9,11 @@ use serde_json::{Value, json};
 use tracing::{debug, info};
 use url::Url;
 
-use crate::buyer_domain::{domain_of_email, domain_of_url};
+use crate::{
+    buyer_domain::{domain_of_email, domain_of_url},
+    endpoint::Endpoint,
+    search,
+};
 
 pub const PAGE_SIZE: usize = 50;
 pub const OFFSET_CAP: usize = 10_000;
@@ -17,9 +21,9 @@ pub const TEXT_MAX_CHARS: usize = 4000;
 const FALLBACK_NOTICE_URL: &str = "https://www.boamp.fr/pages/avis/?q=idweb:";
 const DESCRIPTION_KEYS: [&str; 4] = ["objet", "principales", "description", "intitule"];
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct BoampSettings {
-    pub base_url: Url,
+    pub base_url: Endpoint,
     pub lookback_days: u32,
     pub max_pages: u32,
 }
@@ -39,23 +43,7 @@ pub struct BoampSource<F: Fetcher> {
 }
 
 pub fn keyword_union(profiles: &[ActiveProfile]) -> Vec<String> {
-    let mut seen: HashSet<String> = HashSet::new();
-    let mut union = Vec::new();
-    for rules in profiles.iter().flat_map(|active| {
-        active
-            .revision
-            .definition
-            .definition()
-            .enabled_keyword_rules(SourceName::Boamp)
-    }) {
-        for keyword in &rules.keywords {
-            let keyword = keyword.trim();
-            if !keyword.is_empty() && seen.insert(keyword.to_lowercase()) {
-                union.push(keyword.to_owned());
-            }
-        }
-    }
-    union
+    search::keyword_union(profiles, SourceName::Boamp)
 }
 
 fn quoted(keyword: &str) -> String {
@@ -372,6 +360,7 @@ impl<F: Fetcher> BoampSource<F> {
         if keywords.is_empty() {
             return Ok((Vec::new(), stats));
         }
+        let base_url = self.settings.base_url.resolve().await?;
         let clause = where_clause(&keywords, now, self.settings.lookback_days);
         let mut seen: HashSet<String> = HashSet::new();
         let mut candidates = Vec::new();
@@ -383,7 +372,7 @@ impl<F: Fetcher> BoampSource<F> {
                 break;
             }
             let records = self
-                .fetch_page(page_url(&self.settings.base_url, &clause, offset))
+                .fetch_page(page_url(&base_url, &clause, offset))
                 .await?;
             stats.pages += 1;
             let fetched = records.len();

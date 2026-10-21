@@ -4,17 +4,17 @@ use regex::RegexBuilder;
 use serde::Serialize;
 use thiserror::Error;
 
-use crate::domain::values::SignalKind;
+use crate::domain::{source_provider::descriptor as provider_descriptor, values::SignalKind};
 
 use super::{
     definition::{
-        Agent, AgentSource, Aggregator, CertificateTransparency, CnamePattern, ContactRanking,
-        DebtRule, DnsCname, Escalation, EvidenceSettings, Fingerprint, HttpProbe, Identity,
-        KeywordSource, MAX_CALIBRATION_FLOOR, MAX_DESCRIPTION_CHARS, MAX_HALF_LIFE_DAYS,
-        MAX_OPTIONS, MAX_PROMPT_CHARS, MAX_SAMPLES, MAX_SAMPLING_TEMPERATURE,
-        MIN_EXCLUSION_THRESHOLD, MIN_HALF_LIFE_DAYS, MIN_OPTIONS, Matcher, PROFILE_SCHEMA_VERSION,
-        ProfileDefinition, QualificationAgent, Question, ScoringAgent, VerdictThresholds,
-        VersionExtractor,
+        Agent, Aggregator, CertificateTransparency, CnamePattern, ContactRanking, DebtRule,
+        DnsCname, Escalation, EvidenceSettings, Fingerprint, HttpProbe, Identity,
+        MAX_CALIBRATION_FLOOR, MAX_DESCRIPTION_CHARS, MAX_HALF_LIFE_DAYS, MAX_OPTIONS,
+        MAX_PROMPT_CHARS, MAX_SAMPLES, MAX_SAMPLING_TEMPERATURE, MIN_EXCLUSION_THRESHOLD,
+        MIN_HALF_LIFE_DAYS, MIN_OPTIONS, Matcher, PROFILE_SCHEMA_VERSION, ProfileDefinition,
+        QualificationAgent, Question, ScoringAgent, SearchAgent, SearchFilters, SignalAgent,
+        SignalSource, VerdictThresholds, VersionExtractor,
     },
     legacy::{
         ProfileDefinitionV1, ProfileDefinitionV2, ProfileDefinitionV3, ProfileDefinitionV4,
@@ -22,6 +22,7 @@ use super::{
         ProfileDefinitionV10, ProfileDefinitionV11, ProfileDefinitionV12, ProfileDefinitionV13,
         ProfileDefinitionV14,
     },
+    v15::ProfileDefinitionV15,
 };
 
 const REGEX_SIZE_LIMIT: usize = 1 << 20;
@@ -32,7 +33,7 @@ pub enum ProfileProblem {
     #[error("malformed: {0}")]
     Malformed(String),
     #[error(
-        "unsupported schema version {found}, expected 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14 or {PROFILE_SCHEMA_VERSION}"
+        "unsupported schema version {found}, expected 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 or {PROFILE_SCHEMA_VERSION}"
     )]
     UnsupportedSchemaVersion { found: u32 },
     #[error("must not be empty")]
@@ -43,6 +44,14 @@ pub enum ProfileProblem {
     NoAgent,
     #[error("at least one qualification agent is required")]
     NoQualificationAgent,
+    #[error("at least one provider is required")]
+    NoProvider,
+    #[error("unknown source provider `{0}`")]
+    UnknownProvider(String),
+    #[error("provider `{0}` does not support keyword search")]
+    ProviderCannotSearch(String),
+    #[error("must be an ISO 3166-1 alpha-2 country code in uppercase")]
+    InvalidCountryCode,
     #[error("must be a slug of lowercase letters, digits and hyphens, at most 63 characters")]
     InvalidAgentId,
     #[error("must be lowercase letters, digits, hyphens and underscores, at most 63 characters")]
@@ -148,6 +157,7 @@ impl ValidatedProfile {
             Some(12) => decode::<ProfileDefinitionV12>(value)?.upgrade(),
             Some(13) => decode::<ProfileDefinitionV13>(value)?.upgrade(),
             Some(14) => decode::<ProfileDefinitionV14>(value)?.upgrade(),
+            Some(15) => decode::<ProfileDefinitionV15>(value)?.upgrade(),
             Some(PROFILE_SCHEMA_VERSION) | None => decode::<ProfileDefinition>(value)?,
             Some(found) => {
                 return Err(Path::root()
@@ -297,12 +307,12 @@ fn validate_agents(agents: &[Agent], path: &Path) -> Check {
     non_empty_list(agents, path).map_err(|_| path.fail(ProfileProblem::NoAgent))?;
     for (index, agent) in agents.iter().enumerate() {
         let id = path.index(index).field("id");
-        if !agent.id.is_slug() {
+        if !agent.id().is_slug() {
             return Err(id.fail(ProfileProblem::InvalidAgentId));
         }
     }
     unique(
-        agents.iter().map(|agent| agent.id.as_str()).enumerate(),
+        agents.iter().map(|agent| agent.id().as_str()).enumerate(),
         |index| path.index(index).field("id"),
     )?;
     for (index, agent) in agents.iter().enumerate() {
@@ -350,7 +360,7 @@ fn validate_qualification_agents(
                 .fail(ProfileProblem::InvalidAgentId));
         }
     }
-    let mut seen: HashSet<&str> = sourcing.iter().map(|agent| agent.id.as_str()).collect();
+    let mut seen: HashSet<&str> = sourcing.iter().map(|agent| agent.id().as_str()).collect();
     for (index, agent) in agents.iter().enumerate() {
         if !seen.insert(agent.id.as_str()) {
             return Err(path
@@ -426,7 +436,7 @@ fn validate_scoring_agents(
     }
     let mut seen: HashSet<&str> = sourcing
         .iter()
-        .map(|agent| agent.id.as_str())
+        .map(|agent| agent.id().as_str())
         .chain(qualification.iter().map(|agent| agent.id.as_str()))
         .collect();
     for (index, agent) in agents.iter().enumerate() {
@@ -621,19 +631,61 @@ fn validate_evidence(evidence: &EvidenceSettings, path: &Path) -> Check {
 }
 
 fn validate_agent(agent: &Agent, path: &Path) -> Check {
-    non_empty(&agent.name, &path.field("name"))?;
+    non_empty(agent.name(), &path.field("name"))?;
+    match agent {
+        Agent::Search(search) => validate_search_agent(search, path),
+        Agent::Signal(signal) => validate_signal_agent(signal, path),
+    }
+}
+
+fn validate_signal_agent(agent: &SignalAgent, path: &Path) -> Check {
     let source = path.field("source");
     match &agent.source {
-        AgentSource::CertificateTransparency(ct) => validate_ct(ct, &source)?,
-        AgentSource::DnsCname(dns) => validate_dns(dns, &source)?,
-        AgentSource::HttpProbe(probe) => validate_http_probe(probe, &source)?,
-        AgentSource::Boamp(rules)
-        | AgentSource::Decp(rules)
-        | AgentSource::Ted(rules)
-        | AgentSource::FranceTravail(rules)
-        | AgentSource::Ats(rules) => validate_keyword_source(rules, &source)?,
+        SignalSource::CertificateTransparency(ct) => validate_ct(ct, &source),
+        SignalSource::DnsCname(dns) => validate_dns(dns, &source),
+        SignalSource::HttpProbe(probe) => validate_http_probe(probe, &source),
+    }
+}
+
+fn validate_search_agent(agent: &SearchAgent, path: &Path) -> Check {
+    validate_providers(&agent.providers, &path.field("providers"))?;
+    validate_keyword_rules(agent, path)?;
+    validate_filters(&agent.filters, &path.field("filters"))
+}
+
+fn validate_providers(providers: &[String], path: &Path) -> Check {
+    non_empty_list(providers, path).map_err(|_| path.fail(ProfileProblem::NoProvider))?;
+    unique(providers.iter().map(String::as_str).enumerate(), |index| {
+        path.index(index)
+    })?;
+    for (index, key) in providers.iter().enumerate() {
+        let at = path.index(index);
+        let descriptor = provider_descriptor(key)
+            .ok_or_else(|| at.fail(ProfileProblem::UnknownProvider(key.clone())))?;
+        if !descriptor.capabilities.keyword_search {
+            return Err(at.fail(ProfileProblem::ProviderCannotSearch(key.clone())));
+        }
     }
     Ok(())
+}
+
+fn validate_filters(filters: &SearchFilters, path: &Path) -> Check {
+    let countries = path.field("countries");
+    for (index, country) in filters.countries.iter().enumerate() {
+        if !country.is_valid() {
+            return Err(countries
+                .index(index)
+                .fail(ProfileProblem::InvalidCountryCode));
+        }
+    }
+    unique(
+        filters
+            .countries
+            .iter()
+            .map(|country| country.as_str())
+            .enumerate(),
+        |index| countries.index(index),
+    )
 }
 
 fn is_label(label: &str) -> bool {
@@ -782,7 +834,7 @@ fn validate_cname_pattern(pattern: &CnamePattern, path: &Path) -> Check {
     }
 }
 
-fn validate_keyword_source(source: &KeywordSource, path: &Path) -> Check {
+fn validate_keyword_rules(source: &SearchAgent, path: &Path) -> Check {
     let keywords = path.field("keywords");
     non_empty_list(&source.keywords, &keywords)?;
     for (index, keyword) in source.keywords.iter().enumerate() {
@@ -835,11 +887,14 @@ fn validate_contact_ranking(ranking: &ContactRanking, path: &Path) -> Check {
 
 #[cfg(test)]
 mod tests {
-    use serde_json::{Value, json};
+    use serde_json::{Map, Value, json};
 
     use super::*;
     use crate::domain::{
-        profile::{definition::Language, fixtures::MINIMAL_PROFILE},
+        profile::{
+            definition::{Language, RemoteFilter},
+            fixtures::MINIMAL_PROFILE,
+        },
         values::SourceName,
     };
 
@@ -892,8 +947,8 @@ mod tests {
             v["scoring"] = iam_scoring_v2();
             v["llm"]["qualification_threshold"] = json!(50);
         });
-        assert_eq!(profile.definition().schema_version, 15);
-        assert_eq!(profile.to_json()["schema_version"], 15);
+        assert_eq!(profile.definition().schema_version, 16);
+        assert_eq!(profile.to_json()["schema_version"], 16);
         assert!(profile.to_json().get("scoring").is_none());
         assert!(profile.to_json().get("llm").is_none());
     }
@@ -931,11 +986,11 @@ mod tests {
 
     #[test]
     fn unsupported_schema_version_is_rejected() {
-        let error = error_for(|v| v["schema_version"] = json!(16));
+        let error = error_for(|v| v["schema_version"] = json!(17));
         assert_eq!(error.path, "schema_version");
         assert_eq!(
             error.problem,
-            ProfileProblem::UnsupportedSchemaVersion { found: 16 }
+            ProfileProblem::UnsupportedSchemaVersion { found: 17 }
         );
         let error = error_for(|v| v["schema_version"] = json!(0));
         assert_eq!(
@@ -1009,7 +1064,10 @@ mod tests {
     #[test]
     fn an_agent_llm_block_is_unknown_in_the_current_version() {
         let error = v4_error(|v| v["agents"][0]["llm"] = json!({"relevance_criteria": "x"}));
-        assert_eq!(error.path, "agents[0].llm");
+        assert_eq!(error.path, "agents[0]");
+        assert!(
+            matches!(&error.problem, ProfileProblem::Malformed(message) if message.contains("llm"))
+        );
     }
 
     #[test]
@@ -1022,7 +1080,7 @@ mod tests {
     #[test]
     fn agent_enabled_defaults_to_true() {
         let profile = ValidatedProfile::parse(minimal()).unwrap();
-        assert!(profile.definition().agents[0].enabled);
+        assert!(profile.definition().agents[0].enabled());
     }
 
     #[test]
@@ -1115,7 +1173,7 @@ mod tests {
                 agent_json("boamp", json!({"kind": "boamp", "keywords": []})),
             )
         });
-        assert_eq!(error.path, "agents[1].source.keywords");
+        assert_eq!(error.path, "agents[1].keywords");
         assert_eq!(error.problem, ProfileProblem::Empty);
     }
 
@@ -1127,7 +1185,7 @@ mod tests {
                 agent_json("ats", json!({"kind": "ats", "keywords": ["sso", " "]})),
             )
         });
-        assert_eq!(error.path, "agents[1].source.keywords[1]");
+        assert_eq!(error.path, "agents[1].keywords[1]");
         assert_eq!(error.problem, ProfileProblem::Empty);
     }
 
@@ -1142,7 +1200,7 @@ mod tests {
         assert_eq!(
             profile
                 .definition()
-                .enabled_keyword_rules(SourceName::Boamp)
+                .enabled_search_agents(SourceName::Boamp)
                 .next()
                 .unwrap()
                 .accept_min_keywords,
@@ -1157,7 +1215,7 @@ mod tests {
                 ),
             )
         });
-        assert_eq!(error.path, "agents[1].source.accept_min_keywords");
+        assert_eq!(error.path, "agents[1].accept_min_keywords");
         assert_eq!(error.problem, ProfileProblem::MustBePositive);
     }
 
@@ -1184,7 +1242,7 @@ mod tests {
 
     fn ats_keywords(definition: &ProfileDefinition) -> Vec<&[String]> {
         definition
-            .enabled_keyword_rules(SourceName::Ats)
+            .enabled_search_agents(SourceName::Ats)
             .map(|rules| rules.keywords.as_slice())
             .collect()
     }
@@ -1225,12 +1283,12 @@ mod tests {
             .definition()
             .agents
             .iter()
-            .map(|agent| agent.source.source_name())
+            .map(|agent| match agent {
+                Agent::Signal(signal) => signal.source.source_name().as_str(),
+                Agent::Search(search) => search.providers[0].as_str(),
+            })
             .collect();
-        assert_eq!(
-            names,
-            [SourceName::HttpProbe, SourceName::Ats, SourceName::Ats]
-        );
+        assert_eq!(names, ["http_probe", "ats", "ats"]);
     }
 
     #[test]
@@ -1244,18 +1302,25 @@ mod tests {
         value["sources"] = json!({"http_probe": source, "ats": {"keywords": ["sso"]}});
         let profile = ValidatedProfile::parse(value).unwrap();
         let definition = profile.definition();
-        assert_eq!(definition.schema_version, 15);
+        assert_eq!(definition.schema_version, 16);
         let summary: Vec<_> = definition
             .agents
             .iter()
-            .map(|agent| (agent.id.as_str(), agent.name.as_str(), agent.enabled))
+            .map(|agent| (agent.id().as_str(), agent.name(), agent.enabled()))
             .collect();
         assert_eq!(
             summary,
             [("http-probe", "HTTP probe", true), ("ats", "ATS", true)]
         );
-        assert_eq!(profile.to_json()["schema_version"], 15);
-        assert_eq!(profile.to_json()["agents"][0]["source"], agent);
+        assert_eq!(profile.to_json()["schema_version"], 16);
+        let mut expected = agent.clone();
+        let object = expected.as_object_mut().unwrap();
+        let kind = object.remove("kind").unwrap();
+        object.insert("provider".to_owned(), kind);
+        assert_eq!(profile.to_json()["agents"][0]["source"], expected);
+        assert_eq!(profile.to_json()["agents"][0]["type"], "signal");
+        assert_eq!(profile.to_json()["agents"][1]["type"], "search");
+        assert_eq!(profile.to_json()["agents"][1]["providers"], json!(["ats"]));
     }
 
     #[test]
@@ -1308,8 +1373,36 @@ mod tests {
         ValidatedProfile::parse(minimal()).unwrap().to_json()
     }
 
+    fn with_version_fifteen_agents(mut value: Value) -> Value {
+        for agent in value["agents"].as_array_mut().unwrap() {
+            let object = agent.as_object_mut().unwrap();
+            let kind = object.remove("type").unwrap();
+            if kind == "signal" {
+                let source = object.get_mut("source").unwrap().as_object_mut().unwrap();
+                let provider = source.remove("provider").unwrap();
+                source.insert("kind".to_owned(), provider);
+            } else {
+                let provider = object.remove("providers").unwrap()[0].clone();
+                let mut source = Map::new();
+                source.insert("kind".to_owned(), provider);
+                for key in ["keywords", "exclusions", "accept_min_keywords"] {
+                    source.insert(key.to_owned(), object.remove(key).unwrap());
+                }
+                object.remove("filters");
+                object.insert("source".to_owned(), Value::Object(source));
+            }
+        }
+        value
+    }
+
+    fn v14() -> Value {
+        let mut value = with_version_fifteen_agents(v4());
+        value["schema_version"] = json!(14);
+        value
+    }
+
     fn v13() -> Value {
-        let mut value = v4();
+        let mut value = with_version_fifteen_agents(v4());
         let object = value.as_object_mut().unwrap();
         object.remove("language");
         object.insert("schema_version".to_owned(), json!(13));
@@ -1392,7 +1485,7 @@ mod tests {
     fn version_three_is_upgraded_with_a_default_qualification_agent() {
         let profile = ValidatedProfile::parse(minimal()).unwrap();
         let definition = profile.definition();
-        assert_eq!(definition.schema_version, 15);
+        assert_eq!(definition.schema_version, 16);
         assert_eq!(definition.qualification_agents.len(), 1);
         let agent = &definition.qualification_agents[0];
         assert_eq!(agent.id.as_str(), "pertinence");
@@ -1492,14 +1585,14 @@ mod tests {
     fn version_five_is_upgraded_with_default_evidence_settings() {
         let profile = ValidatedProfile::parse(v5()).unwrap();
         let definition = profile.definition();
-        assert_eq!(definition.schema_version, 15);
+        assert_eq!(definition.schema_version, 16);
         assert_eq!(definition.verdict.reliable_from, 80);
         assert_eq!(definition.verdict.discard_below, 20);
         assert_eq!(definition.verdict.calibration_floor, 0.05);
         assert_eq!(definition.verdict.min_evidence, 0.5);
         assert_eq!(definition.evidence, EvidenceSettings::default());
         assert_eq!(definition.evidence.influence, 0.6);
-        assert_eq!(profile.to_json()["schema_version"], 15);
+        assert_eq!(profile.to_json()["schema_version"], 16);
     }
 
     #[test]
@@ -1633,7 +1726,7 @@ mod tests {
             .unwrap()
             .remove("half_life_days");
         let profile = ValidatedProfile::parse(value).unwrap();
-        assert_eq!(profile.definition().schema_version, 15);
+        assert_eq!(profile.definition().schema_version, 16);
         assert_eq!(profile.definition().evidence, EvidenceSettings::default());
     }
 
@@ -1690,10 +1783,10 @@ mod tests {
         agent.insert("name".to_owned(), json!("Maturité technique"));
         let profile = ValidatedProfile::parse(value).unwrap();
         let agent = &profile.definition().qualification_agents[0];
-        assert_eq!(profile.definition().schema_version, 15);
+        assert_eq!(profile.definition().schema_version, 16);
         assert_eq!(agent.description, "Évalue : Maturité technique");
         assert_eq!(agent.name, "Maturité technique");
-        assert_eq!(profile.to_json()["schema_version"], 15);
+        assert_eq!(profile.to_json()["schema_version"], 16);
     }
 
     #[test]
@@ -1759,10 +1852,9 @@ mod tests {
     #[test]
     fn a_qualification_agent_weight_is_dropped_by_the_upgrade_and_rejected_when_current() {
         for weight in [0, 5, 11] {
-            let profile = v4_ok(|v| {
-                v["schema_version"] = json!(14);
-                v["qualification_agents"][0]["weight"] = json!(weight);
-            });
+            let mut value = v14();
+            value["qualification_agents"][0]["weight"] = json!(weight);
+            let profile = ValidatedProfile::parse(value).unwrap();
             assert!(
                 profile.to_json()["qualification_agents"][0]
                     .get("weight")
@@ -1933,7 +2025,7 @@ mod tests {
                     json!({"value": value, "label": "Je ne sais pas", "score": 0.4}),
                 );
             let profile = ValidatedProfile::parse(document).unwrap();
-            assert_eq!(profile.definition().schema_version, 15);
+            assert_eq!(profile.definition().schema_version, 16);
             assert_eq!(
                 options_of(&profile),
                 [
@@ -1962,7 +2054,7 @@ mod tests {
         );
         let appended = &profile.definition().qualification_agents[0].questions[0].options[3];
         assert_eq!(appended.label, "Inconnu");
-        assert_eq!(profile.to_json()["schema_version"], 15);
+        assert_eq!(profile.to_json()["schema_version"], 16);
     }
 
     #[test]
@@ -1999,7 +2091,7 @@ mod tests {
     fn version_seven_is_upgraded_with_exclusion_defaults() {
         let profile = ValidatedProfile::parse(v7()).unwrap();
         let definition = profile.definition();
-        assert_eq!(definition.schema_version, 15);
+        assert_eq!(definition.schema_version, 16);
         for agent in &definition.qualification_agents {
             assert_eq!(agent.exclusion_threshold, 0.6);
             assert!(
@@ -2010,7 +2102,7 @@ mod tests {
                     .all(|option| !option.excludes)
             );
         }
-        assert_eq!(profile.to_json()["schema_version"], 15);
+        assert_eq!(profile.to_json()["schema_version"], 16);
         assert_eq!(profile, ValidatedProfile::parse(v4()).unwrap());
     }
 
@@ -2030,7 +2122,7 @@ mod tests {
     fn version_eight_is_upgraded_with_sampling_and_escalation_defaults() {
         let profile = ValidatedProfile::parse(v8()).unwrap();
         let definition = profile.definition();
-        assert_eq!(definition.schema_version, 15);
+        assert_eq!(definition.schema_version, 16);
         assert_eq!(definition.escalation, Escalation::default());
         assert_eq!(definition.escalation.provider, None);
         assert_eq!(
@@ -2044,7 +2136,7 @@ mod tests {
             assert_eq!(agent.samples, 3);
             assert_eq!(agent.sampling_temperature, 0.7);
         }
-        assert_eq!(profile.to_json()["schema_version"], 15);
+        assert_eq!(profile.to_json()["schema_version"], 16);
         assert_eq!(profile, ValidatedProfile::parse(v4()).unwrap());
     }
 
@@ -2237,7 +2329,7 @@ mod tests {
         value.as_object_mut().unwrap().remove("calibration");
         let profile = ValidatedProfile::parse(value).unwrap();
         let definition = profile.definition();
-        assert_eq!(definition.schema_version, 15);
+        assert_eq!(definition.schema_version, 16);
         assert_eq!(definition.scoring_agents.len(), 1);
         let agent = &definition.scoring_agents[0];
         assert_eq!(agent.id.as_str(), "score-global");
@@ -2270,7 +2362,7 @@ mod tests {
         value.as_object_mut().unwrap().remove("calibration");
         let profile = ValidatedProfile::parse(value).unwrap();
         let definition = profile.definition();
-        assert_eq!(definition.schema_version, 15);
+        assert_eq!(definition.schema_version, 16);
         assert!(
             definition
                 .qualification_agents
@@ -2295,8 +2387,8 @@ mod tests {
         value["evidence"]["influence"] = json!(0.3);
         let profile = ValidatedProfile::parse(value).unwrap();
         let json = profile.to_json();
-        assert_eq!(profile.definition().schema_version, 15);
-        assert_eq!(json["schema_version"], 15);
+        assert_eq!(profile.definition().schema_version, 16);
+        assert_eq!(json["schema_version"], 16);
         assert!(json.get("scoring").is_none());
         assert!(json["evidence"].get("reference_score").is_none());
         assert_eq!(profile.definition().evidence.influence, 0.3);
@@ -2540,5 +2632,133 @@ mod tests {
             "scoring_agents[0].criteria[1].options[0].excludes"
         );
         assert_eq!(error.problem, ProfileProblem::CriterionCannotExclude);
+    }
+
+    fn search_agent(id: &str, providers: Value) -> Value {
+        json!({
+            "type": "search",
+            "id": id,
+            "name": id,
+            "providers": providers,
+            "keywords": ["sso"]
+        })
+    }
+
+    fn current_with(agent: Value) -> Result<ValidatedProfile, ProfileValidationError> {
+        let mut value = v4();
+        value["agents"].as_array_mut().unwrap().push(agent);
+        ValidatedProfile::parse(value)
+    }
+
+    #[test]
+    fn a_search_agent_with_several_providers_is_valid() {
+        let profile =
+            current_with(search_agent("marches", json!(["boamp", "decp", "ted"]))).unwrap();
+        let agent = profile.definition().agents[1].as_search().unwrap();
+        assert_eq!(agent.providers, ["boamp", "decp", "ted"]);
+        assert_eq!(agent.filters, SearchFilters::default());
+        assert_eq!(agent.accept_min_keywords, 2);
+        assert_eq!(
+            profile
+                .definition()
+                .enabled_search_agents(SourceName::Decp)
+                .count(),
+            1
+        );
+        assert_eq!(
+            profile
+                .definition()
+                .enabled_search_agents(SourceName::Ats)
+                .count(),
+            0
+        );
+    }
+
+    #[test]
+    fn a_search_agent_needs_at_least_one_provider() {
+        let error = current_with(search_agent("marches", json!([]))).unwrap_err();
+        assert_eq!(error.path, "agents[1].providers");
+        assert_eq!(error.problem, ProfileProblem::NoProvider);
+    }
+
+    #[test]
+    fn an_unknown_provider_is_rejected() {
+        let error =
+            current_with(search_agent("marches", json!(["boamp", "linkedin"]))).unwrap_err();
+        assert_eq!(error.path, "agents[1].providers[1]");
+        assert_eq!(
+            error.problem,
+            ProfileProblem::UnknownProvider("linkedin".to_owned())
+        );
+    }
+
+    #[test]
+    fn a_provider_without_keyword_search_is_rejected() {
+        for key in [
+            "certificate_transparency",
+            "dns_cname",
+            "http_probe",
+            "contacts",
+        ] {
+            let error = current_with(search_agent("marches", json!([key]))).unwrap_err();
+            assert_eq!(error.path, "agents[1].providers[0]", "{key}");
+            assert_eq!(
+                error.problem,
+                ProfileProblem::ProviderCannotSearch(key.to_owned()),
+                "{key}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_provider_listed_twice_is_rejected() {
+        let error = current_with(search_agent("marches", json!(["ted", "ted"]))).unwrap_err();
+        assert_eq!(error.path, "agents[1].providers[1]");
+        assert_eq!(error.problem, ProfileProblem::Duplicate("ted".to_owned()));
+    }
+
+    #[test]
+    fn filters_are_parsed_and_checked() {
+        let mut agent = search_agent("jobs", json!(["france_travail"]));
+        agent["filters"] = json!({
+            "remote": "remote_or_hybrid",
+            "countries": ["FR", "BE"],
+            "contracts": ["freelance", "any"]
+        });
+        let profile = current_with(agent.clone()).unwrap();
+        let filters = &profile.definition().agents[1].as_search().unwrap().filters;
+        assert_eq!(filters.remote, RemoteFilter::RemoteOrHybrid);
+        assert_eq!(filters.countries.len(), 2);
+        assert!(filters.wants_any_contract());
+        agent["filters"]["countries"] = json!(["fr"]);
+        let error = current_with(agent.clone()).unwrap_err();
+        assert_eq!(error.path, "agents[1].filters.countries[0]");
+        assert_eq!(error.problem, ProfileProblem::InvalidCountryCode);
+        agent["filters"]["countries"] = json!(["FR", "FR"]);
+        let error = current_with(agent.clone()).unwrap_err();
+        assert_eq!(error.problem, ProfileProblem::Duplicate("FR".to_owned()));
+        agent["filters"] = json!({"remote": "sometimes"});
+        let error = current_with(agent).unwrap_err();
+        assert!(matches!(error.problem, ProfileProblem::Malformed(_)));
+    }
+
+    #[test]
+    fn a_signal_agent_keeps_its_settings_and_names_its_provider() {
+        let profile = ValidatedProfile::parse(v4()).unwrap();
+        let signal = profile.definition().agents[0].as_signal().unwrap();
+        assert_eq!(signal.source.source_name(), SourceName::HttpProbe);
+        assert_eq!(
+            profile.to_json()["agents"][0]["source"]["provider"],
+            "http_probe"
+        );
+        assert_eq!(profile.to_json()["agents"][0]["type"], "signal");
+    }
+
+    #[test]
+    fn an_agent_needs_a_known_type() {
+        let mut agent = search_agent("marches", json!(["boamp"]));
+        agent["type"] = json!("crawler");
+        let error = current_with(agent).unwrap_err();
+        assert!(matches!(error.problem, ProfileProblem::Malformed(_)));
     }
 }

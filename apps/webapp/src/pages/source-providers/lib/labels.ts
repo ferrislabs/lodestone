@@ -19,6 +19,7 @@ const STATUS_LABELS: Readonly<Record<string, string>> = {
 	untested: 'À tester',
 	ready: 'Prêt',
 	failing: 'En échec',
+	unknown: 'Inconnu',
 }
 
 const AUTH_LABELS: Readonly<Record<string, string>> = {

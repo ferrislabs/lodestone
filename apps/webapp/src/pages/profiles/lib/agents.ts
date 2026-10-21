@@ -7,21 +7,21 @@ import {
 	type JsonValue,
 	type Problem,
 	resolve,
+	type Schema,
 	toJsonObject,
 } from '#/lib/schema-form'
 import { PROFILE_HINTS } from '#/pages/profiles/lib/form-hints'
 import { PROFILE_SCHEMA } from '#/pages/profiles/lib/profile-schema'
 
-export const AGENT_KINDS = [
+export const SIGNAL_KINDS = [
 	'certificate_transparency',
 	'dns_cname',
 	'http_probe',
-	'boamp',
-	'decp',
-	'ted',
-	'france_travail',
-	'ats',
 ] as const
+
+export type SignalKind = (typeof SIGNAL_KINDS)[number]
+
+export const AGENT_KINDS = ['search', ...SIGNAL_KINDS] as const
 
 export type AgentKind = (typeof AGENT_KINDS)[number]
 
@@ -31,6 +31,11 @@ export interface KindMeta {
 }
 
 export const KIND_META: Record<AgentKind, KindMeta> = {
+	search: {
+		label: 'Recherche',
+		description:
+			'Recherche par mots-clés sur un ou plusieurs fournisseurs du catalogue, avec des critères communs.',
+	},
 	certificate_transparency: {
 		label: sourceLabel('certificate_transparency'),
 		description:
@@ -46,42 +51,19 @@ export const KIND_META: Record<AgentKind, KindMeta> = {
 		description:
 			"Sonde des hôtes en HTTP à la recherche d'empreintes de produits.",
 	},
-	boamp: {
-		label: sourceLabel('boamp'),
-		description:
-			'Recherche par mots-clés des avis de marchés publics français.',
-	},
-	decp: {
-		label: sourceLabel('decp'),
-		description:
-			'Recherche par mots-clés des données de marchés publics français.',
-	},
-	ted: {
-		label: sourceLabel('ted'),
-		description: "Recherche par mots-clés des appels d'offres européens.",
-	},
-	france_travail: {
-		label: sourceLabel('france_travail'),
-		description: "Recherche par mots-clés des offres d'emploi France Travail.",
-	},
-	ats: {
-		label: sourceLabel('ats'),
-		description:
-			"Recherche les offres d'emploi des entreprises déjà détectées.",
-	},
 }
 
 export const KIND_GROUPS: { title: string; kinds: readonly AgentKind[] }[] = [
-	{
-		title: 'Infrastructure',
-		kinds: ['certificate_transparency', 'dns_cname', 'http_probe'],
-	},
-	{ title: 'Marchés publics', kinds: ['boamp', 'decp', 'ted'] },
-	{ title: "Offres d'emploi", kinds: ['france_travail', 'ats'] },
+	{ title: 'Fournisseurs du catalogue', kinds: ['search'] },
+	{ title: 'Signaux techniques', kinds: SIGNAL_KINDS },
 ]
 
 export function isAgentKind(value: unknown): value is AgentKind {
 	return AGENT_KINDS.some((kind) => kind === value)
+}
+
+export function isSignalKind(value: unknown): value is SignalKind {
+	return SIGNAL_KINDS.some((kind) => kind === value)
 }
 
 export function agentList(value: JsonObject): JsonValue[] {
@@ -98,9 +80,29 @@ export function withAgents(
 
 export function agentKind(agent: JsonValue | undefined): AgentKind | null {
 	if (!isJsonObject(agent)) return null
+	if (agent.type === 'search') return 'search'
+	if (agent.type !== 'signal') return null
 	const source = agent.source
 	if (!isJsonObject(source)) return null
-	return isAgentKind(source.kind) ? source.kind : null
+	return isSignalKind(source.provider) ? source.provider : null
+}
+
+export function agentProviders(agent: JsonValue | undefined): string[] {
+	if (!isJsonObject(agent)) return []
+	if (agent.type === 'search') {
+		const providers = agent.providers
+		return Array.isArray(providers)
+			? providers.filter((key): key is string => typeof key === 'string')
+			: []
+	}
+	const kind = agentKind(agent)
+	return kind === null || kind === 'search' ? [] : [kind]
+}
+
+export function agentTypeLabel(agent: JsonValue | undefined): string {
+	const kind = agentKind(agent)
+	if (kind === null) return ''
+	return kind === 'search' ? 'Recherche' : 'Signal'
 }
 
 export function agentField(agent: JsonValue | undefined, key: string): string {
@@ -125,7 +127,7 @@ export function slugify(text: string): string {
 }
 
 export function kindSlug(kind: AgentKind): string {
-	return kind.replace(/_/g, '-')
+	return kind === 'search' ? 'recherche' : kind.replace(/_/g, '-')
 }
 
 export function uniqueId(base: string, taken: ReadonlySet<string>): string {
@@ -146,25 +148,48 @@ function idsExcept(
 	return ids
 }
 
-function sourceVariant(kind: AgentKind) {
-	const agent = resolve(
+function agentVariant(type: 'search' | 'signal') {
+	const node = classify(
 		PROFILE_SCHEMA,
 		PROFILE_SCHEMA.properties?.agents?.items ?? {},
 	)
-	const source = agent.properties?.source
+	if (node.kind !== 'union') return null
+	return node.variants.find((variant) => variant.value === type) ?? null
+}
+
+function sourceVariant(kind: SignalKind) {
+	const source = agentVariant('signal')?.schema.properties?.source
 	if (source === undefined) return null
 	const node = classify(PROFILE_SCHEMA, source)
 	if (node.kind !== 'union') return null
 	return node.variants.find((variant) => variant.value === kind) ?? null
 }
 
-export function sourceSchema(kind: AgentKind) {
+export function sourceSchema(kind: SignalKind) {
 	return sourceVariant(kind)?.schema ?? {}
 }
 
-export function defaultSource(kind: AgentKind): JsonObject {
+export function searchFieldsSchema(): Schema {
+	const properties = agentVariant('search')?.schema.properties ?? {}
+	const picked: Record<string, Schema> = {}
+	for (const key of ['keywords', 'exclusions', 'accept_min_keywords']) {
+		const property = properties[key]
+		if (property !== undefined) picked[key] = property
+	}
+	return { properties: picked, required: ['keywords'] }
+}
+
+export function filtersCountriesSchema(): Schema {
+	const filters = agentVariant('search')?.schema.properties?.filters
+	if (filters === undefined) return {}
+	const resolved = resolve(PROFILE_SCHEMA, filters)
+	const countries = resolved.properties?.countries
+	return countries === undefined ? {} : { properties: { countries } }
+}
+
+export function defaultSource(kind: SignalKind): JsonObject {
 	const variant = sourceVariant(kind)
-	if (variant === null) return { kind }
+	if (variant === null) return { provider: kind }
 	return toJsonObject(
 		defaultValue(PROFILE_SCHEMA, variant.schema, PROFILE_HINTS, [
 			'agents',
@@ -177,9 +202,25 @@ export function defaultSource(kind: AgentKind): JsonObject {
 export function newAgent(
 	kind: AgentKind,
 	agents: readonly JsonValue[],
+	providers: readonly string[] = [],
 ): JsonObject {
+	const id = uniqueId(kindSlug(kind), idsExcept(agents, null))
+	if (kind === 'search') {
+		return {
+			type: 'search',
+			id,
+			name: KIND_META.search.label,
+			enabled: true,
+			providers: [...providers],
+			keywords: [],
+			exclusions: [],
+			filters: { remote: 'any', countries: [], contracts: [] },
+			accept_min_keywords: 2,
+		}
+	}
 	return {
-		id: uniqueId(kindSlug(kind), idsExcept(agents, null)),
+		type: 'signal',
+		id,
 		name: KIND_META[kind].label,
 		enabled: true,
 		source: defaultSource(kind),
@@ -216,17 +257,30 @@ export function renameAgent(
 	return agents.map((item, position) => (position === index ? next : item))
 }
 
-function sourceCount(agent: JsonValue | undefined, field: string): number {
-	if (!isJsonObject(agent) || !isJsonObject(agent.source)) return 0
-	const items = agent.source[field]
+function listCount(holder: JsonValue | undefined, field: string): number {
+	if (!isJsonObject(holder)) return 0
+	const items = holder[field]
 	return Array.isArray(items) ? items.length : 0
+}
+
+function sourceCount(agent: JsonValue | undefined, field: string): number {
+	return isJsonObject(agent) ? listCount(agent.source, field) : 0
 }
 
 export function agentSummary(agent: JsonValue | undefined): string {
 	const kind = agentKind(agent)
 	if (kind === null) return ''
 	const parts: string[] = []
-	if (kind === 'certificate_transparency') {
+	if (kind === 'search') {
+		const keywords = listCount(agent, 'keywords')
+		parts.push(`${keywords} ${pluralize(keywords, 'mot-clé', 'mots-clés')}`)
+		const exclusions = listCount(agent, 'exclusions')
+		if (exclusions > 0) {
+			parts.push(
+				`${exclusions} ${pluralize(exclusions, 'exclusion', 'exclusions')}`,
+			)
+		}
+	} else if (kind === 'certificate_transparency') {
 		const labels = sourceCount(agent, 'labels')
 		parts.push(`${labels} ${pluralize(labels, 'label', 'labels')}`)
 	} else if (kind === 'dns_cname') {
@@ -234,7 +288,7 @@ export function agentSummary(agent: JsonValue | undefined): string {
 		parts.push(
 			`${patterns} ${pluralize(patterns, 'motif CNAME', 'motifs CNAME')}`,
 		)
-	} else if (kind === 'http_probe') {
+	} else {
 		const fingerprints = sourceCount(agent, 'fingerprints')
 		parts.push(
 			`${fingerprints} ${pluralize(fingerprints, 'empreinte', 'empreintes')}`,
@@ -243,15 +297,6 @@ export function agentSummary(agent: JsonValue | undefined): string {
 		if (excluded > 0) {
 			parts.push(
 				`${excluded} ${pluralize(excluded, 'produit exclu', 'produits exclus')}`,
-			)
-		}
-	} else {
-		const keywords = sourceCount(agent, 'keywords')
-		parts.push(`${keywords} ${pluralize(keywords, 'mot-clé', 'mots-clés')}`)
-		const exclusions = sourceCount(agent, 'exclusions')
-		if (exclusions > 0) {
-			parts.push(
-				`${exclusions} ${pluralize(exclusions, 'exclusion', 'exclusions')}`,
 			)
 		}
 	}
@@ -263,10 +308,17 @@ export interface DependencyNote {
 	warn: boolean
 }
 
+const SIGNAL_FEEDERS: readonly (AgentKind | null)[] = [
+	'certificate_transparency',
+	'http_probe',
+	'dns_cname',
+]
+
 export function dependencyNote(
-	kind: AgentKind | null,
+	agent: JsonValue | undefined,
 	agents: readonly JsonValue[],
 ): DependencyNote | null {
+	const kind = agentKind(agent)
 	const kinds = agents.map(agentKind)
 	if (kind === 'http_probe') {
 		return {
@@ -274,15 +326,10 @@ export function dependencyNote(
 			warn: !kinds.includes('certificate_transparency'),
 		}
 	}
-	if (kind === 'ats') {
+	if (kind === 'search' && agentProviders(agent).includes('ats')) {
 		return {
-			text: 'Ne visite que les entreprises déjà détectées par des agents Transparence des certificats, Sonde HTTP ou DNS CNAME.',
-			warn: !kinds.some(
-				(other) =>
-					other === 'certificate_transparency' ||
-					other === 'http_probe' ||
-					other === 'dns_cname',
-			),
+			text: 'Pages carrières : ne visite que les entreprises déjà détectées par des agents Transparence des certificats, Sonde HTTP ou DNS CNAME.',
+			warn: !kinds.some((other) => SIGNAL_FEEDERS.includes(other)),
 		}
 	}
 	return null
@@ -309,6 +356,12 @@ export function validateAgents(value: JsonObject): Problem[] {
 			problems.push({ path, message: 'Doit être unique dans le profil' })
 		}
 		seen.add(id)
+		if (agentKind(agent) === 'search' && agentProviders(agent).length === 0) {
+			problems.push({
+				path: `agents[${index}].providers`,
+				message: 'Choisir au moins un fournisseur',
+			})
+		}
 	})
 	return problems
 }

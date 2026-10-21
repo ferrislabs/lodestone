@@ -16,9 +16,11 @@ use lodestone_core::{
 use tracing::{info, warn};
 use url::Url;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+use crate::endpoint::Endpoint;
+
+#[derive(Debug, Clone)]
 pub struct CtSettings {
-    pub log_list_url: Url,
+    pub log_list_url: Endpoint,
     pub log_list_ttl: Duration,
     pub max_logs: usize,
     pub tiles_per_log: u64,
@@ -53,6 +55,7 @@ fn log_summary(name: &str, pass: &LogPass) -> String {
 
 struct CachedLogs {
     fetched_at: DateTime<Utc>,
+    url: Url,
     logs: Arc<[CtLog]>,
 }
 
@@ -82,7 +85,7 @@ pub fn label_filter(profiles: &[ActiveProfile]) -> HashSet<String> {
                 .definition()
                 .enabled_agents(SourceName::CertificateTransparency)
         })
-        .filter_map(|agent| agent.source.certificate_transparency())
+        .filter_map(|agent| agent.certificate_transparency())
         .flat_map(|ct| ct.labels.iter().cloned())
         .collect()
 }
@@ -133,13 +136,15 @@ where
     async fn logs(&self, now: DateTime<Utc>) -> Result<Arc<[CtLog]>, SourceError> {
         let ttl = chrono::Duration::from_std(self.settings.log_list_ttl)
             .unwrap_or(chrono::Duration::hours(6));
+        let url = self.settings.log_list_url.resolve().await?;
         if let Ok(guard) = self.logs.lock()
             && let Some(cached) = guard.as_ref()
+            && cached.url == url
             && now - cached.fetched_at < ttl
         {
             return Ok(Arc::clone(&cached.logs));
         }
-        let mut logs = fetch_log_list(self.fetcher.as_ref(), &self.settings.log_list_url)
+        let mut logs = fetch_log_list(self.fetcher.as_ref(), &url)
             .await
             .map_err(upstream)?;
         logs.sort_by(|a, b| a.description.cmp(&b.description));
@@ -148,6 +153,7 @@ where
         if let Ok(mut guard) = self.logs.lock() {
             *guard = Some(CachedLogs {
                 fetched_at: now,
+                url,
                 logs: Arc::clone(&logs),
             });
         }
@@ -284,7 +290,7 @@ where
     }
 
     fn serves(&self, item: &CandidateHost, agent: &Agent) -> bool {
-        agent.source.certificate_transparency().is_some_and(|ct| {
+        agent.certificate_transparency().is_some_and(|ct| {
             let labels: HashSet<String> = ct.labels.iter().cloned().collect();
             matching_host(item.host.as_str(), &labels).is_some()
         })

@@ -9,7 +9,7 @@ Detection profiles (#60) are JSON documents stored in Postgres as immutable revi
 
 ## Decision
 
-The Rust types in `libs/core/src/domain/profile/definition.rs` are the source of truth. A write is validated in two passes: typed deserialization with `deny_unknown_fields` through `serde_path_to_error`, which yields the JSON path of a structural error, then semantic checks that return a path and a `ProfileProblem`. Only a `ValidatedProfile` can be stored. The JSON Schema in `docs/schemas/profile.v15.schema.json` is generated from the same types with `schemars` and kept current by a test. `schema_version` in the payload selects the definition version; `1`, `2`, `3`, `4`, `5`, `6`, `7`, `8`, `9`, `10`, `11`, `12`, `13` and `14` are upgraded on read to `15`, the current version.
+The Rust types in `libs/core/src/domain/profile/definition.rs` are the source of truth. A write is validated in two passes: typed deserialization with `deny_unknown_fields` through `serde_path_to_error`, which yields the JSON path of a structural error, then semantic checks that return a path and a `ProfileProblem`. Only a `ValidatedProfile` can be stored. The JSON Schema in `docs/schemas/profile.v16.schema.json` is generated from the same types with `schemars` and kept current by a test. `schema_version` in the payload selects the definition version; `1`, `2`, `3`, `4`, `5`, `6`, `7`, `8`, `9`, `10`, `11`, `12`, `13`, `14` and `15` are upgraded on read to `16`, the current version.
 
 ## Alternatives rejected
 

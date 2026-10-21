@@ -65,7 +65,7 @@
       }
     },
     "schema_version": {
-      "description": "Profile format version. Must be 15.",
+      "description": "Profile format version. Must be 16.",
       "type": "integer",
       "format": "uint32",
       "minimum": 0
@@ -100,32 +100,114 @@
   "$defs": {
     "Agent": {
       "title": "Agent",
-      "description": "Searches one source with its own settings.",
-      "type": "object",
-      "properties": {
-        "enabled": {
-          "description": "A disabled agent is kept but not run.",
-          "type": "boolean",
-          "default": true
+      "description": "A detection agent, selected by type. A search agent looks for keywords across catalog providers. A signal agent reads one technical signal provider with its own settings.",
+      "oneOf": [
+        {
+          "title": "Search agent",
+          "description": "Looks for keywords across one or several catalog providers. Keywords, exclusions and filters are defined once and every provider translates them into its own API, or applies them after collection when it cannot filter natively.",
+          "type": "object",
+          "properties": {
+            "accept_min_keywords": {
+              "description": "Distinct keywords needed to accept a candidate without the LLM. Fewer, or any exclusion, sends it to LLM triage.",
+              "type": "integer",
+              "format": "uint8",
+              "default": 2,
+              "maximum": 255,
+              "minimum": 0
+            },
+            "enabled": {
+              "description": "A disabled agent is kept but not run.",
+              "type": "boolean",
+              "default": true
+            },
+            "exclusions": {
+              "description": "Keywords that send a candidate to LLM triage when present.",
+              "type": "array",
+              "default": [],
+              "items": {
+                "type": "string"
+              }
+            },
+            "filters": {
+              "$ref": "#/$defs/SearchFilters",
+              "default": {
+                "contracts": [],
+                "countries": [],
+                "remote": "any"
+              }
+            },
+            "id": {
+              "description": "Unique slug in the profile, for example marches-publics.",
+              "$ref": "#/$defs/AgentId"
+            },
+            "keywords": {
+              "description": "Keywords to search for.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "name": {
+              "description": "Display name.",
+              "type": "string"
+            },
+            "providers": {
+              "description": "Catalog provider keys searched by this agent, for example boamp, decp, ted, france_travail or ats. Each one must exist in the catalog and support keyword search. A provider that is not ready is skipped at run time.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1
+            },
+            "type": {
+              "type": "string",
+              "const": "search"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "name",
+            "providers",
+            "keywords"
+          ]
         },
-        "id": {
-          "description": "Unique slug in the profile, for example ats-en.",
-          "$ref": "#/$defs/AgentId"
-        },
-        "name": {
-          "description": "Display name.",
-          "type": "string"
-        },
-        "source": {
-          "description": "The source searched and its settings.",
-          "$ref": "#/$defs/AgentSource"
+        {
+          "title": "Signal agent",
+          "description": "Reads one technical signal provider with its own settings. The provider is its catalog key.",
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "description": "A disabled agent is kept but not run.",
+              "type": "boolean",
+              "default": true
+            },
+            "id": {
+              "description": "Unique slug in the profile, for example certificate-transparency.",
+              "$ref": "#/$defs/AgentId"
+            },
+            "name": {
+              "description": "Display name.",
+              "type": "string"
+            },
+            "source": {
+              "description": "The signal provider and its settings.",
+              "$ref": "#/$defs/SignalSource"
+            },
+            "type": {
+              "type": "string",
+              "const": "signal"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "name",
+            "source"
+          ]
         }
-      },
-      "additionalProperties": false,
-      "required": [
-        "id",
-        "name",
-        "source"
       ]
     },
     "AgentId": {
@@ -135,284 +217,6 @@
       "maxLength": 63,
       "minLength": 1,
       "pattern": "^[a-z0-9][a-z0-9-]{0,62}$"
-    },
-    "AgentSource": {
-      "title": "Agent source",
-      "description": "The source an agent searches, selected by kind.",
-      "oneOf": [
-        {
-          "title": "Certificate transparency",
-          "description": "Hostname labels to look for in certificate logs.",
-          "type": "object",
-          "properties": {
-            "kind": {
-              "type": "string",
-              "const": "certificate_transparency"
-            },
-            "labels": {
-              "description": "Hostname labels to look for, for example auth or sso.",
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            }
-          },
-          "additionalProperties": false,
-          "required": [
-            "kind",
-            "labels"
-          ]
-        },
-        {
-          "title": "DNS CNAME",
-          "description": "Providers identified by the CNAME target of a domain.",
-          "type": "object",
-          "properties": {
-            "kind": {
-              "type": "string",
-              "const": "dns_cname"
-            },
-            "patterns": {
-              "description": "Provider and target suffix pairs.",
-              "type": "array",
-              "items": {
-                "$ref": "#/$defs/CnamePattern"
-              }
-            }
-          },
-          "additionalProperties": false,
-          "required": [
-            "kind",
-            "patterns"
-          ]
-        },
-        {
-          "title": "HTTP probe",
-          "description": "Fingerprints probed over HTTP and products to ignore.",
-          "type": "object",
-          "properties": {
-            "excluded_products": {
-              "description": "Products to ignore, for example your own.",
-              "type": "array",
-              "default": [],
-              "items": {
-                "type": "string"
-              }
-            },
-            "fingerprints": {
-              "description": "Fingerprints to probe on each domain.",
-              "type": "array",
-              "items": {
-                "$ref": "#/$defs/Fingerprint"
-              }
-            },
-            "kind": {
-              "type": "string",
-              "const": "http_probe"
-            }
-          },
-          "additionalProperties": false,
-          "required": [
-            "kind",
-            "fingerprints"
-          ]
-        },
-        {
-          "title": "BOAMP",
-          "description": "Source searched with keywords and exclusions.",
-          "type": "object",
-          "properties": {
-            "accept_min_keywords": {
-              "description": "Distinct keywords needed to accept a candidate without the LLM. Fewer, or any exclusion, sends it to LLM triage.",
-              "type": "integer",
-              "format": "uint8",
-              "default": 2,
-              "maximum": 255,
-              "minimum": 0
-            },
-            "exclusions": {
-              "description": "Keywords that send a candidate to LLM triage when present.",
-              "type": "array",
-              "default": [],
-              "items": {
-                "type": "string"
-              }
-            },
-            "keywords": {
-              "description": "Keywords to search for.",
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            },
-            "kind": {
-              "type": "string",
-              "const": "boamp"
-            }
-          },
-          "additionalProperties": false,
-          "required": [
-            "kind",
-            "keywords"
-          ]
-        },
-        {
-          "title": "DECP",
-          "description": "Source searched with keywords and exclusions.",
-          "type": "object",
-          "properties": {
-            "accept_min_keywords": {
-              "description": "Distinct keywords needed to accept a candidate without the LLM. Fewer, or any exclusion, sends it to LLM triage.",
-              "type": "integer",
-              "format": "uint8",
-              "default": 2,
-              "maximum": 255,
-              "minimum": 0
-            },
-            "exclusions": {
-              "description": "Keywords that send a candidate to LLM triage when present.",
-              "type": "array",
-              "default": [],
-              "items": {
-                "type": "string"
-              }
-            },
-            "keywords": {
-              "description": "Keywords to search for.",
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            },
-            "kind": {
-              "type": "string",
-              "const": "decp"
-            }
-          },
-          "additionalProperties": false,
-          "required": [
-            "kind",
-            "keywords"
-          ]
-        },
-        {
-          "title": "TED",
-          "description": "Source searched with keywords and exclusions.",
-          "type": "object",
-          "properties": {
-            "accept_min_keywords": {
-              "description": "Distinct keywords needed to accept a candidate without the LLM. Fewer, or any exclusion, sends it to LLM triage.",
-              "type": "integer",
-              "format": "uint8",
-              "default": 2,
-              "maximum": 255,
-              "minimum": 0
-            },
-            "exclusions": {
-              "description": "Keywords that send a candidate to LLM triage when present.",
-              "type": "array",
-              "default": [],
-              "items": {
-                "type": "string"
-              }
-            },
-            "keywords": {
-              "description": "Keywords to search for.",
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            },
-            "kind": {
-              "type": "string",
-              "const": "ted"
-            }
-          },
-          "additionalProperties": false,
-          "required": [
-            "kind",
-            "keywords"
-          ]
-        },
-        {
-          "title": "France Travail",
-          "description": "Source searched with keywords and exclusions.",
-          "type": "object",
-          "properties": {
-            "accept_min_keywords": {
-              "description": "Distinct keywords needed to accept a candidate without the LLM. Fewer, or any exclusion, sends it to LLM triage.",
-              "type": "integer",
-              "format": "uint8",
-              "default": 2,
-              "maximum": 255,
-              "minimum": 0
-            },
-            "exclusions": {
-              "description": "Keywords that send a candidate to LLM triage when present.",
-              "type": "array",
-              "default": [],
-              "items": {
-                "type": "string"
-              }
-            },
-            "keywords": {
-              "description": "Keywords to search for.",
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            },
-            "kind": {
-              "type": "string",
-              "const": "france_travail"
-            }
-          },
-          "additionalProperties": false,
-          "required": [
-            "kind",
-            "keywords"
-          ]
-        },
-        {
-          "title": "ATS",
-          "description": "Source searched with keywords and exclusions.",
-          "type": "object",
-          "properties": {
-            "accept_min_keywords": {
-              "description": "Distinct keywords needed to accept a candidate without the LLM. Fewer, or any exclusion, sends it to LLM triage.",
-              "type": "integer",
-              "format": "uint8",
-              "default": 2,
-              "maximum": 255,
-              "minimum": 0
-            },
-            "exclusions": {
-              "description": "Keywords that send a candidate to LLM triage when present.",
-              "type": "array",
-              "default": [],
-              "items": {
-                "type": "string"
-              }
-            },
-            "keywords": {
-              "description": "Keywords to search for.",
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            },
-            "kind": {
-              "type": "string",
-              "const": "ats"
-            }
-          },
-          "additionalProperties": false,
-          "required": [
-            "kind",
-            "keywords"
-          ]
-        }
-      ]
     },
     "Aggregator": {
       "title": "Aggregator",
@@ -484,6 +288,24 @@
       "required": [
         "preferred_local_parts"
       ]
+    },
+    "ContractFilter": {
+      "title": "Contract filter",
+      "type": "string",
+      "enum": [
+        "freelance",
+        "employee",
+        "public_contract",
+        "any"
+      ]
+    },
+    "CountryCode": {
+      "title": "Country code",
+      "description": "ISO 3166-1 alpha-2 country code, uppercase.",
+      "type": "string",
+      "maxLength": 2,
+      "minLength": 2,
+      "pattern": "^[A-Z]{2}$"
     },
     "DebtMarker": {
       "title": "Debt marker",
@@ -983,6 +805,16 @@
         "score"
       ]
     },
+    "RemoteFilter": {
+      "title": "Remote filter",
+      "description": "any keeps every candidate, full_remote keeps fully remote ones, remote_or_hybrid keeps remote and hybrid ones.",
+      "type": "string",
+      "enum": [
+        "any",
+        "full_remote",
+        "remote_or_hybrid"
+      ]
+    },
     "ScoringAgent": {
       "title": "Scoring agent",
       "description": "Decides the score and the verdict of every lead from the reports of the qualification agents. The shape of its answer is imposed by the application: criteria choices, a score from 0 to 100, probabilities for each verdict and reasons.",
@@ -1066,6 +898,118 @@
         "description",
         "system_prompt",
         "criteria"
+      ]
+    },
+    "SearchFilters": {
+      "title": "Search filters",
+      "description": "Criteria shared by every provider of a search agent. A provider filters natively what its API supports and the rest is applied on the candidate text after collection.",
+      "type": "object",
+      "properties": {
+        "contracts": {
+          "description": "Accepted contract types. Empty, or any, means every contract type.",
+          "type": "array",
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ContractFilter"
+          }
+        },
+        "countries": {
+          "description": "ISO 3166-1 alpha-2 country codes, uppercase, for example FR. Empty means every country.",
+          "type": "array",
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/CountryCode"
+          }
+        },
+        "remote": {
+          "description": "Remote work requirement. Default any.",
+          "$ref": "#/$defs/RemoteFilter",
+          "default": "any"
+        }
+      },
+      "additionalProperties": false
+    },
+    "SignalSource": {
+      "title": "Signal source",
+      "description": "The signal provider an agent reads, selected by its catalog key.",
+      "oneOf": [
+        {
+          "title": "Certificate transparency",
+          "description": "Hostname labels to look for in certificate logs.",
+          "type": "object",
+          "properties": {
+            "labels": {
+              "description": "Hostname labels to look for, for example auth or sso.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "provider": {
+              "type": "string",
+              "const": "certificate_transparency"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "provider",
+            "labels"
+          ]
+        },
+        {
+          "title": "DNS CNAME",
+          "description": "Providers identified by the CNAME target of a domain.",
+          "type": "object",
+          "properties": {
+            "patterns": {
+              "description": "Provider and target suffix pairs.",
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/CnamePattern"
+              }
+            },
+            "provider": {
+              "type": "string",
+              "const": "dns_cname"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "provider",
+            "patterns"
+          ]
+        },
+        {
+          "title": "HTTP probe",
+          "description": "Fingerprints probed over HTTP and products to ignore.",
+          "type": "object",
+          "properties": {
+            "excluded_products": {
+              "description": "Products to ignore, for example your own.",
+              "type": "array",
+              "default": [],
+              "items": {
+                "type": "string"
+              }
+            },
+            "fingerprints": {
+              "description": "Fingerprints to probe on each domain.",
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Fingerprint"
+              }
+            },
+            "provider": {
+              "type": "string",
+              "const": "http_probe"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "provider",
+            "fingerprints"
+          ]
+        }
       ]
     },
     "VerdictThresholds": {

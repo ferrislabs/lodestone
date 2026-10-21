@@ -8,12 +8,17 @@ import {
 	agentEnabled,
 	agentField,
 	agentKind,
+	agentProviders,
 	agentSummary,
+	agentTypeLabel,
 	type DependencyNote,
 	KIND_META,
 } from '#/pages/profiles/lib/agents'
+import { providerName } from '#/pages/profiles/lib/search-agent'
 import { belongsToPath } from '#/pages/profiles/lib/tabs'
 import { DependencyNoteText } from '#/pages/profiles/ui/agent-form'
+import { ProviderChips } from '#/pages/profiles/ui/provider-chips'
+import type { ProviderSummary } from '#/pages/source-providers/lib/types'
 import {
 	agentListenerLine,
 	isContinuousKind,
@@ -22,6 +27,10 @@ import {
 import { triggerResultLabel } from '#/pages/sources/lib/state'
 import type { ListenerSummary, TriggerResult } from '#/pages/sources/lib/types'
 
+const NO_CATALOG: readonly ProviderSummary[] = []
+const NO_PENDING: ReadonlySet<string> = new Set()
+const NO_RESULTS: Readonly<Record<string, TriggerResult>> = {}
+
 interface AgentCardProps {
 	agent: JsonValue
 	index: number
@@ -29,9 +38,10 @@ interface AgentCardProps {
 	note: DependencyNote | null
 	editing: boolean
 	confirmingRemove: boolean
-	runPending?: boolean
-	runResult?: TriggerResult | null
-	onRunSource?: () => void
+	catalog?: readonly ProviderSummary[]
+	runPending?: ReadonlySet<string>
+	runResults?: Readonly<Record<string, TriggerResult>>
+	onRunSource?: (provider: string) => void
 	listener?: ListenerSummary
 	now?: number
 	onEdit: () => void
@@ -48,8 +58,9 @@ export function AgentCard({
 	note,
 	editing,
 	confirmingRemove,
-	runPending = false,
-	runResult = null,
+	catalog = NO_CATALOG,
+	runPending = NO_PENDING,
+	runResults = NO_RESULTS,
 	onRunSource,
 	listener,
 	now = 0,
@@ -83,7 +94,10 @@ export function AgentCard({
 			</div>
 			<div className="flex flex-wrap items-center gap-2">
 				{kind ? (
-					<Badge variant="secondary">{KIND_META[kind].label}</Badge>
+					<Badge variant="secondary">{agentTypeLabel(agent)}</Badge>
+				) : null}
+				{kind && kind !== 'search' ? (
+					<Badge variant="outline">{KIND_META[kind].label}</Badge>
 				) : null}
 				{own.length > 0 ? (
 					<Badge variant="destructive">
@@ -92,6 +106,9 @@ export function AgentCard({
 				) : null}
 			</div>
 			<p className="text-xs text-muted-foreground">{agentSummary(agent)}</p>
+			{kind === 'search' ? (
+				<ProviderChips keys={agentProviders(agent)} catalog={catalog} />
+			) : null}
 			{note ? <DependencyNoteText note={note} /> : null}
 			<div className="mt-auto flex items-center gap-1 pt-1">
 				{confirmingRemove ? (
@@ -146,29 +163,34 @@ export function AgentCard({
 					{agentListenerLine(listener, now)}
 				</p>
 			) : null}
-			{onRunSource && kind && !isContinuousKind(kind) ? (
-				<div className="flex items-center gap-2">
-					<Button
-						type="button"
-						variant="secondary"
-						size="sm"
-						disabled={runPending}
-						aria-label={`Lancer la source de ${name || 'agent'}`}
-						title="Lance la source maintenant pour tous les profils, avec la dernière version enregistrée"
-						onClick={onRunSource}
-					>
-						<PlayIcon />
-						Lancer la source
-					</Button>
-					{runResult ? (
-						<output
-							className={`text-xs ${runResult.kind === 'error' ? 'text-destructive' : 'text-muted-foreground'}`}
-						>
-							{triggerResultLabel(runResult)}
-						</output>
-					) : null}
-				</div>
-			) : null}
+			{onRunSource && kind && !isContinuousKind(kind)
+				? agentProviders(agent).map((provider) => {
+						const result = runResults[provider]
+						return (
+							<div key={provider} className="flex items-center gap-2">
+								<Button
+									type="button"
+									variant="secondary"
+									size="sm"
+									disabled={runPending.has(provider)}
+									aria-label={`Lancer la source ${providerName(catalog, provider)} de ${name || 'agent'}`}
+									title="Lance la source maintenant pour tous les profils, avec la dernière version enregistrée"
+									onClick={() => onRunSource(provider)}
+								>
+									<PlayIcon />
+									Lancer {providerName(catalog, provider)}
+								</Button>
+								{result ? (
+									<output
+										className={`text-xs ${result.kind === 'error' ? 'text-destructive' : 'text-muted-foreground'}`}
+									>
+										{triggerResultLabel(result)}
+									</output>
+								) : null}
+							</div>
+						)
+					})
+				: null}
 		</li>
 	)
 }

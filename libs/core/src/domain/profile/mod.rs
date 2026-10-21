@@ -14,6 +14,7 @@ pub mod definition;
 mod legacy;
 pub mod ports;
 pub mod service;
+mod v15;
 pub mod validation;
 
 pub use validation::{ProfileProblem, ProfileValidationError, ValidatedProfile};

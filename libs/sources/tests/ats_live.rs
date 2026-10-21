@@ -2,7 +2,7 @@ use std::{num::NonZeroU32, sync::Arc, time::Duration};
 
 use chrono::Utc;
 use fetch::{FetchSettings, PoliteFetcher};
-use lodestone_core::{NormalizedDomain, Route, ValidatedProfile, route};
+use lodestone_core::{NormalizedDomain, Route, SourceName, ValidatedProfile, route};
 use sources::ats::AtsScanner;
 
 const IAM: &str = include_str!("../../../docs/examples/profiles/iam-ferriskey.json");
@@ -17,7 +17,7 @@ async fn iam_keywords_against_real_careers_pages_and_boards() {
     let definition = ValidatedProfile::parse(serde_json::from_str(IAM).unwrap()).unwrap();
     let rules = definition
         .definition()
-        .enabled_keyword_rules(lodestone_core::SourceName::Ats)
+        .enabled_search_agents(SourceName::Ats)
         .next()
         .cloned()
         .unwrap();

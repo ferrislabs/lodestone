@@ -8,7 +8,7 @@ Profiles live in Postgres. Each edit creates a new revision; earlier revisions a
 
 ## Schema
 
-The JSON Schema is `docs/schemas/profile.v15.schema.json`. It is generated from `ProfileDefinition` and must not be edited by hand. Regenerate it with:
+The JSON Schema is `docs/schemas/profile.v16.schema.json`. It is generated from `ProfileDefinition` and must not be edited by hand. Regenerate it with:
 
 ```
 UPDATE_SCHEMA=1 cargo test -p lodestone-core --test profile_examples
@@ -18,19 +18,17 @@ Without `UPDATE_SCHEMA=1` the same test fails if the committed file is stale. Th
 
 ## Examples
 
-- `docs/examples/profiles/iam-ferriskey.json`: sells FerrisKey and Autharie to organizations running Keycloak or a SaaS IAM. Uses certificate transparency, HTTP probes, CNAME patterns, public tenders and two job agents of the same kind (`ats-fr`, `ats-en`), the second with its own relevance criteria, written in the prompt of the `pertinence` agent.
+- `docs/examples/profiles/iam-ferriskey.json`: sells FerrisKey and Autharie to organizations running Keycloak or a SaaS IAM. Uses certificate transparency, HTTP probes, CNAME patterns, one search agent « Marchés publics » over the BOAMP, DECP and TED providers, and two job agents of the same kind (`ats-fr`, `ats-en`), the second with its own relevance criteria, written in the prompt of the `pertinence` agent.
 - `docs/examples/profiles/ecommerce-replatforming.json`: sells Magento migrations. Uses one HTTP probe with a version extractor, BOAMP and France Travail. It has no IAM-specific field.
 
 ## Sections
 
-- `schema_version`: must be 15. See [Older versions](#older-versions).
+- `schema_version`: must be 16. See [Older versions](#older-versions).
 - `identity`: the offer and the target customer, in free text.
 - `language`: `fr` or `en`, default `fr` (was `llm.language` before 14). The language of every free-text field the LLM writes: the aggregator's summary, verdict narrative, approach angle, draft subject and body, the qualification summaries and the scoring reasons. The system prompts state it (`Write every free-text field (...) in French. Evidence quotes stay in the language of the document they come from.`), so evidence quotes stay in the source language and the verbatim check is unchanged. Changing the language changes the system prompt, hence the LLM cache key: answers are regenerated.
-- `agents`: the detection agents; at least one is required. An agent searches one source with its own settings (see ADR 0005). Several agents of the same kind are allowed.
-  - `id`: slug matching `^[a-z0-9][a-z0-9-]{0,62}$`, unique in the profile.
-  - `name`: display name, not empty.
-  - `enabled`: defaults to `true`. A disabled agent is kept but not run.
-  - `source`: an object whose `kind` selects the source; the other fields are that kind's settings (table below).
+- `agents`: the detection agents; at least one is required (see ADR 0005). `type` selects `search` or `signal`. `id` (slug matching `^[a-z0-9][a-z0-9-]{0,62}$`, unique in the profile), `name` (not empty) and `enabled` (default `true`, a disabled agent is kept but not run) are common.
+  - `search` agent: looks for keywords across catalog providers (ADR 0010). `providers`: at least one catalog key that supports keyword search (`boamp`, `decp`, `ted`, `france_travail`, `ats`), no duplicate; an unknown key (`UnknownProvider`) or a provider without keyword search (`ProviderCannotSearch`) is rejected, a provider that is not ready is accepted but skipped at run time. `keywords` (at least one), `exclusions`, `accept_min_keywords` and `filters` are defined once for every provider (see "Search agents").
+  - `signal` agent: reads one technical provider with its own settings. `source.provider` is its catalog key (`certificate_transparency`, `dns_cname`, `http_probe`) and the other fields of `source` are its settings (table in "Signal agents").
 - `qualification_agents`: at least one (ADR 0007). Each agent evaluates every lead of the profile, from every source, from one angle.
   - `id`: slug, unique among all agents of the profile, sourcing and qualification together.
   - `name`: display name, not empty. `enabled`: defaults to `true`.
@@ -261,19 +259,47 @@ Strengths set by the sources:
 
 Example: a lead with a Keycloak fingerprint (strength 0.9) and a job offer accepted by the rules (strength 0.7), both observed today, has a strength of `(0.9 + 0.7) / 2 = 0.8`, a score of 80. A third signal of 0.3 brings it to `(0.9 + 0.7 + 0.3) / 3 = 0.63`.
 
-## Agent kinds
+## Search agents
 
-| `kind` | Settings |
+A search agent defines its criteria once and every provider attached to it translates them into its own API. `filters`:
+
+| Field | Values |
+| --- | --- |
+| `remote` | `any` (default), `full_remote`, `remote_or_hybrid`. |
+| `countries` | ISO 3166-1 alpha-2 codes in uppercase (`FR`), no duplicate. Empty means every country. |
+| `contracts` | `freelance`, `employee`, `public_contract`, `any`. Empty or containing `any` means every contract type. |
+
+`accept_min_keywords` (default 2, at least 1) is the number of distinct keywords from which a candidate is accepted without the LLM, provided no exclusion matches.
+
+Each provider filters natively what its API supports (`capabilities.filters` of its catalog descriptor) and the rest is applied after collection, on every candidate, by the same function for all providers (`passes_filters`, `libs/core/src/domain/triage/filters.rs`). A candidate dropped by the filters is counted as `rejected_by_filters` and never reaches the keyword routing. The signals recorded by a search agent carry its id in `agent`.
+
+| Provider | Native | Applied after collection |
+| --- | --- | --- |
+| `france_travail` | `contracts` as `typeContrat` (`freelance`: `FRA,LIB`; `employee`: `CDD,CDI,MIS,SAI`). Keywords are queried once per distinct native filter. | `remote`, `countries`, and `contracts` again on the offer contract code and text. |
+| `ted` | `countries` as `buyer-country` (alpha-3 code derived from the alpha-2; a country without alpha-3 code is left to the post-filter). Without `countries`, the operator default `TED_BUYER_COUNTRIES` applies. | `remote` (not applicable to notices, they pass), `contracts` (a notice is a `public_contract`). |
+| `boamp`, `decp`, `ats` | none | all three filters. |
+
+Post-filter rules, best effort on the title and text of the candidate, accents ignored:
+
+- `remote` applies to job offers only; notices and awards pass. A negation (`pas de télétravail`, `no remote`) is on-site; `full remote`, `100% télétravail`, `télétravail complet`, `fully remote`, `entièrement à distance` are fully remote; `hybride`, `hybrid`, `télétravail partiel`, `N jours de télétravail`, or any mention of `télétravail`, `remote`, `à distance` is hybrid; `sur site`, `on-site`, `présentiel` is on-site. An offer with no mention fails `full_remote` and `remote_or_hybrid`.
+- `contracts`: a tender or an award is a `public_contract`. An offer is `freelance` (`freelance`, `indépendant`, `contractor`, `TJM`, `auto-entrepreneur`, provider contract code `LIB`) and/or `employee` (`CDI`, `CDD`, `permanent`, `salarié`, `fixed-term`, provider codes `CDI`, `CDD`, `MIS`, `SAI`). An offer with no recognised contract fails a contract filter.
+- `countries`: the country comes from the provider detail (TED `buyer-country`), the country-code top-level domain of the candidate, or a country name in French or English in the text. A candidate with no country evidence is kept; one whose evidence names only other countries is dropped.
+
+The editor lists, per selected provider, what it filters natively and what is applied after collection.
+
+## Signal agents
+
+| `source.provider` | Settings |
 | --- | --- |
 | `certificate_transparency` | `labels`: hostname labels to look for in certificate logs. |
 | `http_probe` | `fingerprints` (path, matchers, optional version extractor, debt markers) and `excluded_products`. |
 | `dns_cname` | `patterns`: provider names with the CNAME target suffix that identifies them. |
-| `boamp`, `decp`, `ted` | Public procurement sources: `keywords`, `exclusions`, `accept_min_keywords`. |
-| `france_travail`, `ats` | Job sources: `keywords`, `exclusions`, `accept_min_keywords`. |
 
-`accept_min_keywords` (default 2, at least 1) is the number of distinct keywords from which a candidate is accepted without the LLM, provided no exclusion matches.
+Validation paths include the agent index, for example `agents[1].keywords[0]`, `agents[1].providers[0]`, `agents[0].source.labels[1]` or `contact_ranking.guess_local_parts[1]`.
 
-Validation paths include the agent index, for example `agents[1].source.keywords[0]` or `contact_ranking.guess_local_parts[1]`.
+## Provider URLs
+
+The URL settings of the catalog (`boamp.base_url`, `decp.dataset_api_url`, `ted.base_url`, `certificate_transparency.log_list_url`, `company_research.entreprises_url`) are read at each run. The environment variables only seed the catalog at startup (ADR 0010). DECP name lookups use `company_research.entreprises_url`.
 
 ## Dependencies between kinds
 
@@ -302,7 +328,7 @@ A host or domain whose lookup, probe or crawl fails is marked checked like a suc
 
 ## Older versions
 
-Stored revisions are never rewritten. Versions 1, 2, 3, 4, 5, 6, 7, 8, 9 and 10 are accepted and upgraded when read; new revisions are written in version 11. Errors on an older document keep that document's paths.
+Stored revisions are never rewritten. Versions 1 to 15 are accepted and upgraded when read; new revisions are written in version 16. Errors on an older document keep that document's paths.
 
 ### Version 1 to 2
 
@@ -373,3 +399,7 @@ The `scoring` section (weighted factors) and `evidence.reference_score` are remo
 ### Version 14 to 15
 
 `qualification_agents[].weight` is dropped, whatever its value. It only fed the agents' opinion, which is now the plain mean of the calibrated scores of the valid qualification agents. Question weights and scoring agent weights are unchanged. Stored leads are rescored without a model call (`SCORING_VERSION` 5), so their indicators (opinion, indicator confidence) follow the new mean. The aggregator and scoring prompts no longer print a weight for qualification agents.
+
+### Version 15 to 16
+
+`agents[]` becomes a tagged union. Every agent of a keyword kind (`boamp`, `decp`, `ted`, `france_travail`, `ats`) becomes a `search` agent whose `providers` is `[kind]`, with the same `keywords`, `exclusions` and `accept_min_keywords` and open `filters`. Agents of the signal kinds (`certificate_transparency`, `dns_cname`, `http_probe`) become `signal` agents and `source.kind` is renamed `source.provider`. Ids, names, order and `enabled` are kept. Agents with identical keywords are not merged; the operator can do it by hand. The IAM example merges its three public procurement agents into one `marches-publics` agent over `boamp`, `decp` and `ted`.

@@ -17,15 +17,15 @@ function Harness() {
 	return (
 		<ul>
 			<AgentCard
-				agent={newAgent('boamp', [])}
+				agent={newAgent('search', [], ['boamp'])}
 				index={0}
 				problems={[]}
 				note={null}
 				editing={false}
 				confirmingRemove={false}
-				runPending={sourceTrigger.pending.has('boamp')}
-				runResult={sourceTrigger.results.boamp ?? null}
-				onRunSource={() => sourceTrigger.trigger('boamp')}
+				runPending={sourceTrigger.pending}
+				runResults={sourceTrigger.results}
+				onRunSource={sourceTrigger.trigger}
 				onEdit={() => undefined}
 				onEnabled={() => undefined}
 				onRequestRemove={() => undefined}

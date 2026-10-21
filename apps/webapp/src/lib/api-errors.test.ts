@@ -80,6 +80,12 @@ describe('translateApiMessage', () => {
 			'Doit être un pourcentage de 0 à 100',
 		],
 		['at least one agent is required', 'Au moins un agent est requis'],
+		['at least one provider is required', 'Au moins un fournisseur est requis'],
+		['unknown source provider `linkedin`', 'Fournisseur inconnu : `linkedin`'],
+		[
+			'provider `ted2` does not support keyword search',
+			'Le fournisseur `ted2` ne prend pas en charge la recherche par mots-clés',
+		],
 		['invalid regular expression', 'Expression régulière invalide'],
 		['Authentication failed', "Échec de l'authentification"],
 		['Too many requests', 'Trop de requêtes, réessayez dans un instant'],

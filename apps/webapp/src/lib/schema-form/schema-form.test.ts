@@ -48,20 +48,28 @@ describe('resolve', () => {
 })
 
 describe('classify', () => {
-	const unions = ['Matcher', 'VersionExtractor', 'DebtRule', 'AgentSource']
+	const unions = [
+		'Matcher',
+		'VersionExtractor',
+		'DebtRule',
+		'Agent',
+		'SignalSource',
+	]
 
 	it('classifies every $def of the committed schema', () => {
 		const names = Object.keys(root.$defs ?? {})
-		expect(names.length).toBe(21)
+		expect(names.length).toBe(25)
 		for (const name of names) {
 			const node = classify(root, { $ref: `#/$defs/${name}` })
 			const expected = unions.includes(name)
 				? 'union'
 				: name === 'AgentId'
 					? 'string'
-					: name === 'Language'
-						? 'enum'
-						: 'object'
+					: name === 'CountryCode'
+						? 'string'
+						: ['Language', 'RemoteFilter', 'ContractFilter'].includes(name)
+							? 'enum'
+							: 'object'
 			expect(node.kind, name).toBe(expected)
 		}
 	})
@@ -162,18 +170,20 @@ describe('defaultValue', () => {
 	it('fills schema defaults for keyword sources', () => {
 		const source = defaultValue(
 			root,
-			{ $ref: '#/$defs/AgentSource' },
+			{ $ref: '#/$defs/SignalSource' },
 			PROFILE_HINTS,
 		)
 		expect(source).toEqual({
-			kind: 'certificate_transparency',
+			provider: 'certificate_transparency',
 			labels: [],
 		})
-		const boamp = def('AgentSource').oneOf?.[3] ?? {}
-		expect(defaultValue(root, boamp, PROFILE_HINTS)).toEqual({
-			kind: 'boamp',
+		const search = def('Agent').oneOf?.[0] ?? {}
+		expect(defaultValue(root, search, PROFILE_HINTS)).toMatchObject({
+			type: 'search',
+			providers: [],
 			keywords: [],
 			exclusions: [],
+			filters: { remote: 'any', countries: [], contracts: [] },
 			accept_min_keywords: 2,
 		})
 	})
@@ -295,11 +305,12 @@ describe('validateValue', () => {
 			['agents'],
 			[
 				{
+					type: 'signal',
 					id: 'x',
 					name: 'n',
 					enabled: true,
 					source: {
-						kind: 'http_probe',
+						provider: 'http_probe',
 						fingerprints: [
 							{
 								id: 'x',

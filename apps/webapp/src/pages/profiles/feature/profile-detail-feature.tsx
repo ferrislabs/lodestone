@@ -14,6 +14,7 @@ import { useAgentCalibration } from '#/pages/profiles/feature/use-agent-calibrat
 import { useDefinitionEditor } from '#/pages/profiles/feature/use-definition-editor'
 import { useProfileActivation } from '#/pages/profiles/feature/use-profile-activation'
 import { useProviderOptions } from '#/pages/profiles/feature/use-provider-options'
+import { useSourceCatalog } from '#/pages/profiles/feature/use-source-catalog'
 import {
 	prettyDefinition,
 	saveResultMessage,
@@ -44,6 +45,7 @@ export function ProfileDetailFeature() {
 	const activation = useProfileActivation()
 	const sourceTrigger = useSourceTrigger()
 	const providers = useProviderOptions()
+	const catalog = useSourceCatalog()
 	const calibration = useAgentCalibration(profileId)
 	const sourcesQuery = useQuery({
 		...lodestoneApi().get('/api/v1/sources').queryOptions,
@@ -141,6 +143,10 @@ export function ProfileDetailFeature() {
 						sourceTrigger={sourceTrigger}
 						listeners={listeners}
 						providers={providers}
+						catalog={catalog}
+						onOpenProvider={(key) =>
+							void navigate({ to: '/sources/providers/$key', params: { key } })
+						}
 						calibration={calibration}
 						now={Date.now()}
 						onChange={(next) => {
