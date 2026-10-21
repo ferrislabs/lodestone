@@ -121,6 +121,15 @@ describe('leads search params', () => {
 		})
 	})
 
+	it('sorts by the score decided by the scoring agents', () => {
+		expect(queryFromSearch({ sort: 'llm_score_desc' }).sort).toBe(
+			'llm_score_desc',
+		)
+		expect(queryFromSearch({ sort: 'llm_score_asc' }).sort).toBe(
+			'llm_score_asc',
+		)
+	})
+
 	it('falls back to the default verdicts when none is ticked', () => {
 		const form = new FormData()
 		expect(filtersFromForm(form).verdicts).toEqual([

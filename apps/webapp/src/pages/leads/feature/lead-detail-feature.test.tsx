@@ -32,6 +32,7 @@ const DETAIL: LeadDetailData = {
 		updated_at: '2026-02-01T00:00:00Z',
 	},
 	qualification_results: [],
+	scoring_results: [],
 	assessments: [],
 	facts: {
 		distinct_hosts: 0,

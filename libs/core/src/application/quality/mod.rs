@@ -19,6 +19,7 @@ use crate::{
             DecisionKind, DecisionLabel, DecisionSnapshot, ExclusionCandidate, LabelFilter,
             ProfileInfo, QualityReport, Rejection, exclusion_targets, ports::DecisionRepository,
         },
+        scoring_agent::ports::ScoringRepository,
     },
 };
 
@@ -32,6 +33,7 @@ pub(crate) struct Decided<'a> {
 pub(crate) async fn record_decisions(
     decisions: &mut impl DecisionRepository,
     qualification: &mut impl QualificationRepository,
+    scoring_agents: &mut impl ScoringRepository,
     profiles: &mut impl ProfileRepository,
     assessments: &mut impl AssessmentRepository,
     lead: &Lead,
@@ -39,6 +41,7 @@ pub(crate) async fn record_decisions(
 ) -> Result<(), CoreError> {
     let results = qualification.current_results(lead.id).await?;
     let assessment = assessments.list_for_lead(lead.id).await?.into_iter().next();
+    let scoring_results = scoring_agents.current_results(lead.id).await?;
     let scoring = qualification.scorings(&[lead.id]).await?.remove(&lead.id);
     let profile_revision = match results.first() {
         Some(result) => result.profile_revision,
@@ -48,7 +51,13 @@ pub(crate) async fn record_decisions(
             .last()
             .map_or(RevisionNumber::FIRST, |revision| revision.number),
     };
-    let snapshot = DecisionSnapshot::capture(lead, scoring.as_ref(), &results, assessment.as_ref());
+    let snapshot = DecisionSnapshot::capture(
+        lead,
+        scoring.as_ref(),
+        &results,
+        &scoring_results,
+        assessment.as_ref(),
+    );
     for kind in decided.kinds {
         decisions
             .record(&DecisionLabel {
@@ -100,7 +109,11 @@ impl LodestoneUseCase {
             }
             let revisions = profiles.list_revisions(profile.id).await?;
             for revision in &revisions {
-                for agent in &revision.definition.definition().qualification_agents {
+                let definition = revision.definition.definition();
+                for agent in &definition.qualification_agents {
+                    agent_names.insert(agent.id.as_str().to_owned(), agent.name.clone());
+                }
+                for agent in &definition.scoring_agents {
                     agent_names.insert(agent.id.as_str().to_owned(), agent.name.clone());
                 }
             }

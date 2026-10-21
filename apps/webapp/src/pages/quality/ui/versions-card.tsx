@@ -15,7 +15,11 @@ import {
 	TableRow,
 } from '#/components/ui/table'
 import { formatNumber } from '#/lib/format'
-import { formatRatio, versionAgentLabel } from '#/pages/quality/lib/format'
+import {
+	formatRatio,
+	versionAgentLabel,
+	versionKindLabel,
+} from '#/pages/quality/lib/format'
 import type { Quality } from '#/pages/quality/lib/types'
 
 interface VersionsCardProps {
@@ -28,11 +32,11 @@ export function VersionsCard({ versions }: VersionsCardProps) {
 			<CardHeader>
 				<CardTitle>Précision par version</CardTitle>
 				<CardDescription>
-					Part de leads validés parmi les leads décidés, selon l'agent, le
-					modèle et la version du prompt qui ont produit la qualification.
-					Comparez deux versions pour savoir si un changement a aidé. Les
-					exécutions escaladées vers un fournisseur plus puissant sont comptées
-					à part.
+					Part de leads validés parmi les leads décidés, selon l'agent (de
+					qualification, de scoring ou l'agrégateur), le modèle et la version du
+					prompt qui ont produit le résultat. Comparez deux versions pour savoir
+					si un changement a aidé. Les exécutions escaladées vers un fournisseur
+					plus puissant sont comptées à part.
 				</CardDescription>
 			</CardHeader>
 			<CardContent>
@@ -45,6 +49,7 @@ export function VersionsCard({ versions }: VersionsCardProps) {
 					<Table>
 						<TableHeader>
 							<TableRow>
+								<TableHead>Type</TableHead>
 								<TableHead>Agent</TableHead>
 								<TableHead>Modèle</TableHead>
 								<TableHead>Version du prompt</TableHead>
@@ -55,8 +60,10 @@ export function VersionsCard({ versions }: VersionsCardProps) {
 						<TableBody>
 							{versions.map((row) => (
 								<TableRow
-									key={`${row.agent_id ?? 'aggregator'}|${row.model}|${row.prompt_version}|${row.escalated}`}
+									key={`${row.kind}|${row.agent_id ?? 'aggregator'}|${row.model}|${row.prompt_version}|${row.escalated}`}
+									data-version-kind={row.kind}
 								>
+									<TableCell>{versionKindLabel(row.kind)}</TableCell>
 									<TableCell>
 										{versionAgentLabel(row)}
 										{row.escalated ? (

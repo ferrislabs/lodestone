@@ -62,6 +62,7 @@ struct Seen {
     instruction: String,
     documents: Vec<(String, String)>,
     aggregator: bool,
+    scoring: bool,
 }
 
 struct Shared {
@@ -149,7 +150,8 @@ fn summary_with(quote: &str) -> Value {
 
 impl LlmProvider for Scripted {
     async fn complete(&self, request: &LlmRequest<'_>) -> Result<LlmResponse, LlmError> {
-        let aggregator = request.schema["properties"].get("answers").is_none();
+        let scoring = request.schema["properties"].get("criteria").is_some();
+        let aggregator = !scoring && request.schema["properties"].get("answers").is_none();
         self.shared.seen.lock().unwrap().push(Seen {
             model: self.model.clone(),
             system: request.system.to_owned(),
@@ -160,21 +162,33 @@ impl LlmProvider for Scripted {
                 .map(|document| (document.source.to_owned(), document.content.to_owned()))
                 .collect(),
             aggregator,
+            scoring,
         });
+        let key = if scoring {
+            format!("{}#scoring", self.model)
+        } else {
+            self.model.clone()
+        };
         let reply = self
             .shared
             .replies
             .lock()
             .unwrap()
-            .get_mut(&self.model)
+            .get_mut(&key)
             .and_then(VecDeque::pop_front)
             .unwrap_or(Reply::Good);
         let output = match (reply, aggregator) {
             (Reply::Fail(error), _) => return Err(error),
             (Reply::Raw(value), _) => value,
             (Reply::Quote(quote), _) => summary_with(quote),
+            (Reply::Worst, false) if scoring => {
+                support::scoring_answer(request.schema, &quote_of(request), true)
+            }
             (Reply::Worst, false) => answers_from(request.schema, true, &quote_of(request)),
             (_, true) => summary_with(GOOD_QUOTE),
+            (_, false) if scoring => {
+                support::scoring_answer(request.schema, &quote_of(request), false)
+            }
             (_, false) => answers_from(request.schema, false, &quote_of(request)),
         };
         Ok(LlmResponse {
@@ -414,6 +428,16 @@ impl Harness {
             )
             .await
             .unwrap();
+        self.usecase
+            .score_due_leads(
+                &self.builder(),
+                &self.cipher,
+                &PgLlmCache::new(self.pool.clone()),
+                settings(100, 10),
+                &self.clock,
+            )
+            .await
+            .unwrap();
     }
 
     async fn summarise(&self, settings: EvaluationSettings) -> AggregationReport {
@@ -549,9 +573,18 @@ async fn invalid_agent_results_still_complete_the_set(pool: PgPool) {
             .instruction
             .contains("confidence not computed; verdict pending")
     );
-    let agent_block = &calls[0].documents.last().unwrap().1;
+    let agent_block = &calls[0]
+        .documents
+        .iter()
+        .find(|document| document.0 == "qualification:solo")
+        .unwrap()
+        .1;
     assert!(agent_block.contains("status: invalid, left out of the confidence"));
     assert!(agent_block.contains("fournisseur indisponible"));
+    let scoring_block = &calls[0].documents.last().unwrap().1;
+    assert!(scoring_block.contains(
+        "status: invalid, left out of the decision (aucun rapport de qualification valide)"
+    ));
     let lead = harness.lead(profile, "acme.com").await;
     assert_eq!(lead.confidence, None);
     assert_eq!(lead.verdict, None);
@@ -576,7 +609,7 @@ async fn the_aggregator_uses_its_provider_else_the_synthesis_default(pool: PgPoo
         harness
             .seen()
             .iter()
-            .filter(|call| !call.aggregator)
+            .filter(|call| !call.aggregator && !call.scoring)
             .all(|call| call.model == CLASSIFIER)
     );
     assert_eq!(
@@ -615,10 +648,10 @@ async fn the_prompt_holds_the_aggregator_context_signals_agents_and_computed_fac
     assert!(call.system.contains("Contract JSON schema:"));
     assert!(
         call.instruction
-            .contains("confidence 100.0 %; verdict reliable")
+            .contains("confidence 80.0 %; verdict reliable; score 85 out of 100")
     );
     assert!(call.instruction.contains("Documents 0 to 1"));
-    assert_eq!(call.documents.len(), 5);
+    assert_eq!(call.documents.len(), 6);
     assert!(call.documents[0].1.starts_with(
         "acme.com expose Keycloak-http_probe (sonde HTTP, version 21.1)\nsource: http_probe"
     ));
@@ -652,6 +685,12 @@ async fn the_prompt_holds_the_aggregator_context_signals_agents_and_computed_fac
             .contains("answer: Forte (forte), confidence 90 %")
     );
     assert_eq!(call.documents[4].0, "qualification:two");
+    assert_eq!(call.documents[5].0, "scoring:score-global");
+    let scoring = &call.documents[5].1;
+    assert!(scoring.starts_with("scoring agent: Score global (weight 5)"));
+    assert!(scoring.contains("status: valid\nscore: 85 out of 100"));
+    assert!(scoring.contains("reason: Le lead correspond à la cible."));
+    assert!(scoring.contains("criterion: Le lead correspond-il à la cible de l'offre ?"));
 }
 
 #[sqlx::test(migrations = "../../migrations")]
@@ -660,6 +699,7 @@ async fn the_aggregator_cannot_change_the_computed_confidence_or_verdict(pool: P
     harness.defaults().await;
     let profile = harness.profile(vec![agent("solo", 5, None)], None).await;
     harness.script("model-class", vec![Reply::Worst]);
+    harness.script("model-synth#scoring", vec![Reply::Worst]);
     harness.observe("acme.com", SourceName::HttpProbe, 10).await;
     let mut hostile = summary_with(GOOD_QUOTE);
     hostile["confidence"] = json!(99.0);
@@ -669,8 +709,9 @@ async fn the_aggregator_cannot_change_the_computed_confidence_or_verdict(pool: P
     harness.pass().await;
 
     let lead = harness.lead(profile, "acme.com").await;
-    assert_eq!(lead.confidence, Some(0.0));
+    assert_eq!(lead.confidence, Some(80.0));
     assert_eq!(lead.verdict, Some(Verdict::Discarded));
+    assert_eq!(lead.llm_score, Some(10));
     assert_eq!(harness.assessments(profile, "acme.com").await.len(), 1);
 }
 
@@ -1015,6 +1056,7 @@ async fn every_lead_gets_a_draft_whatever_its_verdict(pool: PgPool) {
         )
         .await;
     harness.script("model-bad", vec![Reply::Worst, Reply::Worst]);
+    harness.script("model-synth#scoring", vec![Reply::Worst, Reply::Worst]);
     harness.observe("low.com", SourceName::HttpProbe, 10).await;
     harness.observe("low2.com", SourceName::HttpProbe, 11).await;
     harness.pass().await;
@@ -1101,7 +1143,7 @@ async fn without_a_provider_nothing_is_stored_and_the_lead_stays_due(pool: PgPoo
     assert_eq!(report.backlog, 1);
     assert!(harness.assessments(profile, "acme.com").await.is_empty());
     let lead = harness.lead(profile, "acme.com").await;
-    assert_eq!(lead.verdict, Some(Verdict::Reliable));
+    assert_eq!(lead.verdict, None);
     assert_eq!(lead.status, LeadStatus::New);
 }
 

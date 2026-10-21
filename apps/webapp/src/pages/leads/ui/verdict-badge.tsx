@@ -1,5 +1,6 @@
 import { Badge } from '#/components/ui/badge'
 import { cn } from '#/lib/utils'
+import { PENDING_SCORING_LABEL } from '#/pages/leads/lib/scoring'
 import type { Verdict } from '#/pages/leads/lib/types'
 import {
 	type VerdictKey,
@@ -25,7 +26,7 @@ export function VerdictBadge({ verdict }: VerdictBadgeProps) {
 			data-verdict={verdictKey(verdict)}
 			className={cn(STYLES[verdictKey(verdict)])}
 		>
-			{verdictLabel(verdict)}
+			{verdict ? verdictLabel(verdict) : PENDING_SCORING_LABEL}
 		</Badge>
 	)
 }

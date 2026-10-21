@@ -14,8 +14,8 @@ use crate::{
     domain::{
         aggregation::{
             AggregatorOutput, EVIDENCE_RETRY, Facts, agent_source, build, check,
-            instruction_with_dossier, missing_results, render_agent, retry_message, warnings,
-            with_problem,
+            instruction_with_dossier, missing_results, render_agent, render_scoring, retry_message,
+            scoring_source, warnings, with_problem,
         },
         company::PAGE_PROMPT_CHARS,
         job::ports::Clock,
@@ -34,6 +34,7 @@ use crate::{
         qualification::{
             QualificationResult, ports::QualificationRepository, prompt::lead_document,
         },
+        scoring_agent::ScoringResult,
         suppression::ports::SuppressionRepository,
         values::Provenance,
     },
@@ -77,6 +78,19 @@ fn agent_blocks(
         .map(|agent| {
             let result = results.iter().find(|result| result.agent_id == agent.id);
             (agent_source(&agent.id), render_agent(agent, result))
+        })
+        .collect()
+}
+
+fn scoring_blocks(
+    definition: &ProfileDefinition,
+    results: &[ScoringResult],
+) -> Vec<(String, String)> {
+    definition
+        .enabled_scoring_agents()
+        .map(|agent| {
+            let result = results.iter().find(|result| result.agent_id == agent.id);
+            (scoring_source(&agent.id), render_scoring(agent, result))
         })
         .collect()
 }
@@ -139,7 +153,9 @@ where
             .unwrap_or_default();
         let signal_contents: Vec<String> = signals.iter().map(render_signal).collect();
         let overview = lead_document(lead.domain.as_str(), &facts);
+        let scoring_results = usecase.lead_scoring_results(lead.id).await?;
         let blocks = agent_blocks(definition, &results);
+        let scoring_blocks = scoring_blocks(definition, &scoring_results);
         let mut documents: Vec<UntrustedDocument<'_>> = signals
             .iter()
             .zip(&signal_contents)
@@ -159,6 +175,7 @@ where
         documents.extend(
             blocks
                 .iter()
+                .chain(&scoring_blocks)
                 .map(|(source, content)| UntrustedDocument { source, content }),
         );
         let evidence_documents = &documents[..signals.len() + dossier_documents.len()];
@@ -169,6 +186,7 @@ where
             Facts {
                 confidence: lead.confidence,
                 verdict: lead.verdict,
+                score: lead.llm_score,
             },
             signals.len(),
             dossier_documents.len(),

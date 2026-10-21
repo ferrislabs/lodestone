@@ -14,6 +14,7 @@ export const PROFILE_HINTS: UiHints = {
 		'llm.relevance_criteria',
 		'agents.llm.relevance_criteria',
 		'qualification_agents.system_prompt',
+		'scoring_agents.system_prompt',
 		'aggregator.system_prompt',
 	],
 	defaults: {

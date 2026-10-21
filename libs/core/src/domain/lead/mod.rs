@@ -157,6 +157,7 @@ pub struct Lead {
     pub score_breakdown: Vec<crate::domain::scoring::ScoreContribution>,
     pub confidence: Option<f64>,
     pub verdict: Option<crate::domain::qualification::Verdict>,
+    pub llm_score: Option<u8>,
     pub qualified_at: Option<DateTime<Utc>>,
     pub first_seen_at: DateTime<Utc>,
     pub last_seen_at: DateTime<Utc>,

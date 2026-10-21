@@ -1,6 +1,6 @@
 # 0007. Leads are qualified by qualification agents and summed up by an aggregator
 
-Status: accepted
+Status: accepted. The verdict part (confidence blend, thresholds, caps) is superseded by ADR 0009: it is now the indicators given to the scoring agents.
 Date: 2026-10-06
 
 Note (2026-10-07): ADR 0009 adds scoring agents that decide the score and the verdict. Once issue 172 lands, the verdict part of this ADR (confidence blend, thresholds and caps, "Evidence and calibration") is superseded; exclusions, the qualification contract, the aggregator and the company dossier stay. Evidence indicators now count independent signals, decay with age and aggregate the sibling domains of a company (issue 170, ADR 0009).

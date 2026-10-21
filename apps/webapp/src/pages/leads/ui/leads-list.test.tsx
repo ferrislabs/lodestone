@@ -20,6 +20,7 @@ const leads: Lead[] = [
 		grouped_leads: [],
 		score: 42,
 		confidence: 72.5,
+		llm_score: 72,
 		verdict: 'fiable',
 		summary:
 			'Le domaine expose un Keycloak ancien et recrute un ingénieur IAM.',
@@ -60,7 +61,7 @@ interface HarnessProps {
 }
 
 function Harness({ data, state, onOpen, onExport }: HarnessProps) {
-	const columns = buildLeadColumns(42, onOpen ?? (() => {}))
+	const columns = buildLeadColumns(onOpen ?? (() => {}))
 	const table = useReactTable({
 		data,
 		columns,
@@ -91,7 +92,8 @@ describe('LeadsList', () => {
 		expect(screen.getByText('acme.test')).toBeTruthy()
 		expect(screen.getByText('globex.test')).toBeTruthy()
 		expect(screen.getByText('Qualifié')).toBeTruthy()
-		expect(screen.getByText('42')).toBeTruthy()
+		expect(screen.getByText('72 / 100')).toBeTruthy()
+		expect(screen.queryByText('42')).toBeNull()
 		expect(screen.getByText('Page 1 sur 2 - 40 leads')).toBeTruthy()
 	})
 
@@ -100,7 +102,7 @@ describe('LeadsList', () => {
 		const badges = Array.from(container.querySelectorAll('[data-verdict]'))
 		expect(badges.map((badge) => badge.textContent)).toEqual([
 			'Fiable',
-			'En attente',
+			'En attente du scoring',
 		])
 		expect(badges.map((badge) => badge.getAttribute('data-verdict'))).toEqual([
 			'fiable',
@@ -108,7 +110,22 @@ describe('LeadsList', () => {
 		])
 		expect(screen.getByText('Verdict')).toBeTruthy()
 		expect(screen.getByText(/^72,5\s%$/)).toBeTruthy()
-		expect(screen.getByText('—')).toBeTruthy()
+		expect(screen.getAllByText('—')).toHaveLength(2)
+	})
+
+	it('shows the score decided by the scoring agents out of 100', () => {
+		const { container } = render(<Harness data={leads} state="ready" />)
+		const bars = Array.from(
+			container.querySelectorAll('[role="progressbar"][aria-label="Score"]'),
+		)
+		expect(bars.map((bar) => bar.getAttribute('aria-valuenow'))).toEqual([
+			'72',
+			null,
+		])
+		const cells = Array.from(
+			container.querySelectorAll('[data-part="llm-score"]'),
+		)
+		expect(cells.map((cell) => cell.textContent)).toEqual(['72 / 100', '—'])
 	})
 
 	it('shows the opinion and evidence breakdown under the confidence', () => {
@@ -138,11 +155,11 @@ describe('LeadsList', () => {
 		const breakdowns = container.querySelectorAll('[data-confidence-breakdown]')
 		expect(breakdowns).toHaveLength(1)
 		expect(breakdowns[0]?.textContent).toMatch(
-			/^Avis 100\s%\s·\sPreuves 35\s%$/,
+			/^Indicateurs : avis 100\s%\s×\spreuves 35\s%$/,
 		)
 		expect(
-			container.querySelector('[title^="Avis"]')?.getAttribute('title'),
-		).toMatch(/Preuves 35/)
+			container.querySelector('[title^="Indicateurs"]')?.getAttribute('title'),
+		).toMatch(/preuves 35/)
 	})
 
 	it('shows the confidence bar and the summary excerpt of each lead', () => {
@@ -153,7 +170,11 @@ describe('LeadsList', () => {
 				state="ready"
 			/>,
 		)
-		const bars = Array.from(container.querySelectorAll('[role="progressbar"]'))
+		const bars = Array.from(
+			container.querySelectorAll(
+				'[role="progressbar"][aria-label="Confiance"]',
+			),
+		)
 		expect(bars.map((bar) => bar.getAttribute('aria-valuenow'))).toEqual([
 			'73',
 			null,
@@ -249,7 +270,7 @@ describe('LeadsList', () => {
 		const badges = Array.from(container.querySelectorAll('[data-verdict]'))
 		expect(badges.map((badge) => badge.textContent)).toEqual([
 			'Écarté',
-			'En attente',
+			'En attente du scoring',
 		])
 		const hints = container.querySelectorAll('[data-part="exclusion"]')
 		expect(hints).toHaveLength(1)

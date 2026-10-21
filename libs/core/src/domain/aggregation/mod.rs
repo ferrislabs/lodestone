@@ -4,12 +4,15 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::domain::{
-    profile::definition::{AgentId, Aggregator, ProfileDefinition, QualificationAgent},
+    profile::definition::{
+        AgentId, Aggregator, ProfileDefinition, QualificationAgent, ScoringAgent,
+    },
     prompt::{DraftMessage, EvidenceQuote},
     qualification::{
         QualificationResult, ResultStatus, Verdict,
         prompt::{DOSSIER_NOTE, FACTS_NOTE, hex, identity_context},
     },
+    scoring_agent::ScoringResult,
 };
 
 mod checks;
@@ -74,6 +77,7 @@ pub struct AggregationPrompt {
 pub struct Facts {
     pub confidence: Option<f64>,
     pub verdict: Option<Verdict>,
+    pub score: Option<u8>,
 }
 
 fn verdict_name(verdict: Option<Verdict>) -> &'static str {
@@ -81,7 +85,7 @@ fn verdict_name(verdict: Option<Verdict>) -> &'static str {
         Some(Verdict::Reliable) => "reliable",
         Some(Verdict::ToCheck) => "to check",
         Some(Verdict::Discarded) => "discarded",
-        None => "pending, no qualification agent answered validly",
+        None => "pending, awaiting the scoring agents",
     }
 }
 
@@ -136,8 +140,12 @@ pub fn instruction_with_dossier(facts: Facts, signal_count: usize, dossier_count
             "Documents 0 to {last_signal} are the signals of the lead. Documents {first_dossier} to {last_dossier} are the company dossier (official data and pages of the company site). Evidence may quote only these documents."
         )
     };
+    let score = facts.score.map_or_else(
+        || "not decided".to_owned(),
+        |score| format!("{score} out of 100"),
+    );
     format!(
-        "Using only the documents above, write the summary of this lead for the offer in the market context.\n{quotable} The following document is the lead overview with the computed facts about the domain, then comes one document per qualification agent with its answers and score.\nComputed facts, final, displayed by the application: never change, contradict or restate them in your text: confidence {confidence}; verdict {}.",
+        "Using only the documents above, write the summary of this lead for the offer in the market context.\n{quotable} The following document is the lead overview with the computed facts about the domain, then comes one document per qualification agent with its answers and score, then one document per scoring agent with its score, verdict and reasons.\nComputed facts, final, displayed by the application: never change, contradict or restate them in your text: confidence {confidence}; verdict {}; score {score}.",
         verdict_name(facts.verdict)
     )
 }
@@ -148,6 +156,10 @@ pub fn with_problem(instruction: &str, problem: &str) -> String {
 
 pub fn agent_source(agent: &AgentId) -> String {
     format!("qualification:{}", agent.as_str())
+}
+
+pub fn scoring_source(agent: &AgentId) -> String {
+    format!("scoring:{}", agent.as_str())
 }
 
 fn percent(value: f64) -> String {
@@ -214,6 +226,50 @@ pub fn render_agent(agent: &QualificationAgent, result: Option<&QualificationRes
                 .unwrap_or("-");
             text.push_str(&format!(
                 "\nungrounded: the agent first chose `{original}` without a verifiable quote, so the answer was set to the unknown option"
+            ));
+        }
+    }
+    text
+}
+
+pub fn render_scoring(agent: &ScoringAgent, result: Option<&ScoringResult>) -> String {
+    let mut text = format!(
+        "scoring agent: {} (weight {})\nevaluates: {}\n",
+        agent.name, agent.weight, agent.description
+    );
+    let Some((score, verdict)) = result.and_then(ScoringResult::valid_parts) else {
+        let reason = result
+            .and_then(|result| result.error.as_deref())
+            .unwrap_or("no result");
+        text.push_str(&format!(
+            "status: invalid, left out of the decision ({reason})"
+        ));
+        return text;
+    };
+    text.push_str(&format!(
+        "status: valid\nscore: {score} out of 100\nverdict: {} (probability {})",
+        verdict_name(Some(verdict.choice)),
+        percent(verdict.confidence)
+    ));
+    if let Some(result) = result {
+        for reason in &result.reasons {
+            text.push_str(&format!("\nreason: {reason}"));
+        }
+        for criterion in &agent.criteria {
+            let Some(answer) = result.criteria.get(&criterion.id) else {
+                continue;
+            };
+            let Some(choice) = answer.get("choice").and_then(Value::as_str) else {
+                continue;
+            };
+            let label = criterion
+                .options
+                .iter()
+                .find(|option| option.value == choice)
+                .map_or(choice, |option| option.label.as_str());
+            text.push_str(&format!(
+                "\ncriterion: {}\nanswer: {label} ({choice})",
+                criterion.wording
             ));
         }
     }
@@ -331,6 +387,7 @@ mod tests {
             Facts {
                 confidence: Some(61.0),
                 verdict: None,
+                score: None,
             },
             3,
             2,
@@ -356,6 +413,7 @@ mod tests {
             Facts {
                 confidence: Some(72.5),
                 verdict: Some(Verdict::Reliable),
+                score: Some(74),
             },
             3,
         );
@@ -365,6 +423,7 @@ mod tests {
             Facts {
                 confidence: None,
                 verdict: None,
+                score: None,
             },
             1,
         );

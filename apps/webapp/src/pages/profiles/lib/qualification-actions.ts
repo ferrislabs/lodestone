@@ -3,27 +3,7 @@ import type {
 	HalfLifeKey,
 } from '#/pages/profiles/lib/qualification'
 
-export interface QualificationActions {
-	openPicker: () => void
-	closePicker: () => void
-	add: (templateId: string) => void
-	edit: (index: number) => void
-	closeEdit: () => void
-	setEnabled: (index: number, enabled: boolean) => void
-	setName: (index: number, name: string) => void
-	setDescription: (index: number, description: string) => void
-	setId: (index: number, id: string) => void
-	setProvider: (index: number, providerId: string) => void
-	setWeight: (index: number, weight: number) => void
-	setExclusionThreshold: (index: number, percent: number | null) => void
-	setSamples: (index: number, samples: number | null) => void
-	setSamplingTemperature: (index: number, temperature: number | null) => void
-	setPrompt: (index: number, prompt: string) => void
-	requestRemove: (index: number) => void
-	confirmRemove: (index: number) => void
-	cancelRemove: () => void
-	togglePreview: () => void
-	addQuestion: (index: number) => void
+export interface AxisActions {
 	removeQuestion: (index: number, question: number) => void
 	setQuestionWording: (index: number, question: number, text: string) => void
 	setQuestionId: (index: number, question: number, id: string) => void
@@ -48,12 +28,35 @@ export interface QualificationActions {
 		option: number,
 		score: number | null,
 	) => void
-	setOptionExcludes: (
+	setOptionExcludes?: (
 		index: number,
 		question: number,
 		option: number,
 		excludes: boolean,
 	) => void
+}
+
+export interface QualificationActions extends AxisActions {
+	openPicker: () => void
+	closePicker: () => void
+	add: (templateId: string) => void
+	edit: (index: number) => void
+	closeEdit: () => void
+	setEnabled: (index: number, enabled: boolean) => void
+	setName: (index: number, name: string) => void
+	setDescription: (index: number, description: string) => void
+	setId: (index: number, id: string) => void
+	setProvider: (index: number, providerId: string) => void
+	setWeight: (index: number, weight: number) => void
+	setExclusionThreshold: (index: number, percent: number | null) => void
+	setSamples: (index: number, samples: number | null) => void
+	setSamplingTemperature: (index: number, temperature: number | null) => void
+	setPrompt: (index: number, prompt: string) => void
+	requestRemove: (index: number) => void
+	confirmRemove: (index: number) => void
+	cancelRemove: () => void
+	togglePreview: () => void
+	addQuestion: (index: number) => void
 	setEscalationProvider: (providerId: string) => void
 	setBandLow: (percent: number | null) => void
 	setBandHigh: (percent: number | null) => void
@@ -67,4 +70,24 @@ export interface QualificationActions {
 	setReferenceScore: (score: number | null) => void
 	setEvidenceWeight: (key: EvidenceWeightKey, weight: number | null) => void
 	setHalfLife: (key: HalfLifeKey, days: number | null) => void
+}
+
+export interface ScoringActions extends AxisActions {
+	add: () => void
+	edit: (index: number) => void
+	closeEdit: () => void
+	setEnabled: (index: number, enabled: boolean) => void
+	setName: (index: number, name: string) => void
+	setDescription: (index: number, description: string) => void
+	setId: (index: number, id: string) => void
+	setProvider: (index: number, providerId: string) => void
+	setWeight: (index: number, weight: number) => void
+	setSamples: (index: number, samples: number | null) => void
+	setSamplingTemperature: (index: number, temperature: number | null) => void
+	setPrompt: (index: number, prompt: string) => void
+	requestRemove: (index: number) => void
+	confirmRemove: (index: number) => void
+	cancelRemove: () => void
+	togglePreview: () => void
+	addCriterion: (index: number) => void
 }

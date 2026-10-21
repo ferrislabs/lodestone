@@ -10,11 +10,10 @@ import type { Lead } from '#/pages/leads/lib/types'
 import { summaryExcerpt } from '#/pages/leads/lib/verdict'
 import { ConfidenceBar } from './confidence-bar'
 import { LeadStatusBadge } from './lead-status-badge'
-import { ScoreBar } from './score-bar'
+import { LlmScoreBar } from './llm-score-bar'
 import { VerdictBadge } from './verdict-badge'
 
 export function buildLeadColumns(
-	maxScore: number,
 	onOpenLead: (leadId: string) => void,
 ): ColumnDef<Lead>[] {
 	return [
@@ -101,7 +100,7 @@ export function buildLeadColumns(
 		{
 			id: 'score',
 			header: 'Score',
-			cell: ({ row }) => <ScoreBar score={row.original.score} max={maxScore} />,
+			cell: ({ row }) => <LlmScoreBar score={row.original.llm_score} />,
 		},
 		{
 			id: 'status',

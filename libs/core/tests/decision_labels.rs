@@ -5,7 +5,7 @@ use common::CoreError;
 use lodestone_core::{
     AssessmentId, CreateProfileCommand, DecisionSnapshot, EvidenceComponents, EvidenceStrength,
     LeadId, LeadStatus, LodestoneUseCase, ProfileId, ProfileName, Rejection, RejectionReason,
-    Suggestion, UserId, ValidatedProfile,
+    Suggestion, UserId, ValidatedProfile, VersionKind,
 };
 use serde_json::{Value, json};
 use sqlx::PgPool;
@@ -197,6 +197,103 @@ async fn validating_a_lead_records_the_qualification_at_decision_time(pool: PgPo
     assert_eq!(snapshot["aggregator"]["samples"], json!(1));
     let parsed: DecisionSnapshot = serde_json::from_value(snapshot).unwrap();
     assert_eq!(parsed.evidence, Some(evidence()));
+}
+
+async fn scored(pool: &PgPool, lead: LeadId) {
+    let profile: Uuid = sqlx::query_scalar("SELECT profile_id FROM leads WHERE id = $1")
+        .bind(lead.0)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "UPDATE lead_qualification_state SET verdict_source = 'scoring', indicator_confidence = 44.5, verdict_reason = NULL WHERE lead_id = $1",
+    )
+    .bind(lead.0)
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query("UPDATE leads SET llm_score = 68 WHERE id = $1")
+        .bind(lead.0)
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO scoring_results (id, lead_id, profile_id, profile_revision, agent_id, model, prompt_version, status, criteria, score, verdict, reasons, created_at, provider_name, generation, samples)
+         VALUES ($1, $2, $3, 1, 'score-global', 'model-scorer', 'scoring-agent@hash', 'valid', '{}'::jsonb, 68, $4, '[\"Un signal.\"]'::jsonb, now(), 'cloud', '{\"temperature\":0.0}'::jsonb, 3)",
+    )
+    .bind(Uuid::now_v7())
+    .bind(lead.0)
+    .bind(profile)
+    .bind(json!({
+        "choice": "a_verifier",
+        "confidence": 0.6,
+        "probabilities": {"fiable": 0.3, "a_verifier": 0.6, "ecarte": 0.1}
+    }))
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_snapshot_keeps_the_scoring_results_and_the_report_counts_them_per_agent(pool: PgPool) {
+    let profile = create_profile(&pool, "alpha").await;
+    let actor = user(&pool).await;
+    let id = lead(&pool, profile, "a.com", "qualified").await;
+    qualify(&pool, id, 60.0, "a_verifier").await;
+    scored(&pool, id).await;
+    let usecase = LodestoneUseCase::new(pool.clone());
+
+    usecase
+        .change_lead_status(id, LeadStatus::Validated, actor, None)
+        .await
+        .unwrap();
+
+    let snapshot: Value =
+        sqlx::query_scalar("SELECT snapshot FROM decision_labels WHERE lead_id = $1")
+            .bind(id.0)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(snapshot["llm_score"], json!(68));
+    assert_eq!(snapshot["indicator_confidence"], json!(44.5));
+    assert_eq!(snapshot["verdict_source"], json!("scoring"));
+    assert_eq!(snapshot["confidence"], json!(60.0));
+    let agent = &snapshot["scoring_agents"]["score-global"];
+    assert_eq!(agent["status"], json!("valid"));
+    assert_eq!(agent["score"], json!(68));
+    assert_eq!(agent["verdict"], json!("a_verifier"));
+    assert_eq!(agent["confidence"], json!(0.6));
+    assert_eq!(agent["provenance"]["model"], json!("model-scorer"));
+    assert_eq!(
+        agent["provenance"]["prompt_version"],
+        json!("scoring-agent@hash")
+    );
+    assert_eq!(agent["provenance"]["samples"], json!(3));
+    let parsed: DecisionSnapshot = serde_json::from_value(snapshot).unwrap();
+    assert_eq!(parsed.scoring_agents.len(), 1);
+
+    let report = usecase
+        .quality_report(None, None, Some(profile))
+        .await
+        .unwrap();
+    let row = report
+        .versions
+        .iter()
+        .find(|row| row.kind == VersionKind::Scoring)
+        .unwrap();
+    assert_eq!(row.agent_id.as_deref(), Some("score-global"));
+    assert_eq!(row.agent_name.as_deref(), Some("Score global"));
+    assert_eq!(row.model, "model-scorer");
+    assert_eq!(row.prompt_version, "scoring-agent@hash");
+    assert_eq!((row.validated, row.rejected), (1, 0));
+    assert_eq!(row.precision, Some(1.0));
+    assert!(
+        report
+            .versions
+            .iter()
+            .filter(|row| row.kind == VersionKind::Qualification)
+            .all(|row| row.agent_id.as_deref() == Some("fit"))
+    );
 }
 
 #[sqlx::test(migrations = "../../migrations")]

@@ -1068,6 +1068,151 @@ async fn detail_lists_the_qualification_results_with_labels_and_providers(pool: 
 }
 
 #[sqlx::test(migrations = "../../migrations")]
+async fn detail_lists_the_scoring_results_and_the_combined_decision(pool: PgPool) {
+    let seed = Seed { pool: pool.clone() };
+    let profile = seed.qualified_profile("keycloak-ops").await;
+    let lead = seed.lead(&profile, "scored.com", "new", 8.0, 1).await;
+    let other = seed.lead(&profile, "pending.com", "new", 7.0, 2).await;
+    let provider = seed.provider("Synthèse", "gemma_laya").await;
+    seed.result(
+        &lead,
+        SeededResult {
+            agent: "pertinence",
+            provider: None,
+            status: "valid",
+            summary: Some("Résumé."),
+            answers: json!({}),
+            score: Some(0.5),
+            error: None,
+        },
+    )
+    .await;
+    sqlx::query(
+        "INSERT INTO scoring_results (id, lead_id, profile_id, profile_revision, agent_id, provider_id, model, prompt_version, status, criteria, score, verdict, reasons, created_at, provider_name, samples)
+         SELECT $1, l.id, l.profile_id, 2, 'score-global', $3::uuid, 'gemma_laya', 'scoring-agent@hash', 'valid', $4, 72, $5, $6, now(), 'Synthèse', 3
+         FROM leads l WHERE l.id = $2::uuid",
+    )
+    .bind(common::generate_uuid_v7())
+    .bind(&lead)
+    .bind(&provider)
+    .bind(json!({"adequation_offre": {"type": "choice", "choice": "forte", "confidence": 0.8,
+        "evidence": "expose Keycloak 18", "evidence_source": "https://scored.com/realms/master",
+        "grounded": true, "agreement": 0.67,
+        "probabilities": {"forte": 0.8, "moyenne": 0.1, "faible": 0.0, "inconnu": 0.1}}}))
+    .bind(json!({"choice": "a_verifier", "declared_choice": "fiable", "confidence": 0.6,
+        "probabilities": {"fiable": 0.3, "a_verifier": 0.6, "ecarte": 0.1}}))
+    .bind(json!(["Un seul signal.", "Entreprise ciblée."]))
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query("UPDATE leads SET confidence = 60.0, verdict = 'a_verifier', llm_score = 72, qualified_at = now() WHERE id = $1::uuid")
+        .bind(&lead)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "UPDATE lead_qualification_state SET verdict_source = 'scoring', indicator_confidence = 41.5, indicator_cap = 'single_angle', verdict_probabilities = $2, evidence = $3, opinion = 0.7 WHERE lead_id = $1::uuid",
+    )
+    .bind(&lead)
+    .bind(json!({"fiable": 0.3, "a_verifier": 0.6, "ecarte": 0.1}))
+    .bind(json!({
+        "score": 0.4, "components": {"volume": 0.4, "diversity": 0.5, "environment": 1.0, "strength": 0.2},
+        "signal_count": 1, "signal_score": 8.0, "only_non_production": false,
+        "independent_signals": 1, "decayed_signals": 1.0, "source_count": 1, "kind_count": 1
+    }))
+    .execute(&pool)
+    .await
+    .unwrap();
+    let api = Api::new(pool).await;
+
+    let (status, body) = api.get(&format!("/api/v1/leads/{lead}")).await;
+
+    assert_eq!(status, StatusCode::OK);
+    let data = &body["data"];
+    assert_eq!(data["lead"]["llm_score"], 72);
+    assert_eq!(data["lead"]["verdict"], "a_verifier");
+    assert_eq!(data["lead"]["confidence"], 60.0);
+    assert_eq!(data["lead"]["verdict_source"], "scoring");
+    assert_eq!(data["lead"]["indicator_confidence"], 41.5);
+    assert_eq!(data["lead"]["indicator_cap"], "single_angle");
+    assert_eq!(data["lead"]["verdict_probabilities"]["a_verifier"], 60.0);
+    assert_eq!(data["lead"]["verdict_probabilities"]["fiable"], 30.0);
+    let results = data["scoring_results"].as_array().unwrap();
+    assert_eq!(results.len(), 1);
+    let result = &results[0];
+    assert_eq!(result["agent_id"], "score-global");
+    assert_eq!(result["agent_name"], "Score global");
+    assert_eq!(result["weight"], 5);
+    assert_eq!(result["provider_name"], "Synthèse");
+    assert_eq!(result["model"], "gemma_laya");
+    assert_eq!(result["provenance"]["samples"], 3);
+    assert_eq!(result["status"], "valid");
+    assert_eq!(result["score"], 72);
+    assert_eq!(result["verdict"]["choice"], "a_verifier");
+    assert_eq!(result["verdict"]["declared_choice"], "fiable");
+    assert_eq!(result["verdict"]["confidence"], 60.0);
+    assert_eq!(result["verdict"]["probabilities"]["ecarte"], 10.0);
+    assert_eq!(
+        result["reasons"],
+        json!(["Un seul signal.", "Entreprise ciblée."])
+    );
+    let criterion = &result["criteria"][0];
+    assert_eq!(criterion["question_id"], "adequation_offre");
+    assert_eq!(criterion["choice"], "forte");
+    assert_eq!(criterion["choice_label"], "Forte");
+    assert_eq!(criterion["evidence"], "expose Keycloak 18");
+    assert_eq!(criterion["grounded"], true);
+    assert_eq!(criterion["agreement"], 0.67);
+
+    let (_, pending) = api.get(&format!("/api/v1/leads/{other}")).await;
+    assert!(
+        pending["data"]["scoring_results"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert!(pending["data"]["lead"]["llm_score"].is_null());
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn an_unscored_lead_waits_for_its_scoring_and_the_list_sorts_by_llm_score(pool: PgPool) {
+    let seed = Seed { pool: pool.clone() };
+    let profile = seed.profile("keycloak-ops").await;
+    let low = seed.lead(&profile, "low.com", "new", 30.0, 1).await;
+    let high = seed.lead(&profile, "high.com", "new", 10.0, 2).await;
+    seed.lead(&profile, "waiting.com", "new", 50.0, 3).await;
+    for (lead, score) in [(&low, 20), (&high, 90)] {
+        sqlx::query("UPDATE leads SET llm_score = $2, confidence = 50, verdict = 'a_verifier' WHERE id = $1::uuid")
+            .bind(lead)
+            .bind(score)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+    let api = Api::new(pool).await;
+    let base = format!("/api/v1/profiles/{profile}/leads");
+
+    let (_, desc) = api.get(&format!("{base}?sort=llm_score_desc")).await;
+    assert_eq!(domains(&desc), ["high.com", "low.com", "waiting.com"]);
+    let (_, asc) = api.get(&format!("{base}?sort=llm_score_asc")).await;
+    assert_eq!(domains(&asc), ["low.com", "high.com", "waiting.com"]);
+    let (_, pending) = api.get(&format!("{base}?verdict=en_attente")).await;
+    assert_eq!(domains(&pending), ["waiting.com"]);
+    let waiting = &pending["data"][0];
+    assert!(waiting["llm_score"].is_null());
+    assert!(waiting["verdict"].is_null());
+    let (_, listed) = api.get(&base).await;
+    let scores: Vec<(&str, Option<u64>)> = listed["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|lead| (lead["domain"].as_str().unwrap(), lead["llm_score"].as_u64()))
+        .collect();
+    assert!(scores.contains(&("high.com", Some(90))));
+    assert!(scores.contains(&("waiting.com", None)));
+}
+
+#[sqlx::test(migrations = "../../migrations")]
 async fn detail_flags_a_downgraded_answer_and_keeps_old_answers_readable(pool: PgPool) {
     let seed = Seed { pool: pool.clone() };
     let profile = seed.qualified_profile("keycloak-ops").await;

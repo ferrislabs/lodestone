@@ -18,6 +18,7 @@ pub mod profile;
 pub mod qualification;
 pub mod registry;
 pub mod run;
+pub mod scoring_agent;
 pub mod signal;
 pub mod suppression;
 pub mod user;

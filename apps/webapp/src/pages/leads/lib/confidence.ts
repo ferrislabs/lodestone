@@ -12,10 +12,25 @@ const VERDICT_REASON_LABELS: Readonly<Record<VerdictReason, string>> = {
 	weak_evidence: `${CAP_PREFIX}preuves insuffisantes`,
 	non_production: `${CAP_PREFIX}uniquement des hôtes hors production`,
 	excluded: 'Écarté : un agent de qualification a exclu le lead',
+	awaiting_scoring: "En attente : aucun agent de scoring n'a répondu",
 }
 
 export function verdictReasonLabel(reason: VerdictReason): string {
 	return VERDICT_REASON_LABELS[reason]
+}
+
+const INDICATOR_CAP_PREFIX = 'Indicateurs plafonnés : '
+
+const INDICATOR_CAP_LABELS: Readonly<Record<VerdictReason, string>> = {
+	single_angle: `${INDICATOR_CAP_PREFIX}un seul angle d'analyse`,
+	weak_evidence: `${INDICATOR_CAP_PREFIX}preuves insuffisantes`,
+	non_production: `${INDICATOR_CAP_PREFIX}uniquement des hôtes hors production`,
+	excluded: VERDICT_REASON_LABELS.excluded,
+	awaiting_scoring: VERDICT_REASON_LABELS.awaiting_scoring,
+}
+
+export function indicatorCapLabel(cap: VerdictReason): string {
+	return INDICATOR_CAP_LABELS[cap]
 }
 
 export function exclusionTitle(exclusion: Exclusion): string {
@@ -37,7 +52,7 @@ export function confidenceBreakdown(
 	lead: Pick<Lead, 'opinion' | 'evidence'>,
 ): string | null {
 	if (lead.opinion == null || lead.evidence == null) return null
-	return `Avis ${formatConfidence(lead.opinion)} · Preuves ${formatConfidence(lead.evidence.strength)}`
+	return `Indicateurs : avis ${formatConfidence(lead.opinion)} × preuves ${formatConfidence(lead.evidence.strength)}`
 }
 
 export interface EvidenceComponentRow {

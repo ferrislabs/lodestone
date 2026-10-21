@@ -8,12 +8,46 @@ use crate::{
     domain::{
         lead::Lead,
         profile::ActiveProfile,
+        profile::definition::ProfileDefinition,
         qualification::{
-            AgentOpinion, EvidenceStrength, Rescoring, ResultStatus, SCORING_VERSION, agent_score,
-            exclusions, judge, ports::QualificationRepository, stored_answers,
+            AgentOpinion, EvidenceStrength, LeadScoring, QualificationResult, Rescoring, ResultId,
+            ResultStatus, SCORING_VERSION, VerdictSource, agent_score, exclusions, judge,
+            ports::QualificationRepository, stored_answers,
         },
+        scoring_agent::{Decision, decide, ports::ScoringRepository},
     },
 };
+
+pub(crate) fn stored_opinions(
+    definition: &ProfileDefinition,
+    results: &[QualificationResult],
+) -> (Vec<AgentOpinion>, Vec<(ResultId, f64)>) {
+    let mut opinions = Vec::new();
+    let mut agent_scores = Vec::new();
+    for agent in definition
+        .qualification_agents
+        .iter()
+        .filter(|agent| agent.enabled)
+    {
+        let Some(result) = results
+            .iter()
+            .find(|result| result.agent_id == agent.id && result.status == ResultStatus::Valid)
+        else {
+            continue;
+        };
+        let Some(answers) = stored_answers(agent, &result.answers) else {
+            continue;
+        };
+        let score = agent_score(agent, &answers, definition.verdict.calibration_floor);
+        opinions.push(AgentOpinion {
+            weight: agent.weight,
+            score,
+            axes: answers.0.len(),
+        });
+        agent_scores.push((result.id, score));
+    }
+    (opinions, agent_scores)
+}
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct RescoreReport {
@@ -61,33 +95,12 @@ impl LodestoneUseCase {
     ) -> Result<(), CoreError> {
         let definition = active.revision.definition.definition();
         let results = self.lead_qualification_results(lead.id).await?;
+        let scoring_results = self.lead_scoring_results(lead.id).await?;
         let (_, facts, _) = self.signals_with_facts(lead).await?;
-        let mut opinions = Vec::new();
-        let mut agent_scores = Vec::new();
-        for agent in definition
-            .qualification_agents
-            .iter()
-            .filter(|agent| agent.enabled)
-        {
-            let Some(result) = results
-                .iter()
-                .find(|result| result.agent_id == agent.id && result.status == ResultStatus::Valid)
-            else {
-                continue;
-            };
-            let Some(answers) = stored_answers(agent, &result.answers) else {
-                continue;
-            };
-            let score = agent_score(agent, &answers, definition.verdict.calibration_floor);
-            opinions.push(AgentOpinion {
-                weight: agent.weight,
-                score,
-                axes: answers.0.len(),
-            });
-            agent_scores.push((result.id, score));
-        }
+        let (opinions, agent_scores) = stored_opinions(definition, &results);
         let evidence =
             EvidenceStrength::compute(&facts, lead.score.get(), &definition.evidence, now);
+        let found = exclusions(&results, &definition.qualification_agents);
         let rescoring = Rescoring {
             lead_id: lead.id,
             judgement: judge(
@@ -95,13 +108,29 @@ impl LodestoneUseCase {
                 evidence,
                 definition.verdict,
                 &definition.evidence,
-            )
-            .excluding(exclusions(&results, &definition.qualification_agents)),
+            ),
+            exclusions: found.clone(),
             scoring_version: SCORING_VERSION,
             scored_at: now,
             agent_scores,
         };
-        self.store_rescoring(&rescoring).await
+        let scored = !scoring_results.is_empty() && self.has_scoring_verdict(lead).await?;
+        let decision = (scored || !found.is_empty())
+            .then(|| decide(&definition.scoring_agents, &scoring_results, found));
+        self.store_rescoring(&rescoring, decision.as_ref()).await
+    }
+
+    async fn has_scoring_verdict(&self, lead: &Lead) -> Result<bool, CoreError> {
+        Ok(self
+            .scorings_of(lead)
+            .await?
+            .is_some_and(|scoring| scoring.verdict_source == VerdictSource::Scoring))
+    }
+
+    #[transactional(qualification)]
+    async fn scorings_of(&self, lead: &Lead) -> Result<Option<LeadScoring>, CoreError> {
+        let mut repo = qualification_repository;
+        Ok(repo.scorings(&[lead.id]).await?.remove(&lead.id))
     }
 
     #[transactional(qualification)]
@@ -127,9 +156,18 @@ impl LodestoneUseCase {
             .await
     }
 
-    #[transactional(qualification)]
-    async fn store_rescoring(&self, rescoring: &Rescoring) -> Result<(), CoreError> {
-        let mut repo = qualification_repository;
-        repo.rescore(rescoring).await
+    #[transactional(qualification, scoring_agent)]
+    async fn store_rescoring(
+        &self,
+        rescoring: &Rescoring,
+        decision: Option<&Decision>,
+    ) -> Result<(), CoreError> {
+        let mut qualification = qualification_repository;
+        let mut scoring = scoring_agent_repository;
+        qualification.rescore(rescoring).await?;
+        if let Some(decision) = decision {
+            scoring.apply_decision(rescoring.lead_id, decision).await?;
+        }
+        Ok(())
     }
 }

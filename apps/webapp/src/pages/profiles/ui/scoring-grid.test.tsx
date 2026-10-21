@@ -314,12 +314,20 @@ describe('scoring grid', () => {
 				onChange={() => {}}
 			/>,
 		)
-		const panel = screen.getByRole('complementary')
+		const panels = screen.getAllByRole('complementary')
 		const layout = screen.getByTestId('help-layout')
 		expect(layout.className).toContain('lg:grid-cols-4')
-		expect(layout.contains(panel)).toBe(true)
-		expect(panel.className).toContain('lg:col-span-1')
-		expect(panel.className).toContain('lg:sticky')
-		expect(screen.getAllByRole('complementary')).toHaveLength(1)
+		expect(panels).toHaveLength(tab === 'scoring' ? 2 : 1)
+		for (const panel of panels) expect(layout.contains(panel)).toBe(true)
+		expect(panels[0]?.className).toContain('lg:col-span-1')
+		expect(panels[0]?.className).toContain('lg:sticky')
+		if (tab === 'scoring') {
+			expect(panels[0]?.getAttribute('aria-label')).toBe('Scoring')
+			expect(panels[1]?.getAttribute('aria-label')).toBe(
+				'Fonctionnement du scoring',
+			)
+			expect(panels[0]?.parentElement).toBe(panels[1]?.parentElement)
+			expect(panels[0]?.parentElement?.className).toContain('lg:col-span-1')
+		}
 	})
 })

@@ -218,6 +218,7 @@ impl Cooldown {
 #[derive(Debug, Default)]
 pub struct Cooldowns {
     evaluation: Cooldown,
+    scoring: Cooldown,
     aggregation: Cooldown,
 }
 
@@ -230,21 +231,23 @@ pub struct QualificationStep {
 }
 
 impl QualificationStep {
-    fn paused(&self, now: Instant) -> (bool, bool) {
-        self.cooldowns.lock().map_or((false, false), |cooldowns| {
-            (
+    fn paused(&self, now: Instant) -> [bool; 3] {
+        self.cooldowns.lock().map_or([false; 3], |cooldowns| {
+            [
                 cooldowns.evaluation.is_active(now),
+                cooldowns.scoring.is_active(now),
                 cooldowns.aggregation.is_active(now),
-            )
+            ]
         })
     }
 
-    fn settle(&self, evaluation: Option<bool>, aggregation: Option<bool>, now: Instant) {
+    fn settle(&self, outcomes: [Option<bool>; 3], now: Instant) {
         if let Ok(mut guard) = self.cooldowns.lock() {
             let cooldowns = &mut *guard;
             for (cooldown, exhausted) in [
-                (&mut cooldowns.evaluation, evaluation),
-                (&mut cooldowns.aggregation, aggregation),
+                (&mut cooldowns.evaluation, outcomes[0]),
+                (&mut cooldowns.scoring, outcomes[1]),
+                (&mut cooldowns.aggregation, outcomes[2]),
             ] {
                 match exhausted {
                     Some(true) => cooldown.exhausted(now),
@@ -272,13 +275,28 @@ impl ListenerStep for QualificationStep {
             batch_size: QUALIFICATION_BATCH_SIZE,
             base_delay: QUALIFICATION_BASE_DELAY,
         };
-        let (skip_evaluation, skip_aggregation) = self.paused(Instant::now());
+        let [skip_evaluation, skip_scoring, skip_aggregation] = self.paused(Instant::now());
         let evaluation = if skip_evaluation {
             None
         } else {
             Some(
                 self.usecase
                     .qualify_due_leads(
+                        &AnyProviderBuilder,
+                        &self.cipher,
+                        &self.cache,
+                        settings,
+                        &SystemClock,
+                    )
+                    .await?,
+            )
+        };
+        let scoring = if skip_scoring {
+            None
+        } else {
+            Some(
+                self.usecase
+                    .score_due_leads(
                         &AnyProviderBuilder,
                         &self.cipher,
                         &self.cache,
@@ -304,16 +322,20 @@ impl ListenerStep for QualificationStep {
             )
         };
         self.settle(
-            evaluation.map(|report| report.budget_exhausted),
-            aggregation.map(|report| report.budget_exhausted),
+            [
+                evaluation.map(|report| report.budget_exhausted),
+                scoring.map(|report| report.budget_exhausted),
+                aggregation.map(|report| report.budget_exhausted),
+            ],
             Instant::now(),
         );
         let evaluation = evaluation.unwrap_or_default();
+        let scoring = scoring.unwrap_or_default();
         let aggregation = aggregation.unwrap_or_default();
         Ok(StepOutcome {
-            processed: evaluation.leads + aggregation.leads,
+            processed: evaluation.leads + scoring.leads + aggregation.leads,
             signals: evaluation.valid,
-            backlog: Some(evaluation.backlog + aggregation.backlog),
+            backlog: Some(evaluation.backlog + scoring.backlog + aggregation.backlog),
         })
     }
 }

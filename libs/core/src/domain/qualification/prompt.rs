@@ -3,7 +3,7 @@ use serde_json::Value;
 
 use crate::domain::{
     facts::LeadFacts,
-    profile::definition::{ProfileDefinition, QualificationAgent},
+    profile::definition::{ProfileDefinition, QualificationAgent, Question},
     prompt::neutralize,
     qualification::Violations,
 };
@@ -33,7 +33,7 @@ pub(crate) fn identity_context(definition: &ProfileDefinition) -> String {
     )
 }
 
-fn language_line(definition: &ProfileDefinition) -> String {
+pub(crate) fn language_line(definition: &ProfileDefinition) -> String {
     format!(
         "Write any free text in {}. Option values stay exactly as listed.",
         definition.llm.language.name()
@@ -47,10 +47,9 @@ fn contract_rules(definition: &ProfileDefinition, schema: &Value) -> String {
     )
 }
 
-fn questions_text(agent: &QualificationAgent) -> String {
-    let mut text =
-        String::from("Answer these questions about the company described by the documents.\n");
-    for question in &agent.questions {
+pub(crate) fn questions_block(questions: &[Question]) -> String {
+    let mut text = String::new();
+    for question in questions {
         let options: Vec<String> = question
             .options
             .iter()
@@ -75,6 +74,13 @@ fn questions_text(agent: &QualificationAgent) -> String {
         ));
     }
     text
+}
+
+fn questions_text(agent: &QualificationAgent) -> String {
+    format!(
+        "Answer these questions about the company described by the documents.\n{}",
+        questions_block(&agent.questions)
+    )
 }
 
 pub fn build(

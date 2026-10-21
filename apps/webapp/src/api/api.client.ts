@@ -245,10 +245,13 @@ export namespace Schemas {
     confidence?: (number | null) | undefined;
     domain: string;
     id: string;
+    llm_score?: (number | null) | undefined;
     status: LeadStatusDto;
     verdict?: (null | VerdictDto) | undefined;
   };
-  export type VerdictReasonDto = "single_angle" | "weak_evidence" | "non_production" | "excluded";
+  export type VerdictReasonDto = "single_angle" | "weak_evidence" | "non_production" | "excluded" | "awaiting_scoring";
+  export type VerdictProbabilitiesDto = { a_verifier: number; ecarte: number; fiable: number };
+  export type VerdictSourceDto = "indicators" | "scoring";
   export type LeadDto = {
     confidence?: (number | null) | undefined;
     domain: string;
@@ -257,7 +260,10 @@ export namespace Schemas {
     first_seen_at: string;
     grouped_leads: Array<GroupedLeadDto>;
     id: string;
+    indicator_cap?: (null | VerdictReasonDto) | undefined;
+    indicator_confidence?: (number | null) | undefined;
     last_seen_at: string;
+    llm_score?: (number | null) | undefined;
     opinion?: (number | null) | undefined;
     profile: ProfileRefDto;
     qualified_at?: (string | null) | undefined;
@@ -266,7 +272,9 @@ export namespace Schemas {
     summary?: (string | null) | undefined;
     updated_at: string;
     verdict?: (null | VerdictDto) | undefined;
+    verdict_probabilities?: (null | VerdictProbabilitiesDto) | undefined;
     verdict_reason?: (null | VerdictReasonDto) | undefined;
+    verdict_source?: (null | VerdictSourceDto) | undefined;
   };
   export type ProbabilityDto = { label: string; probability: number; value: string };
   export type QualificationAnswerDto = {
@@ -306,6 +314,29 @@ export namespace Schemas {
     value?: (string | null) | undefined;
     weight: number;
   };
+  export type ScoringVerdictDto = {
+    choice: VerdictDto;
+    confidence: number;
+    declared_choice?: (null | VerdictDto) | undefined;
+    probabilities: VerdictProbabilitiesDto;
+  };
+  export type ScoringResultDto = {
+    agent_description?: (string | null) | undefined;
+    agent_id: string;
+    agent_name: string;
+    created_at: string;
+    criteria: Array<QualificationAnswerDto>;
+    error?: (string | null) | undefined;
+    model: string;
+    provenance: ProvenanceDto;
+    provider_id?: (string | null) | undefined;
+    provider_name?: (string | null) | undefined;
+    reasons: Array<string>;
+    score?: (number | null) | undefined;
+    status: string;
+    verdict?: (null | ScoringVerdictDto) | undefined;
+    weight?: (number | null) | undefined;
+  };
   export type SignalDto = {
     agent?: (string | null) | undefined;
     id: string;
@@ -333,6 +364,7 @@ export namespace Schemas {
       lead: LeadDto;
       qualification_results: Array<QualificationResultDto>;
       score_breakdown: Array<ScoreContributionDto>;
+      scoring_results: Array<ScoringResultDto>;
       signals: Array<SignalDto>;
       summary_state?: (null | SummaryStateDto) | undefined;
     };
@@ -347,7 +379,10 @@ export namespace Schemas {
       first_seen_at: string;
       grouped_leads: Array<GroupedLeadDto>;
       id: string;
+      indicator_cap?: (null | VerdictReasonDto) | undefined;
+      indicator_confidence?: (number | null) | undefined;
       last_seen_at: string;
+      llm_score?: (number | null) | undefined;
       opinion?: (number | null) | undefined;
       profile: ProfileRefDto;
       qualified_at?: (string | null) | undefined;
@@ -356,7 +391,9 @@ export namespace Schemas {
       summary?: (string | null) | undefined;
       updated_at: string;
       verdict?: (null | VerdictDto) | undefined;
+      verdict_probabilities?: (null | VerdictProbabilitiesDto) | undefined;
       verdict_reason?: (null | VerdictReasonDto) | undefined;
+      verdict_source?: (null | VerdictSourceDto) | undefined;
     };
     pagination?: (null | PaginationMetadata) | undefined;
   };
@@ -451,6 +488,7 @@ export namespace Schemas {
     agent_id?: (string | null) | undefined;
     agent_name?: (string | null) | undefined;
     escalated: boolean;
+    kind: string;
     model: string;
     n: number;
     precision?: (number | null) | undefined;
@@ -554,7 +592,10 @@ export namespace Schemas {
       first_seen_at: string;
       grouped_leads: Array<GroupedLeadDto>;
       id: string;
+      indicator_cap?: (null | VerdictReasonDto) | undefined;
+      indicator_confidence?: (number | null) | undefined;
       last_seen_at: string;
+      llm_score?: (number | null) | undefined;
       opinion?: (number | null) | undefined;
       profile: ProfileRefDto;
       qualified_at?: (string | null) | undefined;
@@ -563,7 +604,9 @@ export namespace Schemas {
       summary?: (string | null) | undefined;
       updated_at: string;
       verdict?: (null | VerdictDto) | undefined;
+      verdict_probabilities?: (null | VerdictProbabilitiesDto) | undefined;
       verdict_reason?: (null | VerdictReasonDto) | undefined;
+      verdict_source?: (null | VerdictSourceDto) | undefined;
     }>;
     pagination?: (null | PaginationMetadata) | undefined;
   };
@@ -655,6 +698,7 @@ export namespace Schemas {
     lead: LeadDto;
     qualification_results: Array<QualificationResultDto>;
     score_breakdown: Array<ScoreContributionDto>;
+    scoring_results: Array<ScoringResultDto>;
     signals: Array<SignalDto>;
     summary_state?: (null | SummaryStateDto) | undefined;
   };

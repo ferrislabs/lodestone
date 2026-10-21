@@ -15,6 +15,8 @@ export const PER_PAGE = 25
 export const LEAD_SORTS = [
 	'confidence_desc',
 	'confidence_asc',
+	'llm_score_desc',
+	'llm_score_asc',
 	'score_desc',
 	'score_asc',
 	'last_seen_desc',

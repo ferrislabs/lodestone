@@ -206,6 +206,7 @@ impl LodestoneUseCase {
         contact,
         suppression,
         qualification,
+        scoring_agent,
         profile,
         decision
     )]
@@ -220,6 +221,7 @@ impl LodestoneUseCase {
         let mut contacts = contact_repository;
         let mut suppression = suppression_repository;
         let mut qualification = qualification_repository;
+        let mut scoring_agents = scoring_agent_repository;
         let mut profiles = profile_repository;
         let mut decisions = decision_repository;
 
@@ -256,6 +258,7 @@ impl LodestoneUseCase {
         record_decisions(
             &mut decisions,
             &mut qualification,
+            &mut scoring_agents,
             &mut profiles,
             &mut assessments,
             &record.lead,

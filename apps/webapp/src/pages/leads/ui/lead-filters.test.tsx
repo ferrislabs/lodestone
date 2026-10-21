@@ -43,3 +43,29 @@ describe('LeadFiltersForm grouping toggle', () => {
 		expect(onApply.mock.calls[0]?.[0]).toMatchObject({ grouped: false })
 	})
 })
+
+describe('LeadFiltersForm sort', () => {
+	it('sorts by the score of the scoring agents and keeps the signal score apart', () => {
+		renderForm(filtersFromSearch({}))
+		const select = screen.getByLabelText('Tri') as HTMLSelectElement
+		const options = Array.from(select.options).map((option) => [
+			option.value,
+			option.textContent,
+		])
+		expect(options).toContainEqual(['llm_score_desc', 'Score décroissant'])
+		expect(options).toContainEqual(['llm_score_asc', 'Score croissant'])
+		expect(options).toContainEqual([
+			'score_desc',
+			'Score des signaux décroissant',
+		])
+	})
+
+	it('applies the chosen score sort', () => {
+		const onApply = renderForm(filtersFromSearch({}))
+		fireEvent.change(screen.getByLabelText('Tri'), {
+			target: { value: 'llm_score_desc' },
+		})
+		fireEvent.click(screen.getByRole('button', { name: 'Appliquer' }))
+		expect(onApply.mock.calls[0]?.[0]).toMatchObject({ sort: 'llm_score_desc' })
+	})
+})

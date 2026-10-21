@@ -1,11 +1,12 @@
 export const NEW_PROFILE_TEMPLATE = `{
-  "schema_version": 10,
+  "schema_version": 11,
   "identity": {
     "offer": "",
     "target_customer": ""
   },
   "agents": [],
   "qualification_agents": [],
+  "scoring_agents": [],
   "aggregator": {
     "provider_id": null,
     "system_prompt": ""

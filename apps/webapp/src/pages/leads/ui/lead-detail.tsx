@@ -13,6 +13,7 @@ import { LeadHeader } from './lead-header'
 import { LeadSummary } from './lead-summary'
 import { QualificationResults } from './qualification-results'
 import { ScoreBreakdown } from './score-breakdown'
+import { ScoringResults } from './scoring-results'
 import { SignalsList } from './signals-list'
 
 interface LeadDetailProps {
@@ -94,6 +95,7 @@ export function LeadDetail({
 					/>
 					{detail.facts ? <LeadFacts facts={detail.facts} /> : null}
 					<QualificationResults results={detail.qualification_results} />
+					<ScoringResults results={detail.scoring_results} lead={detail.lead} />
 					<LeadSummary
 						assessment={detail.assessments[0] ?? null}
 						summaryState={detail.summary_state ?? null}

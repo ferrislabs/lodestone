@@ -404,6 +404,7 @@ mod tests {
             score_breakdown: Vec::new(),
             confidence: None,
             verdict: None,
+            llm_score: None,
             qualified_at: None,
             first_seen_at: at(1_800_000_000),
             last_seen_at: at(1_800_086_400),

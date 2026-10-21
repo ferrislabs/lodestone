@@ -18,6 +18,7 @@ pub(crate) mod qualification;
 pub(crate) mod quality;
 pub(crate) mod run;
 pub(crate) mod scoring;
+pub(crate) mod scoring_agent;
 pub(crate) mod source;
 pub(crate) mod suppression;
 pub(crate) mod triage;

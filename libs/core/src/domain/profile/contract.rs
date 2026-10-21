@@ -1,8 +1,72 @@
 use serde_json::{Map, Value, json};
 
-use super::definition::{EVIDENCE_MAX_CHARS, QualificationAgent, Question};
+use super::definition::{EVIDENCE_MAX_CHARS, QualificationAgent, Question, ScoringAgent};
 
 const DIALECT: &str = "https://json-schema.org/draft/2020-12/schema";
+
+pub const VERDICT_VALUES: [&str; 3] = ["fiable", "a_verifier", "ecarte"];
+pub const MAX_REASONS: usize = 5;
+pub const REASON_MAX_CHARS: usize = 200;
+pub const MAX_SCORE: u8 = 100;
+
+pub fn scoring_contract_schema(agent: &ScoringAgent) -> Value {
+    let properties: Map<String, Value> = agent
+        .criteria
+        .iter()
+        .map(|criterion| (criterion.id.clone(), question_schema(criterion)))
+        .collect();
+    let required: Vec<&str> = agent
+        .criteria
+        .iter()
+        .map(|criterion| criterion.id.as_str())
+        .collect();
+    let verdict_probabilities: Map<String, Value> = VERDICT_VALUES
+        .iter()
+        .map(|value| ((*value).to_owned(), probability()))
+        .collect();
+    json!({
+        "$schema": DIALECT,
+        "title": format!("Score and verdict of {}", agent.name),
+        "type": "object",
+        "properties": {
+            "criteria": {
+                "type": "object",
+                "properties": properties,
+                "required": required,
+                "additionalProperties": false
+            },
+            "score": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": MAX_SCORE,
+                "description": "Score of the lead from 0 (not worth contacting) to 100 (contact first)."
+            },
+            "verdict": {
+                "type": "object",
+                "properties": {
+                    "choice": {"type": "string", "enum": VERDICT_VALUES},
+                    "confidence": probability(),
+                    "probabilities": {
+                        "type": "object",
+                        "properties": verdict_probabilities,
+                        "required": VERDICT_VALUES,
+                        "additionalProperties": false
+                    }
+                },
+                "required": ["choice", "confidence", "probabilities"],
+                "additionalProperties": false
+            },
+            "reasons": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": MAX_REASONS,
+                "items": {"type": "string", "minLength": 1, "maxLength": REASON_MAX_CHARS}
+            }
+        },
+        "required": ["criteria", "score", "verdict", "reasons"],
+        "additionalProperties": false
+    })
+}
 
 pub fn contract_schema(agent: &QualificationAgent) -> Value {
     let properties: Map<String, Value> = agent
@@ -79,6 +143,80 @@ fn question_schema(question: &Question) -> Value {
 mod tests {
     use super::*;
     use crate::domain::profile::ValidatedProfile;
+
+    fn scoring_agent() -> ScoringAgent {
+        let value = json!({
+            "schema_version": 3,
+            "identity": {"offer": "o", "target_customer": "t"},
+            "agents": [{"id": "ats", "name": "ATS", "source": {"kind": "ats", "keywords": ["sso"]}}],
+            "scoring": {"factors": [{"signal": "a", "weight": 1}]},
+            "contact_ranking": {"preferred_local_parts": []},
+            "llm": {"qualification_threshold": 50, "relevance_criteria": "c"}
+        });
+        let mut definition = ValidatedProfile::parse(value).unwrap().definition().clone();
+        definition.scoring_agents.remove(0)
+    }
+
+    #[test]
+    fn the_scoring_schema_imposes_score_verdict_and_reasons() {
+        let schema = scoring_contract_schema(&scoring_agent());
+        assert_eq!(
+            schema["required"],
+            json!(["criteria", "score", "verdict", "reasons"])
+        );
+        assert_eq!(schema["additionalProperties"], json!(false));
+        assert_eq!(schema["properties"]["score"]["type"], "integer");
+        assert_eq!(schema["properties"]["score"]["minimum"], 0);
+        assert_eq!(schema["properties"]["score"]["maximum"], 100);
+        let verdict = &schema["properties"]["verdict"];
+        assert_eq!(
+            verdict["properties"]["choice"]["enum"],
+            json!(["fiable", "a_verifier", "ecarte"])
+        );
+        assert_eq!(
+            verdict["properties"]["probabilities"]["required"],
+            json!(["fiable", "a_verifier", "ecarte"])
+        );
+        assert_eq!(
+            verdict["properties"]["probabilities"]["additionalProperties"],
+            json!(false)
+        );
+        assert_eq!(
+            verdict["required"],
+            json!(["choice", "confidence", "probabilities"])
+        );
+        let reasons = &schema["properties"]["reasons"];
+        assert_eq!(reasons["minItems"], 1);
+        assert_eq!(reasons["maxItems"], 5);
+        assert_eq!(reasons["items"]["maxLength"], 200);
+    }
+
+    #[test]
+    fn the_scoring_schema_describes_every_criterion_like_a_question() {
+        let agent = scoring_agent();
+        let schema = scoring_contract_schema(&agent);
+        let criteria = &schema["properties"]["criteria"];
+        assert_eq!(
+            criteria["required"],
+            json!([
+                "adequation_offre",
+                "solidite_preuves",
+                "priorite_commerciale"
+            ])
+        );
+        let criterion = &criteria["properties"]["adequation_offre"];
+        assert_eq!(criterion["properties"]["type"]["const"], "choice");
+        assert_eq!(
+            criterion["properties"]["choice"]["enum"],
+            json!(["forte", "moyenne", "faible", "inconnu"])
+        );
+        assert_eq!(
+            criterion["required"],
+            json!(["type", "choice", "evidence", "confidence", "probabilities"])
+        );
+        assert_eq!(criterion["properties"]["evidence"]["maxLength"], 300);
+        assert_eq!(criterion["description"], agent.criteria[0].wording);
+    }
 
     fn agent() -> QualificationAgent {
         let value = json!({

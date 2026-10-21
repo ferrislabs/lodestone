@@ -21,6 +21,7 @@ pub mod domain {
     pub struct Profile;
     pub struct Qualification;
     pub struct Run;
+    pub struct ScoringAgent;
     pub struct Signal;
     pub struct Suppression;
     pub struct User;

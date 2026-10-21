@@ -65,9 +65,39 @@ export interface ProviderOption {
 	enabled: boolean
 }
 
+export interface AgentScope {
+	list: 'qualification_agents' | 'scoring_agents'
+	items: 'questions' | 'criteria'
+}
+
+export const QUALIFICATION_SCOPE: AgentScope = {
+	list: 'qualification_agents',
+	items: 'questions',
+}
+
+export const SCORING_SCOPE: AgentScope = {
+	list: 'scoring_agents',
+	items: 'criteria',
+}
+
 export function qualificationList(value: JsonObject): JsonValue[] {
 	const agents = value.qualification_agents
 	return Array.isArray(agents) ? agents : []
+}
+
+export function scoringList(value: JsonObject): JsonValue[] {
+	const agents = value.scoring_agents
+	return Array.isArray(agents) ? agents : []
+}
+
+function agentsIn(value: JsonObject, scope: AgentScope): JsonValue[] {
+	return scope.list === 'scoring_agents'
+		? scoringList(value)
+		: qualificationList(value)
+}
+
+function itemsIn(agent: JsonValue | undefined, scope: AgentScope): JsonValue[] {
+	return listField(agent, scope.items)
 }
 
 export function withQualification(
@@ -77,15 +107,26 @@ export function withQualification(
 	return { ...value, qualification_agents: [...agents] }
 }
 
+export function withScoring(
+	value: JsonObject,
+	agents: readonly JsonValue[],
+): JsonObject {
+	return { ...value, scoring_agents: [...agents] }
+}
+
 export function allAgentIds(
 	value: JsonObject,
 	except: number | null = null,
+	scope: AgentScope = QUALIFICATION_SCOPE,
 ): Set<string> {
 	const ids = new Set<string>()
 	for (const agent of agentList(value)) ids.add(agentField(agent, 'id'))
-	qualificationList(value).forEach((agent, index) => {
-		if (index !== except) ids.add(agentField(agent, 'id'))
-	})
+	for (const kind of [QUALIFICATION_SCOPE, SCORING_SCOPE]) {
+		agentsIn(value, kind).forEach((agent, index) => {
+			if (kind.list === scope.list && index === except) return
+			ids.add(agentField(agent, 'id'))
+		})
+	}
 	return ids
 }
 
@@ -528,11 +569,9 @@ export function setAgentField(
 	index: number,
 	key: string,
 	next: JsonValue,
+	scope: AgentScope = QUALIFICATION_SCOPE,
 ): JsonObject {
-	return toObject(
-		setIn(value, ['qualification_agents', index, key], next),
-		value,
-	)
+	return toObject(setIn(value, [scope.list, index, key], next), value)
 }
 
 function toObject(next: JsonValue, fallback: JsonObject): JsonObject {
@@ -546,8 +585,12 @@ function nextQuestionId(questions: readonly JsonValue[]): string {
 	return `question-${counter}`
 }
 
-export function addQuestion(value: JsonObject, agent: number): JsonObject {
-	const questions = questionsOf(qualificationList(value)[agent])
+export function addQuestion(
+	value: JsonObject,
+	agent: number,
+	scope: AgentScope = QUALIFICATION_SCOPE,
+): JsonObject {
+	const questions = itemsIn(agentsIn(value, scope)[agent], scope)
 	const created: JsonObject = {
 		id: nextQuestionId(questions),
 		wording: '',
@@ -559,7 +602,7 @@ export function addQuestion(value: JsonObject, agent: number): JsonObject {
 		],
 	}
 	return toObject(
-		appendIn(value, ['qualification_agents', agent, 'questions'], created),
+		appendIn(value, [scope.list, agent, scope.items], created),
 		value,
 	)
 }
@@ -568,9 +611,10 @@ export function removeQuestion(
 	value: JsonObject,
 	agent: number,
 	question: number,
+	scope: AgentScope = QUALIFICATION_SCOPE,
 ): JsonObject {
 	return toObject(
-		removeIn(value, ['qualification_agents', agent, 'questions', question]),
+		removeIn(value, [scope.list, agent, scope.items, question]),
 		value,
 	)
 }
@@ -581,13 +625,10 @@ export function setQuestionField(
 	question: number,
 	key: string,
 	next: JsonValue,
+	scope: AgentScope = QUALIFICATION_SCOPE,
 ): JsonObject {
 	return toObject(
-		setIn(
-			value,
-			['qualification_agents', agent, 'questions', question, key],
-			next,
-		),
+		setIn(value, [scope.list, agent, scope.items, question, key], next),
 		value,
 	)
 }
@@ -597,8 +638,9 @@ export function setQuestionWording(
 	agent: number,
 	question: number,
 	wording: string,
+	scope: AgentScope = QUALIFICATION_SCOPE,
 ): JsonObject {
-	const questions = questionsOf(qualificationList(value)[agent])
+	const questions = itemsIn(agentsIn(value, scope)[agent], scope)
 	const current = questions[question]
 	const id = agentField(current, 'id')
 	const previous = slugify(agentField(current, 'wording'))
@@ -610,6 +652,7 @@ export function setQuestionWording(
 		question,
 		'wording',
 		wording,
+		scope,
 	)
 	const derived = slugify(wording)
 	if (!untouched || derived === '') return withWording
@@ -624,6 +667,7 @@ export function setQuestionWording(
 		question,
 		'id',
 		uniqueId(derived, taken),
+		scope,
 	)
 }
 
@@ -631,9 +675,10 @@ export function addOption(
 	value: JsonObject,
 	agent: number,
 	question: number,
+	scope: AgentScope = QUALIFICATION_SCOPE,
 ): JsonObject {
 	const options = optionsOf(
-		questionsOf(qualificationList(value)[agent])[question],
+		itemsIn(agentsIn(value, scope)[agent], scope)[question],
 	)
 	const taken = new Set(options.map((item) => agentField(item, 'value')))
 	let counter = options.length + 1
@@ -644,7 +689,7 @@ export function addOption(
 	return toObject(
 		setIn(
 			value,
-			['qualification_agents', agent, 'questions', question, 'options'],
+			[scope.list, agent, scope.items, question, 'options'],
 			[...options.slice(0, at), created, ...options.slice(at)],
 		),
 		value,
@@ -656,16 +701,17 @@ export function removeOption(
 	agent: number,
 	question: number,
 	position: number,
+	scope: AgentScope = QUALIFICATION_SCOPE,
 ): JsonObject {
 	const options = optionsOf(
-		questionsOf(qualificationList(value)[agent])[question],
+		itemsIn(agentsIn(value, scope)[agent], scope)[question],
 	)
 	if (isUnknownOption(options[position])) return value
 	return toObject(
 		removeIn(value, [
-			'qualification_agents',
+			scope.list,
 			agent,
-			'questions',
+			scope.items,
 			question,
 			'options',
 			position,
@@ -681,19 +727,12 @@ export function setOptionField(
 	position: number,
 	key: string,
 	next: JsonValue,
+	scope: AgentScope = QUALIFICATION_SCOPE,
 ): JsonObject {
 	return toObject(
 		setIn(
 			value,
-			[
-				'qualification_agents',
-				agent,
-				'questions',
-				question,
-				'options',
-				position,
-				key,
-			],
+			[scope.list, agent, scope.items, question, 'options', position, key],
 			next,
 		),
 		value,
@@ -859,10 +898,11 @@ function problem(path: string, message: string): Problem {
 	return { path, message }
 }
 
-function checkOptions(
+export function checkOptions(
 	options: readonly JsonValue[],
 	base: string,
 	problems: Problem[],
+	noun = "l'axe",
 ) {
 	const path = `${base}.options`
 	if (options.length < MIN_OPTIONS || options.length > MAX_OPTIONS) {
@@ -882,7 +922,9 @@ function checkOptions(
 				),
 			)
 		} else if (optionValue !== '' && seen.has(optionValue)) {
-			problems.push(problem(`${itemPath}.value`, "Doit être unique dans l'axe"))
+			problems.push(
+				problem(`${itemPath}.value`, `Doit être unique dans ${noun}`),
+			)
 		}
 		seen.add(optionValue)
 		if (isExcludingOption(item) && isUnknownOption(item)) {

@@ -289,6 +289,112 @@ export const FIELD_COPY: Readonly<Record<string, FieldCopy>> = {
 		description:
 			"Quand l'agent choisit cette option avec une preuve vérifiée et une probabilité au moins égale au seuil d'exclusion, le lead est écarté. Jamais sur l'option « inconnu ».",
 	},
+	scoring_agents: {
+		label: 'Agents de scoring',
+		description:
+			'Chaque agent décide du score et du verdict de chaque lead, avec une réponse de forme imposée. Aucun agent actif : le verdict reste en attente.',
+	},
+	'scoring_agents[]': {
+		label: 'Agent de scoring',
+		description:
+			'Répond à des critères à choix, donne un score de 0 à 100, un verdict avec ses probabilités et ses raisons.',
+	},
+	'scoring_agents[].id': {
+		label: 'Identifiant',
+		description:
+			'Identifiant unique parmi tous les agents du profil, par exemple score-global.',
+	},
+	'scoring_agents[].name': {
+		label: 'Nom',
+		description: "Nom d'affichage.",
+	},
+	'scoring_agents[].description': {
+		label: 'Ce que cet agent évalue',
+		description:
+			"Ce que l'agent évalue, en une phrase. Affiché sur sa carte et dans la fiche du lead.",
+	},
+	'scoring_agents[].enabled': {
+		label: 'Activé',
+		description: "Un agent désactivé est conservé mais n'est pas exécuté.",
+	},
+	'scoring_agents[].provider_id': {
+		label: 'Fournisseur LLM',
+		description:
+			"Fournisseur LLM déclaré qui répond pour cet agent. Le fournisseur Synthèse par défaut s'applique à défaut.",
+	},
+	'scoring_agents[].weight': {
+		label: "Poids de l'agent",
+		description:
+			'Poids entier de 1 à 10 de cet agent dans le score et le verdict du lead.',
+	},
+	'scoring_agents[].system_prompt': {
+		label: 'Prompt système',
+		description: 'Consigne donnée au modèle, 8000 caractères au maximum.',
+	},
+	'scoring_agents[].criteria': {
+		label: 'Critères',
+		description:
+			"Critères auxquels l'agent répond avant de donner son score. Au moins un est requis.",
+	},
+	'scoring_agents[].criteria[]': {
+		label: 'Critère',
+		description: 'Une question à choix posée au modèle à propos du lead.',
+		add: 'Ajouter un critère',
+	},
+	'scoring_agents[].criteria[].id': {
+		label: 'Identifiant du critère',
+		description: "Identifiant unique dans l'agent, clé de la réponse.",
+	},
+	'scoring_agents[].criteria[].wording': {
+		label: 'Intitulé du critère',
+		description: 'La question posée au modèle.',
+	},
+	'scoring_agents[].criteria[].weight': {
+		label: 'Poids du critère',
+		description: 'Poids entier de 1 à 10 de ce critère.',
+	},
+	'scoring_agents[].criteria[].options': {
+		label: 'Options',
+		description:
+			'Réponses possibles, de 2 à 11, de valeurs uniques, dont exactement une option « inconnu ».',
+	},
+	'scoring_agents[].criteria[].options[]': {
+		label: 'Option',
+		description: "Une réponse possible et le score qu'elle vaut.",
+		add: 'Ajouter une option',
+	},
+	'scoring_agents[].criteria[].options[].value': {
+		label: 'Valeur',
+		description: 'Valeur renvoyée par le modèle, unique dans le critère.',
+	},
+	'scoring_agents[].criteria[].options[].label': {
+		label: 'Libellé',
+		description: "Libellé d'affichage de l'option.",
+	},
+	'scoring_agents[].criteria[].options[].score': {
+		label: 'Score',
+		description: 'Score de 0 à 1 de cette réponse.',
+	},
+	'scoring_agents[].criteria[].options[].is_unknown': {
+		label: 'Option « inconnu »',
+		description:
+			"Marque l'option choisie quand rien dans les documents n'étaye une réponse. Chaque critère en a exactement une.",
+	},
+	'scoring_agents[].criteria[].options[].excludes': {
+		label: 'Exclut le lead',
+		description:
+			'Inutilisé : seuls les agents de qualification peuvent exclure un lead.',
+	},
+	'scoring_agents[].samples': {
+		label: 'Échantillons',
+		description:
+			"Nombre d'appels indépendants au modèle par lead, de 1 à 5. Les critères sont votés, le score et les probabilités du verdict sont moyennés. 1 par défaut.",
+	},
+	'scoring_agents[].sampling_temperature': {
+		label: "Température d'échantillonnage",
+		description:
+			"Température de 0 à 1,5 des appels quand il y a plus d'un échantillon ; elle remplace celle du fournisseur. 0,7 par défaut.",
+	},
 	escalation: {
 		label: 'Escalade',
 		description:

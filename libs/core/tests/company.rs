@@ -49,6 +49,7 @@ impl Clock for TestClock {
 #[derive(Debug, Clone)]
 struct Seen {
     aggregator: bool,
+    scoring: bool,
     documents: Vec<(String, String)>,
     system: String,
     instruction: String,
@@ -114,9 +115,11 @@ fn summary_quoting(index: u32, quote: &str) -> Value {
 
 impl LlmProvider for Scripted {
     async fn complete(&self, request: &LlmRequest<'_>) -> Result<LlmResponse, LlmError> {
-        let aggregator = request.schema["properties"].get("answers").is_none();
+        let scoring = request.schema["properties"].get("criteria").is_some();
+        let aggregator = !scoring && request.schema["properties"].get("answers").is_none();
         self.shared.seen.lock().unwrap().push(Seen {
             aggregator,
+            scoring,
             documents: request
                 .documents
                 .iter()
@@ -125,7 +128,14 @@ impl LlmProvider for Scripted {
             system: request.system.to_owned(),
             instruction: request.instruction.to_owned(),
         });
-        let output = if aggregator {
+        let first_line = request
+            .documents
+            .first()
+            .and_then(|document| document.content.lines().next())
+            .unwrap_or_default();
+        let output = if scoring {
+            support::scoring_answer(request.schema, first_line, false)
+        } else if aggregator {
             self.shared
                 .aggregator_reply
                 .lock()
@@ -133,14 +143,7 @@ impl LlmProvider for Scripted {
                 .clone()
                 .unwrap_or_else(|| summary_quoting(0, "Keycloak-http_probe"))
         } else {
-            answers_from(
-                request.schema,
-                request
-                    .documents
-                    .first()
-                    .and_then(|document| document.content.lines().next())
-                    .unwrap_or_default(),
-            )
+            answers_from(request.schema, first_line)
         };
         Ok(LlmResponse {
             output,
@@ -427,7 +430,8 @@ impl Harness {
     }
 
     async fn qualify(&self) -> u64 {
-        self.usecase
+        let leads = self
+            .usecase
             .qualify_due_leads(
                 &FakeBuilder {
                     shared: Arc::clone(&self.shared),
@@ -439,7 +443,20 @@ impl Harness {
             )
             .await
             .unwrap()
-            .leads
+            .leads;
+        self.usecase
+            .score_due_leads(
+                &FakeBuilder {
+                    shared: Arc::clone(&self.shared),
+                },
+                &self.cipher,
+                &PgLlmCache::new(self.pool.clone()),
+                evaluation(),
+                &self.clock,
+            )
+            .await
+            .unwrap();
+        leads
     }
 
     async fn summarise(&self) -> u64 {
@@ -464,7 +481,7 @@ impl Harness {
             .lock()
             .unwrap()
             .iter()
-            .filter(|call| call.aggregator == aggregator)
+            .filter(|call| call.aggregator == aggregator && !call.scoring)
             .cloned()
             .collect()
     }

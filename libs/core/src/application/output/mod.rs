@@ -218,6 +218,7 @@ mod tests {
             score_breakdown: vec![],
             confidence: None,
             verdict: None,
+            llm_score: None,
             qualified_at: None,
             first_seen_at: at(),
             last_seen_at: at(),

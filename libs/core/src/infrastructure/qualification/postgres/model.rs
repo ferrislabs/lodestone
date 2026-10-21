@@ -5,9 +5,12 @@ use uuid::Uuid;
 use crate::{
     GenerationSnapshot, LeadId, ProfileId, ProviderId, RevisionNumber, RunProvenance,
     definition::AgentId,
-    domain::qualification::{
-        EXCLUDED_REASON, EvidenceStrength, Exclusion, LeadScoring, QualificationResult, ResultId,
-        ResultStatus, VerdictCap,
+    domain::{
+        qualification::{
+            EvidenceStrength, Exclusion, LeadScoring, QualificationResult, ResultId, ResultStatus,
+            VerdictCap, VerdictReason, VerdictSource,
+        },
+        scoring_agent::VerdictProbabilities,
     },
 };
 
@@ -81,7 +84,11 @@ pub struct ScoringRow {
     pub lead_id: Uuid,
     pub opinion: Option<f64>,
     pub evidence: Option<serde_json::Value>,
+    pub indicator_confidence: Option<f64>,
+    pub indicator_cap: Option<String>,
     pub verdict_reason: Option<String>,
+    pub verdict_source: String,
+    pub verdict_probabilities: Option<serde_json::Value>,
     pub exclusions: serde_json::Value,
 }
 
@@ -99,20 +106,43 @@ impl TryFrom<ScoringRow> for LeadScoring {
         let exclusions: Vec<Exclusion> = serde_json::from_value(row.exclusions)
             .map_err(|_| CoreError::Internal("stored exclusions are invalid".to_owned()))?;
         let cap = row
-            .verdict_reason
+            .indicator_cap
             .as_deref()
-            .filter(|raw| *raw != EXCLUDED_REASON)
             .map(|raw| {
                 VerdictCap::parse(raw).ok_or_else(|| {
+                    CoreError::Internal("stored indicator cap is invalid".to_owned())
+                })
+            })
+            .transpose()?;
+        let reason = row
+            .verdict_reason
+            .as_deref()
+            .map(|raw| {
+                VerdictReason::parse(raw).ok_or_else(|| {
                     CoreError::Internal("stored verdict reason is invalid".to_owned())
+                })
+            })
+            .transpose()?;
+        let verdict_source = VerdictSource::parse(&row.verdict_source)
+            .ok_or_else(|| CoreError::Internal("stored verdict source is invalid".to_owned()))?;
+        let probabilities = row
+            .verdict_probabilities
+            .as_ref()
+            .map(|value| {
+                VerdictProbabilities::from_json(value).ok_or_else(|| {
+                    CoreError::Internal("stored verdict probabilities are invalid".to_owned())
                 })
             })
             .transpose()?;
         Ok(Self {
             opinion: row.opinion,
             evidence,
+            indicator_confidence: row.indicator_confidence,
             cap,
+            reason,
             exclusions,
+            verdict_source,
+            probabilities,
         })
     }
 }
