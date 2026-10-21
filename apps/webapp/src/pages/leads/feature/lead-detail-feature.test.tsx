@@ -33,6 +33,7 @@ const DETAIL: LeadDetailData = {
 	},
 	qualification_results: [],
 	scoring_results: [],
+	agent_failures: [],
 	assessments: [],
 	facts: {
 		distinct_hosts: 0,

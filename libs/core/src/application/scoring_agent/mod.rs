@@ -7,8 +7,8 @@ use crate::{
     application::{
         LodestoneUseCase,
         evaluation::{
-            EvaluationSettings, Loaded, ProviderBuilder, Providers, count, load_cached,
-            render_signal,
+            CALL_FAILURE_PREFIX, CallFailure, EvaluationSettings, Loaded, ProviderBuilder,
+            Providers, count, load_cached, render_signal,
         },
         llm::gateway::{
             CallSettings, LlmCallError, Prompt, RunBudget, SchemaCall, Structured, call_with_schema,
@@ -27,7 +27,7 @@ use crate::{
         },
         profile::{ActiveProfile, contract::scoring_contract_schema, definition::ScoringAgent},
         qualification::{
-            EvidenceStrength, ResultStatus, exclusions, judge,
+            AgentKind, EvidenceStrength, ResultStatus, exclusions, judge,
             prompt::{AgentPrompt, lead_document, with_ungrounded},
         },
         scoring_agent::{
@@ -50,6 +50,7 @@ pub struct ScoringReport {
     pub leads: u64,
     pub valid: u64,
     pub invalid: u64,
+    pub deferred: u64,
     pub backlog: u64,
     pub budget_exhausted: bool,
 }
@@ -62,16 +63,21 @@ enum SampleOutcome {
     Invalid {
         error: String,
     },
+    CallFailed {
+        error: String,
+    },
     BudgetExhausted,
 }
 
 enum AgentOutcome {
     Result(Box<ScoringResult>),
+    CallFailed(CallFailure),
     BudgetExhausted,
 }
 
 enum LeadOutcome {
     Done { valid: u64, invalid: u64 },
+    Deferred,
     BudgetExhausted,
 }
 
@@ -232,14 +238,19 @@ where
                     if let Some((output, model)) = fallback {
                         return SampleOutcome::Valid { output, model };
                     }
+                    let call_failure = error.is_call_failure();
                     warn!(
                         agent = agent.id.as_str(),
                         %error,
                         provider_message = error.provider_message(),
+                        call_failure,
                         "scoring call failed"
                     );
-                    return SampleOutcome::Invalid {
-                        error: format!("Échec de l'appel au modèle : {error}"),
+                    let error = format!("{CALL_FAILURE_PREFIX} : {error}");
+                    return if call_failure {
+                        SampleOutcome::CallFailed { error }
+                    } else {
+                        SampleOutcome::Invalid { error }
                     };
                 }
             };
@@ -326,9 +337,18 @@ where
         let mut records: Vec<serde_json::Value> = Vec::new();
         let mut model: Option<String> = None;
         let mut first_error: Option<String> = None;
+        let mut call_errors: Vec<String> = Vec::new();
         for sample in 0..samples {
             match self.run_sample(&run, sample, budget).await {
                 SampleOutcome::BudgetExhausted => return Ok(AgentOutcome::BudgetExhausted),
+                SampleOutcome::CallFailed { error } => {
+                    warn!(
+                        agent = agent.id.as_str(),
+                        sample, "scoring sample dropped, its call failed"
+                    );
+                    records.push(scoring_sample_record(sample, Err(&error)));
+                    call_errors.push(error);
+                }
                 SampleOutcome::Valid {
                     output,
                     model: answered,
@@ -343,6 +363,16 @@ where
                     first_error.get_or_insert(error);
                 }
             }
+        }
+        if valid.is_empty()
+            && first_error.is_none()
+            && let Some(error) = call_errors.into_iter().next()
+        {
+            return Ok(AgentOutcome::CallFailed(CallFailure {
+                agent_id: agent.id.as_str().to_owned(),
+                provider_id: loaded.id,
+                error,
+            }));
         }
         let raw_samples = if samples > 1 {
             serde_json::Value::Array(records)
@@ -504,6 +534,19 @@ where
                 .await?
             {
                 AgentOutcome::BudgetExhausted => return Ok(LeadOutcome::BudgetExhausted),
+                AgentOutcome::CallFailed(failure) => {
+                    let record =
+                        failure.into_record(lead.id, AgentKind::Scoring, active.revision.number);
+                    let attempts = usecase.note_agent_failure(&record, at).await?;
+                    warn!(
+                        lead_id = %lead.id,
+                        agent = record.agent_id,
+                        attempts,
+                        error = record.error,
+                        "scoring deferred, a model call failed"
+                    );
+                    return Ok(LeadOutcome::Deferred);
+                }
                 AgentOutcome::Result(result) => {
                     info!(
                         monotonic_counter.scoring_results = 1u64,
@@ -579,7 +622,9 @@ impl LodestoneUseCase {
             if remaining == 0 {
                 break;
             }
-            let leads = self.due_scoring_leads(active, remaining).await?;
+            let leads = self
+                .due_scoring_leads(active, remaining, clock.now())
+                .await?;
             for lead in &leads {
                 match scorer
                     .score_lead(self, active, lead, &mut providers, &mut budget, clock)
@@ -591,6 +636,10 @@ impl LodestoneUseCase {
                         report.invalid += invalid;
                         remaining = remaining.saturating_sub(1);
                     }
+                    LeadOutcome::Deferred => {
+                        report.deferred += 1;
+                        remaining = remaining.saturating_sub(1);
+                    }
                     LeadOutcome::BudgetExhausted => {
                         report.budget_exhausted = true;
                         warn!("scoring stopped, the run budget is exhausted");
@@ -600,7 +649,7 @@ impl LodestoneUseCase {
             }
         }
         for active in &profiles {
-            report.backlog += self.count_due_scoring(active).await?;
+            report.backlog += self.count_due_scoring(active, clock.now()).await?;
         }
         Ok(report)
     }
@@ -610,16 +659,21 @@ impl LodestoneUseCase {
         &self,
         active: &ActiveProfile,
         limit: u32,
+        now: DateTime<Utc>,
     ) -> Result<Vec<Lead>, CoreError> {
         let mut repo = scoring_agent_repository;
-        repo.due_leads(active.profile.id, active.revision.number, limit)
+        repo.due_leads(active.profile.id, active.revision.number, limit, now)
             .await
     }
 
     #[transactional(scoring_agent)]
-    async fn count_due_scoring(&self, active: &ActiveProfile) -> Result<u64, CoreError> {
+    async fn count_due_scoring(
+        &self,
+        active: &ActiveProfile,
+        now: DateTime<Utc>,
+    ) -> Result<u64, CoreError> {
         let mut repo = scoring_agent_repository;
-        repo.count_due(active.profile.id, active.revision.number)
+        repo.count_due(active.profile.id, active.revision.number, now)
             .await
     }
 

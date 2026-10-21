@@ -1,3 +1,4 @@
+use chrono::{DateTime, Utc};
 use common::CoreError;
 use lodestone_macros::repository;
 
@@ -50,6 +51,13 @@ const SCORING_DUE: &str = r#"
           state.scoring_revision IS DISTINCT FROM state.profile_revision
           OR state.scoring_for IS DISTINCT FROM state.completed_at
       )
+      AND NOT EXISTS (
+          SELECT 1 FROM lead_agent_retries retry
+          WHERE retry.lead_id = leads.id
+            AND retry.kind = 'scoring'
+            AND retry.profile_revision = $2
+            AND retry.next_attempt_at > $3
+      )
 "#;
 
 impl<'tx> ScoringRepository for PgScoringRepository<'tx> {
@@ -59,15 +67,17 @@ impl<'tx> ScoringRepository for PgScoringRepository<'tx> {
         profile_id: ProfileId,
         revision: RevisionNumber,
         limit: u32,
+        now: DateTime<Utc>,
     ) -> Result<Vec<Lead>, CoreError> {
         let revision = revision_number(revision)?;
         let query = format!(
-            "SELECT leads.id, leads.profile_id, leads.domain, leads.status, leads.score, leads.confidence, leads.verdict, leads.llm_score, leads.qualified_at, leads.first_seen_at, leads.last_seen_at, leads.updated_at {SCORING_DUE}{NOT_SUPPRESSED} ORDER BY leads.first_seen_at ASC, leads.id ASC LIMIT $3"
+            "SELECT leads.id, leads.profile_id, leads.domain, leads.status, leads.score, leads.confidence, leads.verdict, leads.llm_score, leads.qualified_at, leads.first_seen_at, leads.last_seen_at, leads.updated_at {SCORING_DUE}{NOT_SUPPRESSED} ORDER BY leads.first_seen_at ASC, leads.id ASC LIMIT $4"
         );
         let mut tx = self.tx.lock().await;
         let rows = sqlx::query_as::<_, LeadRow>(&query)
             .bind(profile_id.0)
             .bind(revision)
+            .bind(now)
             .bind(i64::from(limit))
             .fetch_all(&mut ***tx)
             .await
@@ -80,6 +90,7 @@ impl<'tx> ScoringRepository for PgScoringRepository<'tx> {
         &mut self,
         profile_id: ProfileId,
         revision: RevisionNumber,
+        now: DateTime<Utc>,
     ) -> Result<u64, CoreError> {
         let revision = revision_number(revision)?;
         let query = format!("SELECT COUNT(*) {SCORING_DUE}{NOT_SUPPRESSED}");
@@ -87,6 +98,7 @@ impl<'tx> ScoringRepository for PgScoringRepository<'tx> {
         let count: i64 = sqlx::query_scalar(&query)
             .bind(profile_id.0)
             .bind(revision)
+            .bind(now)
             .fetch_one(&mut ***tx)
             .await
             .map_err(map_sqlx_error)?;
@@ -178,6 +190,11 @@ impl<'tx> ScoringRepository for PgScoringRepository<'tx> {
             .bind(decision.confidence)
             .bind(decision.verdict.map(|verdict| verdict.as_str()))
             .bind(score_value(decision.score))
+            .execute(&mut ***tx)
+            .await
+            .map_err(map_sqlx_error)?;
+        sqlx::query("DELETE FROM lead_agent_retries WHERE lead_id = $1 AND kind = 'scoring'")
+            .bind(completion.lead_id.0)
             .execute(&mut ***tx)
             .await
             .map_err(map_sqlx_error)?;

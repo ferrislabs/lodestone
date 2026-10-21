@@ -3,6 +3,7 @@ import type { ReactNode } from 'react'
 
 import { Button } from '#/components/ui/button'
 import { Skeleton } from '#/components/ui/skeleton'
+import { failureOfKind } from '#/pages/leads/lib/agent-failure'
 import type { LeadDetailData, LeadStatus } from '#/pages/leads/lib/types'
 import { AssessmentsList } from './assessments-list'
 import { CompanyCard } from './company-card'
@@ -28,6 +29,9 @@ interface LeadDetailProps {
 	onRetrySummary: () => void
 	retryingSummary: boolean
 	retrySummaryError: string | null
+	onRetryAgents: () => void
+	retryingAgents: boolean
+	retryAgentsError: string | null
 	onRefreshCompany: () => void
 	refreshingCompany: boolean
 	refreshCompanyError: string | null
@@ -48,6 +52,9 @@ export function LeadDetail({
 	onRetrySummary,
 	retryingSummary,
 	retrySummaryError,
+	onRetryAgents,
+	retryingAgents,
+	retryAgentsError,
 	onRefreshCompany,
 	refreshingCompany,
 	refreshCompanyError,
@@ -93,8 +100,21 @@ export function LeadDetail({
 						onRefresh={onRefreshCompany}
 					/>
 					{detail.facts ? <LeadFacts facts={detail.facts} /> : null}
-					<QualificationResults results={detail.qualification_results} />
-					<ScoringResults results={detail.scoring_results} lead={detail.lead} />
+					<QualificationResults
+						results={detail.qualification_results}
+						failure={failureOfKind(detail.agent_failures, 'qualification')}
+						onRetry={onRetryAgents}
+						retrying={retryingAgents}
+						retryError={retryAgentsError}
+					/>
+					<ScoringResults
+						results={detail.scoring_results}
+						lead={detail.lead}
+						failure={failureOfKind(detail.agent_failures, 'scoring')}
+						onRetry={onRetryAgents}
+						retrying={retryingAgents}
+						retryError={retryAgentsError}
+					/>
 					<LeadSummary
 						assessment={detail.assessments[0] ?? null}
 						summaryState={detail.summary_state ?? null}

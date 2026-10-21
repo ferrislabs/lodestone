@@ -96,11 +96,11 @@ pub use domain::{
     },
     prompt::{DraftMessage, EvidenceCheck, EvidenceQuote, check_evidence},
     qualification::{
-        Answer, Completion, EvidenceComponents, EvidenceStrength, Exclusion, Judgement,
-        LeadScoring, QualificationResult, ResultId, ResultStatus, SCORING_VERSION,
-        SUMMARY_FAILED_AFTER, SummaryState, VOTE_SHARE_WEIGHT, ValidAnswers, ValidOutput, Verdict,
-        VerdictCap, VerdictReason, VerdictSource, Violation, Violations, agent_score, calibrate,
-        exclusions, judge,
+        AGENT_FAILED_AFTER, AgentFailure, AgentKind, Answer, Completion, EvidenceComponents,
+        EvidenceStrength, Exclusion, Judgement, LeadScoring, QualificationResult, ResultId,
+        ResultStatus, SCORING_VERSION, SUMMARY_FAILED_AFTER, SummaryState, VOTE_SHARE_WEIGHT,
+        ValidAnswers, ValidOutput, Verdict, VerdictCap, VerdictReason, VerdictSource, Violation,
+        Violations, agent_score, calibrate, exclusions, judge,
         ports::QualificationRepository,
         prompt::{
             AgentPrompt, build as agent_prompt, lead_document, with_ungrounded, with_violations,

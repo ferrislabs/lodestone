@@ -5,12 +5,13 @@ use axum::{
     extract::{Path, Query, State, rejection::JsonRejection},
 };
 use lodestone_core::{
-    Assessment, Calibrations, ContactEmail, DraftMessage, DraftReview, DraftStatus, Exclusion,
-    Lead, LeadDetail, LeadFacts, LeadId, LeadQuery, LeadScoring, LeadSort, LeadStatus,
-    LlmProviderRecord, Profile, ProfileId, QualificationResult, Rejection, RejectionProblem,
-    ResultStatus, RunProvenance, SUMMARY_FAILED_AFTER, ScoringResult, Signal, SignalKind,
-    SummaryState, Verdict, VerdictAnswer, VerdictCap, VerdictFilter, VerdictProbabilities,
-    VerdictReason, VerdictSource, calibrate_verdict,
+    AGENT_FAILED_AFTER, AgentFailure, AgentKind, Assessment, Calibrations, ContactEmail,
+    DraftMessage, DraftReview, DraftStatus, Exclusion, Lead, LeadDetail, LeadFacts, LeadId,
+    LeadQuery, LeadScoring, LeadSort, LeadStatus, LlmProviderRecord, Profile, ProfileId,
+    QualificationResult, Rejection, RejectionProblem, ResultStatus, RunProvenance,
+    SUMMARY_FAILED_AFTER, ScoringResult, Signal, SignalKind, SummaryState, Verdict, VerdictAnswer,
+    VerdictCap, VerdictFilter, VerdictProbabilities, VerdictReason, VerdictSource,
+    calibrate_verdict,
     definition::{QualificationAgent, Question, ScoringAgent},
     signal_sentence,
 };
@@ -885,6 +886,66 @@ impl SummaryStateDto {
     }
 }
 
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "snake_case")]
+#[schema(as = AgentKind)]
+pub enum AgentKindDto {
+    Qualification,
+    Scoring,
+}
+
+impl From<AgentKind> for AgentKindDto {
+    fn from(kind: AgentKind) -> Self {
+        match kind {
+            AgentKind::Qualification => Self::Qualification,
+            AgentKind::Scoring => Self::Scoring,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, PartialEq, ToSchema)]
+pub struct AgentFailureDto {
+    pub kind: AgentKindDto,
+    /// Identifier of the agent whose model call failed.
+    pub agent_id: String,
+    /// Display name of that agent, its identifier when the profile no longer defines it.
+    pub agent_name: String,
+    /// Consecutive failed attempts of the model call for this lead and agent kind.
+    pub attempts: u32,
+    /// True from 5 consecutive failures; the agents then retry every 6 hours.
+    pub failed: bool,
+    /// Reason of the last failure, in French, with the provider message when there is one.
+    pub error: String,
+    #[schema(format = DateTime)]
+    pub next_attempt_at: Option<String>,
+}
+
+impl AgentFailureDto {
+    fn new(failure: &AgentFailure, detail: &LeadDetail) -> Self {
+        let name = match failure.kind {
+            AgentKind::Qualification => detail
+                .qualification_agents
+                .iter()
+                .find(|agent| agent.id.as_str() == failure.agent_id)
+                .map(|agent| agent.name.clone()),
+            AgentKind::Scoring => detail
+                .scoring_agents
+                .iter()
+                .find(|agent| agent.id.as_str() == failure.agent_id)
+                .map(|agent| agent.name.clone()),
+        };
+        Self {
+            kind: failure.kind.into(),
+            agent_id: failure.agent_id.clone(),
+            agent_name: name.unwrap_or_else(|| failure.agent_id.clone()),
+            attempts: failure.attempts,
+            failed: failure.attempts >= AGENT_FAILED_AFTER,
+            error: failure.error.clone(),
+            next_attempt_at: failure.next_attempt_at.map(|at| at.to_rfc3339()),
+        }
+    }
+}
+
 #[derive(Debug, Serialize, PartialEq, ToSchema)]
 pub struct HostFactDto {
     pub host: String,
@@ -1019,6 +1080,8 @@ pub struct LeadDetailDto {
     pub scoring_results: Vec<ScoringResultDto>,
     /// Present while the summary of the lead failed at least once since the agents last answered.
     pub summary_state: Option<SummaryStateDto>,
+    /// Qualification and scoring agents whose model call failed and is waiting for a new attempt; empty when none is.
+    pub agent_failures: Vec<AgentFailureDto>,
     /// Company dossier of the lead domain; null until the company research listener has seen the domain.
     pub company: Option<CompanyDto>,
 }
@@ -1069,6 +1132,11 @@ impl LeadDetailDto {
     pub fn new(detail: &LeadDetail, providers: &[LlmProviderRecord]) -> Self {
         Self {
             summary_state: detail.summary_state.as_ref().and_then(SummaryStateDto::new),
+            agent_failures: detail
+                .agent_failures
+                .iter()
+                .map(|failure| AgentFailureDto::new(failure, detail))
+                .collect(),
             company: detail.company.as_ref().map(|dossier| {
                 CompanyDto::from(dossier).with_entity(detail.entity.as_ref(), &detail.siblings)
             }),
@@ -1461,6 +1529,45 @@ pub async fn retry_lead_summary(
     let lead = state
         .usecase
         .retry_lead_summary(lead_id(&lead_id_raw)?)
+        .await?;
+    let detail = state.usecase.lead_detail(lead.id).await?;
+    let summary = detail
+        .assessments
+        .first()
+        .map(|assessment| assessment.summary.as_str());
+    Ok(Response::OK(LeadDto::new(
+        &lead,
+        &detail.profile,
+        summary,
+        detail.scoring.as_ref(),
+    )))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/leads/{lead_id}/agents/retry",
+    tag = "leads",
+    security(("bearer_auth" = [])),
+    params(("lead_id" = String, Path, description = "Lead identifier (UUID)")),
+    responses(
+        (status = 200, description = "The failure counters of the qualification and scoring agents in failure are reset; they try again on their next loop. Nothing changes when no agent is in failure", body = crate::response::DataEnvelope<LeadDto>),
+        (status = 400, description = "Malformed lead identifier"),
+        (status = 401, description = "Missing, malformed, invalid or expired bearer token"),
+        (status = 403, description = "The caller is not a user"),
+        (status = 404, description = "Unknown lead, or its domain is suppressed"),
+    )
+)]
+pub async fn retry_lead_agents(
+    State(state): State<AppState>,
+    user: Option<Extension<AuthenticatedUser>>,
+    Path(lead_id_raw): Path<String>,
+) -> Result<Response<LeadDto>, ApiError> {
+    if user.is_none() {
+        return Err(ApiError::Forbidden);
+    }
+    let lead = state
+        .usecase
+        .retry_lead_agents(lead_id(&lead_id_raw)?)
         .await?;
     let detail = state.usecase.lead_detail(lead.id).await?;
     let summary = detail

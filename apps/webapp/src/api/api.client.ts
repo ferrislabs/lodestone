@@ -13,6 +13,16 @@ export namespace Schemas {
     reliability: Array<ReliabilityBinDto>;
     status: string;
   };
+  export type AgentKind = "qualification" | "scoring";
+  export type AgentFailureDto = {
+    agent_id: string;
+    agent_name: string;
+    attempts: number;
+    error: string;
+    failed: boolean;
+    kind: AgentKind;
+    next_attempt_at?: (string | null) | undefined;
+  };
   export type AgentQualityDto = {
     agent_id: string;
     mean_rejected?: (number | null) | undefined;
@@ -376,6 +386,7 @@ export namespace Schemas {
   };
   export type DataEnvelope_LeadDetailDto = {
     data: {
+      agent_failures: Array<AgentFailureDto>;
       assessments: Array<AssessmentDto>;
       company?: (null | CompanyDto) | undefined;
       contacts: Array<ContactDto>;
@@ -709,6 +720,7 @@ export namespace Schemas {
   };
   export type ErrorDetail = { message: string; path: string };
   export type LeadDetailDto = {
+    agent_failures: Array<AgentFailureDto>;
     assessments: Array<AssessmentDto>;
     company?: (null | CompanyDto) | undefined;
     contacts: Array<ContactDto>;
@@ -908,6 +920,15 @@ export namespace Endpoints {
       path: { lead_id: string };
     };
     responses: { 200: Schemas.DataEnvelope_LeadDetailDto; 400: unknown; 401: unknown; 404: unknown };
+  };
+  export type post_Retry_lead_agents = {
+    method: "POST";
+    path: "/api/v1/leads/{lead_id}/agents/retry";
+    requestFormat: "json";
+    parameters: {
+      path: { lead_id: string };
+    };
+    responses: { 200: Schemas.DataEnvelope_LeadDto; 400: unknown; 401: unknown; 403: unknown; 404: unknown };
   };
   export type post_Refresh_company = {
     method: "POST";
@@ -1304,6 +1325,7 @@ export type EndpointByMethod = {
   post: {
     "/api/v1/drafts/{assessment_id}/approve": Endpoints.post_Approve_draft;
     "/api/v1/drafts/{assessment_id}/reject": Endpoints.post_Reject_draft;
+    "/api/v1/leads/{lead_id}/agents/retry": Endpoints.post_Retry_lead_agents;
     "/api/v1/leads/{lead_id}/company/refresh": Endpoints.post_Refresh_company;
     "/api/v1/leads/{lead_id}/summary/retry": Endpoints.post_Retry_lead_summary;
     "/api/v1/llm/providers": Endpoints.post_Create_provider;

@@ -40,6 +40,12 @@ describe('llm labels', () => {
 		expect(testErrorHint('timeout')).toBeNull()
 	})
 
+	it('labels a model that rejects the reasoning setting', () => {
+		expect(testErrorLabel('reasoning_unsupported')).toBe(
+			'Raisonnement non pris en charge',
+		)
+	})
+
 	it('labels the reasoning levels', () => {
 		expect(reasoningLabel('none')).toBe('Désactivé')
 		expect(reasoningLabel('high')).toBe('Élevé')

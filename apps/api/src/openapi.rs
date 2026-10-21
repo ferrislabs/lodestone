@@ -40,6 +40,7 @@ impl Modify for SecurityAddon {
         handlers::leads::lead_detail,
         handlers::leads::change_lead_status,
         handlers::leads::retry_lead_summary,
+        handlers::leads::retry_lead_agents,
         handlers::company::refresh_company,
         handlers::drafts::list_drafts,
         handlers::drafts::get_draft,

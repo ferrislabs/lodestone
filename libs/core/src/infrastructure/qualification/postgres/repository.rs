@@ -5,11 +5,13 @@ use common::CoreError;
 use lodestone_macros::repository;
 
 use crate::{
-    Lead, LeadId, ProfileId, RevisionNumber,
+    Lead, LeadId, ProfileId, ProviderId, RevisionNumber,
     domain::qualification::{
-        AWAITING_SCORING_REASON, Completion, EvidenceStrength, Exclusion, LeadScoring,
+        AGENT_ERROR_MAX_CHARS, AGENT_FAILED_AFTER, AWAITING_SCORING_REASON, AgentCallFailure,
+        AgentFailure, AgentKind, Completion, EvidenceStrength, Exclusion, LeadScoring,
         QualificationResult, Rescoring, SCORING_MAX_AGE_HOURS, SCORING_VERSION,
-        SUMMARY_ERROR_MAX_CHARS, SummaryState, ports::QualificationRepository, summary_retry_delay,
+        SUMMARY_ERROR_MAX_CHARS, SummaryState, agent_retry_delay, ports::QualificationRepository,
+        summary_retry_delay,
     },
     infrastructure::{
         lead::postgres::{model::LeadRow, repository::NOT_SUPPRESSED},
@@ -26,6 +28,41 @@ pub struct PgQualificationRepository<'tx> {
 impl<'tx> PgQualificationRepository<'tx> {
     pub fn new(tx: &SharedTx<'tx>) -> Self {
         Self { tx: tx.clone() }
+    }
+}
+
+#[derive(sqlx::FromRow)]
+struct AgentFailureRow {
+    kind: String,
+    profile_revision: i32,
+    agent_id: String,
+    provider_id: Option<uuid::Uuid>,
+    attempts: i32,
+    next_attempt_at: Option<DateTime<Utc>>,
+    error: String,
+}
+
+impl TryFrom<AgentFailureRow> for AgentFailure {
+    type Error = CoreError;
+
+    fn try_from(row: AgentFailureRow) -> Result<Self, CoreError> {
+        let kind = AgentKind::parse(&row.kind)
+            .ok_or_else(|| CoreError::Internal("unknown agent kind".to_owned()))?;
+        let profile_revision = u32::try_from(row.profile_revision)
+            .ok()
+            .and_then(RevisionNumber::new)
+            .ok_or_else(|| {
+                CoreError::Internal("profile revision number out of range".to_owned())
+            })?;
+        Ok(Self {
+            kind,
+            profile_revision,
+            agent_id: row.agent_id,
+            provider_id: row.provider_id.map(ProviderId),
+            attempts: u32::try_from(row.attempts).unwrap_or_default(),
+            next_attempt_at: row.next_attempt_at,
+            error: row.error,
+        })
     }
 }
 
@@ -68,6 +105,16 @@ const DUE: &str = r#"
               SELECT 1 FROM company_dossiers dossier
               WHERE dossier.domain = leads.domain AND dossier.state <> 'pending'
           )
+      )
+"#;
+
+const QUALIFICATION_BACKOFF: &str = r#"
+      AND NOT EXISTS (
+          SELECT 1 FROM lead_agent_retries retry
+          WHERE retry.lead_id = leads.id
+            AND retry.kind = 'qualification'
+            AND retry.profile_revision = $2
+            AND retry.next_attempt_at > $4
       )
 "#;
 
@@ -114,16 +161,18 @@ impl<'tx> QualificationRepository for PgQualificationRepository<'tx> {
         revision: RevisionNumber,
         limit: u32,
         dossier_gate: Option<DateTime<Utc>>,
+        now: DateTime<Utc>,
     ) -> Result<Vec<Lead>, CoreError> {
         let revision = revision_number(revision)?;
         let query = format!(
-            "SELECT leads.id, leads.profile_id, leads.domain, leads.status, leads.score, leads.confidence, leads.verdict, leads.llm_score, leads.qualified_at, leads.first_seen_at, leads.last_seen_at, leads.updated_at {DUE}{NOT_SUPPRESSED} ORDER BY leads.first_seen_at ASC, leads.id ASC LIMIT $4"
+            "SELECT leads.id, leads.profile_id, leads.domain, leads.status, leads.score, leads.confidence, leads.verdict, leads.llm_score, leads.qualified_at, leads.first_seen_at, leads.last_seen_at, leads.updated_at {DUE}{QUALIFICATION_BACKOFF}{NOT_SUPPRESSED} ORDER BY leads.first_seen_at ASC, leads.id ASC LIMIT $5"
         );
         let mut tx = self.tx.lock().await;
         let rows = sqlx::query_as::<_, LeadRow>(&query)
             .bind(profile_id.0)
             .bind(revision)
             .bind(dossier_gate)
+            .bind(now)
             .bind(i64::from(limit))
             .fetch_all(&mut ***tx)
             .await
@@ -137,14 +186,16 @@ impl<'tx> QualificationRepository for PgQualificationRepository<'tx> {
         profile_id: ProfileId,
         revision: RevisionNumber,
         dossier_gate: Option<DateTime<Utc>>,
+        now: DateTime<Utc>,
     ) -> Result<u64, CoreError> {
         let revision = revision_number(revision)?;
-        let query = format!("SELECT COUNT(*) {DUE}{NOT_SUPPRESSED}");
+        let query = format!("SELECT COUNT(*) {DUE}{QUALIFICATION_BACKOFF}{NOT_SUPPRESSED}");
         let mut tx = self.tx.lock().await;
         let count: i64 = sqlx::query_scalar(&query)
             .bind(profile_id.0)
             .bind(revision)
             .bind(dossier_gate)
+            .bind(now)
             .fetch_one(&mut ***tx)
             .await
             .map_err(map_sqlx_error)?;
@@ -219,16 +270,18 @@ impl<'tx> QualificationRepository for PgQualificationRepository<'tx> {
         lead_id: LeadId,
         qualified_at: DateTime<Utc>,
         reason: &str,
+        provider_id: Option<ProviderId>,
         at: DateTime<Utc>,
     ) -> Result<Option<u32>, CoreError> {
         let reason: String = reason.chars().take(SUMMARY_ERROR_MAX_CHARS).collect();
         let mut tx = self.tx.lock().await;
         let attempts: Option<i32> = sqlx::query_scalar(
-            "UPDATE lead_qualification_state SET summary_attempts = summary_attempts + 1, summary_error = $3 WHERE lead_id = $1 AND completed_at = $2 AND summarised_at IS NULL RETURNING summary_attempts",
+            "UPDATE lead_qualification_state SET summary_attempts = summary_attempts + 1, summary_error = $3, summary_provider_id = $4 WHERE lead_id = $1 AND completed_at = $2 AND summarised_at IS NULL RETURNING summary_attempts",
         )
         .bind(lead_id.0)
         .bind(qualified_at)
         .bind(&reason)
+        .bind(provider_id.map(|provider| provider.0))
         .fetch_optional(&mut ***tx)
         .await
         .map_err(map_sqlx_error)?;
@@ -257,6 +310,110 @@ impl<'tx> QualificationRepository for PgQualificationRepository<'tx> {
         .await
         .map_err(map_sqlx_error)?;
         Ok(result.rows_affected() == 1)
+    }
+
+    #[tracing::instrument(skip(self, failure), fields(db.system = "postgresql", db.operation = "upsert", db.table = "lead_agent_retries", lead.id = %failure.lead_id), err)]
+    async fn record_agent_failure(
+        &mut self,
+        failure: &AgentCallFailure,
+        at: DateTime<Utc>,
+    ) -> Result<u32, CoreError> {
+        let revision = revision_number(failure.profile_revision)?;
+        let error: String = failure.error.chars().take(AGENT_ERROR_MAX_CHARS).collect();
+        let mut tx = self.tx.lock().await;
+        let previous: Option<(i32, i32)> = sqlx::query_as(
+            "SELECT attempts, profile_revision FROM lead_agent_retries WHERE lead_id = $1 AND kind = $2 FOR UPDATE",
+        )
+        .bind(failure.lead_id.0)
+        .bind(failure.kind.as_str())
+        .fetch_optional(&mut ***tx)
+        .await
+        .map_err(map_sqlx_error)?;
+        let attempts = match previous {
+            Some((attempts, stored_revision)) if stored_revision == revision => {
+                u32::try_from(attempts)
+                    .unwrap_or_default()
+                    .saturating_add(1)
+            }
+            _ => 1,
+        };
+        sqlx::query(
+            r#"
+            INSERT INTO lead_agent_retries (
+                lead_id, kind, profile_revision, agent_id, provider_id, attempts,
+                next_attempt_at, error, updated_at
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            ON CONFLICT (lead_id, kind) DO UPDATE SET
+                profile_revision = EXCLUDED.profile_revision,
+                agent_id         = EXCLUDED.agent_id,
+                provider_id      = EXCLUDED.provider_id,
+                attempts         = EXCLUDED.attempts,
+                next_attempt_at  = EXCLUDED.next_attempt_at,
+                error            = EXCLUDED.error,
+                updated_at       = EXCLUDED.updated_at
+            "#,
+        )
+        .bind(failure.lead_id.0)
+        .bind(failure.kind.as_str())
+        .bind(revision)
+        .bind(&failure.agent_id)
+        .bind(failure.provider_id.map(|provider| provider.0))
+        .bind(i32::try_from(attempts).unwrap_or(i32::MAX))
+        .bind(at + agent_retry_delay(attempts))
+        .bind(&error)
+        .bind(at)
+        .execute(&mut ***tx)
+        .await
+        .map_err(map_sqlx_error)?;
+        Ok(attempts)
+    }
+
+    #[tracing::instrument(skip(self), fields(db.system = "postgresql", db.operation = "select", db.table = "lead_agent_retries", lead.id = %lead_id), err)]
+    async fn agent_failures(&mut self, lead_id: LeadId) -> Result<Vec<AgentFailure>, CoreError> {
+        let mut tx = self.tx.lock().await;
+        let rows = sqlx::query_as::<_, AgentFailureRow>(
+            "SELECT kind, profile_revision, agent_id, provider_id, attempts, next_attempt_at, error FROM lead_agent_retries WHERE lead_id = $1 ORDER BY kind ASC",
+        )
+        .bind(lead_id.0)
+        .fetch_all(&mut ***tx)
+        .await
+        .map_err(map_sqlx_error)?;
+        rows.into_iter().map(AgentFailure::try_from).collect()
+    }
+
+    #[tracing::instrument(skip(self), fields(db.system = "postgresql", db.operation = "update", db.table = "lead_agent_retries", lead.id = %lead_id), err)]
+    async fn retry_agent_failures(&mut self, lead_id: LeadId) -> Result<u64, CoreError> {
+        let mut tx = self.tx.lock().await;
+        let result = sqlx::query(
+            "UPDATE lead_agent_retries SET attempts = 0, next_attempt_at = NULL WHERE lead_id = $1 AND attempts >= $2",
+        )
+        .bind(lead_id.0)
+        .bind(i32::try_from(AGENT_FAILED_AFTER).unwrap_or(i32::MAX))
+        .execute(&mut ***tx)
+        .await
+        .map_err(map_sqlx_error)?;
+        Ok(result.rows_affected())
+    }
+
+    #[tracing::instrument(skip(self), fields(db.system = "postgresql", db.operation = "update", db.table = "lead_agent_retries", provider.id = %provider_id), err)]
+    async fn reset_provider_backoff(&mut self, provider_id: ProviderId) -> Result<u64, CoreError> {
+        let mut tx = self.tx.lock().await;
+        let retries = sqlx::query(
+            "UPDATE lead_agent_retries SET attempts = 0, next_attempt_at = NULL WHERE provider_id = $1 AND attempts > 0",
+        )
+        .bind(provider_id.0)
+        .execute(&mut ***tx)
+        .await
+        .map_err(map_sqlx_error)?;
+        let summaries = sqlx::query(
+            "UPDATE lead_qualification_state SET summary_attempts = 0, summary_next_attempt_at = NULL WHERE summary_provider_id = $1 AND summary_attempts > 0",
+        )
+        .bind(provider_id.0)
+        .execute(&mut ***tx)
+        .await
+        .map_err(map_sqlx_error)?;
+        Ok(retries.rows_affected() + summaries.rows_affected())
     }
 
     #[tracing::instrument(skip(self), fields(db.system = "postgresql", db.operation = "select", db.table = "lead_qualification_state", lead.id = %lead_id), err)]
@@ -388,6 +545,11 @@ impl<'tx> QualificationRepository for PgQualificationRepository<'tx> {
         sqlx::query("UPDATE leads SET qualified_at = $2 WHERE id = $1")
             .bind(completion.lead_id.0)
             .bind(completion.at)
+            .execute(&mut ***tx)
+            .await
+            .map_err(map_sqlx_error)?;
+        sqlx::query("DELETE FROM lead_agent_retries WHERE lead_id = $1 AND kind = 'qualification'")
+            .bind(completion.lead_id.0)
             .execute(&mut ***tx)
             .await
             .map_err(map_sqlx_error)?;

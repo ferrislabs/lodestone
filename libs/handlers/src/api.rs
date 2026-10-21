@@ -109,6 +109,10 @@ pub fn router(state: AppState) -> Router<AppState> {
             post(leads::retry_lead_summary),
         )
         .route(
+            "/leads/{lead_id}/agents/retry",
+            post(leads::retry_lead_agents),
+        )
+        .route(
             "/leads/{lead_id}/company/refresh",
             post(company::refresh_company),
         );

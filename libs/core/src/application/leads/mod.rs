@@ -134,6 +134,7 @@ impl LodestoneUseCase {
             .ok_or(CoreError::NotFound)?;
         let qualification_results = qualification.current_results(lead_id).await?;
         let scoring_results = scoring_agents.current_results(lead_id).await?;
+        let agent_failures = qualification.agent_failures(lead_id).await?;
         let revision_number = qualification_results
             .first()
             .map(|result| result.profile_revision)
@@ -141,6 +142,11 @@ impl LodestoneUseCase {
                 scoring_results
                     .first()
                     .map(|result| result.profile_revision)
+            })
+            .or_else(|| {
+                agent_failures
+                    .first()
+                    .map(|failure| failure.profile_revision)
             });
         let stored = calibrations.list(lead.profile_id).await?;
         let (qualification_agents, scoring_agents, calibrations) = match revision_number {
@@ -173,6 +179,7 @@ impl LodestoneUseCase {
         .await?;
         Ok(LeadDetail {
             summary_state,
+            agent_failures,
             scoring,
             qualification_results,
             qualification_agents,

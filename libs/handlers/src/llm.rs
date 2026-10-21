@@ -139,7 +139,7 @@ pub struct TierDto {
 
 #[derive(Debug, Serialize, PartialEq, Eq, ToSchema)]
 pub struct TestErrorDto {
-    /// One of `authentication`, `unreachable`, `timeout`, `invalid_response`, `rate_limited`, `reasoning_exhausted`, `other`.
+    /// One of `authentication`, `unreachable`, `timeout`, `invalid_response`, `rate_limited`, `reasoning_exhausted`, `reasoning_unsupported`, `other`.
     pub kind: String,
     pub message: String,
 }
@@ -927,6 +927,9 @@ pub async fn unassign_tier(
     Ok(Response::NoContent)
 }
 
+const REASONING_UNSUPPORTED: &str =
+    "Ce modèle n'accepte pas le réglage de raisonnement : choisissez « Par défaut (non envoyé) ».";
+
 fn failure(kind: &str, message: &str, key: Option<&Secret>) -> TestResultDto {
     TestResultDto {
         ok: false,
@@ -1020,7 +1023,7 @@ async fn run_test(record: &LlmProviderRecord, cipher: &impl SecretCipher) -> Tes
         generation: record.generation,
     };
     let key = definition.api_key.as_ref();
-    let provider = match AnyProvider::from_definition(&definition) {
+    let provider = match AnyProvider::reporting_from_definition(&definition) {
         Ok(provider) => provider,
         Err(error) => return classify(&error, key),
     };
@@ -1052,6 +1055,9 @@ async fn run_test(record: &LlmProviderRecord, cipher: &impl SecretCipher) -> Tes
             "The provider answered with an unusable response.",
             key,
         ),
+        Err(error) if record.reasoning_effort.is_some() && error.is_reasoning_rejection() => {
+            failure("reasoning_unsupported", REASONING_UNSUPPORTED, key)
+        }
         Err(error) => classify(&error, key),
     }
 }
@@ -1149,6 +1155,28 @@ mod tests {
             error.message,
             "The provider answered with status 400: Extra inputs are not permitted: reasoning_effort"
         );
+    }
+
+    #[tokio::test]
+    async fn tester_explains_a_rejected_reasoning_effort_without_retrying() {
+        let server = MockServer::start();
+        let mock = server.mock(|when, then| {
+            when.method(POST);
+            then.status(400).json_body(json!({
+                "message": "reasoning_effort is not enabled for this model",
+            }));
+        });
+        let mut configured = record(&server);
+        configured.reasoning_effort = Some(ReasoningEffort::Medium);
+        let result = run_test(&configured, &PlainCipher).await;
+        let error = result.error.unwrap();
+        assert!(!result.ok);
+        assert_eq!(error.kind, "reasoning_unsupported");
+        assert_eq!(
+            error.message,
+            "Ce modèle n'accepte pas le réglage de raisonnement : choisissez « Par défaut (non envoyé) »."
+        );
+        mock.assert_hits(1);
     }
 
     #[tokio::test]

@@ -214,6 +214,32 @@ pub enum LlmError {
     Configuration(String),
 }
 
+const REASONING_REJECTIONS: [&str; 5] = [
+    "not supported",
+    "not enabled",
+    "unsupported",
+    "unknown",
+    "extra inputs",
+];
+
+impl LlmError {
+    pub fn is_reasoning_rejection(&self) -> bool {
+        let Self::Status {
+            status: 400 | 422,
+            message: Some(message),
+        } = self
+        else {
+            return false;
+        };
+        let message = message.to_ascii_lowercase();
+        message.contains("reasoning_effort")
+            || (message.contains("reasoning")
+                && REASONING_REJECTIONS
+                    .iter()
+                    .any(|phrase| message.contains(phrase)))
+    }
+}
+
 pub trait LlmProvider: Send + Sync {
     fn complete(
         &self,
@@ -435,5 +461,41 @@ mod tests {
         ] {
             assert_eq!(ProviderKind::parse(kind.as_str()), Some(kind));
         }
+    }
+    fn status(status: u16, message: Option<&str>) -> LlmError {
+        LlmError::Status {
+            status,
+            message: message.map(str::to_owned),
+        }
+    }
+
+    #[test]
+    fn reasoning_rejections_are_recognised_from_the_provider_message() {
+        for message in [
+            "reasoning_effort is not enabled for this model",
+            "Unknown parameter: reasoning_effort",
+            "Extra inputs are not permitted: reasoning_effort",
+            "This model does not support reasoning: unsupported value",
+            "reasoning is not supported by this model",
+        ] {
+            assert!(
+                status(400, Some(message)).is_reasoning_rejection(),
+                "{message}"
+            );
+            assert!(
+                status(422, Some(message)).is_reasoning_rejection(),
+                "{message}"
+            );
+        }
+    }
+
+    #[test]
+    fn other_errors_are_not_reasoning_rejections() {
+        assert!(!status(400, Some("response_format is invalid")).is_reasoning_rejection());
+        assert!(!status(400, Some("the reasoning in the prompt is fine")).is_reasoning_rejection());
+        assert!(!status(400, None).is_reasoning_rejection());
+        assert!(!status(500, Some("reasoning_effort is not enabled")).is_reasoning_rejection());
+        assert!(!status(401, Some("reasoning_effort")).is_reasoning_rejection());
+        assert!(!LlmError::Timeout.is_reasoning_rejection());
     }
 }

@@ -90,6 +90,20 @@ pub enum LlmCallError {
 }
 
 impl LlmCallError {
+    pub fn is_call_failure(&self) -> bool {
+        match self {
+            Self::BudgetExhausted => true,
+            Self::Provider(error) => matches!(
+                error,
+                LlmError::Timeout
+                    | LlmError::RateLimited { .. }
+                    | LlmError::Network(_)
+                    | LlmError::Status { .. }
+            ),
+            Self::InvalidOutput(_) | Self::Schema(_) => false,
+        }
+    }
+
     pub fn provider_message(&self) -> Option<&str> {
         match self {
             Self::Provider(LlmError::Status {
@@ -378,6 +392,38 @@ mod tests {
 
     use super::*;
     use crate::domain::llm::LlmResponse;
+
+    #[test]
+    fn only_transport_status_timeout_rate_limit_and_budget_are_call_failures() {
+        let provider = |error| LlmCallError::Provider(error);
+        for failure in [
+            LlmCallError::BudgetExhausted,
+            provider(LlmError::Timeout),
+            provider(LlmError::RateLimited { retry_after: None }),
+            provider(LlmError::Network("x".to_owned())),
+            provider(LlmError::Status {
+                status: 400,
+                message: None,
+            }),
+            provider(LlmError::Status {
+                status: 503,
+                message: None,
+            }),
+        ] {
+            assert!(failure.is_call_failure(), "{failure}");
+        }
+        for contract in [
+            LlmCallError::InvalidOutput("x".to_owned()),
+            LlmCallError::Schema("x".to_owned()),
+            provider(LlmError::Refused),
+            provider(LlmError::Truncated),
+            provider(LlmError::ReasoningExhausted),
+            provider(LlmError::InvalidOutput("x".to_owned())),
+            provider(LlmError::Configuration("x".to_owned())),
+        ] {
+            assert!(!contract.is_call_failure(), "{contract}");
+        }
+    }
 
     fn scope_of(agent: Option<&str>) -> CacheScope {
         CacheScope {
