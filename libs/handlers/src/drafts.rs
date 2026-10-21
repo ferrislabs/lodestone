@@ -3,7 +3,8 @@ use axum::{
     extract::{Path, Query, State, rejection::JsonRejection},
 };
 use lodestone_core::{
-    AssessmentId, ContactEmail, DraftEdit, DraftEntry, DraftProblem, ProfileId, Rejection,
+    AssessmentId, ContactEmail, DraftEdit, DraftEntry, DraftProblem, DraftRevision, ProfileId,
+    Rejection,
 };
 use pagination::{Page, PaginationMetadata};
 use serde::{Deserialize, Serialize};
@@ -125,6 +126,14 @@ pub struct EditDraftRequest {
     pub subject: Option<String>,
     /// New body, 1 to 10000 characters.
     pub body: Option<String>,
+    /// Revision of the draft the editor saw. The edit is refused with 409 when the draft has changed since. Not checked when absent.
+    pub expected_revision: Option<u32>,
+}
+
+#[derive(Debug, Default, Deserialize, ToSchema)]
+pub struct ApproveDraftRequest {
+    /// Revision of the draft the reviewer saw. The approval is refused with 409 when the draft has changed since. Not checked when absent.
+    pub expected_revision: Option<u32>,
 }
 
 #[derive(Debug, Default, Deserialize, ToSchema)]
@@ -134,6 +143,8 @@ pub struct RejectDraftRequest {
     pub reason: Option<String>,
     /// Free text, at most 500 characters. Required when the reason is `autre`.
     pub note: Option<String>,
+    /// Revision of the draft the reviewer saw. The rejection is refused with 409 when the draft has changed since. Not checked when absent.
+    pub expected_revision: Option<u32>,
 }
 
 fn assessment_id(raw: &str) -> Result<AssessmentId, ApiError> {
@@ -242,7 +253,7 @@ pub async fn get_draft(
         (status = 401, description = "Missing, malformed, invalid or expired bearer token"),
         (status = 403, description = "The caller is not a user"),
         (status = 404, description = "Unknown draft, or the lead domain is suppressed"),
-        (status = 409, description = "The draft is no longer pending"),
+        (status = 409, description = "The draft is no longer pending, has changed since `expected_revision`, or was superseded by a newer assessment"),
         (status = 422, description = "Subject or body is out of bounds, or both are missing"),
     )
 )]
@@ -255,8 +266,9 @@ pub async fn edit_draft(
     actor(user)?;
     let id = assessment_id(&raw)?;
     let Json(request) = body.map_err(|rejection| invalid("body", &rejection.body_text()))?;
+    let expected = request.expected_revision.map(DraftRevision::new);
     let edit = DraftEdit::new(request.subject, request.body).map_err(rejected)?;
-    let entry = state.usecase.edit_draft(id, edit).await?;
+    let entry = state.usecase.edit_draft(id, edit, expected).await?;
     Ok(Response::OK(DraftEntryDto::try_from(&entry)?))
 }
 
@@ -266,25 +278,27 @@ pub async fn edit_draft(
     tag = "drafts",
     security(("bearer_auth" = [])),
     params(("assessment_id" = String, Path, description = "Assessment identifier (UUID)")),
+    request_body(content = Option<ApproveDraftRequest>, description = "Optional guard"),
     responses(
         (status = 200, description = "The draft is marked approved and its lead validated; nothing is sent", body = DataEnvelope<DraftEntryDto>),
-        (status = 400, description = "Malformed assessment identifier"),
+        (status = 400, description = "Malformed assessment identifier or body"),
         (status = 401, description = "Missing, malformed, invalid or expired bearer token"),
         (status = 403, description = "The caller is not a user"),
         (status = 404, description = "Unknown or superseded draft, or the lead domain is suppressed"),
-        (status = 409, description = "The draft is not pending, or its lead is not qualified"),
+        (status = 409, description = "The draft is not pending, has changed since `expected_revision`, or its lead is not qualified"),
     )
 )]
 pub async fn approve_draft(
     State(state): State<AppState>,
     user: Option<Extension<AuthenticatedUser>>,
     Path(raw): Path<String>,
+    body: Option<Json<ApproveDraftRequest>>,
 ) -> Result<Response<DraftEntryDto>, ApiError> {
     let reviewer = actor(user)?;
-    let entry = state
-        .usecase
-        .approve_draft(assessment_id(&raw)?, reviewer)
-        .await?;
+    let id = assessment_id(&raw)?;
+    let request = body.map(|Json(request)| request).unwrap_or_default();
+    let expected = request.expected_revision.map(DraftRevision::new);
+    let entry = state.usecase.approve_draft(id, reviewer, expected).await?;
     Ok(Response::OK(DraftEntryDto::try_from(&entry)?))
 }
 
@@ -301,7 +315,7 @@ pub async fn approve_draft(
         (status = 401, description = "Missing, malformed, invalid or expired bearer token"),
         (status = 403, description = "The caller is not a user"),
         (status = 404, description = "Unknown or superseded draft, or the lead domain is suppressed"),
-        (status = 409, description = "The draft is not pending, or its lead is not qualified"),
+        (status = 409, description = "The draft is not pending, has changed since `expected_revision`, or its lead is not qualified"),
         (status = 422, description = "The reason is missing or unknown, or the note is too long or missing for `autre`"),
     )
 )]
@@ -316,6 +330,10 @@ pub async fn reject_draft(
     let request = body.map(|Json(request)| request).unwrap_or_default();
     let rejection = Rejection::parse(request.reason.as_deref(), request.note.as_deref())
         .map_err(rejection_problem)?;
-    let entry = state.usecase.reject_draft(id, reviewer, rejection).await?;
+    let expected = request.expected_revision.map(DraftRevision::new);
+    let entry = state
+        .usecase
+        .reject_draft(id, reviewer, rejection, expected)
+        .await?;
     Ok(Response::OK(DraftEntryDto::try_from(&entry)?))
 }

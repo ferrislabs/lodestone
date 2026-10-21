@@ -4,11 +4,12 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::{
-    Assessment, AssessmentId, DraftMessage, DraftReview, DraftStatus, Evidence, GenerationSnapshot,
-    LeadId, Provenance, ProviderId, QualityWarning, RevisionNumber, RunProvenance, UserId,
+    Assessment, AssessmentId, DraftMessage, DraftReview, DraftRevision, DraftStatus, Evidence,
+    GenerationSnapshot, LeadId, Provenance, ProviderId, QualityWarning, RevisionNumber,
+    RunProvenance, UserId,
 };
 
-pub const ASSESSMENT_COLUMNS: &str = "assessments.id, assessments.lead_id, assessments.profile_revision, assessments.summary, assessments.verdict_narrative, assessments.approach_angle, assessments.evidence, assessments.evidence_verified, assessments.quality_warnings, assessments.provider_id, assessments.provider_name, assessments.model, assessments.prompt_version, assessments.generation, assessments.samples, assessments.draft_subject, assessments.draft_body, assessments.draft_status, assessments.draft_reviewed_by, assessments.draft_reviewed_at, assessments.draft_edited_at, assessments.draft_rejection_reason, assessments.draft_original_subject, assessments.draft_original_body, assessments.draft_suggested_subject, assessments.draft_suggested_body, assessments.draft_outdated_at, assessments.created_at";
+pub const ASSESSMENT_COLUMNS: &str = "assessments.id, assessments.lead_id, assessments.profile_revision, assessments.summary, assessments.verdict_narrative, assessments.approach_angle, assessments.evidence, assessments.evidence_verified, assessments.quality_warnings, assessments.provider_id, assessments.provider_name, assessments.model, assessments.prompt_version, assessments.generation, assessments.samples, assessments.draft_subject, assessments.draft_body, assessments.draft_status, assessments.draft_reviewed_by, assessments.draft_reviewed_at, assessments.draft_edited_at, assessments.draft_rejection_reason, assessments.draft_original_subject, assessments.draft_original_body, assessments.draft_suggested_subject, assessments.draft_suggested_body, assessments.draft_outdated_at, assessments.draft_revision, assessments.created_at";
 
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct AssessmentRow {
@@ -39,6 +40,7 @@ pub struct AssessmentRow {
     pub draft_suggested_subject: Option<String>,
     pub draft_suggested_body: Option<String>,
     pub draft_outdated_at: Option<DateTime<Utc>>,
+    pub draft_revision: i32,
     pub created_at: DateTime<Utc>,
 }
 
@@ -86,6 +88,9 @@ impl TryFrom<AssessmentRow> for Assessment {
             .ok_or_else(|| {
                 CoreError::Internal("stored assessment revision is invalid".to_owned())
             })?;
+        let draft_revision = u32::try_from(row.draft_revision)
+            .map(DraftRevision::new)
+            .map_err(|_| CoreError::Internal("stored draft revision is invalid".to_owned()))?;
         let draft_review = match (&row.draft_subject, row.draft_status.as_deref()) {
             (Some(_), Some(raw)) => Some(DraftReview {
                 status: DraftStatus::parse(raw).ok_or_else(|| {
@@ -104,6 +109,7 @@ impl TryFrom<AssessmentRow> for Assessment {
                     _ => None,
                 },
                 outdated_at: row.draft_outdated_at,
+                revision: draft_revision,
             }),
             (Some(_), None) => {
                 return Err(CoreError::Internal("stored draft has no status".to_owned()));
