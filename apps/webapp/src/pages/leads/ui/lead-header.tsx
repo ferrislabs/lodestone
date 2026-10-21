@@ -15,7 +15,6 @@ interface LeadHeaderProps {
 	onChangeStatus: (status: LeadStatus) => void
 	changing: boolean
 	changeError: string | null
-	waiting?: string | null
 }
 
 export function LeadHeader({
@@ -26,14 +25,13 @@ export function LeadHeader({
 	onChangeStatus,
 	changing,
 	changeError,
-	waiting = null,
 }: LeadHeaderProps) {
 	return (
 		<div className="flex flex-col gap-3">
 			<div className="flex flex-wrap items-center gap-3">
 				<h1 className="text-2xl font-bold tracking-tight">{lead.domain}</h1>
 				<LeadStatusBadge status={lead.status} />
-				<VerdictBadge verdict={lead.verdict} waiting={waiting} />
+				<VerdictBadge verdict={lead.verdict} />
 			</div>
 			<dl className="grid gap-x-8 gap-y-1 text-sm sm:grid-cols-2 lg:grid-cols-4">
 				<div>

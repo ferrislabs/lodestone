@@ -3,6 +3,10 @@ import { useNavigate, useParams } from '@tanstack/react-router'
 
 import { errorMessage, lodestoneApi } from '#/api/lodestone'
 import { parseApiError } from '#/lib/api-errors'
+import {
+	EVALUATION_POLL_MS,
+	evaluationMoves,
+} from '#/pages/leads/lib/evaluation'
 import { nextStatuses } from '#/pages/leads/lib/transitions'
 import { LeadDetail } from '#/pages/leads/ui/lead-detail'
 import { useRejectionForm } from '#/pages/rejection/feature/use-rejection-form'
@@ -23,7 +27,9 @@ export function LeadDetailFeature() {
 		refetchInterval: (query) =>
 			query.state.data?.data.company?.state === 'pending'
 				? COMPANY_POLL_MS
-				: false,
+				: evaluationMoves(query.state.data?.data.lead.evaluation)
+					? EVALUATION_POLL_MS
+					: false,
 	})
 
 	const changeStatus = useMutation({
@@ -72,6 +78,20 @@ export function LeadDetailFeature() {
 			queryClient.invalidateQueries({
 				queryKey: [{ _id: '/api/v1/leads/{lead_id}' }],
 			}),
+	})
+
+	const reevaluate = useMutation({
+		...lodestoneApi().mutation('post', '/api/v1/leads/{lead_id}/reevaluate')
+			.mutationOptions,
+		onSuccess: () =>
+			Promise.all([
+				queryClient.invalidateQueries({
+					queryKey: [{ _id: '/api/v1/leads/{lead_id}' }],
+				}),
+				queryClient.invalidateQueries({
+					queryKey: [{ _id: '/api/v1/profiles/{profile_id}/leads' }],
+				}),
+			]),
 	})
 
 	const detail = detailQuery.data?.data ?? null
@@ -175,6 +195,11 @@ export function LeadDetailFeature() {
 			refreshingCompany={refreshCompany.isPending}
 			refreshCompanyError={
 				refreshCompany.isError ? errorMessage(refreshCompany.error) : null
+			}
+			onReevaluate={() => reevaluate.mutate({ path: { lead_id: leadId } })}
+			reevaluating={reevaluate.isPending}
+			reevaluateError={
+				reevaluate.isError ? errorMessage(reevaluate.error) : null
 			}
 			changing={changeStatus.isPending}
 			changeError={

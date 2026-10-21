@@ -10,6 +10,8 @@ use sqlx::{PgPool, query, query_scalar};
 use support::{Harness, call, lazy_pool, send};
 use utoipa::OpenApi;
 
+const IAM: &str = include_str!("../../../docs/examples/profiles/iam-ferriskey.json");
+
 struct Seed {
     pool: PgPool,
 }
@@ -236,11 +238,12 @@ async fn leads_are_listed_by_score_with_their_profile_and_pagination(pool: PgPoo
 }
 
 #[sqlx::test(migrations = "../../migrations")]
-async fn each_listed_lead_says_whether_it_waits_for_its_enrichment(pool: PgPool) {
+async fn each_listed_lead_carries_its_evaluation_status(pool: PgPool) {
     let seed = Seed { pool: pool.clone() };
     let profile = seed.profile("keycloak-ops").await;
     let certificate = seed.lead(&profile, "cert.com", "new", 30.0, 1).await;
     let probed = seed.lead(&profile, "probe.com", "new", 20.0, 1).await;
+    let evaluated = seed.lead(&profile, "eval.com", "new", 10.0, 1).await;
     seed.host_signal(
         &certificate,
         "certificate_seen",
@@ -258,27 +261,119 @@ async fn each_listed_lead_says_whether_it_waits_for_its_enrichment(pool: PgPool)
     )
     .await;
     seed.signal(&probed, "product_detected").await;
+    seed.signal(&evaluated, "product_detected").await;
+    query(
+        "INSERT INTO profile_revisions (profile_id, revision, definition, created_at) SELECT id, 3, $1::jsonb, now() FROM profiles",
+    )
+    .bind(IAM)
+        .execute(&pool)
+        .await
+        .unwrap();
+    query(
+        "UPDATE leads SET qualified_at = now() - interval '1 hour' WHERE domain IN ('eval.com', 'probe.com')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    query(
+        "INSERT INTO lead_ecosystem_modules (domain, module, status, last_run, next_run_at, changed_at)
+         VALUES ('eval.com', 'website_stack', 'done', now() - interval '2 hours', now() + interval '7 days', now() - interval '2 hours'),
+                ('eval.com', 'dns_email', 'done', now(), now() + interval '7 days', now()),
+                ('probe.com', 'website_stack', 'done', now(), now() + interval '7 days', now())",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    query(
+        "INSERT INTO lead_requalifications (lead_id, requalify_after, marked_at)
+         SELECT id, '2030-01-01T10:02:00Z', now() FROM leads WHERE domain = 'probe.com'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
     let api = Api::new(pool).await;
 
     let (status, body) = api.get(&format!("/api/v1/profiles/{profile}/leads")).await;
 
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(domains(&body), ["cert.com", "probe.com"]);
-    assert_eq!(
-        body["data"][0]["enrichment_waiting"],
-        json!({ "waiting_reason": "awaiting_enrichment_evidence", "wait_until": null })
+    assert_eq!(domains(&body), ["cert.com", "probe.com", "eval.com"]);
+    assert_eq!(body["data"][0]["evaluation"]["stage"], "certificate_only");
+    assert_eq!(body["data"][0]["evaluation"]["evaluated_at"], Value::Null);
+    let planned = &body["data"][1]["evaluation"];
+    assert_eq!(planned["stage"], "requalification_planned");
+    assert_eq!(planned["requalify_reason"], "new_information");
+    assert!(
+        planned["requalify_at"]
+            .as_str()
+            .unwrap()
+            .starts_with("2030-01-01T10:02:00")
     );
+    let running = &body["data"][2]["evaluation"];
+    assert_eq!(running["stage"], "inspection_running");
+    assert_eq!(running["modules_done"], 2);
+    assert_eq!(running["modules_available"], 4);
+    assert_eq!(running["requalify_at"], Value::Null);
+    assert_eq!(running["changed_modules"].as_array().unwrap().len(), 1);
+    assert_eq!(running["changed_modules"][0]["module"], "dns_email");
     assert_eq!(
-        body["data"][1]["enrichment_waiting"],
-        json!({ "waiting_reason": null, "wait_until": null })
+        running["changed_modules"][0]["label"],
+        "Écosystème DNS et e-mail"
     );
-    let (_, detail) = api.get(&format!("/api/v1/leads/{certificate}")).await;
+    let (_, detail) = api.get(&format!("/api/v1/leads/{evaluated}")).await;
+    assert_eq!(detail["data"]["lead"]["evaluation"], *running);
     assert_eq!(
-        detail["data"]["lead"]["enrichment_waiting"]["waiting_reason"],
-        "awaiting_enrichment_evidence"
+        detail["data"]["enrichment"]["modules"]
+            .as_array()
+            .unwrap()
+            .len(),
+        7
     );
     let (_, changed) = api.patch_status(&probed, "qualified").await;
-    assert_eq!(changed["data"]["enrichment_waiting"], Value::Null);
+    assert_eq!(changed["data"]["evaluation"], Value::Null);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_user_can_ask_for_a_reevaluation_beyond_the_daily_cap(pool: PgPool) {
+    let seed = Seed { pool: pool.clone() };
+    let profile = seed.profile("keycloak-ops").await;
+    let lead = seed.lead(&profile, "acme.com", "new", 5.0, 1).await;
+    seed.signal(&lead, "product_detected").await;
+    query("UPDATE leads SET qualified_at = now() - interval '1 hour'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    query(
+        "INSERT INTO lead_requalifications (lead_id, daily_count, counted_on)
+         SELECT id, 3, (now() AT TIME ZONE 'UTC')::date FROM leads",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let api = Api::new(pool.clone()).await;
+    let client = format!("Bearer {}", api.harness.valid_client_token());
+    let uri = format!("/api/v1/leads/{lead}/reevaluate");
+
+    let (forbidden, _, _) = send(api.app(), Method::POST, &uri, Some(&client), None).await;
+    assert_eq!(forbidden, StatusCode::FORBIDDEN);
+    let (anonymous, _, _) = send(api.app(), Method::POST, &uri, None, None).await;
+    assert_eq!(anonymous, StatusCode::UNAUTHORIZED);
+    let missing = format!("/api/v1/leads/{}/reevaluate", generate_uuid_v7());
+    let (not_found, _, _) = send(api.app(), Method::POST, &missing, Some(&api.bearer), None).await;
+    assert_eq!(not_found, StatusCode::NOT_FOUND);
+
+    let (status, body, _) = send(api.app(), Method::POST, &uri, Some(&api.bearer), None).await;
+
+    assert_eq!(status, StatusCode::OK);
+    let evaluation = &body["data"]["evaluation"];
+    assert_eq!(evaluation["stage"], "requalification_planned");
+    assert_eq!(evaluation["requalify_reason"], "manual");
+    let forced: bool =
+        query_scalar("SELECT forced FROM lead_requalifications WHERE lead_id = $1::uuid")
+            .bind(&lead)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(forced);
 }
 
 #[sqlx::test(migrations = "../../migrations")]
@@ -2121,9 +2216,10 @@ async fn the_detail_exposes_the_module_statuses_and_the_ecosystem_findings(pool:
     let (status, body) = api.get(&uri).await;
     assert_eq!(status, StatusCode::OK);
     let enrichment = &body["data"]["enrichment"];
-    assert_eq!(enrichment["status"], "pending");
-    assert_eq!(enrichment["waiting_reason"], "awaiting_enrichment_evidence");
-    assert!(enrichment["wait_until"].is_string());
+    assert_eq!(
+        body["data"]["lead"]["evaluation"]["stage"],
+        "certificate_only"
+    );
     assert!(enrichment["hosting_platform"].is_null());
     let modules: Vec<(&str, &str)> = enrichment["modules"]
         .as_array()
@@ -2177,9 +2273,9 @@ async fn the_detail_exposes_the_module_statuses_and_the_ecosystem_findings(pool:
     .unwrap();
     let (_, body) = api.get(&uri).await;
     let enrichment = &body["data"]["enrichment"];
-    assert_eq!(enrichment["status"], "complete");
-    assert_eq!(enrichment["waiting_reason"], "awaiting_enrichment_evidence");
-    assert!(enrichment["wait_until"].is_null());
+    let evaluation = &body["data"]["lead"]["evaluation"];
+    assert_eq!(evaluation["stage"], "certificate_only");
+    assert_eq!(evaluation["modules_done"], evaluation["modules_available"]);
     assert_eq!(enrichment["modules"][0]["label"], "Identité officielle");
     assert!(enrichment["modules"][0]["last_run"].is_string());
     let ecosystem = &body["data"]["ecosystem"];
@@ -2200,7 +2296,7 @@ async fn the_detail_exposes_the_module_statuses_and_the_ecosystem_findings(pool:
 
     seed.signal(&lead, "product_detected").await;
     let (_, body) = api.get(&uri).await;
-    assert!(body["data"]["enrichment"]["waiting_reason"].is_null());
+    assert_eq!(body["data"]["lead"]["evaluation"]["stage"], "not_evaluated");
 }
 
 #[sqlx::test(migrations = "../../migrations")]

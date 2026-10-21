@@ -16,6 +16,7 @@ use api::{
 use args::Args;
 use axum::Router;
 use axum_server::Handle;
+use chrono::Utc;
 use clap::Parser;
 use common::{JobsConfig, LlmConfig, OutboundConfig};
 use dns::{DnsSettings, HickoryResolver};
@@ -331,6 +332,26 @@ async fn main() -> Result<(), Box<dyn Error>> {
             "dossiers of domains on a hosting platform no longer read their site"
         );
     }
+    let tenant_leads = app_state
+        .usecase
+        .exclude_saas_tenant_leads(Utc::now())
+        .await?;
+    if tenant_leads > 0 {
+        info!(
+            tenant_leads,
+            "leads on the domain of a SaaS provider suppressed"
+        );
+    }
+    let dossier_requalifications = app_state
+        .usecase
+        .backfill_dossier_requalifications(Utc::now())
+        .await?;
+    if dossier_requalifications > 0 {
+        info!(
+            dossier_requalifications,
+            "leads evaluated before their latest dossier will be requalified"
+        );
+    }
 
     let usecase = app_state.usecase.clone();
     let ecosystem = Arc::clone(&app_state.ecosystem);
@@ -453,6 +474,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             modules: ecosystem,
             settings: InspectionRunSettings {
                 batch_size: INSPECTION_BATCH_SIZE,
+                priority_batch_size: args.enrichment.inspection_priority_batch,
             },
         },
         pool.clone(),

@@ -5,12 +5,14 @@ use common::{CoreError, generate_uuid_v7};
 use lodestone_macros::transactional;
 use serde_json::json;
 use tokio::select;
+use tracing::info;
 
 use crate::{
     application::{LodestoneUseCase, jobs::JobError},
     domain::{
         NormalizedDomain,
         agent_work::{AgentWork, CancelReason, WorkTarget, all_cancelled},
+        company::ports::CompanyRepository,
         facts::independent_signals,
         job::{Job, JobKind, NewJob, ports::Clock},
         lead::{
@@ -19,12 +21,13 @@ use crate::{
         },
         profile::{
             ActiveProfile,
-            definition::{EvidenceSettings, SourceTarget},
+            definition::{CountryCode, EvidenceSettings, SourceTarget},
         },
         run::{Run, RunId, RunOutcome, ports::RunRepository},
         scoring::{signal_strength, strength_score},
         source::{Observation, Source, SourceError},
         suppression::ports::SuppressionRepository,
+        territory::{HostAdmission, OUT_OF_COUNTRY_REASON, Territory, admit_host, territory_of},
         values::SourceName,
     },
 };
@@ -38,6 +41,8 @@ pub struct SourceRunReport {
     pub items: u64,
     pub signals: u64,
     pub skipped_no_lead: u64,
+    pub skipped_out_of_country: u64,
+    pub skipped_saas_tenant: u64,
     pub cancelled: u64,
 }
 
@@ -48,15 +53,36 @@ impl SourceRunReport {
             items: 0,
             signals: 0,
             skipped_no_lead: 0,
+            skipped_out_of_country: 0,
+            skipped_saas_tenant: 0,
             cancelled: 0,
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Skipped {
+    pub no_lead: u64,
+    pub out_of_country: u64,
+    pub saas_tenant: u64,
+}
+
+impl Skipped {
+    fn total(&self) -> u64 {
+        self.no_lead + self.out_of_country + self.saas_tenant
+    }
+
+    fn add(&mut self, other: Skipped) {
+        self.no_lead += other.no_lead;
+        self.out_of_country += other.out_of_country;
+        self.saas_tenant += other.saas_tenant;
     }
 }
 
 pub(crate) struct Recorded {
     pub(crate) processed: u64,
     pub(crate) signals: u64,
-    pub(crate) skipped: u64,
+    pub(crate) skipped: Skipped,
     pub(crate) stopped: Option<CancelReason>,
 }
 
@@ -93,16 +119,20 @@ where
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LeadCreation {
+pub enum LeadCreation<'a> {
     Create,
+    Hosts(&'a [CountryCode]),
     ExistingOnly,
 }
 
-impl LeadCreation {
-    pub fn of(target: &SourceTarget<'_>) -> Self {
-        match target {
-            SourceTarget::Agent(_) => Self::Create,
-            SourceTarget::HttpProbe(_) | SourceTarget::CompanyJobs(_) => Self::ExistingOnly,
+impl<'a> LeadCreation<'a> {
+    pub fn of(target: &SourceTarget<'a>) -> Self {
+        match target.host_countries() {
+            Some(countries) => Self::Hosts(countries),
+            None => match target {
+                SourceTarget::Agent(_) => Self::Create,
+                SourceTarget::HttpProbe(_) | SourceTarget::CompanyJobs(_) => Self::ExistingOnly,
+            },
         }
     }
 }
@@ -279,7 +309,7 @@ impl LodestoneUseCase {
         }
 
         let mut total_signals = 0;
-        let mut skipped_no_lead = 0;
+        let mut skipped = Skipped::default();
         let mut cancelled = 0;
         for (((active, target), run), work) in targets.iter().zip(&runs).zip(&works) {
             let served: Vec<&S::Item> = items
@@ -314,14 +344,24 @@ impl LodestoneUseCase {
                 cancelled += 1;
             }
             total_signals += recorded.signals;
-            skipped_no_lead += recorded.skipped;
+            skipped.add(recorded.skipped);
+        }
+        if skipped.out_of_country + skipped.saas_tenant > 0 {
+            info!(
+                source = name.as_str(),
+                out_of_country = skipped.out_of_country,
+                saas_tenant = skipped.saas_tenant,
+                "hosts dropped before lead creation"
+            );
         }
 
         Ok(SourceRunReport {
             runs: runs.iter().map(|run| run.id).collect(),
             items: count(items.len()),
             signals: total_signals,
-            skipped_no_lead,
+            skipped_no_lead: skipped.no_lead,
+            skipped_out_of_country: skipped.out_of_country,
+            skipped_saas_tenant: skipped.saas_tenant,
             cancelled,
         })
     }
@@ -332,7 +372,7 @@ impl LodestoneUseCase {
         name: SourceName,
         batches: I,
         work: &AgentWork,
-        creation: LeadCreation,
+        creation: LeadCreation<'_>,
         clock: &C,
     ) -> Result<Recorded, CoreError>
     where
@@ -342,7 +382,7 @@ impl LodestoneUseCase {
         let mut recorded = Recorded {
             processed: 0,
             signals: 0,
-            skipped: 0,
+            skipped: Skipped::default(),
             stopped: work.stop_reason(),
         };
         if recorded.stopped.is_some() {
@@ -360,8 +400,8 @@ impl LodestoneUseCase {
             let skipped = self
                 .record_observations_with(active, name, &observations, clock.now(), creation)
                 .await?;
-            recorded.skipped += skipped;
-            recorded.signals += count(observations.len()).saturating_sub(skipped);
+            recorded.skipped.add(skipped);
+            recorded.signals += count(observations.len()).saturating_sub(skipped.total());
         }
         Ok(recorded)
     }
@@ -409,19 +449,20 @@ impl LodestoneUseCase {
             .map(drop)
     }
 
-    #[transactional(lead, signal, suppression)]
+    #[transactional(lead, signal, suppression, company)]
     pub async fn record_observations_with(
         &self,
         active: &ActiveProfile,
         source: SourceName,
         observations: &[Observation],
         now: DateTime<Utc>,
-        creation: LeadCreation,
-    ) -> Result<u64, CoreError> {
+        creation: LeadCreation<'_>,
+    ) -> Result<Skipped, CoreError> {
         let mut leads = lead_repository;
-        let mut skipped = 0;
+        let mut skipped = Skipped::default();
         let mut signals = signal_repository;
         let mut suppressions = suppression_repository;
+        let mut company = company_repository;
         let mut touched = Vec::new();
         let mut suppressed: Vec<(NormalizedDomain, bool)> = Vec::new();
         for observation in observations {
@@ -447,8 +488,28 @@ impl LodestoneUseCase {
                     .await?
                     .is_none()
             {
-                skipped += 1;
+                skipped.no_lead += 1;
                 continue;
+            }
+            if let LeadCreation::Hosts(countries) = creation {
+                let head_office = match territory_of(&observation.domain, countries) {
+                    Territory::Generic if !countries.is_empty() => company
+                        .find(&observation.domain)
+                        .await?
+                        .and_then(|dossier| dossier.head_office_country_code().map(str::to_owned)),
+                    _ => None,
+                };
+                match admit_host(&observation.domain, countries, head_office.as_deref()) {
+                    HostAdmission::Admitted => {}
+                    HostAdmission::SaasTenant => {
+                        skipped.saas_tenant += 1;
+                        continue;
+                    }
+                    HostAdmission::OutOfCountry => {
+                        skipped.out_of_country += 1;
+                        continue;
+                    }
+                }
             }
             let lead = leads
                 .record_seen(
@@ -459,6 +520,14 @@ impl LodestoneUseCase {
                 .await?;
             if !touched.contains(&lead.id) {
                 touched.push(lead.id);
+            }
+            if observation.agent.is_some()
+                && creation != LeadCreation::ExistingOnly
+                && suppressions
+                    .lift_exclusion(lead.id, OUT_OF_COUNTRY_REASON)
+                    .await?
+            {
+                info!(lead.id = %lead.id, "lead back in the target countries");
             }
             signals
                 .record(&Signal {

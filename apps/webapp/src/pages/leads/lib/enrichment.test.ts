@@ -1,25 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import {
-	enrichmentStatusLabel,
-	listWaitingLabel,
-	moduleSections,
-	signalTitle,
-	waitingBadge,
-} from '#/pages/leads/lib/enrichment'
+import { moduleSections, signalTitle } from '#/pages/leads/lib/enrichment'
 import { formatDateTime } from '#/pages/leads/lib/format'
-import type { Enrichment, Signal } from '#/pages/leads/lib/types'
+import type { Signal } from '#/pages/leads/lib/types'
 
 const WAIT = '2026-10-08T10:30:00Z'
-
-function enrichment(overrides: Partial<Enrichment> = {}): Enrichment {
-	return {
-		status: 'pending',
-		modules: [],
-		waiting_reason: 'awaiting_enrichment',
-		wait_until: WAIT,
-		...overrides,
-	}
-}
 
 describe('moduleSections', () => {
 	it('groups the findings per module with their status and sources', () => {
@@ -117,66 +101,6 @@ describe('moduleSections', () => {
 				view: { kind: 'hiring', summary: null, rows: [] },
 			},
 		])
-	})
-})
-
-describe('waitingBadge', () => {
-	it('shows the wait for enrichment with its deadline', () => {
-		expect(waitingBadge(enrichment())).toEqual({
-			reason: 'awaiting_enrichment',
-			label: "En attente d'enrichissement",
-			detail: `jusqu'au ${formatDateTime(WAIT)}`,
-		})
-		expect(waitingBadge(enrichment({ wait_until: null }))?.detail).toBeNull()
-	})
-
-	it('shows the wait for evidence of a certificate-only lead', () => {
-		expect(
-			waitingBadge(
-				enrichment({
-					status: 'complete',
-					waiting_reason: 'awaiting_enrichment_evidence',
-					wait_until: null,
-				}),
-			),
-		).toEqual({
-			reason: 'awaiting_enrichment_evidence',
-			label: "En attente de preuve d'enrichissement",
-			detail: null,
-		})
-	})
-
-	it('shows nothing when the lead is not waiting', () => {
-		expect(
-			waitingBadge(enrichment({ status: 'complete', waiting_reason: null })),
-		).toBeNull()
-		expect(waitingBadge(undefined)).toBeNull()
-	})
-})
-
-describe('listWaitingLabel', () => {
-	it('names the wait of a listed lead', () => {
-		expect(
-			listWaitingLabel({
-				waiting_reason: 'awaiting_enrichment',
-				wait_until: WAIT,
-			}),
-		).toBe("En attente d'enrichissement")
-		expect(
-			listWaitingLabel({ waiting_reason: 'awaiting_enrichment_evidence' }),
-		).toBe("En attente de preuve d'enrichissement")
-		expect(listWaitingLabel({ waiting_reason: null })).toBeNull()
-		expect(listWaitingLabel(null)).toBeNull()
-		expect(listWaitingLabel(undefined)).toBeNull()
-	})
-})
-
-describe('enrichmentStatusLabel', () => {
-	it('translates every status', () => {
-		expect(enrichmentStatusLabel('disabled')).toBe('Inspection désactivée')
-		expect(enrichmentStatusLabel('pending')).toBe('En cours')
-		expect(enrichmentStatusLabel('complete')).toBe('Terminé')
-		expect(enrichmentStatusLabel('timed_out')).toBe('Délai dépassé')
 	})
 })
 

@@ -5,7 +5,7 @@ use fetch::{FetchSettings, PoliteFetcher};
 use httpmock::{Method::GET, MockServer};
 use lodestone_core::{
     Clock, CreateProfileCommand, DnsError, DnsRecords, DnsResolver, EcosystemModule,
-    EnrichmentStatus, FetchError, FetchRequest, FetchResponse, Fetcher, Hostname, LeadRepository,
+    EvaluationStage, FetchError, FetchRequest, FetchResponse, Fetcher, Hostname, LeadRepository,
     LodestoneUseCase, ModuleStatus, NormalizedDomain, Observation, ProfileId, ProfileName,
     Provenance, SignalKind, SignalRepository, SourceName, UnitInterval, ValidatedProfile,
     ecosystem::InspectionRunSettings,
@@ -281,7 +281,8 @@ async fn a_boamp_lead_is_enriched_by_the_http_probe_and_its_job_offers(pool: PgP
     .unwrap()
     .unwrap();
     let before = usecase.lead_detail(lead.id).await.unwrap();
-    assert_eq!(before.enrichment.status, EnrichmentStatus::TimedOut);
+    assert_eq!(before.evaluation.stage, EvaluationStage::NotEvaluated);
+    assert_eq!(before.evaluation.modules_done, 0);
     assert!(
         before
             .enrichment
@@ -324,7 +325,10 @@ async fn a_boamp_lead_is_enriched_by_the_http_probe_and_its_job_offers(pool: PgP
     let inspection = usecase
         .inspect_due_domains(
             &modules.runners(),
-            InspectionRunSettings { batch_size: 10 },
+            InspectionRunSettings {
+                batch_size: 10,
+                priority_batch_size: 30,
+            },
             &FixedClock,
         )
         .await
@@ -333,7 +337,10 @@ async fn a_boamp_lead_is_enriched_by_the_http_probe_and_its_job_offers(pool: PgP
     assert_eq!(inspection.not_applicable, 3);
     assert!(site_realm.hits() >= 1);
     let detail = usecase.lead_detail(lead.id).await.unwrap();
-    assert_eq!(detail.enrichment.status, EnrichmentStatus::Complete);
+    assert_eq!(
+        detail.evaluation.modules_done,
+        detail.evaluation.modules_available
+    );
     for module in [
         EcosystemModule::OfficialIdentity,
         EcosystemModule::LegalLife,
@@ -386,7 +393,10 @@ async fn a_boamp_lead_is_enriched_by_the_http_probe_and_its_job_offers(pool: PgP
     let again = usecase
         .inspect_due_domains(
             &modules.runners(),
-            InspectionRunSettings { batch_size: 10 },
+            InspectionRunSettings {
+                batch_size: 10,
+                priority_batch_size: 30,
+            },
             &FixedClock,
         )
         .await

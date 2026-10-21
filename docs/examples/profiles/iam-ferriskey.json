@@ -1,5 +1,5 @@
 {
-  "schema_version": 18,
+  "schema_version": 19,
   "identity": {
     "offer": "FerrisKey (open source IAM/CIAM in Rust) and Autharie (managed IAM), both by Ferrislabs",
     "target_customer": "Organizations running self-hosted Keycloak or a similar IAM, or paying for a SaaS IAM"
@@ -21,6 +21,9 @@
         "accounts",
         "identity",
         "idp"
+      ],
+      "countries": [
+        "FR"
       ]
     },
     {
@@ -49,6 +52,9 @@
           "provider": "entra_external_id",
           "target_suffix": "ciamlogin.com"
         }
+      ],
+      "countries": [
+        "FR"
       ]
     },
     {

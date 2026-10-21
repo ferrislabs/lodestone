@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE leads SET excluded_reason = $2, excluded_at = $3 WHERE id = ANY($1) AND excluded_reason IS NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "UuidArray",
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "443653d201e88a8828105ffc2565a0f0cdc8bca09688cdc6ac520903190f8fff"
+}

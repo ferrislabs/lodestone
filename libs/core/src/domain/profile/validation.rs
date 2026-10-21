@@ -8,12 +8,12 @@ use crate::domain::{source_provider::descriptor as provider_descriptor, values::
 
 use super::{
     definition::{
-        Agent, Aggregator, CnamePattern, ContactRanking, CustomInspection, DebtRule, Escalation,
-        EvidenceSettings, Fingerprint, Identity, MAX_CALIBRATION_FLOOR, MAX_DESCRIPTION_CHARS,
-        MAX_HALF_LIFE_DAYS, MAX_OPTIONS, MAX_PROMPT_CHARS, MAX_SAMPLES, MAX_SAMPLING_TEMPERATURE,
-        MIN_EXCLUSION_THRESHOLD, MIN_HALF_LIFE_DAYS, MIN_OPTIONS, Matcher, PROFILE_SCHEMA_VERSION,
-        ProfileDefinition, QualificationAgent, Question, ScoringAgent, SearchAgent, SearchFilters,
-        VerdictThresholds, VersionExtractor,
+        Agent, Aggregator, CnamePattern, ContactRanking, CountryCode, CustomInspection, DebtRule,
+        Escalation, EvidenceSettings, Fingerprint, Identity, MAX_CALIBRATION_FLOOR,
+        MAX_DESCRIPTION_CHARS, MAX_HALF_LIFE_DAYS, MAX_OPTIONS, MAX_PROMPT_CHARS, MAX_SAMPLES,
+        MAX_SAMPLING_TEMPERATURE, MIN_EXCLUSION_THRESHOLD, MIN_HALF_LIFE_DAYS, MIN_OPTIONS,
+        Matcher, PROFILE_SCHEMA_VERSION, ProfileDefinition, QualificationAgent, Question,
+        ScoringAgent, SearchAgent, SearchFilters, VerdictThresholds, VersionExtractor,
     },
     legacy::{
         ProfileDefinitionV1, ProfileDefinitionV2, ProfileDefinitionV3, ProfileDefinitionV4,
@@ -34,7 +34,7 @@ pub enum ProfileProblem {
     #[error("malformed: {0}")]
     Malformed(String),
     #[error(
-        "unsupported schema version {found}, expected 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17 or {PROFILE_SCHEMA_VERSION}"
+        "unsupported schema version {found}, expected 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18 or {PROFILE_SCHEMA_VERSION}"
     )]
     UnsupportedSchemaVersion { found: u32 },
     #[error("must not be empty")]
@@ -161,6 +161,7 @@ impl ValidatedProfile {
             Some(15) => decode::<ProfileDefinitionV15>(value)?.upgrade(),
             Some(16) => decode::<ProfileDefinitionV16>(value)?.upgrade(),
             Some(17) => decode::<ProfileDefinitionV17>(value)?.upgrade(),
+            Some(18) => upgrade_v18(decode::<ProfileDefinition>(value)?),
             Some(PROFILE_SCHEMA_VERSION) | None => decode::<ProfileDefinition>(value)?,
             Some(found) => {
                 return Err(Path::root()
@@ -637,14 +638,25 @@ fn validate_evidence(evidence: &EvidenceSettings, path: &Path) -> Check {
     Ok(())
 }
 
+fn upgrade_v18(definition: ProfileDefinition) -> ProfileDefinition {
+    ProfileDefinition {
+        schema_version: PROFILE_SCHEMA_VERSION,
+        ..definition
+    }
+}
+
 fn validate_agent(agent: &Agent, path: &Path) -> Check {
     non_empty(agent.name(), &path.field("name"))?;
     match agent {
         Agent::Search(search) => validate_search_agent(search, path),
         Agent::Certificates(certificates) => {
-            validate_labels(&certificates.labels, &path.field("labels"))
+            validate_labels(&certificates.labels, &path.field("labels"))?;
+            validate_countries(&certificates.countries, &path.field("countries"))
         }
-        Agent::Dns(dns) => validate_patterns(&dns.patterns, &path.field("patterns")),
+        Agent::Dns(dns) => {
+            validate_patterns(&dns.patterns, &path.field("patterns"))?;
+            validate_countries(&dns.countries, &path.field("countries"))
+        }
     }
 }
 
@@ -681,21 +693,18 @@ fn validate_providers(providers: &[String], path: &Path) -> Check {
 }
 
 fn validate_filters(filters: &SearchFilters, path: &Path) -> Check {
-    let countries = path.field("countries");
-    for (index, country) in filters.countries.iter().enumerate() {
+    validate_countries(&filters.countries, &path.field("countries"))
+}
+
+fn validate_countries(countries: &[CountryCode], path: &Path) -> Check {
+    for (index, country) in countries.iter().enumerate() {
         if !country.is_valid() {
-            return Err(countries
-                .index(index)
-                .fail(ProfileProblem::InvalidCountryCode));
+            return Err(path.index(index).fail(ProfileProblem::InvalidCountryCode));
         }
     }
     unique(
-        filters
-            .countries
-            .iter()
-            .map(|country| country.as_str())
-            .enumerate(),
-        |index| countries.index(index),
+        countries.iter().map(|country| country.as_str()).enumerate(),
+        |index| path.index(index),
     )
 }
 
@@ -968,8 +977,8 @@ mod tests {
             v["scoring"] = iam_scoring_v2();
             v["llm"]["qualification_threshold"] = json!(50);
         });
-        assert_eq!(profile.definition().schema_version, 18);
-        assert_eq!(profile.to_json()["schema_version"], 18);
+        assert_eq!(profile.definition().schema_version, 19);
+        assert_eq!(profile.to_json()["schema_version"], 19);
         assert!(profile.to_json().get("scoring").is_none());
         assert!(profile.to_json().get("llm").is_none());
     }
@@ -1008,11 +1017,11 @@ mod tests {
 
     #[test]
     fn unsupported_schema_version_is_rejected() {
-        let error = error_for(|v| v["schema_version"] = json!(19));
+        let error = error_for(|v| v["schema_version"] = json!(20));
         assert_eq!(error.path, "schema_version");
         assert_eq!(
             error.problem,
-            ProfileProblem::UnsupportedSchemaVersion { found: 19 }
+            ProfileProblem::UnsupportedSchemaVersion { found: 20 }
         );
         let error = error_for(|v| v["schema_version"] = json!(0));
         assert_eq!(
@@ -1395,12 +1404,12 @@ mod tests {
         value["sources"] = json!({"http_probe": source, "ats": {"keywords": ["sso"]}});
         let profile = ValidatedProfile::parse(value).unwrap();
         let definition = profile.definition();
-        assert_eq!(definition.schema_version, 18);
+        assert_eq!(definition.schema_version, 19);
         assert!(definition.agents.is_empty());
         assert!(definition.probes_hosts());
         assert_eq!(definition.enrichment.highlight_keywords, ["sso"]);
         let json = profile.to_json();
-        assert_eq!(json["schema_version"], 18);
+        assert_eq!(json["schema_version"], 19);
         assert_eq!(
             json["enrichment"]["custom"]["fingerprints"],
             agent["fingerprints"]
@@ -1488,7 +1497,8 @@ mod tests {
             "id": "certificats",
             "name": "Certificats",
             "enabled": true,
-            "labels": ["sso", "auth"]
+            "labels": ["sso", "auth"],
+            "countries": []
         }]);
         value
     }
@@ -1501,6 +1511,7 @@ mod tests {
         for agent in object["agents"].as_array().unwrap() {
             let mut agent = agent.as_object().unwrap().clone();
             let kind = agent.remove("type").unwrap();
+            agent.remove("countries");
             let mut source = Map::new();
             if kind == "search" {
                 let provider = agent.remove("providers").unwrap()[0].clone();
@@ -1631,7 +1642,7 @@ mod tests {
     fn version_three_is_upgraded_with_a_default_qualification_agent() {
         let profile = ValidatedProfile::parse(minimal()).unwrap();
         let definition = profile.definition();
-        assert_eq!(definition.schema_version, 18);
+        assert_eq!(definition.schema_version, 19);
         assert_eq!(definition.qualification_agents.len(), 1);
         let agent = &definition.qualification_agents[0];
         assert_eq!(agent.id.as_str(), "pertinence");
@@ -1731,14 +1742,14 @@ mod tests {
     fn version_five_is_upgraded_with_default_evidence_settings() {
         let profile = ValidatedProfile::parse(v5()).unwrap();
         let definition = profile.definition();
-        assert_eq!(definition.schema_version, 18);
+        assert_eq!(definition.schema_version, 19);
         assert_eq!(definition.verdict.reliable_from, 80);
         assert_eq!(definition.verdict.discard_below, 20);
         assert_eq!(definition.verdict.calibration_floor, 0.05);
         assert_eq!(definition.verdict.min_evidence, 0.5);
         assert_eq!(definition.evidence, EvidenceSettings::default());
         assert_eq!(definition.evidence.influence, 0.6);
-        assert_eq!(profile.to_json()["schema_version"], 18);
+        assert_eq!(profile.to_json()["schema_version"], 19);
     }
 
     #[test]
@@ -1872,7 +1883,7 @@ mod tests {
             .unwrap()
             .remove("half_life_days");
         let profile = ValidatedProfile::parse(value).unwrap();
-        assert_eq!(profile.definition().schema_version, 18);
+        assert_eq!(profile.definition().schema_version, 19);
         assert_eq!(profile.definition().evidence, EvidenceSettings::default());
     }
 
@@ -1929,10 +1940,10 @@ mod tests {
         agent.insert("name".to_owned(), json!("Maturité technique"));
         let profile = ValidatedProfile::parse(value).unwrap();
         let agent = &profile.definition().qualification_agents[0];
-        assert_eq!(profile.definition().schema_version, 18);
+        assert_eq!(profile.definition().schema_version, 19);
         assert_eq!(agent.description, "Évalue : Maturité technique");
         assert_eq!(agent.name, "Maturité technique");
-        assert_eq!(profile.to_json()["schema_version"], 18);
+        assert_eq!(profile.to_json()["schema_version"], 19);
     }
 
     #[test]
@@ -2171,7 +2182,7 @@ mod tests {
                     json!({"value": value, "label": "Je ne sais pas", "score": 0.4}),
                 );
             let profile = ValidatedProfile::parse(document).unwrap();
-            assert_eq!(profile.definition().schema_version, 18);
+            assert_eq!(profile.definition().schema_version, 19);
             assert_eq!(
                 options_of(&profile),
                 [
@@ -2200,7 +2211,7 @@ mod tests {
         );
         let appended = &profile.definition().qualification_agents[0].questions[0].options[3];
         assert_eq!(appended.label, "Inconnu");
-        assert_eq!(profile.to_json()["schema_version"], 18);
+        assert_eq!(profile.to_json()["schema_version"], 19);
     }
 
     #[test]
@@ -2237,7 +2248,7 @@ mod tests {
     fn version_seven_is_upgraded_with_exclusion_defaults() {
         let profile = ValidatedProfile::parse(v7()).unwrap();
         let definition = profile.definition();
-        assert_eq!(definition.schema_version, 18);
+        assert_eq!(definition.schema_version, 19);
         for agent in &definition.qualification_agents {
             assert_eq!(agent.exclusion_threshold, 0.6);
             assert!(
@@ -2248,7 +2259,7 @@ mod tests {
                     .all(|option| !option.excludes)
             );
         }
-        assert_eq!(profile.to_json()["schema_version"], 18);
+        assert_eq!(profile.to_json()["schema_version"], 19);
         assert_eq!(profile, ValidatedProfile::parse(v4()).unwrap());
     }
 
@@ -2268,7 +2279,7 @@ mod tests {
     fn version_eight_is_upgraded_with_sampling_and_escalation_defaults() {
         let profile = ValidatedProfile::parse(v8()).unwrap();
         let definition = profile.definition();
-        assert_eq!(definition.schema_version, 18);
+        assert_eq!(definition.schema_version, 19);
         assert_eq!(definition.escalation, Escalation::default());
         assert_eq!(definition.escalation.provider, None);
         assert_eq!(
@@ -2282,7 +2293,7 @@ mod tests {
             assert_eq!(agent.samples, 3);
             assert_eq!(agent.sampling_temperature, 0.7);
         }
-        assert_eq!(profile.to_json()["schema_version"], 18);
+        assert_eq!(profile.to_json()["schema_version"], 19);
         assert_eq!(profile, ValidatedProfile::parse(v4()).unwrap());
     }
 
@@ -2475,7 +2486,7 @@ mod tests {
         value.as_object_mut().unwrap().remove("calibration");
         let profile = ValidatedProfile::parse(value).unwrap();
         let definition = profile.definition();
-        assert_eq!(definition.schema_version, 18);
+        assert_eq!(definition.schema_version, 19);
         assert_eq!(definition.scoring_agents.len(), 1);
         let agent = &definition.scoring_agents[0];
         assert_eq!(agent.id.as_str(), "score-global");
@@ -2508,7 +2519,7 @@ mod tests {
         value.as_object_mut().unwrap().remove("calibration");
         let profile = ValidatedProfile::parse(value).unwrap();
         let definition = profile.definition();
-        assert_eq!(definition.schema_version, 18);
+        assert_eq!(definition.schema_version, 19);
         assert!(
             definition
                 .qualification_agents
@@ -2533,8 +2544,8 @@ mod tests {
         value["evidence"]["influence"] = json!(0.3);
         let profile = ValidatedProfile::parse(value).unwrap();
         let json = profile.to_json();
-        assert_eq!(profile.definition().schema_version, 18);
-        assert_eq!(json["schema_version"], 18);
+        assert_eq!(profile.definition().schema_version, 19);
+        assert_eq!(json["schema_version"], 19);
         assert!(json.get("scoring").is_none());
         assert!(json["evidence"].get("reference_score").is_none());
         assert_eq!(profile.definition().evidence.influence, 0.3);

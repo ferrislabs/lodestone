@@ -217,6 +217,7 @@ fn the_siren_comes_from_the_dossier_then_from_the_identity_findings() {
             module: EcosystemModule::OfficialIdentity,
             status: ModuleStatus::NotApplicable,
             last_run: Some(at(2)),
+            changed_at: None,
             error: Some(SIREN_UNKNOWN.to_owned()),
         }],
         findings: vec![identity_finding("552 100 554")],
@@ -385,5 +386,89 @@ fn the_new_modules_give_concise_agent_lines() {
             "- CMS: WordPress 6.4",
             "- Dernière actualité: Nouvelle version (2026-10-01)",
         ]
+    );
+}
+
+#[test]
+fn saas_tenant_domains_and_their_subdomains_are_recognised() {
+    assert_eq!(SAAS_TENANT_DOMAINS.len(), 20);
+    for tenant in SAAS_TENANT_DOMAINS {
+        assert!(saas_tenant(tenant).is_some(), "{tenant}");
+        let host = format!("acme.{tenant}");
+        assert!(saas_tenant(&host).is_some(), "{host}");
+    }
+    assert_eq!(
+        saas_tenant("acme.my.salesforce.com"),
+        Some("salesforce.com")
+    );
+    assert_eq!(saas_tenant("login.acme.okta.com"), Some("okta.com"));
+    assert_eq!(saas_tenant("d111.cloudfront.net"), Some("cloudfront.net"));
+    assert_eq!(saas_tenant("acme.fr"), None);
+    assert_eq!(saas_tenant("myokta.com"), None);
+    assert_eq!(saas_tenant("auth.acme.fr"), None);
+    assert_eq!(SAAS_TENANT_REASON, "domaine d'un fournisseur SaaS");
+}
+
+#[test]
+fn the_findings_hash_ignores_order_observation_time_and_pass_relative_values() {
+    let module = EcosystemModule::RecentActivity;
+    let freshness = |days: u32, latest: &str, minute: u32| {
+        EcosystemFinding::new(
+            module,
+            "freshness",
+            "Fraîcheur du site",
+            format!("mis à jour il y a {days} jours ({latest})"),
+            "https://acme.fr/sitemap.xml",
+            at(minute),
+        )
+        .keyed("freshness")
+        .with_details(json!({"days": days, "latest": latest}))
+    };
+    let news = EcosystemFinding::new(
+        module,
+        "news",
+        "Actualité",
+        "Lancement",
+        "https://acme.fr/blog/lancement",
+        at(1),
+    );
+    let first = findings_hash(&[freshness(3, "2026-10-05", 1), news.clone()]);
+    let rerun = findings_hash(&[news.clone(), freshness(4, "2026-10-05", 9)]);
+    assert_eq!(first, rerun);
+    let changed = findings_hash(&[news.clone(), freshness(0, "2026-10-08", 9)]);
+    assert_ne!(first, changed);
+    let more = findings_hash(&[
+        news.clone(),
+        freshness(3, "2026-10-05", 1),
+        EcosystemFinding::new(
+            module,
+            "news",
+            "Actualité",
+            "Levée",
+            "https://acme.fr/b",
+            at(2),
+        ),
+    ]);
+    assert_ne!(first, more);
+    assert_ne!(findings_hash(&[]), first);
+    let summary = |count: u32, delta: i64| {
+        EcosystemFinding::new(
+            EcosystemModule::HiringActivity,
+            "hiring_summary",
+            "Recrutement",
+            format!("{count} offres ouvertes (+{delta} depuis le dernier passage)"),
+            "https://acme.fr/careers",
+            at(1),
+        )
+        .keyed("hiring_summary")
+        .with_details(json!({"count": count, "delta": delta, "previous_count": 1, "history": [1]}))
+    };
+    assert_eq!(
+        findings_hash(&[summary(3, 2)]),
+        findings_hash(&[summary(3, 0)])
+    );
+    assert_ne!(
+        findings_hash(&[summary(3, 2)]),
+        findings_hash(&[summary(4, 1)])
     );
 }

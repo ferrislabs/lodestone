@@ -217,6 +217,7 @@ where
             domain: lead.domain.clone(),
             agent: None,
             sample: 0,
+            fresh: usecase.lead_fresh_calls(lead.id).await?,
         };
         let mut current = base.clone();
         let mut candidate: Option<Candidate> = None;

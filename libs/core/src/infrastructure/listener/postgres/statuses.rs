@@ -33,11 +33,12 @@ impl PgListenerStatuses {
         sqlx::query!(
             r#"
             INSERT INTO listeners (
-                name, holder, state, last_activity_at, last_error,
+                name, holder, state, last_activity_at, last_error, last_error_at,
                 items_total, signals_total, backlog, updated_at
             )
             VALUES (
                 $1, $2, $3, CASE WHEN $4::bigint > 0 THEN $8::timestamptz END, $5,
+                CASE WHEN $5::text IS NOT NULL THEN $8::timestamptz END,
                 $4::bigint, $6::bigint, $7, $8::timestamptz
             )
             ON CONFLICT (name) DO UPDATE SET
@@ -47,7 +48,16 @@ impl PgListenerStatuses {
                     WHEN $4::bigint > 0 THEN $8::timestamptz
                     ELSE listeners.last_activity_at
                 END,
-                last_error = COALESCE(EXCLUDED.last_error, listeners.last_error),
+                last_error = CASE
+                    WHEN EXCLUDED.last_error IS NOT NULL THEN EXCLUDED.last_error
+                    WHEN $9 THEN NULL
+                    ELSE listeners.last_error
+                END,
+                last_error_at = CASE
+                    WHEN EXCLUDED.last_error IS NOT NULL THEN EXCLUDED.last_error_at
+                    WHEN $9 THEN NULL
+                    ELSE listeners.last_error_at
+                END,
                 items_total = listeners.items_total + $4::bigint,
                 signals_total = listeners.signals_total + $6::bigint,
                 backlog = EXCLUDED.backlog,
@@ -61,6 +71,7 @@ impl PgListenerStatuses {
             to_i64(update.outcome.signals),
             update.outcome.backlog.map(to_i64),
             update.at,
+            update.succeeded,
         )
         .execute(&self.pool)
         .await
@@ -161,7 +172,7 @@ impl PgListenerStatuses {
     pub async fn list(&self) -> Result<Vec<ListenerStatus>, CoreError> {
         let rows = sqlx::query!(
             r#"
-            SELECT name, holder, state, last_activity_at, last_error,
+            SELECT name, holder, state, last_activity_at, last_error, last_error_at,
                 items_total, signals_total, backlog, updated_at
             FROM listeners
             ORDER BY name
@@ -180,6 +191,7 @@ impl PgListenerStatuses {
                     })?,
                     last_activity_at: row.last_activity_at,
                     last_error: row.last_error,
+                    last_error_at: row.last_error_at,
                     items_total: counter(row.items_total)?,
                     signals_total: counter(row.signals_total)?,
                     backlog: row.backlog.map(counter).transpose()?,

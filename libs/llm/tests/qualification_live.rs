@@ -113,6 +113,7 @@ async fn the_pertinence_agent_answers_the_contract_live() {
                 domain: lodestone_core::NormalizedDomain::from_host("acme-keycloak.com").unwrap(),
                 agent: Some(agent.id.clone()),
                 sample,
+                fresh: false,
             };
             let mut instruction = built.instruction.clone();
             let mut attempt = 0;

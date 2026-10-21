@@ -1,6 +1,9 @@
+use std::collections::BTreeMap;
+
+use aws_lc_rs::digest::{SHA256, digest};
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as _};
-use serde_json::Value;
+use serde_json::{Value, to_string};
 
 use crate::domain::{
     NormalizedDomain,
@@ -10,6 +13,7 @@ use crate::domain::{
         ProfileId,
         definition::{Fingerprint, ProfileDefinition},
     },
+    qualification::prompt::hex,
     source::SourceError,
     source_provider::{BODACC, COMPANY_RESEARCH, DECP},
 };
@@ -17,7 +21,9 @@ use crate::domain::{
 mod platform;
 pub mod ports;
 
-pub use platform::{HOSTING_PLATFORMS, hosting_platform};
+pub use platform::{
+    HOSTING_PLATFORMS, SAAS_TENANT_DOMAINS, SAAS_TENANT_REASON, hosting_platform, saas_tenant,
+};
 
 pub const MAX_DOCUMENT_FINDINGS: usize = 12;
 pub const MAX_WEBSITE_DOCUMENT_FINDINGS: usize = 24;
@@ -26,7 +32,10 @@ pub const STATS_RETENTION_DAYS: i64 = 30;
 pub const SIREN_UNKNOWN: &str = "SIREN inconnu";
 pub const SIREN_FINDING_KEY: &str = "siren";
 pub const PROVIDER_NOT_READY: &str = "Fournisseur non prêt";
+pub const RECENT_LEAD_HOURS: i64 = 1;
 const FAILURE_RETRY_HOURS: i64 = 6;
+const PASS_RELATIVE_KINDS: [&str; 2] = ["freshness", "hiring_summary"];
+const PASS_RELATIVE_DETAILS: [&str; 4] = ["days", "previous_count", "delta", "history"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum EcosystemModule {
@@ -232,6 +241,7 @@ pub struct ModuleState {
     pub module: EcosystemModule,
     pub status: ModuleStatus,
     pub last_run: Option<DateTime<Utc>>,
+    pub changed_at: Option<DateTime<Utc>>,
     pub error: Option<String>,
 }
 
@@ -241,6 +251,7 @@ impl ModuleState {
             module,
             status: ModuleStatus::Pending,
             last_run: None,
+            changed_at: None,
             error: None,
         }
     }
@@ -334,6 +345,18 @@ impl EcosystemFinding {
             line.push_str(&extras.join("; "));
         }
         line
+    }
+
+    fn content(&self) -> String {
+        let value = (!PASS_RELATIVE_KINDS.contains(&self.kind.as_str())).then_some(&self.value);
+        let details: Option<BTreeMap<&str, &Value>> = self.details.as_object().map(|map| {
+            map.iter()
+                .filter(|(key, _)| !PASS_RELATIVE_DETAILS.contains(&key.as_str()))
+                .map(|(key, value)| (key.as_str(), value))
+                .collect()
+        });
+        let raw = details.is_none().then_some(&self.details);
+        to_string(&(&self.key, &self.kind, &self.label, value, details, raw)).unwrap_or_default()
     }
 
     pub fn example(&self, domain: &NormalizedDomain) -> FindingExample {
@@ -504,6 +527,12 @@ pub trait ModuleRunner: Send + Sync {
     ) -> impl Future<Output = Result<Inspection, SourceError>> + Send;
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DueBatch {
+    pub priority: u32,
+    pub refresh: u32,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DueDomain {
     pub domain: NormalizedDomain,
@@ -582,6 +611,12 @@ fn euros(amount: f64) -> String {
     } else {
         format!("{amount:.2}")
     }
+}
+
+pub fn findings_hash(findings: &[EcosystemFinding]) -> String {
+    let mut contents: Vec<String> = findings.iter().map(EcosystemFinding::content).collect();
+    contents.sort();
+    hex(digest(&SHA256, contents.join("\n").as_bytes()).as_ref())
 }
 
 pub fn ecosystem_documents(findings: &[EcosystemFinding]) -> Vec<DossierDocument> {

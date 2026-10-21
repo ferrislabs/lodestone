@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use chrono::{DateTime, Duration, Utc};
+use chrono::{DateTime, Duration, NaiveDate, Utc};
 use common::CoreError;
 use lodestone_macros::repository;
 use serde_json::{Value, from_value, to_value};
@@ -11,11 +11,15 @@ use crate::{
     LeadId, NormalizedDomain, ProfileId, ValidatedProfile,
     domain::{
         ecosystem::{
-            DomainEcosystem, DueDomain, EcosystemFinding, EcosystemModule, EcosystemReadiness,
-            FindingExample, ModuleOutcome, ModuleRun, ModuleState, ModuleStats, ModuleStatus,
-            STATS_RETENTION_DAYS, hosting_platform, ports::EcosystemRepository,
+            DomainEcosystem, DueBatch, DueDomain, EcosystemFinding, EcosystemModule,
+            EcosystemReadiness, FindingExample, ModuleOutcome, ModuleRun, ModuleState, ModuleStats,
+            ModuleStatus, RECENT_LEAD_HOURS, STATS_RETENTION_DAYS, findings_hash, hosting_platform,
+            ports::EcosystemRepository,
         },
-        enrichment::{CERTIFICATE_SEEN_KIND, CONTACT_SOURCES, InspectionRecord, ListedEnrichment},
+        enrichment::{
+            CERTIFICATE_SEEN_KIND, CONTACT_SOURCES, InspectionRecord, ListedEnrichment,
+            Requalification,
+        },
     },
     infrastructure::postgres::{SharedTx, error::map_sqlx_error},
 };
@@ -42,7 +46,21 @@ struct StateRow {
     module: String,
     status: String,
     last_run: Option<DateTime<Utc>>,
+    changed_at: Option<DateTime<Utc>>,
     error: Option<String>,
+}
+
+struct PreviousRow {
+    content_hash: Option<String>,
+    last_run: Option<DateTime<Utc>>,
+}
+
+struct RequalificationRow {
+    lead_id: Uuid,
+    requalify_after: Option<DateTime<Utc>>,
+    forced: bool,
+    daily_count: i32,
+    counted_on: Option<NaiveDate>,
 }
 
 struct FindingRow {
@@ -76,7 +94,7 @@ struct LeadRow {
     id: Uuid,
     profile_id: Uuid,
     domain: String,
-    created_at: DateTime<Utc>,
+    qualified_at: Option<DateTime<Utc>>,
 }
 
 struct DefinitionRow {
@@ -114,6 +132,7 @@ fn module_state(row: &StateRow) -> Option<ModuleState> {
         module: EcosystemModule::parse(&row.module)?,
         status: ModuleStatus::parse(&row.status)?,
         last_run: row.last_run,
+        changed_at: row.changed_at,
         error: row.error.clone(),
     })
 }
@@ -131,6 +150,20 @@ fn finding(row: FindingRow) -> Option<EcosystemFinding> {
     })
 }
 
+fn content_changed(previous: Option<&PreviousRow>, hash: &str, empty: &str) -> bool {
+    match previous {
+        Some(PreviousRow {
+            content_hash: Some(known),
+            ..
+        }) => known != hash,
+        Some(PreviousRow {
+            content_hash: None,
+            last_run: Some(_),
+        }) => false,
+        _ => hash != empty,
+    }
+}
+
 fn inspection_enabled(definition: Value) -> bool {
     ValidatedProfile::parse(definition)
         .map(|profile| profile.definition().inspection.enabled)
@@ -144,11 +177,12 @@ impl<'tx> EcosystemRepository for PgEcosystemRepository<'tx> {
         module: EcosystemModule,
         profiles: &[ProfileId],
         now: DateTime<Utc>,
-        limit: u32,
+        batch: DueBatch,
     ) -> Result<Vec<DueDomain>, CoreError> {
         let ids = profile_uuids(profiles);
+        let recent = now - Duration::hours(RECENT_LEAD_HOURS);
         let mut tx = self.tx.lock().await;
-        let rows = query_as!(
+        let mut rows = query_as!(
             DueRow,
             r#"
             SELECT leads.domain,
@@ -158,24 +192,60 @@ impl<'tx> EcosystemRepository for PgEcosystemRepository<'tx> {
             LEFT JOIN lead_ecosystem_modules state
                 ON state.domain = leads.domain AND state.module = $1
             WHERE leads.profile_id = ANY($2)
+              AND leads.excluded_reason IS NULL
               AND (state.domain IS NULL OR state.next_run_at <= $3)
               AND NOT EXISTS (
                   SELECT 1 FROM suppression_list sup
                   WHERE sup.kind = 'domain'
                     AND (sup.value = leads.domain OR right(leads.domain, length(sup.value) + 1) = '.' || sup.value)
               )
-            GROUP BY leads.domain, state.domain, state.next_run_at
-            ORDER BY (state.domain IS NULL) DESC, state.next_run_at ASC NULLS FIRST, MIN(leads.created_at) ASC, leads.domain ASC
-            LIMIT $4
+            GROUP BY leads.domain, state.domain, state.last_run
+            HAVING state.last_run IS NULL OR MAX(leads.created_at) > $4
+            ORDER BY MAX(leads.created_at) DESC, leads.domain ASC
+            LIMIT $5
             "#,
             module.as_str(),
             &ids,
             now,
-            i64::from(limit),
+            recent,
+            i64::from(batch.priority),
         )
         .fetch_all(&mut ***tx)
         .await
         .map_err(map_sqlx_error)?;
+        let refresh = query_as!(
+            DueRow,
+            r#"
+            SELECT leads.domain,
+                COUNT(*) AS "leads!",
+                array_agg(DISTINCT leads.profile_id) AS "profiles!"
+            FROM leads
+            JOIN lead_ecosystem_modules state
+                ON state.domain = leads.domain AND state.module = $1
+            WHERE leads.profile_id = ANY($2)
+              AND leads.excluded_reason IS NULL
+              AND state.next_run_at <= $3
+              AND state.last_run IS NOT NULL
+              AND NOT EXISTS (
+                  SELECT 1 FROM suppression_list sup
+                  WHERE sup.kind = 'domain'
+                    AND (sup.value = leads.domain OR right(leads.domain, length(sup.value) + 1) = '.' || sup.value)
+              )
+            GROUP BY leads.domain, state.next_run_at
+            HAVING MAX(leads.created_at) <= $4
+            ORDER BY state.next_run_at ASC, leads.domain ASC
+            LIMIT $5
+            "#,
+            module.as_str(),
+            &ids,
+            now,
+            recent,
+            i64::from(batch.refresh),
+        )
+        .fetch_all(&mut ***tx)
+        .await
+        .map_err(map_sqlx_error)?;
+        rows.extend(refresh);
         Ok(rows
             .into_iter()
             .filter_map(|row| {
@@ -201,7 +271,10 @@ impl<'tx> EcosystemRepository for PgEcosystemRepository<'tx> {
         let due = query_scalar!(
             r#"
             SELECT COUNT(*) AS "due!"
-            FROM (SELECT DISTINCT domain FROM leads WHERE profile_id = ANY($2)) AS lead_domains
+            FROM (
+                SELECT DISTINCT domain FROM leads
+                WHERE profile_id = ANY($2) AND excluded_reason IS NULL
+            ) AS lead_domains
             CROSS JOIN UNNEST($1::text[]) AS expected(module)
             LEFT JOIN lead_ecosystem_modules state
                 ON state.domain = lead_domains.domain AND state.module = expected.module
@@ -230,18 +303,34 @@ impl<'tx> EcosystemRepository for PgEcosystemRepository<'tx> {
         outcome: &ModuleOutcome,
         ran_at: DateTime<Utc>,
         next_run_at: DateTime<Utc>,
-    ) -> Result<(), CoreError> {
+    ) -> Result<bool, CoreError> {
         let error = outcome.note();
+        let failed = matches!(outcome, ModuleOutcome::Failed(_));
+        let findings = outcome.findings();
+        let hash = findings_hash(findings);
         let mut tx = self.tx.lock().await;
+        let previous = query_as!(
+            PreviousRow,
+            "SELECT content_hash, last_run FROM lead_ecosystem_modules WHERE domain = $1 AND module = $2 FOR UPDATE",
+            domain.as_str(),
+            module.as_str(),
+        )
+        .fetch_optional(&mut ***tx)
+        .await
+        .map_err(map_sqlx_error)?;
+        let changed = !failed && content_changed(previous.as_ref(), &hash, &findings_hash(&[]));
+        let stored_hash = (!failed).then_some(hash.as_str());
         query!(
             r#"
-            INSERT INTO lead_ecosystem_modules (domain, module, status, last_run, next_run_at, error)
-            VALUES ($1, $2, $3, $4, $5, $6)
+            INSERT INTO lead_ecosystem_modules (domain, module, status, last_run, next_run_at, error, content_hash, changed_at)
+            VALUES ($1, $2, $3, $4::timestamptz, $5, $6, $7, CASE WHEN $8::boolean THEN $4::timestamptz END)
             ON CONFLICT (domain, module) DO UPDATE SET
                 status = EXCLUDED.status,
                 last_run = EXCLUDED.last_run,
                 next_run_at = EXCLUDED.next_run_at,
-                error = EXCLUDED.error
+                error = EXCLUDED.error,
+                content_hash = COALESCE(EXCLUDED.content_hash, lead_ecosystem_modules.content_hash),
+                changed_at = CASE WHEN $8::boolean THEN EXCLUDED.last_run ELSE lead_ecosystem_modules.changed_at END
             "#,
             domain.as_str(),
             module.as_str(),
@@ -249,14 +338,15 @@ impl<'tx> EcosystemRepository for PgEcosystemRepository<'tx> {
             ran_at,
             next_run_at,
             error,
+            stored_hash,
+            changed,
         )
         .execute(&mut ***tx)
         .await
         .map_err(map_sqlx_error)?;
-        if matches!(outcome, ModuleOutcome::Failed(_)) {
-            return Ok(());
+        if failed {
+            return Ok(false);
         }
-        let findings = outcome.findings();
         let keys: Vec<&str> = findings.iter().map(|found| found.key.as_str()).collect();
         query!(
             "DELETE FROM lead_ecosystem WHERE domain = $1 AND module = $2 AND NOT (finding_key = ANY($3::text[]))",
@@ -294,7 +384,7 @@ impl<'tx> EcosystemRepository for PgEcosystemRepository<'tx> {
             .await
             .map_err(map_sqlx_error)?;
         }
-        Ok(())
+        Ok(changed)
     }
 
     #[tracing::instrument(skip(self), fields(db.system = "postgresql", db.operation = "upsert", db.table = "lead_ecosystem_modules", module = module.as_str()), err)]
@@ -420,7 +510,7 @@ impl<'tx> EcosystemRepository for PgEcosystemRepository<'tx> {
         let mut tx = self.tx.lock().await;
         let states = query_as!(
             StateRow,
-            "SELECT domain, module, status, last_run, error FROM lead_ecosystem_modules WHERE domain = $1",
+            "SELECT domain, module, status, last_run, changed_at, error FROM lead_ecosystem_modules WHERE domain = $1",
             domain.as_str(),
         )
         .fetch_all(&mut ***tx)
@@ -461,7 +551,7 @@ impl<'tx> EcosystemRepository for PgEcosystemRepository<'tx> {
         let mut tx = self.tx.lock().await;
         let leads = query_as!(
             LeadRow,
-            "SELECT id, profile_id, domain, created_at FROM leads WHERE id = ANY($1)",
+            "SELECT id, profile_id, domain, qualified_at FROM leads WHERE id = ANY($1)",
             &ids,
         )
         .fetch_all(&mut ***tx)
@@ -484,7 +574,7 @@ impl<'tx> EcosystemRepository for PgEcosystemRepository<'tx> {
         .map_err(map_sqlx_error)?;
         let states = query_as!(
             StateRow,
-            "SELECT domain, module, status, last_run, error FROM lead_ecosystem_modules WHERE domain = ANY($1::text[])",
+            "SELECT domain, module, status, last_run, changed_at, error FROM lead_ecosystem_modules WHERE domain = ANY($1::text[])",
             &domains as &[&str],
         )
         .fetch_all(&mut ***tx)
@@ -507,6 +597,28 @@ impl<'tx> EcosystemRepository for PgEcosystemRepository<'tx> {
         .fetch_all(&mut ***tx)
         .await
         .map_err(map_sqlx_error)?;
+        let requalifications = query_as!(
+            RequalificationRow,
+            "SELECT lead_id, requalify_after, forced, daily_count, counted_on FROM lead_requalifications WHERE lead_id = ANY($1)",
+            &ids,
+        )
+        .fetch_all(&mut ***tx)
+        .await
+        .map_err(map_sqlx_error)?;
+        let requalifications: HashMap<Uuid, Requalification> = requalifications
+            .into_iter()
+            .map(|row| {
+                (
+                    row.lead_id,
+                    Requalification {
+                        after: row.requalify_after,
+                        forced: row.forced,
+                        daily_count: u32::try_from(row.daily_count).unwrap_or_default(),
+                        counted_on: row.counted_on,
+                    },
+                )
+            })
+            .collect();
         let enabled: HashMap<Uuid, bool> = definitions
             .into_iter()
             .map(|row| (row.profile_id, inspection_enabled(row.definition)))
@@ -540,7 +652,6 @@ impl<'tx> EcosystemRepository for PgEcosystemRepository<'tx> {
                     .ok()
                     .and_then(|domain| hosting_platform(&domain));
                 let record = InspectionRecord {
-                    created_at: lead.created_at,
                     enabled: enabled.get(&lead.profile_id).copied().unwrap_or(false),
                     hosting_platform: platform,
                     modules: modules
@@ -552,6 +663,8 @@ impl<'tx> EcosystemRepository for PgEcosystemRepository<'tx> {
                 let listed = ListedEnrichment {
                     record,
                     only_certificates: certificates_only.get(&lead.id).copied().unwrap_or(false),
+                    evaluated_at: lead.qualified_at,
+                    requalification: requalifications.get(&lead.id).copied(),
                 };
                 (LeadId(lead.id), listed)
             })

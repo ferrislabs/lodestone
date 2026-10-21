@@ -136,6 +136,7 @@ pub fn router(state: AppState) -> Router<AppState> {
             "/leads/{lead_id}/agents/retry",
             post(leads::retry_lead_agents),
         )
+        .route("/leads/{lead_id}/reevaluate", post(leads::reevaluate_lead))
         .route(
             "/leads/{lead_id}/company/refresh",
             post(company::refresh_company),

@@ -148,9 +148,19 @@ export function withContract(
 	return withFilter(agent, 'contracts', next)
 }
 
+const HOST_AGENT_TYPES: readonly JsonValue[] = ['certificates', 'dns']
+
+function isHostAgent(agent: JsonObject): boolean {
+	return HOST_AGENT_TYPES.includes(agent.type ?? null)
+}
+
 export function agentCountries(agent: JsonValue | undefined): string[] {
-	if (!isJsonObject(agent) || !isJsonObject(agent.filters)) return []
-	const countries = agent.filters.countries
+	if (!isJsonObject(agent)) return []
+	const countries = isHostAgent(agent)
+		? agent.countries
+		: isJsonObject(agent.filters)
+			? agent.filters.countries
+			: undefined
 	return Array.isArray(countries)
 		? countries.filter((item): item is string => typeof item === 'string')
 		: []
@@ -160,6 +170,7 @@ export function withCountries(
 	agent: JsonObject,
 	countries: readonly string[],
 ): JsonObject {
+	if (isHostAgent(agent)) return { ...agent, countries: [...countries] }
 	return withFilter(agent, 'countries', [...countries])
 }
 

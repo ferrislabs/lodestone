@@ -251,6 +251,7 @@ impl ProfileDefinitionV16 {
                             name: signal.name,
                             enabled: signal.enabled,
                             labels: rules.labels,
+                            countries: Vec::new(),
                         }));
                     }
                     SignalSourceV16::DnsCname(rules) => {
@@ -259,6 +260,7 @@ impl ProfileDefinitionV16 {
                             name: signal.name,
                             enabled: signal.enabled,
                             patterns: rules.patterns,
+                            countries: Vec::new(),
                         }));
                     }
                     SignalSourceV16::HttpProbe(rules) => {
@@ -393,12 +395,12 @@ mod tests {
         assert_eq!(
             json["agents"],
             json!([
-                {"type": "certificates", "id": "certificate-transparency", "name": "Certificate transparency", "enabled": true, "labels": ["sso"]},
+                {"type": "certificates", "id": "certificate-transparency", "name": "Certificate transparency", "enabled": true, "labels": ["sso"], "countries": []},
                 {"type": "dns", "id": "dns-cname", "name": "DNS CNAME", "enabled": false,
-                 "patterns": [{"provider": "okta", "target_suffix": "okta.com"}]}
+                 "patterns": [{"provider": "okta", "target_suffix": "okta.com"}], "countries": []}
             ])
         );
-        assert_eq!(json["schema_version"], 18);
+        assert_eq!(json["schema_version"], 19);
         assert_eq!(json["enrichment"]["custom"]["fingerprints"], json!([]));
         assert_eq!(json["enrichment"]["highlight_keywords"], json!([]));
     }

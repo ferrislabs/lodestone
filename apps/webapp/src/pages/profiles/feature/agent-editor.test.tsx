@@ -695,6 +695,56 @@ describe('new agent wizard', () => {
 		expect(latest.agents).toMatchObject([{ labels: ['auth', 'login'] }])
 	})
 
+	it('picks the target countries of a certificates agent on its page', () => {
+		render(
+			<Layout
+				agents={[
+					{
+						...newAgent('certificates', []),
+						name: 'Certificats IAM',
+						labels: ['auth'],
+					},
+				]}
+			/>,
+		)
+		openAgent('Certificats IAM')
+		const settings = within(screen.getByRole('region', { name: 'Réglages' }))
+		expect(settings.getByText(/hors pays visé/)).toBeTruthy()
+		const country = settings.getByRole('combobox', { name: 'Pays' })
+		fireEvent.change(country, { target: { value: countryName('FR') } })
+		fireEvent.click(screen.getByRole('option', { name: countryName('FR') }))
+		expect(latest.agents).toMatchObject([
+			{ labels: ['auth'], countries: ['FR'] },
+		])
+		fireEvent.click(
+			settings.getByRole('button', { name: `Retirer ${countryName('FR')}` }),
+		)
+		expect(latest.agents).toMatchObject([{ countries: [] }])
+	})
+
+	it('keeps the countries of a dns agent at the agent level', () => {
+		render(
+			<Layout
+				agents={[
+					{
+						...newAgent('dns', []),
+						name: 'DNS IAM',
+						patterns: [{ provider: 'Okta', target_suffix: 'okta.com' }],
+						countries: ['FR'],
+					},
+				]}
+			/>,
+		)
+		openAgent('DNS IAM')
+		const settings = within(screen.getByRole('region', { name: 'Réglages' }))
+		expect(settings.getByText(countryName('FR'))).toBeTruthy()
+		const country = settings.getByRole('combobox', { name: 'Pays' })
+		fireEvent.change(country, { target: { value: countryName('BE') } })
+		fireEvent.click(screen.getByRole('option', { name: countryName('BE') }))
+		expect(latest.agents).toMatchObject([{ countries: ['FR', 'BE'] }])
+		expect(JSON.stringify(latest.agents)).not.toContain('"filters"')
+	})
+
 	it('closes without touching the draft', () => {
 		render(<Layout agents={[]} />)
 		fireEvent.click(screen.getByRole('button', { name: 'Ajouter un agent' }))

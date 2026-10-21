@@ -5,11 +5,12 @@ import {
 	exclusionSummary,
 	exclusionTitle,
 } from '#/pages/leads/lib/confidence'
-import { listWaitingLabel } from '#/pages/leads/lib/enrichment'
+import { evaluatedAtText, evaluationLabel } from '#/pages/leads/lib/evaluation'
 import { formatDateTime } from '#/pages/leads/lib/format'
 import type { Lead } from '#/pages/leads/lib/types'
 import { summaryExcerpt } from '#/pages/leads/lib/verdict'
 import { ConfidenceBar } from './confidence-bar'
+import { EvaluationBadge } from './evaluation-badge'
 import { LeadStatusBadge } from './lead-status-badge'
 import { LlmScoreBar } from './llm-score-bar'
 import { VerdictBadge } from './verdict-badge'
@@ -58,9 +59,11 @@ export function buildLeadColumns(
 						className="flex flex-col items-start gap-1"
 						title={exclusions.map(exclusionTitle).join('\n') || undefined}
 					>
-						<VerdictBadge
-							verdict={row.original.verdict}
-							waiting={listWaitingLabel(row.original.enrichment_waiting)}
+						<VerdictBadge verdict={row.original.verdict} />
+						<EvaluationBadge
+							stage={row.original.evaluation?.stage ?? null}
+							label={evaluationLabel(row.original.evaluation)}
+							title={evaluatedAtText(row.original.evaluation)}
 						/>
 						{summary ? (
 							<span

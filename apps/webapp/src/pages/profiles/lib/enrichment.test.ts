@@ -9,7 +9,6 @@ import {
 	type DryRunResult,
 	dryRunView,
 	type EcosystemModuleInfo,
-	ENRICHMENT_WAIT_MINUTES,
 	enrichmentFieldSchema,
 	inspectionEnabled,
 	moduleCards,
@@ -75,10 +74,6 @@ describe('profile-specific settings', () => {
 				{ path: 'enrichment.highlight_keywords[0]', message: 'x' },
 			]),
 		).toBe(false)
-	})
-
-	it('waits thirty minutes by default', () => {
-		expect(ENRICHMENT_WAIT_MINUTES).toBe(30)
 	})
 })
 

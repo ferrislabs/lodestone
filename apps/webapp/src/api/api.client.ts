@@ -280,6 +280,7 @@ export namespace Schemas {
     pagination?: (null | PaginationMetadata) | undefined;
   };
   export type ModuleStateDto = {
+    changed_at?: (string | null) | undefined;
     error?: (string | null) | undefined;
     label: string;
     last_run?: (string | null) | undefined;
@@ -295,15 +296,7 @@ export namespace Schemas {
     hosting_platform?: (string | null) | undefined;
     modules: Array<EcosystemModuleReportDto>;
   };
-  export type EnrichmentStatus = "disabled" | "pending" | "complete" | "timed_out";
-  export type EnrichmentWaitingReason = "awaiting_enrichment" | "awaiting_enrichment_evidence";
-  export type EnrichmentDto = {
-    hosting_platform?: (string | null) | undefined;
-    modules: Array<ModuleStateDto>;
-    status: EnrichmentStatus;
-    wait_until?: (string | null) | undefined;
-    waiting_reason?: (null | EnrichmentWaitingReason) | undefined;
-  };
+  export type EnrichmentDto = { hosting_platform?: (string | null) | undefined; modules: Array<ModuleStateDto> };
   export type HostFactDto = { environment: string; host: string; signals: number };
   export type OfficialFactsDto = {
     head_office_country?: (string | null) | undefined;
@@ -332,10 +325,23 @@ export namespace Schemas {
     source_count: number;
     sources: Array<string>;
   };
-  export type EnrichmentWaitingDto = Partial<{
-    wait_until: string | null;
-    waiting_reason: null | EnrichmentWaitingReason;
-  }>;
+  export type RequalifyReason = "new_information" | "manual";
+  export type EvaluationStage =
+    | "not_evaluated"
+    | "certificate_only"
+    | "requalification_planned"
+    | "inspection_running"
+    | "inspection_complete"
+    | "evaluated";
+  export type EvaluationDto = {
+    changed_modules: Array<ModuleStateDto>;
+    evaluated_at?: (string | null) | undefined;
+    modules_available: number;
+    modules_done: number;
+    requalify_at?: (string | null) | undefined;
+    requalify_reason?: (null | RequalifyReason) | undefined;
+    stage: EvaluationStage;
+  };
   export type EvidenceComponentsDto = { diversity: number; environment: number; strength: number; volume: number };
   export type EvidenceStrengthDto = {
     components: EvidenceComponentsDto;
@@ -372,7 +378,7 @@ export namespace Schemas {
   export type LeadDto = {
     confidence?: (number | null) | undefined;
     domain: string;
-    enrichment_waiting?: (null | EnrichmentWaitingDto) | undefined;
+    evaluation?: (null | EvaluationDto) | undefined;
     evidence?: (null | EvidenceStrengthDto) | undefined;
     exclusions: Array<ExclusionDto>;
     first_seen_at: string;
@@ -490,7 +496,7 @@ export namespace Schemas {
     data: {
       confidence?: (number | null) | undefined;
       domain: string;
-      enrichment_waiting?: (null | EnrichmentWaitingDto) | undefined;
+      evaluation?: (null | EvaluationDto) | undefined;
       evidence?: (null | EvidenceStrengthDto) | undefined;
       exclusions: Array<ExclusionDto>;
       first_seen_at: string;
@@ -684,6 +690,7 @@ export namespace Schemas {
     items_total: number;
     last_activity_at?: (string | null) | undefined;
     last_error?: (string | null) | undefined;
+    last_error_at?: (string | null) | undefined;
     signals_total: number;
     state: string;
     updated_at?: (string | null) | undefined;
@@ -763,7 +770,7 @@ export namespace Schemas {
     data: Array<{
       confidence?: (number | null) | undefined;
       domain: string;
-      enrichment_waiting?: (null | EnrichmentWaitingDto) | undefined;
+      evaluation?: (null | EvaluationDto) | undefined;
       evidence?: (null | EvidenceStrengthDto) | undefined;
       exclusions: Array<ExclusionDto>;
       first_seen_at: string;
@@ -1171,6 +1178,15 @@ export namespace Endpoints {
       409: unknown;
       429: unknown;
     };
+  };
+  export type post_Reevaluate_lead = {
+    method: "POST";
+    path: "/api/v1/leads/{lead_id}/reevaluate";
+    requestFormat: "json";
+    parameters: {
+      path: { lead_id: string };
+    };
+    responses: { 200: Schemas.DataEnvelope_LeadDto; 400: unknown; 401: unknown; 403: unknown; 404: unknown };
   };
   export type patch_Change_lead_status = {
     method: "PATCH";
@@ -1646,6 +1662,7 @@ export type EndpointByMethod = {
     "/api/v1/leads/{lead_id}/agents/retry": Endpoints.post_Retry_lead_agents;
     "/api/v1/leads/{lead_id}/company/refresh": Endpoints.post_Refresh_company;
     "/api/v1/leads/{lead_id}/ecosystem/dry-run": Endpoints.post_Dry_run_ecosystem_module;
+    "/api/v1/leads/{lead_id}/reevaluate": Endpoints.post_Reevaluate_lead;
     "/api/v1/leads/{lead_id}/summary/retry": Endpoints.post_Retry_lead_summary;
     "/api/v1/llm/providers": Endpoints.post_Create_provider;
     "/api/v1/llm/providers/{provider_id}/disable": Endpoints.post_Disable_provider;

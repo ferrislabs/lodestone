@@ -36,7 +36,7 @@ Signals produced by enrichment are the same as before (`product_detected`, `debt
 
 ### Qualification waits for enrichment
 
-A lead is due for qualification once each enabled enrichment step ran for it, or once `ENRICHMENT_WAIT_MINUTES` (default 30, 0 disables the wait) have passed since the lead was created, like the company dossier wait (ADR 0007). In addition, a lead whose only evidence is `certificate_seen` signals (contact signals do not count) is never sent to the models: it waits, with the reason `awaiting_enrichment_evidence` (« En attente d'enrichissement »), until a signal of another kind arrives. The lead API exposes an `enrichment` block with the steps, their last run, the status (`disabled`, `pending`, `complete`, `timed_out`) and the waiting reason.
+A lead is due for qualification once each enabled enrichment step ran for it, or once `ENRICHMENT_WAIT_MINUTES` (default 30, 0 disables the wait) have passed since the lead was created, like the company dossier wait (ADR 0007). In addition, a lead whose only evidence is `certificate_seen` signals (contact signals do not count) is never sent to the models: it waits, with the reason `awaiting_enrichment_evidence` (« En attente d'enrichissement »), until a signal of another kind arrives. The lead API exposes an `enrichment` block with the steps, their last run, the status (`disabled`, `pending`, `complete`, `timed_out`) and the waiting reason. (Superseded by ADR 0012, "Progressive evaluation": no wait, `ENRICHMENT_WAIT_MINUTES` is removed and the lead exposes an `evaluation` status instead.)
 
 ### Upgrade from schema 16
 

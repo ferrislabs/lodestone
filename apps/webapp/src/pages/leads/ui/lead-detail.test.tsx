@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { formatClock } from '#/pages/leads/lib/evaluation'
 import { formatDateTime } from '#/pages/leads/lib/format'
 import type { LeadDetailData, ScoringResult } from '#/pages/leads/lib/types'
 import { LeadDetail } from './lead-detail'
@@ -115,7 +116,7 @@ const detail: LeadDetailData = {
 	scoring_results: [],
 	agent_failures: [],
 	agent_stops: [],
-	enrichment: { status: 'disabled', modules: [] },
+	enrichment: { modules: [] },
 	ecosystem: { modules: [] },
 	qualification_results: [
 		{
@@ -261,6 +262,9 @@ function renderDetail(
 			onRefreshCompany={() => {}}
 			refreshingCompany={false}
 			refreshCompanyError={null}
+			onReevaluate={() => {}}
+			reevaluating={false}
+			reevaluateError={null}
 			changing={false}
 			changeError={null}
 			{...overrides}
@@ -454,11 +458,15 @@ describe('LeadDetail', () => {
 		const { container } = renderDetail({
 			detail: {
 				...detail,
-				enrichment: {
-					status: 'pending',
-					modules: [],
-					waiting_reason: 'awaiting_enrichment',
-					wait_until: '2026-02-01T10:30:00Z',
+				lead: {
+					...detail.lead,
+					evaluation: {
+						stage: 'inspection_running',
+						evaluated_at: '2026-02-01T10:00:00Z',
+						modules_done: 3,
+						modules_available: 7,
+						changed_modules: [],
+					},
 				},
 				ecosystem: {
 					hosting_platform: null,
@@ -539,10 +547,9 @@ describe('LeadDetail', () => {
 		expect(website?.textContent).toContain('En attente')
 		expect(website?.textContent).toContain('Aucun élément trouvé.')
 		expect(block?.querySelector('[data-notice="hosting-platform"]')).toBeNull()
-		const waiting = block?.querySelector('[data-waiting]')
-		expect(waiting?.textContent).toBe(
-			`En attente d'enrichissement jusqu'au ${formatDateTime('2026-02-01T10:30:00Z')}`,
-		)
+		expect(
+			block?.querySelector('[data-part="inspection-progress"]')?.textContent,
+		).toBe('3/7 modules inspectés')
 	})
 
 	it('renders the stack by category, the hiring trend, the latest news and the DNS summary', () => {
@@ -888,47 +895,111 @@ describe('LeadDetail', () => {
 		const { container } = renderDetail({
 			detail: {
 				...detail,
-				lead: pendingScoring,
-				enrichment: {
-					status: 'complete',
-					modules: [],
-					waiting_reason: 'awaiting_enrichment_evidence',
-					wait_until: null,
+				lead: {
+					...pendingScoring,
+					evaluation: {
+						stage: 'certificate_only',
+						modules_done: 7,
+						modules_available: 7,
+						changed_modules: [],
+					},
 				},
 			},
 		})
 		expect(
-			container.querySelector('[data-section="ecosystem"] [data-waiting]')
+			container.querySelector('[data-section="evaluation"] [data-evaluation]')
 				?.textContent,
-		).toBe("En attente de preuve d'enrichissement")
+		).toBe("Certificat seul — en attente d'une autre preuve")
 		expect(container.querySelector('[data-verdict]')?.textContent).toBe(
-			"En attente de preuve d'enrichissement",
+			'En attente du scoring',
 		)
+		expect(
+			screen
+				.getByRole('button', { name: 'Réévaluer' })
+				.hasAttribute('disabled'),
+		).toBe(true)
 	})
 
-	it('shows the wait in the header verdict while the lead has no verdict', () => {
+	it('shows the evaluation, what changed since and reevaluates on demand', () => {
+		const onReevaluate = vi.fn()
 		const { container } = renderDetail({
+			onReevaluate,
 			detail: {
 				...detail,
-				lead: pendingScoring,
-				enrichment: {
-					status: 'pending',
-					modules: [],
-					waiting_reason: 'awaiting_enrichment',
-					wait_until: null,
+				lead: {
+					...detail.lead,
+					evaluation: {
+						stage: 'inspection_running',
+						evaluated_at: '2026-02-01T10:00:00Z',
+						modules_done: 3,
+						modules_available: 7,
+						changed_modules: [
+							{
+								module: 'dns_email',
+								label: 'Écosystème DNS et e-mail',
+								status: 'done',
+								last_run: '2026-02-01T10:05:00Z',
+								changed_at: '2026-02-01T10:05:00Z',
+							},
+						],
+					},
 				},
 			},
 		})
-		expect(container.querySelector('[data-verdict]')?.textContent).toBe(
-			"En attente d'enrichissement",
+		const block = container.querySelector('[data-section="evaluation"]')
+		expect(block?.querySelector('[data-evaluation]')?.textContent).toBe(
+			'Évalué — inspection en cours (3/7 modules)',
+		)
+		expect(block?.textContent).toContain(
+			`Dernière évaluation le ${formatDateTime('2026-02-01T10:00:00Z')}`,
+		)
+		expect(
+			block?.querySelector('[data-changed-module="dns_email"]')?.textContent,
+		).toBe(
+			`Écosystème DNS et e-mail (${formatDateTime('2026-02-01T10:05:00Z')})`,
+		)
+		fireEvent.click(screen.getByRole('button', { name: 'Réévaluer' }))
+		expect(onReevaluate).toHaveBeenCalledTimes(1)
+	})
+
+	it('shows a planned requalification and the reevaluation error', () => {
+		const { container } = renderDetail({
+			reevaluateError: 'HTTP 404',
+			detail: {
+				...detail,
+				lead: {
+					...detail.lead,
+					evaluation: {
+						stage: 'requalification_planned',
+						evaluated_at: '2026-02-01T10:00:00Z',
+						modules_done: 7,
+						modules_available: 7,
+						requalify_at: '2026-02-01T10:32:00Z',
+						requalify_reason: 'new_information',
+						changed_modules: [],
+					},
+				},
+			},
+		})
+		expect(
+			container.querySelector('[data-section="evaluation"] [data-evaluation]')
+				?.textContent,
+		).toBe(
+			`Réévaluation prévue à ${formatClock('2026-02-01T10:32:00Z')} (nouvelles informations)`,
+		)
+		expect(screen.getByRole('alert').textContent).toBe(
+			'Réévaluation impossible : HTTP 404',
 		)
 	})
 
-	it('says so when the profile switches the inspection off', () => {
+	it('shows no evaluation badge before the list or detail carries one', () => {
 		const { container } = renderDetail()
-		const block = container.querySelector('[data-section="ecosystem"]')
-		expect(block?.textContent).toContain('Inspection désactivée')
-		expect(block?.querySelector('[data-waiting]')).toBeNull()
+		expect(
+			container.querySelector('[data-section="evaluation"] [data-evaluation]'),
+		).toBeNull()
+		expect(
+			container.querySelector('[data-part="inspection-progress"]'),
+		).toBeNull()
 	})
 
 	it('names the host of a certificate signal', () => {

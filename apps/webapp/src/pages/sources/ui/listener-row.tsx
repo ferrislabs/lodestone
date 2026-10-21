@@ -5,6 +5,7 @@ import {
 	backlogText,
 	lastActivityText,
 	lastUpdateText,
+	latestError,
 	listenerBadge,
 	STALE_EXPLANATION,
 	totalsText,
@@ -42,15 +43,22 @@ export function ListenerRow({
 	onOpenProvider,
 }: ListenerRowProps) {
 	const badge = listenerBadge(listener.state)
+	const error = latestError(listener)
 	return (
 		<TableRow data-source={source.source} data-listener={listener.state}>
 			<TableCell className="font-medium">{sourceTitle(source)}</TableCell>
 			<TableCell>
 				<div className="flex flex-col items-start gap-1">
 					<Badge variant={badgeVariant(badge.tone)}>{badge.label}</Badge>
-					{listener.state === 'error' && listener.last_error ? (
-						<span className="max-w-56 text-xs text-destructive">
-							{shortError(listener.last_error)}
+					{error ? (
+						<span
+							data-part="listener-error"
+							className="max-w-56 text-xs text-destructive"
+						>
+							<span>{shortError(error.message)}</span>{' '}
+							<time dateTime={error.at} className="text-muted-foreground">
+								({formatDateTime(error.at)})
+							</time>
 						</span>
 					) : null}
 					<ProviderNotice source={source} onOpenProvider={onOpenProvider} />

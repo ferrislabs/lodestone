@@ -3,7 +3,7 @@ use dns::{DnsSettings, HickoryResolver};
 use fetch::{FetchSettings, PoliteFetcher};
 use lodestone_core::{
     BODACC, COMPANY_RESEARCH, DECP, LodestoneAuthService, LodestoneRateLimitService,
-    LodestoneUseCase, ProfileId, WebhookPolicy, create_service,
+    LodestoneUseCase, ProfileId, RequalifyPolicy, WebhookPolicy, create_service,
     infrastructure::crypto::AesGcmCipher,
 };
 use rate_limit::Quota;
@@ -116,8 +116,10 @@ pub async fn state(args: Arc<Args>) -> Result<AppState, ServerError> {
         });
 
     let stale_after = lodestone_core::stale_after(args.listeners.idle());
-    let company_wait = args.company.wait();
-    let enrichment_wait = args.enrichment.wait();
+    let requalify = RequalifyPolicy::from_std(
+        args.enrichment.requalify_debounce(),
+        args.enrichment.requalify_max_per_day,
+    );
     let service = create_service(config).await.unwrap();
     let resolver = HickoryResolver::from_system(DnsSettings::default())
         .map_err(|e| ServerError::Configuration(e.to_string()))?;
@@ -135,8 +137,7 @@ pub async fn state(args: Arc<Args>) -> Result<AppState, ServerError> {
             .usecase
             .with_webhooks(webhooks)
             .with_listener_stale_after(stale_after)
-            .with_company_wait(company_wait)
-            .with_enrichment_wait(enrichment_wait),
+            .with_requalify_policy(requalify),
         rate_limit: service.rate_limit,
         rate_limit_quota: service.rate_limit_quota,
         cipher: Arc::new(cipher),

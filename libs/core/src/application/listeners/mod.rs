@@ -60,6 +60,13 @@ impl ListenerSettings {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Ending<'a> {
+    Succeeded,
+    Skipped,
+    Failed(&'a str),
+}
+
 pub struct Listener<S: ListenerStep> {
     step: S,
     pool: PgPool,
@@ -168,7 +175,7 @@ impl<S: ListenerStep> Listener<S> {
                 statuses,
                 ListenerState::IdleNoAgent,
                 StepOutcome::default(),
-                None,
+                Ending::Skipped,
             )
             .await;
             return Some(self.settings.idle);
@@ -185,8 +192,13 @@ impl<S: ListenerStep> Listener<S> {
                     );
                 }
                 *failures = 0;
-                self.record(statuses, ListenerState::Idle, StepOutcome::default(), None)
-                    .await;
+                self.record(
+                    statuses,
+                    ListenerState::Idle,
+                    StepOutcome::default(),
+                    Ending::Skipped,
+                )
+                .await;
                 return Some(self.settings.idle);
             }
             Err(error) => {
@@ -229,7 +241,8 @@ impl<S: ListenerStep> Listener<S> {
                 } else {
                     ListenerState::Idle
                 };
-                self.record(statuses, state, outcome, None).await;
+                self.record(statuses, state, outcome, Ending::Succeeded)
+                    .await;
                 Some(if outcome.processed > 0 {
                     self.settings.yield_pause
                 } else {
@@ -253,7 +266,7 @@ impl<S: ListenerStep> Listener<S> {
             statuses,
             ListenerState::Error,
             StepOutcome::default(),
-            Some(message),
+            Ending::Failed(message),
         )
         .await;
         wait
@@ -264,14 +277,18 @@ impl<S: ListenerStep> Listener<S> {
         statuses: &PgListenerStatuses,
         state: ListenerState,
         outcome: StepOutcome,
-        error: Option<&str>,
+        ending: Ending<'_>,
     ) {
         let update = StatusUpdate {
             name: self.step.name(),
             holder: &self.instance,
             state,
             outcome,
-            error,
+            error: match ending {
+                Ending::Failed(message) => Some(message),
+                Ending::Succeeded | Ending::Skipped => None,
+            },
+            succeeded: ending == Ending::Succeeded,
             at: Utc::now(),
         };
         if let Err(error) = statuses.record(&update).await {

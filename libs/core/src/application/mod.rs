@@ -7,7 +7,7 @@ use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 
 use crate::{
-    domain::output::WebhookPolicy,
+    domain::{enrichment::RequalifyPolicy, output::WebhookPolicy},
     infrastructure::{agent_registry::InMemoryAgentRegistry, postgres::error::map_sqlx_error},
 };
 
@@ -46,8 +46,7 @@ pub struct LodestoneUseCase {
     pub(crate) pool: PgPool,
     pub(crate) webhooks: Option<WebhookPolicy>,
     pub(crate) listener_stale_after: Duration,
-    pub(crate) company_wait: Duration,
-    pub(crate) enrichment_wait: Duration,
+    pub(crate) requalify: RequalifyPolicy,
     pub(crate) agents: Arc<InMemoryAgentRegistry>,
 }
 
@@ -57,8 +56,7 @@ impl LodestoneUseCase {
             pool,
             webhooks: None,
             listener_stale_after: crate::domain::listener::STALE_FLOOR,
-            company_wait: Duration::ZERO,
-            enrichment_wait: Duration::ZERO,
+            requalify: RequalifyPolicy::default(),
             agents: Arc::new(InMemoryAgentRegistry::new()),
         }
     }
@@ -67,14 +65,13 @@ impl LodestoneUseCase {
         &self.agents
     }
 
-    pub fn with_enrichment_wait(mut self, wait: Duration) -> Self {
-        self.enrichment_wait = wait;
+    pub fn with_requalify_policy(mut self, policy: RequalifyPolicy) -> Self {
+        self.requalify = policy;
         self
     }
 
-    pub fn with_company_wait(mut self, wait: Duration) -> Self {
-        self.company_wait = wait;
-        self
+    pub fn requalify_policy(&self) -> RequalifyPolicy {
+        self.requalify
     }
 
     pub fn with_listener_stale_after(mut self, stale_after: Duration) -> Self {

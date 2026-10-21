@@ -28,8 +28,6 @@ import { belongsToPath } from '#/pages/profiles/lib/tabs'
 export type EcosystemModuleInfo = Schemas.EcosystemModuleInfoDto
 export type DryRunResult = Schemas.EcosystemDryRunDto
 
-export const ENRICHMENT_WAIT_MINUTES = 30
-
 function enrichmentSchema(): Schema {
 	return resolve(PROFILE_SCHEMA, PROFILE_SCHEMA.properties?.enrichment ?? {})
 }

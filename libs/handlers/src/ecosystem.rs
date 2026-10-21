@@ -120,6 +120,8 @@ pub struct ModuleStateDto {
     pub status: ModuleStatusDto,
     #[schema(format = DateTime)]
     pub last_run: Option<String>,
+    #[schema(format = DateTime)]
+    pub changed_at: Option<String>,
     pub error: Option<String>,
 }
 
@@ -130,6 +132,7 @@ impl From<&ModuleState> for ModuleStateDto {
             label: state.module.label().to_owned(),
             status: state.status.into(),
             last_run: state.last_run.map(|at| at.to_rfc3339()),
+            changed_at: state.changed_at.map(|at| at.to_rfc3339()),
             error: state.error.clone(),
         }
     }

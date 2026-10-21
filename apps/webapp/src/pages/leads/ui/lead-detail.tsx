@@ -4,7 +4,13 @@ import type { ReactNode } from 'react'
 import { Button } from '#/components/ui/button'
 import { Skeleton } from '#/components/ui/skeleton'
 import { failureOfKind } from '#/pages/leads/lib/agent-failure'
-import { waitingBadge } from '#/pages/leads/lib/enrichment'
+import {
+	canReevaluate,
+	changedSince,
+	evaluatedAtText,
+	evaluationLabel,
+	inspectionProgress,
+} from '#/pages/leads/lib/evaluation'
 import type { LeadDetailData, LeadStatus } from '#/pages/leads/lib/types'
 import { AgentStopsNotice } from './agent-stops-notice'
 import { AssessmentsList } from './assessments-list'
@@ -12,6 +18,7 @@ import { CompanyCard } from './company-card'
 import { ContactsList } from './contacts-list'
 import { ExclusionNotice } from './exclusion-notice'
 import { LeadEcosystem } from './lead-ecosystem'
+import { LeadEvaluation } from './lead-evaluation'
 import { LeadFacts } from './lead-facts'
 import { LeadHeader } from './lead-header'
 import { LeadSummary } from './lead-summary'
@@ -38,6 +45,9 @@ interface LeadDetailProps {
 	onRefreshCompany: () => void
 	refreshingCompany: boolean
 	refreshCompanyError: string | null
+	onReevaluate: () => void
+	reevaluating: boolean
+	reevaluateError: string | null
 	changing: boolean
 	changeError: string | null
 }
@@ -61,6 +71,9 @@ export function LeadDetail({
 	onRefreshCompany,
 	refreshingCompany,
 	refreshCompanyError,
+	onReevaluate,
+	reevaluating,
+	reevaluateError,
 	changing,
 	changeError,
 }: LeadDetailProps) {
@@ -94,7 +107,16 @@ export function LeadDetail({
 						onChangeStatus={onChangeStatus}
 						changing={changing}
 						changeError={changeError}
-						waiting={waitingBadge(detail.enrichment)?.label ?? null}
+					/>
+					<LeadEvaluation
+						stage={detail.lead.evaluation?.stage ?? null}
+						label={evaluationLabel(detail.lead.evaluation)}
+						evaluatedAt={evaluatedAtText(detail.lead.evaluation)}
+						changed={changedSince(detail.lead.evaluation)}
+						canReevaluate={canReevaluate(detail.lead.evaluation)}
+						reevaluating={reevaluating}
+						reevaluateError={reevaluateError}
+						onReevaluate={onReevaluate}
 					/>
 					<ExclusionNotice exclusions={detail.lead.exclusions} />
 					<CompanyCard
@@ -107,7 +129,7 @@ export function LeadDetail({
 					{detail.ecosystem ? (
 						<LeadEcosystem
 							ecosystem={detail.ecosystem}
-							enrichment={detail.enrichment}
+							progress={inspectionProgress(detail.lead.evaluation)}
 						/>
 					) : null}
 					<AgentStopsNotice stops={detail.agent_stops ?? []} />

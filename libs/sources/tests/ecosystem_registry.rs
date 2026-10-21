@@ -256,7 +256,10 @@ async fn the_registry_modules_read_the_siren_found_by_the_identity_module(pool: 
     let usecase = LodestoneUseCase::new(pool.clone());
     let modules = modules(&server);
     let clock = StepClock(AtomicI64::new(0));
-    let settings = InspectionRunSettings { batch_size: 10 };
+    let settings = InspectionRunSettings {
+        batch_size: 10,
+        priority_batch_size: 30,
+    };
     let registry = [
         EcosystemModule::OfficialIdentity,
         EcosystemModule::LegalLife,
@@ -395,7 +398,10 @@ async fn the_hiring_module_compares_its_count_with_the_previous_pass(pool: PgPoo
     let usecase = LodestoneUseCase::new(pool.clone());
     let modules = modules(&server);
     let clock = StepClock(AtomicI64::new(0));
-    let settings = InspectionRunSettings { batch_size: 10 };
+    let settings = InspectionRunSettings {
+        batch_size: 10,
+        priority_batch_size: 30,
+    };
     let runners: Vec<_> = modules
         .runners()
         .into_iter()

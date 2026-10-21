@@ -12,16 +12,17 @@ use crate::{
         NormalizedDomain,
         company::{CompanyDossier, Siren, bounded_error},
         ecosystem::{
-            DomainEcosystem, DueDomain, EcosystemFinding, EcosystemModule, EcosystemReadiness,
-            InspectionSettings, InspectionTarget, ModuleOutcome, ModuleRun, ModuleRunner,
-            ModuleStats, ModuleStatus, STATS_WINDOW_DAYS, SirenLookup, hosting_platform,
-            ports::EcosystemRepository,
+            DomainEcosystem, DueBatch, DueDomain, EcosystemFinding, EcosystemModule,
+            EcosystemReadiness, InspectionSettings, InspectionTarget, ModuleOutcome, ModuleRun,
+            ModuleRunner, ModuleStats, ModuleStatus, STATS_WINDOW_DAYS, SirenLookup,
+            hosting_platform, ports::EcosystemRepository,
         },
         job::ports::Clock,
         lead::{Lead, LeadId, ports::LeadRepository},
         profile::{
             ActiveProfile, ProfileId, definition::ProfileDefinition, ports::ProfileRepository,
         },
+        qualification::ports::QualificationRepository,
         source::SourceError,
         suppression::ports::SuppressionRepository,
     },
@@ -33,6 +34,7 @@ const MIN_RATE_LIMIT_PAUSE: Duration = Duration::minutes(1);
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct InspectionRunSettings {
     pub batch_size: u32,
+    pub priority_batch_size: u32,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -41,6 +43,7 @@ pub struct InspectionReport {
     pub findings: u64,
     pub failed: u64,
     pub not_applicable: u64,
+    pub changed: u64,
     pub backlog: u64,
     pub rate_limited: bool,
 }
@@ -151,8 +154,12 @@ impl LodestoneUseCase {
                 continue;
             }
             ready.push(module);
+            let batch = DueBatch {
+                priority: settings.priority_batch_size,
+                refresh: settings.batch_size,
+            };
             let due = self
-                .due_ecosystem_domains(module, &ids, clock.now(), settings.batch_size)
+                .due_ecosystem_domains(module, &ids, clock.now(), batch)
                 .await?;
             let mut run = ModuleRun {
                 module,
@@ -201,8 +208,12 @@ impl LodestoneUseCase {
                         now + module.refresh_interval()
                     }
                 };
-                self.save_ecosystem_outcome(&item.domain, module, &outcome, now, next_run)
-                    .await?;
+                if self
+                    .save_ecosystem_outcome(&item.domain, module, &outcome, now, next_run)
+                    .await?
+                {
+                    report.changed += 1;
+                }
                 report.domains += 1;
                 match &outcome {
                     ModuleOutcome::Done(findings) => {
@@ -377,10 +388,10 @@ impl LodestoneUseCase {
         module: EcosystemModule,
         profiles: &[ProfileId],
         now: DateTime<Utc>,
-        limit: u32,
+        batch: DueBatch,
     ) -> Result<Vec<DueDomain>, CoreError> {
         let mut repo = ecosystem_repository;
-        repo.due_domains(module, profiles, now, limit).await
+        repo.due_domains(module, profiles, now, batch).await
     }
 
     #[transactional(ecosystem)]
@@ -394,7 +405,7 @@ impl LodestoneUseCase {
         repo.count_due(modules, profiles, now).await
     }
 
-    #[transactional(ecosystem)]
+    #[transactional(ecosystem, qualification)]
     async fn save_ecosystem_outcome(
         &self,
         domain: &NormalizedDomain,
@@ -402,10 +413,19 @@ impl LodestoneUseCase {
         outcome: &ModuleOutcome,
         ran_at: DateTime<Utc>,
         next_run_at: DateTime<Utc>,
-    ) -> Result<(), CoreError> {
+    ) -> Result<bool, CoreError> {
         let mut repo = ecosystem_repository;
-        repo.save_outcome(domain, module, outcome, ran_at, next_run_at)
-            .await
+        let mut qualification = qualification_repository;
+        let changed = repo
+            .save_outcome(domain, module, outcome, ran_at, next_run_at)
+            .await?;
+        if changed {
+            let marked = qualification
+                .mark_requalification(domain, self.requalify.requalify_after(ran_at), ran_at)
+                .await?;
+            debug!(module = module.as_str(), %domain, leads = marked, "new findings, requalification planned");
+        }
+        Ok(changed)
     }
 
     #[transactional(ecosystem)]

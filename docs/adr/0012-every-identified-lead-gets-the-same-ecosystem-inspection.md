@@ -25,7 +25,7 @@ Findings and module statuses belong to the registrable domain, not to a lead: tw
 
 ### Hosting platforms
 
-A domain under a hosting platform (`github.io`, `vercel.app`, `notion.site`…) is not the site of a company: it is flagged « Site hébergé sur une plateforme » and the modules that read the site are `not_applicable`, so no page is guessed on it. The company research listener skips such domains too: their dossier gets the terminal state `hosting_platform` without any request, so the dossier wait is released at once, and a startup step switches the existing dossiers of these domains to that state (idempotent). The list is data in code (`HOSTING_PLATFORMS`), not a market criterion, and is covered by a test.
+A domain under a hosting platform (`github.io`, `vercel.app`, `notion.site`…) is not the site of a company: it is flagged « Site hébergé sur une plateforme » and the modules that read the site are `not_applicable`, so no page is guessed on it. The company research listener skips such domains too: their dossier gets the terminal state `hosting_platform` without any request, and a startup step switches the existing dossiers of these domains to that state (idempotent). The list is data in code (`HOSTING_PLATFORMS`), not a market criterion, and is covered by a test.
 
 ### What stays in a profile
 
@@ -43,7 +43,7 @@ One continuous listener, `ecosystem_inspection` (ADR 0006), picks the due domain
 
 ### Qualification and agents
 
-Qualification keeps the wait of ADR 0011 (`ENRICHMENT_WAIT_MINUTES`): a lead is due once every available module has settled for its domain (any status but `pending`), or once the wait is over, or at once when the inspection of its profile is off; a lead whose only evidence is a certificate still waits for other evidence. The qualification, scoring and aggregator agents receive one « Ecosystem » document per module and source; evidence may quote them.
+Qualification first kept the wait of ADR 0011 (`ENRICHMENT_WAIT_MINUTES`); "Progressive evaluation" below replaces it: a lead is qualified at once and requalified as the inspection completes. A lead whose only evidence is a certificate still waits for other evidence. The qualification, scoring and aggregator agents receive one « Ecosystem » document per module and source; evidence may quote them.
 
 ### Official modules (issue 211)
 
@@ -77,4 +77,31 @@ The « Enrichissement » page of a profile shows one card per module (title as a
 - A company with leads in several profiles is inspected once.
 - The website module and the HTTP probe listener may both request the fingerprint paths of a lead: the first records findings for every profile, the second the signals of one profile. Both go through polite fetchers and their revisit intervals.
 - Profiles lose their per-step switches: an operator can only switch the whole inspection off, or remove the profile fingerprints and keywords.
-- A new finding does not requalify a lead by itself; the inspection runs before the first qualification, and later findings are read at the next one.
+- ~~A new finding does not requalify a lead by itself.~~ Superseded by "Progressive evaluation": new or changed findings requalify the lead, debounced and capped.
+
+## Amendment: progressive evaluation (issue 217)
+
+Date: 2026-10-08
+
+### Context
+
+Waiting up to 30 minutes for the inspection (`ENRICHMENT_WAIT_MINUTES`) and 10 for the dossier (`COMPANY_RESEARCH_WAIT_MINUTES`) delayed every lead, and a finding that arrived after the first qualification was only read at the next one, which might never come. The user decided (2026-10-08) that there is no imposed wait, and that the status of a lead evolves over time.
+
+### Decision
+
+- **No wait.** Both settings are removed: a lead with evidence is qualified as soon as the qualification listener sees it, with whatever findings and dossier exist. The certificate-only rule stays: a lead whose only evidence is `certificate_seen` (contact signals aside) is never sent to the models. Old `.env` files may still set the two variables; they are ignored.
+- **Requalification on new information.** Each module run hashes its findings (key, kind, label, value and details; the observation time, the order and the values relative to the pass, the days of « Fraîcheur du site » and the trend of « Recrutement », are left out) into `lead_ecosystem_modules.content_hash`; a different hash sets `changed_at`. A changed hash, or a new dossier `content_at` (ADR 0007, which replaces the former `dossier_at` comparison of the due query), marks every lead of the domain in `lead_requalifications`: `requalify_after = now + REQUALIFY_DEBOUNCE_SECONDS` (default 120), pushed by each later change, so modules finishing together give one requalification. A first run that finds nothing, a failed run and a module that ran before the hash existed (no stored hash yet) mark nothing.
+- **Cap.** A mark is due once `requalify_after` passed, at most `REQUALIFY_MAX_PER_DAY` (default 3) times per lead and UTC day, counted in `daily_count` and `counted_on`; beyond, it waits for midnight UTC. `POST /api/v1/leads/{id}/reevaluate` (users only) sets a forced mark due at once, outside the cap and not counted. It also sets `fresh_calls`: the qualification, scoring and aggregator calls of that lead skip the LLM cache read and store their fresh answers in the cache, until the aggregator summary of that evaluation is stored.
+- **Backfill.** A startup step marks, debounced and capped as usual, the leads whose dossier `content_at` is newer than their last evaluation (`leads.qualified_at`), as the former `dossier_at` comparison would have requalified them. A lead already marked is left as is, so the step is idempotent.
+- **Consistency.** The evaluation records the time it started reading (`Completion.read_at`); completing it clears the marks set before, and counts the mark when it was a due requalification of an already evaluated lead. A mark set while the agents ran stays and gives another requalification. A requalification runs the qualification agents, then scoring and aggregation, as a signal from a new source does; edited drafts stay protected as before. Rescoring without model calls is unchanged.
+- **Status.** The list and the detail expose `evaluation` (stage, `evaluated_at`, modules done among those whose provider is ready, planned requalification time and reason, modules changed since the evaluation). The webapp shows « Non évalué », « Certificat seul — en attente d'une autre preuve », « Réévaluation prévue à HH:MM (nouvelles informations) », « Évalué — inspection en cours (3/7 modules) » and « Évalué — inspection complète », a « Réévaluer » button and the modules changed since the last evaluation, and refreshes while the status can move.
+- **Inspection priority.** Each pass of a module first inspects up to `INSPECTION_PRIORITY_BATCH` (default 30) due domains never inspected by it or with a lead created less than an hour ago, newest lead first, then refreshes up to 10 due domains.
+- **Country filter.** Certificates and DNS agents take `countries` (schema 19). A ccTLD of a listed country keeps the host, a ccTLD of another country drops it before the lead exists (counted in the run report), a generic TLD keeps it until the dossier gives a head office outside the list; then the lead is suppressed for its profile (`leads.excluded_reason` « hors pays visé ») when all its sourcing signals come from such filtered agents. A later signal of the lead from a sourcing agent whose own filter admits it (or that has no filter) lifts that exclusion; the SaaS-tenant exclusion is never lifted. The IAM example targets France on both agents.
+- **SaaS tenants.** `SAAS_TENANT_DOMAINS` (data in code, next to `HOSTING_PLATFORMS`, with a test) lists the tenant suffixes of SaaS providers (Salesforce, Okta, Auth0, Entra, SharePoint, Zendesk, Freshdesk, Atlassian, Shopify, CloudFront, Azure Front Door, Heroku, AWS…). A certificates or DNS host under them never creates a lead; a startup step suppresses the existing leads of active profiles on them with the reason « domaine d'un fournisseur SaaS » (idempotent).
+- **Listener errors.** A successful pass clears `listeners.last_error`; `last_error_at` dates the error, and the Sources view shows it only when it is not older than the latest activity.
+
+### Consequences
+
+- A lead shows a verdict within minutes of its first evidence; its verdict may change a few times a day as the inspection fills in.
+- A busy domain costs at most three automatic requalifications per lead and day; the operator can always ask for one more.
+- Leads suppressed for a profile stay in the database with their reason; they are not deleted.
