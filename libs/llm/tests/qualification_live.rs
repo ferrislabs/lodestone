@@ -129,11 +129,15 @@ async fn the_pertinence_agent_answers_the_contract_live() {
         "raw output: {}",
         serde_json::to_string(&structured.value).unwrap()
     );
-    let answers = validate_answers(agent, &structured.value)
+    let output = validate_answers(agent, &structured.value)
         .unwrap_or_else(|violations| panic!("contract violated: {violations}"));
+    println!("agent: {} ({})", agent.name, agent.description);
+    println!("summary: {}", output.summary);
+    assert!(!output.summary.is_empty());
+    assert!(output.summary.chars().count() <= 600);
     println!(
         "validated answers: {}",
-        serde_json::to_string_pretty(&answers.to_json()).unwrap()
+        serde_json::to_string_pretty(&output.answers.to_json()).unwrap()
     );
-    println!("agent score: {:.4}", agent_score(agent, &answers));
+    println!("agent score: {:.4}", agent_score(agent, &output.answers));
 }

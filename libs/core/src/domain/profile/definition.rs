@@ -4,7 +4,7 @@ use uuid::Uuid;
 
 use crate::domain::values::SourceName;
 
-pub const PROFILE_SCHEMA_VERSION: u32 = 4;
+pub const PROFILE_SCHEMA_VERSION: u32 = 5;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -13,7 +13,7 @@ pub const PROFILE_SCHEMA_VERSION: u32 = 4;
     description = "Describes one market: what is sold, which agents scan which sources, which qualification agents judge a lead and how an aggregator sums it up, how leads are scored and which contacts to prefer."
 )]
 pub struct ProfileDefinition {
-    #[schemars(description = "Profile format version. Must be 4.")]
+    #[schemars(description = "Profile format version. Must be 5.")]
     pub schema_version: u32,
     pub identity: Identity,
     #[schemars(description = "Detection agents. At least one is required.")]
@@ -89,6 +89,11 @@ pub struct QualificationAgent {
     pub id: AgentId,
     #[schemars(description = "Display name.")]
     pub name: String,
+    #[schemars(
+        length(min = 1, max = 300),
+        description = "What this agent evaluates, in one sentence, for example the technical maturity of the lead."
+    )]
+    pub description: String,
     #[serde(default = "default_enabled")]
     #[schemars(description = "A disabled agent is kept but not run.")]
     pub enabled: bool,
@@ -117,6 +122,7 @@ pub struct QualificationAgent {
 }
 
 pub const MAX_PROMPT_CHARS: usize = 8000;
+pub const MAX_DESCRIPTION_CHARS: usize = 300;
 pub const MIN_OPTIONS: usize = 2;
 pub const MAX_OPTIONS: usize = 10;
 

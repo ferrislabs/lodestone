@@ -69,6 +69,7 @@ export function LeadDetail({
 						changing={changing}
 						changeError={changeError}
 					/>
+					<QualificationResults results={detail.qualification_results} />
 					<LeadSummary
 						assessment={detail.assessments[0] ?? null}
 						summaryState={detail.summary_state ?? null}
@@ -77,7 +78,6 @@ export function LeadDetail({
 						retrying={retryingSummary}
 						retryError={retrySummaryError}
 					/>
-					<QualificationResults results={detail.qualification_results} />
 					<ScoreBreakdown contributions={detail.score_breakdown} />
 					<SignalsList signals={detail.signals} />
 					<ContactsList contacts={detail.contacts} />

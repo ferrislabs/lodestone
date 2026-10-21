@@ -20,6 +20,11 @@ pub fn contract_schema(agent: &QualificationAgent) -> Value {
         "title": format!("Answers of {}", agent.name),
         "type": "object",
         "properties": {
+            "summary": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 600
+            },
             "answers": {
                 "type": "object",
                 "properties": properties,
@@ -27,7 +32,7 @@ pub fn contract_schema(agent: &QualificationAgent) -> Value {
                 "additionalProperties": false
             }
         },
-        "required": ["answers"],
+        "required": ["summary", "answers"],
         "additionalProperties": false
     })
 }
@@ -89,7 +94,7 @@ mod tests {
     fn schema_describes_every_question_with_its_options() {
         let schema = contract_schema(&agent());
         let answers = &schema["properties"]["answers"];
-        assert_eq!(schema["required"], json!(["answers"]));
+        assert_eq!(schema["required"], json!(["summary", "answers"]));
         assert_eq!(schema["additionalProperties"], json!(false));
         assert_eq!(answers["required"], json!(["q-one"]));
         assert_eq!(answers["additionalProperties"], json!(false));
@@ -108,6 +113,16 @@ mod tests {
             question["description"],
             "Ce lead est-il pertinent pour l'offre ?"
         );
+    }
+
+    #[test]
+    fn the_summary_is_a_required_bounded_string() {
+        let schema = contract_schema(&agent());
+        assert_eq!(
+            schema["properties"]["summary"],
+            json!({"type": "string", "minLength": 1, "maxLength": 600})
+        );
+        assert_eq!(schema["required"][0], "summary");
     }
 
     #[test]

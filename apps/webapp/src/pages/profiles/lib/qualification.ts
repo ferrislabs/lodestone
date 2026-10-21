@@ -28,6 +28,8 @@ export {
 export const MIN_OPTIONS = 2
 export const MAX_OPTIONS = 10
 export const MAX_PROMPT_CHARS = 8000
+export const MAX_DESCRIPTION_CHARS = 300
+export const MAX_SUMMARY_CHARS = 600
 export const DEFAULT_RELIABLE_FROM = 70
 export const DEFAULT_DISCARD_BELOW = 30
 
@@ -411,7 +413,7 @@ export function qualificationSummary(
 ): string {
 	const count = questionsOf(agent).length
 	return [
-		`${count} ${pluralize(count, 'question', 'questions')}`,
+		`${count} ${pluralize(count, "axe d'analyse", "axes d'analyse")}`,
 		`fournisseur : ${providerName(agentProvider(agent), providers)}`,
 		`poids ${agentWeight(agent)}`,
 	].join(' · ')
@@ -452,6 +454,7 @@ export function contractSchema(agent: JsonValue | undefined): JsonObject {
 		title: `Answers of ${agentField(agent, 'name')}`,
 		type: 'object',
 		properties: {
+			summary: { type: 'string', minLength: 1, maxLength: MAX_SUMMARY_CHARS },
 			answers: {
 				type: 'object',
 				properties: Object.fromEntries(
@@ -464,14 +467,15 @@ export function contractSchema(agent: JsonValue | undefined): JsonObject {
 				additionalProperties: false,
 			},
 		},
-		required: ['answers'],
+		required: ['summary', 'answers'],
 		additionalProperties: false,
 	}
 }
 
 export const CONTRACT_EXAMPLE = `{
+  "summary": "<2 à 4 phrases sur ce que l'agent a observé>",
   "answers": {
-    "<identifiant de la question>": {
+    "<identifiant de l'axe>": {
       "type": "choice",
       "choice": "<valeur de l'option>",
       "confidence": 0.0,
@@ -505,9 +509,7 @@ function checkOptions(
 				),
 			)
 		} else if (optionValue !== '' && seen.has(optionValue)) {
-			problems.push(
-				problem(`${itemPath}.value`, 'Doit être unique dans la question'),
-			)
+			problems.push(problem(`${itemPath}.value`, "Doit être unique dans l'axe"))
 		}
 		seen.add(optionValue)
 		const score = numberField(item, 'score')
@@ -526,7 +528,7 @@ function checkQuestions(
 ) {
 	const path = `${base}.questions`
 	if (questions.length === 0) {
-		problems.push(problem(path, 'Doit contenir au moins une question'))
+		problems.push(problem(path, "Doit contenir au moins un axe d'analyse"))
 		return
 	}
 	const seen = new Set<string>()
@@ -583,6 +585,15 @@ export function validateQualification(value: JsonObject): Problem[] {
 			)
 		}
 		seen.add(id)
+		const description = agentField(agent, 'description')
+		if (description.length > MAX_DESCRIPTION_CHARS) {
+			problems.push(
+				problem(
+					`${base}.description`,
+					`Doit contenir au maximum ${MAX_DESCRIPTION_CHARS} caractères`,
+				),
+			)
+		}
 		if (agentField(agent, 'system_prompt').length > MAX_PROMPT_CHARS) {
 			problems.push(
 				problem(

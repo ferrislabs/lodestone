@@ -8,9 +8,9 @@ interface QualificationHelpProps {
 
 const FLOW: readonly string[] = [
 	'Sourcing : les agents trouvent des leads.',
-	'Agents de qualification : chacun répond à ses questions sur chaque lead.',
+	"Agents de qualification : chacun mesure ses axes d'analyse sur chaque lead et en rédige un court résumé.",
 	'Confiance calculée : somme pondérée des scores des réponses, jamais décidée par un modèle.',
-	'Agrégateur : rédige le bilan et le brouillon à partir des réponses.',
+	'Agrégateur : rédige la synthèse finale et le brouillon à partir des rapports de tous les agents.',
 	'Bilan : verdict fiable, à vérifier ou écarté selon les seuils.',
 ]
 
@@ -26,8 +26,9 @@ export function QualificationHelp({
 				))}
 			</ol>
 			<p>
-				Un agent de qualification choisit un fournisseur LLM, un prompt système
-				et des questions à choix. Chaque option vaut un score de 0 à 1.
+				Un agent de qualification décrit ce qu'il évalue, choisit un fournisseur
+				LLM, un prompt système et des axes d'analyse à choix. Chaque option vaut
+				un score de 0 à 1.
 			</p>
 			<div className="flex flex-col gap-1">
 				<p className="font-medium">JSON contractuel</p>

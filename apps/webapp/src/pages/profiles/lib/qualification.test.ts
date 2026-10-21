@@ -52,6 +52,7 @@ describe('templates', () => {
 		expect(agent).toMatchObject({
 			id: 'pertinence',
 			name: 'Pertinence',
+			description: "La pertinence du lead pour l'offre du profil.",
 			enabled: true,
 			provider_id: null,
 			weight: 5,
@@ -173,9 +174,17 @@ describe('contractSchema', () => {
 	const agent = newQualificationAgent('maturite-technique', new Set())
 	const schema = contractSchema(agent)
 
-	it('requires the answers object and forbids extra keys', () => {
-		expect(schema.required).toEqual(['answers'])
+	it('requires the summary and the answers and forbids extra keys', () => {
+		expect(schema.required).toEqual(['summary', 'answers'])
 		expect(schema.additionalProperties).toBe(false)
+	})
+
+	it('bounds the summary to 1 to 600 characters', () => {
+		expect((schema.properties as JsonObject).summary).toEqual({
+			type: 'string',
+			minLength: 1,
+			maxLength: 600,
+		})
 	})
 
 	it('describes each question with its option values', () => {
@@ -228,7 +237,7 @@ describe('summary', () => {
 
 	it('counts questions, names the provider and shows the weight', () => {
 		expect(qualificationSummary(agent, [])).toBe(
-			'1 question · fournisseur : par défaut · poids 5',
+			"1 axe d'analyse · fournisseur : par défaut · poids 5",
 		)
 		const provider = { ...agent, provider_id: 'p1', weight: 8 }
 		const two = addQuestion(withQualification(profile(), [provider]), 0)
@@ -236,7 +245,7 @@ describe('summary', () => {
 			qualificationSummary(qualificationList(two)[0], [
 				{ id: 'p1', name: 'Ollama local', enabled: true },
 			]),
-		).toBe('2 questions · fournisseur : Ollama local · poids 8')
+		).toBe("2 axes d'analyse · fournisseur : Ollama local · poids 8")
 		expect(qualificationSummary(provider, [])).toContain('introuvable')
 	})
 })
@@ -291,6 +300,18 @@ describe('validateQualification', () => {
 		expect(paths(withQualification(profile(), []))).toEqual([
 			'qualification_agents',
 		])
+	})
+
+	it('bounds the description to 300 characters', () => {
+		const base = newQualificationAgent('pertinence', new Set())
+		const long = withQualification(profile(), [
+			{ ...base, description: 'x'.repeat(301) },
+		])
+		expect(paths(long)).toEqual(['qualification_agents[0].description'])
+		const exact = withQualification(profile(), [
+			{ ...base, description: 'x'.repeat(300) },
+		])
+		expect(paths(exact)).toEqual([])
 	})
 
 	it('requires ids unique across both agent lists', () => {

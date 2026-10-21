@@ -137,7 +137,7 @@ describe('defaultValue', () => {
 	it('builds a new profile with every required key', () => {
 		const value = defaultValue(root, root, PROFILE_HINTS)
 		expect(value).toEqual({
-			schema_version: 4,
+			schema_version: 5,
 			identity: { offer: '', target_customer: '' },
 			agents: [],
 			qualification_agents: [],
@@ -308,7 +308,7 @@ describe('validateValue', () => {
 	})
 
 	it('reports a missing required key', () => {
-		const problems = validateValue(root, root, { schema_version: 4 })
+		const problems = validateValue(root, root, { schema_version: 5 })
 		expect(problems.map((p) => p.path)).toContain('identity')
 	})
 })

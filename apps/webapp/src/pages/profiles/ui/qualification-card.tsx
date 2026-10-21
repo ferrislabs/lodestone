@@ -39,6 +39,7 @@ export function QualificationCard({
 	onCancelRemove,
 }: QualificationCardProps) {
 	const name = agentField(agent, 'name')
+	const description = agentField(agent, 'description')
 	const own = problems.filter((problem) =>
 		belongsToPath(problem.path, `qualification_agents[${index}]`),
 	)
@@ -64,6 +65,11 @@ export function QualificationCard({
 						{own.length} {own.length > 1 ? 'problèmes' : 'problème'}
 					</Badge>
 				</div>
+			) : null}
+			{description ? (
+				<p className="text-sm" data-part="description">
+					{description}
+				</p>
 			) : null}
 			<p className="text-xs text-muted-foreground">
 				{qualificationSummary(agent, providers)}

@@ -26,7 +26,7 @@ use crate::{
             definition::{ProfileDefinition, QualificationAgent},
         },
         qualification::{
-            Completion, QualificationResult, ResultId, ResultStatus, ValidAnswers, Violations,
+            Completion, QualificationResult, ResultId, ResultStatus, ValidOutput, Violations,
             agent_score, judge,
             ports::QualificationRepository,
             prompt::{AgentPrompt, build, lead_document, with_violations},
@@ -183,6 +183,7 @@ fn failed(
         model: model.to_owned(),
         prompt_hash: prompt.hash.clone(),
         status: ResultStatus::Invalid,
+        summary: None,
         answers: serde_json::json!({}),
         agent_score: None,
         error: Some(error),
@@ -196,10 +197,10 @@ fn succeeded(
     prompt: &AgentPrompt,
     provider: ProviderId,
     model: &str,
-    answers: &ValidAnswers,
+    output: &ValidOutput,
     at: DateTime<Utc>,
 ) -> (QualificationResult, f64) {
-    let score = agent_score(agent, answers);
+    let score = agent_score(agent, &output.answers);
     let result = QualificationResult {
         id: ResultId(generate_uuid_v7()),
         lead_id: subject.lead.id,
@@ -210,7 +211,8 @@ fn succeeded(
         model: model.to_owned(),
         prompt_hash: prompt.hash.clone(),
         status: ResultStatus::Valid,
-        answers: answers.to_json(),
+        summary: Some(output.summary.clone()),
+        answers: output.answers.to_json(),
         agent_score: Some(score),
         error: None,
         created_at: at,
@@ -342,14 +344,14 @@ where
                 }
             };
             match validate_answers(agent, &structured.value) {
-                Ok(answers) => {
+                Ok(output) => {
                     let (result, score) = succeeded(
                         subject,
                         agent,
                         &prompt,
                         loaded.id,
                         &structured.model,
-                        &answers,
+                        &output,
                         at,
                     );
                     return Ok(AgentOutcome::Result(Box::new(result), Some(score)));

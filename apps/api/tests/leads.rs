@@ -408,17 +408,17 @@ async fn detail_carries_profile_signals_contacts_assessments_and_breakdown(pool:
 }
 
 const QUALIFIED_PROFILE: &str = r#"{
-    "schema_version": 4,
+    "schema_version": 5,
     "identity": {"offer": "Managed IAM", "target_customer": "Companies running Keycloak"},
     "agents": [{"id": "ats-a", "name": "ATS", "source": {"kind": "ats", "keywords": ["sso"]}}],
     "qualification_agents": [
-        {"id": "pertinence", "name": "Pertinence", "system_prompt": "p", "weight": 5,
+        {"id": "pertinence", "name": "Pertinence", "description": "La pertinence du lead.", "system_prompt": "p", "weight": 5,
          "questions": [{"id": "pertinence", "wording": "Pertinent ?", "weight": 5,
             "options": [
                 {"value": "forte", "label": "Forte", "score": 1.0},
                 {"value": "moyenne", "label": "Moyenne", "score": 0.5},
                 {"value": "faible", "label": "Faible", "score": 0.0}]}]},
-        {"id": "maturite", "name": "Maturité", "system_prompt": "m", "weight": 5,
+        {"id": "maturite", "name": "Maturité", "description": "La maturité technique.", "system_prompt": "m", "weight": 5,
          "questions": [{"id": "maturite", "wording": "Mature ?", "weight": 5,
             "options": [
                 {"value": "oui", "label": "Oui", "score": 1.0},
@@ -434,6 +434,7 @@ struct SeededResult<'a> {
     agent: &'a str,
     provider: Option<&'a str>,
     status: &'a str,
+    summary: Option<&'a str>,
     answers: Value,
     score: Option<f64>,
     error: Option<&'a str>,
@@ -481,13 +482,14 @@ impl Seed {
             agent,
             provider,
             status,
+            summary,
             answers,
             score,
             error,
         } = seeded;
         sqlx::query(
-            "INSERT INTO qualification_results (id, lead_id, profile_id, profile_revision, agent_id, provider_id, model, prompt_hash, status, answers, agent_score, error, created_at)
-             SELECT $1, l.id, l.profile_id, 2, $3, $4::uuid, 'gemma_laya', 'hash', $5, $6, $7, $8, now()
+            "INSERT INTO qualification_results (id, lead_id, profile_id, profile_revision, agent_id, provider_id, model, prompt_hash, status, summary, answers, agent_score, error, created_at)
+             SELECT $1, l.id, l.profile_id, 2, $3, $4::uuid, 'gemma_laya', 'hash', $5, $9, $6, $7, $8, now()
              FROM leads l WHERE l.id = $2::uuid",
         )
         .bind(common::generate_uuid_v7())
@@ -498,6 +500,7 @@ impl Seed {
         .bind(answers)
         .bind(score)
         .bind(error)
+        .bind(summary)
         .execute(&self.pool)
         .await
         .expect("result");
@@ -801,6 +804,7 @@ async fn detail_lists_the_qualification_results_with_labels_and_providers(pool: 
             agent: "maturite",
             provider: Some(&provider),
             status: "invalid",
+            summary: None,
             answers: json!({}),
             score: None,
             error: Some("Réponse non conforme au contrat : question `maturite` : pas de réponse"),
@@ -813,6 +817,7 @@ async fn detail_lists_the_qualification_results_with_labels_and_providers(pool: 
             agent: "pertinence",
             provider: Some(&provider),
             status: "valid",
+            summary: Some("Le lead exploite un Keycloak ancien."),
             answers: json!({"pertinence": {"type": "choice", "choice": "moyenne", "confidence": 0.8,
                 "probabilities": {"forte": 0.25, "moyenne": 0.5, "faible": 0.25}}}),
             score: Some(0.5),
@@ -830,6 +835,8 @@ async fn detail_lists_the_qualification_results_with_labels_and_providers(pool: 
     let first = &results[0];
     assert_eq!(first["agent_id"], "pertinence");
     assert_eq!(first["agent_name"], "Pertinence");
+    assert_eq!(first["agent_description"], "La pertinence du lead.");
+    assert_eq!(first["summary"], "Le lead exploite un Keycloak ancien.");
     assert_eq!(first["provider_name"], "Laya");
     assert_eq!(first["provider_id"], provider);
     assert_eq!(first["model"], "gemma_laya");
@@ -849,6 +856,8 @@ async fn detail_lists_the_qualification_results_with_labels_and_providers(pool: 
     let invalid = &results[1];
     assert_eq!(invalid["agent_id"], "maturite");
     assert_eq!(invalid["agent_name"], "Maturité");
+    assert_eq!(invalid["agent_description"], "La maturité technique.");
+    assert!(invalid["summary"].is_null());
     assert_eq!(invalid["status"], "invalid");
     assert!(invalid["agent_score"].is_null());
     assert_eq!(invalid["answers"].as_array().unwrap().len(), 0);

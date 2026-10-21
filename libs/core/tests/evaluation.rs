@@ -106,7 +106,7 @@ fn answers_from(schema: &Value, last: bool) -> Value {
             }),
         );
     }
-    json!({"answers": answers})
+    json!({"summary": "Observations de l'agent sur le lead.", "answers": answers})
 }
 
 impl LlmProvider for Scripted {
@@ -166,6 +166,7 @@ fn agent(id: &str, weight: u8, provider: Option<ProviderId>, question: &str) -> 
     json!({
         "id": id,
         "name": id,
+        "description": format!("DESCRIPTION-OF-{id}"),
         "enabled": true,
         "provider_id": provider.map(|provider| provider.0.to_string()),
         "system_prompt": format!("PROMPT-OF-{id}"),
@@ -377,6 +378,10 @@ async fn valid_answers_are_stored_scored_and_judged(pool: PgPool) {
     assert_eq!(stored.answers["pertinence"]["choice"], "forte");
     assert_eq!(stored.answers["pertinence"]["type"], "choice");
     assert_eq!(stored.prompt_hash.len(), 64);
+    assert_eq!(
+        stored.summary.as_deref(),
+        Some("Observations de l'agent sur le lead.")
+    );
     assert!(stored.error.is_none());
     let lead = harness.lead(profile, "acme.com").await;
     assert_eq!(lead.confidence, Some(100.0));
@@ -402,6 +407,8 @@ async fn the_prompt_carries_the_agent_the_profile_context_the_contract_and_the_l
     assert!(call.system.contains("Offer: "));
     assert!(call.system.contains("Write any free text in French."));
     assert!(call.system.contains("Contract JSON schema:"));
+    assert!(call.system.contains("`summary` is 2 to 4 sentences"));
+    assert_eq!(call.schema["required"], json!(["summary", "answers"]));
     assert!(call.instruction.contains("Question `pertinence`"));
     assert_eq!(call.documents.len(), 2);
     assert!(call.documents[0].starts_with("lead: acme.com"));
@@ -439,7 +446,7 @@ async fn agent_weights_drive_the_lead_confidence_and_the_verdict(pool: PgPool) {
 }
 
 fn broken() -> Value {
-    json!({"answers": {"q": {"type": "choice", "choice": "enorme", "confidence": 0.5,
+    json!({"summary": "Observations.", "answers": {"q": {"type": "choice", "choice": "enorme", "confidence": 0.5,
         "probabilities": {"forte": 1.0, "moyenne": 0.0, "faible": 0.0}}}})
 }
 
@@ -464,6 +471,65 @@ async fn a_contract_violation_is_retried_once_with_the_violation_list(pool: PgPo
     assert!(seen[1].instruction.contains("`q`"));
     let results = harness.results(profile, "acme.com").await;
     assert_eq!(results[0].status, ResultStatus::Valid);
+}
+
+fn solo_answers() -> Value {
+    let profile = ValidatedProfile::parse(definition(vec![agent("solo", 5, None, "q")])).unwrap();
+    let schema = lodestone_core::contract_schema(&profile.definition().qualification_agents[0]);
+    answers_from(&schema, false)
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn an_answer_without_summary_is_retried_then_stored_without_one(pool: PgPool) {
+    let harness = Harness::new(pool, 10);
+    let provider = harness.provider("model-a", 0).await;
+    let mut headless = solo_answers();
+    headless.as_object_mut().unwrap().remove("summary");
+    harness.script(
+        "model-a",
+        vec![Reply::Raw(headless.clone()), Reply::Raw(headless)],
+    );
+    let profile = harness
+        .profile(vec![agent("solo", 5, Some(provider), "q")])
+        .await;
+    harness.observe("acme.com", SourceName::HttpProbe, 10).await;
+
+    let report = harness.step(settings(100, 10)).await;
+
+    assert_eq!(report.invalid, 1);
+    let results = harness.results(profile, "acme.com").await;
+    assert_eq!(results[0].status, ResultStatus::Invalid);
+    assert_eq!(results[0].summary, None);
+    assert!(results[0].error.as_deref().unwrap().contains("`summary`"));
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn an_over_long_summary_is_a_violation_and_a_retry_fixes_it(pool: PgPool) {
+    let harness = Harness::new(pool, 10);
+    let provider = harness.provider("model-a", 0).await;
+    let mut verbose = solo_answers();
+    verbose["summary"] = json!("x".repeat(601));
+    harness.script("model-a", vec![Reply::Raw(verbose), Reply::Best]);
+    let profile = harness
+        .profile(vec![agent("solo", 5, Some(provider), "q")])
+        .await;
+    harness.observe("acme.com", SourceName::HttpProbe, 10).await;
+
+    let report = harness.step(settings(100, 10)).await;
+
+    assert_eq!(report.valid, 1);
+    let seen = harness.seen();
+    assert_eq!(seen.len(), 2);
+    assert!(
+        seen[1]
+            .instruction
+            .contains("`summary` fait 601 caractères")
+    );
+    let results = harness.results(profile, "acme.com").await;
+    assert_eq!(
+        results[0].summary.as_deref(),
+        Some("Observations de l'agent sur le lead.")
+    );
 }
 
 #[sqlx::test(migrations = "../../migrations")]

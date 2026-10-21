@@ -55,8 +55,8 @@ export function QualificationSheet({
 						) : null}
 					</SheetTitle>
 					<SheetDescription>
-						Évalue chaque lead du profil sous un angle, en répondant à des
-						questions à choix.
+						Évalue chaque lead du profil sous un angle, en mesurant des axes
+						d'analyse à choix.
 					</SheetDescription>
 				</SheetHeader>
 				<div className="flex-1 overflow-y-auto p-4">

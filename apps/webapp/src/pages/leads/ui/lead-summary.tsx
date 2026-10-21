@@ -80,6 +80,10 @@ export function LeadSummary({
 		<Card data-section="summary">
 			<CardHeader>
 				<CardTitle>Synthèse</CardTitle>
+				<p className="text-sm text-muted-foreground">
+					Synthèse finale, rédigée par le modèle à partir des rapports de tous
+					les agents ci-dessus.
+				</p>
 			</CardHeader>
 			<CardContent className="flex flex-col gap-4">
 				{summaryState ? (

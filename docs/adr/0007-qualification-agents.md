@@ -19,10 +19,11 @@ A profile has three kinds of agents.
 
 ### Contract JSON
 
-A qualification agent must answer, and only answer:
+A qualification agent must answer, and only answer (contract v2, #152):
 
 ```json
 {
+  "summary": "<2 to 4 sentences, profile language, at most 600 characters>",
   "answers": {
     "<question id>": {
       "type": "choice",
@@ -34,7 +35,7 @@ A qualification agent must answer, and only answer:
 }
 ```
 
-Every question is answered; `choice` and the probability keys are option values of that question; confidence and probabilities are between 0 and 1; probabilities sum to 1 within 0.05 and are renormalised. An answer that breaks the contract is retried once, then the agent's result is stored as invalid and counts as missing.
+`summary` is required: 1 to 600 characters once trimmed, written from the documents only, stored with the result and given to the aggregator. Every question is answered; `choice` and the probability keys are option values of that question; confidence and probabilities are between 0 and 1; probabilities sum to 1 within 0.05 and are renormalised. An answer that breaks the contract is retried once, then the agent's result is stored as invalid and counts as missing.
 
 ### Scores
 
@@ -72,3 +73,9 @@ Each qualification agent and the aggregator pick their provider. The global tria
 - The `llm.qualify` job, the `llm_qualification` source and the fixed prompts (`TRIAGE_V1`, `QUALIFICATION_V1`) are removed. Leads left `uncertain` by the old path are moved back to `new`.
 - A summary whose evidence cannot be verified is kept with `evidence_verified = false` instead of marking the lead uncertain; a lead is never blocked from the list.
 - Leftover: the per-agent `llm.relevance_criteria` of sourcing agents (profile schema) was meant for the removed triage step and is not read anymore. Dropping it needs a schema version.
+
+## Implementation notes (#152)
+
+- Profile schema version 5: a qualification agent has a `description` (1 to 300 characters, what it evaluates). Version 4 documents are upgraded on read with `Évalue : <name>`; the default Pertinence agent gets a fixed sentence.
+- `qualification_results.summary` stores the agent summary (null for results written before the contract v2). The lead detail API returns the agent description and summary; the lead page shows one report card per agent, in profile order, before the aggregator synthesis.
+- Each agent block given to the aggregator starts with the agent name, description and summary, then its measurements. In the interface, questions are called "axes d'analyse".

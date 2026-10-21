@@ -24,6 +24,8 @@ const detail: LeadDetailData = {
 		{
 			agent_id: 'pertinence',
 			agent_name: 'Pertinence',
+			agent_description: "La pertinence du lead pour l'offre.",
+			summary: 'Le lead exploite un Keycloak ancien et recrute.',
 			provider_id: 'prov-1',
 			provider_name: 'Laya',
 			model: 'gemma_laya',
@@ -49,6 +51,8 @@ const detail: LeadDetailData = {
 		{
 			agent_id: 'maturite',
 			agent_name: 'Maturité',
+			agent_description: 'La maturité technique du lead.',
+			summary: null,
 			provider_id: null,
 			provider_name: null,
 			model: '',
@@ -180,8 +184,11 @@ describe('LeadDetail', () => {
 			node
 				? sections.indexOf(node.closest('[data-slot="card"]') as Element)
 				: -1
-		expect(position(summary)).toBeLessThan(
+		expect(
 			position(container.querySelector('article[data-agent]')),
+		).toBeLessThan(position(summary))
+		expect(summary?.textContent).toContain(
+			'Synthèse finale, rédigée par le modèle à partir des rapports de tous les agents',
 		)
 	})
 
@@ -299,21 +306,39 @@ describe('LeadDetail', () => {
 		expect(screen.getAllByText('Growing team')).toHaveLength(1)
 	})
 
-	it('renders one qualification card per agent with answers and bars', () => {
+	it('renders one report card per agent in profile order with its parts', () => {
 		const { container } = renderDetail()
-		expect(screen.getByText('Qualification (2)')).toBeTruthy()
+		expect(screen.getByText('Analyse par agent (2)')).toBeTruthy()
 		const cards = container.querySelectorAll('article[data-agent]')
-		expect(cards).toHaveLength(2)
+		expect(
+			Array.from(cards).map((card) => card.getAttribute('data-agent')),
+		).toEqual(['pertinence', 'maturite'])
 		const valid = container.querySelector('article[data-agent="pertinence"]')
 		expect(valid?.getAttribute('data-status')).toBe('valid')
 		expect(valid?.textContent).toContain('Pertinence')
+		expect(valid?.textContent).toContain('Valide')
 		expect(valid?.textContent).toContain('Laya (gemma_laya)')
-		expect(valid?.textContent).toContain(
+		expect(valid?.textContent).toMatch(/Score de l'agent : 62,5\s%/)
+		expect(valid?.querySelector('[data-part="evaluates"]')?.textContent).toBe(
+			"Ce qu'il évalue : La pertinence du lead pour l'offre.",
+		)
+		expect(valid?.querySelector('[data-part="summary"]')?.textContent).toBe(
+			'Le lead exploite un Keycloak ancien et recrute.',
+		)
+		const text = valid?.textContent ?? ''
+		expect(text.indexOf("Ce qu'il évalue")).toBeLessThan(
+			text.indexOf('Le lead exploite un Keycloak'),
+		)
+		expect(text.indexOf('Le lead exploite un Keycloak')).toBeLessThan(
+			text.indexOf('Mesures'),
+		)
+		const measure = valid?.querySelector('[data-question="pertinence"]')
+		expect(measure?.textContent).toContain(
 			"Ce lead est-il pertinent pour l'offre ?",
 		)
-		expect(valid?.textContent).toContain('Réponse : Moyenne')
-		expect(valid?.textContent).toMatch(/confiance 80\s%/)
-		expect(valid?.textContent).toMatch(/Score de l'agent : 62,5\s%/)
+		expect(measure?.querySelector('code')?.textContent).toBe('pertinence')
+		expect(measure?.textContent).toContain('Réponse : Moyenne')
+		expect(measure?.textContent).toMatch(/confiance 80\s%/)
 		const bars = valid?.querySelectorAll('[data-probability]') ?? []
 		expect(Array.from(bars).map((bar) => bar.getAttribute('style'))).toEqual([
 			'width: 25%;',
@@ -322,13 +347,33 @@ describe('LeadDetail', () => {
 		])
 	})
 
+	it('flags a valid result stored before agent summaries', () => {
+		const first = detail.qualification_results[0]
+		if (!first) throw new Error('fixture without result')
+		const { container } = renderDetail({
+			detail: {
+				...detail,
+				qualification_results: [
+					{ ...first, summary: null, agent_description: null },
+				],
+			},
+		})
+		expect(container.querySelector('[data-part="summary"]')).toBeNull()
+		expect(container.querySelector('[data-part="evaluates"]')).toBeNull()
+		expect(container.querySelector('[data-part="no-summary"]')).not.toBeNull()
+	})
+
 	it('shows the error of an invalid agent result without a score', () => {
 		const { container } = renderDetail()
 		const invalid = container.querySelector('article[data-agent="maturite"]')
 		expect(invalid?.getAttribute('data-status')).toBe('invalid')
 		expect(invalid?.textContent).toContain('Invalide')
 		expect(invalid?.textContent).toContain('fournisseur indisponible')
+		expect(invalid?.textContent).toContain(
+			"Ce qu'il évalue : La maturité technique du lead.",
+		)
 		expect(invalid?.textContent).not.toContain("Score de l'agent")
+		expect(invalid?.querySelector('[data-part="measures"]')).toBeNull()
 		expect(invalid?.querySelectorAll('[data-probability]')).toHaveLength(0)
 	})
 
@@ -343,7 +388,7 @@ describe('LeadDetail', () => {
 		expect(
 			screen.getByText('Aucune qualification pour le moment.'),
 		).toBeTruthy()
-		expect(screen.getByText('Qualification (0)')).toBeTruthy()
+		expect(screen.getByText('Analyse par agent (0)')).toBeTruthy()
 	})
 
 	it('renders evidence as a blockquote with an external provenance link', () => {

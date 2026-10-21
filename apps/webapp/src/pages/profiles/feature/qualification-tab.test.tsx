@@ -53,7 +53,7 @@ const PROVIDERS: ProviderOption[] = [
 
 function base(): JsonObject {
 	return {
-		schema_version: 4,
+		schema_version: 5,
 		identity: { offer: 'o', target_customer: 't' },
 		agents: [newAgent('ats', [])],
 		qualification_agents: [
@@ -144,7 +144,7 @@ describe('qualification tab', () => {
 		const card = document.querySelector('[data-qualification-agent="0"]')
 		expect(card?.textContent).toContain('Pertinence')
 		expect(card?.textContent).toContain(
-			'1 question · fournisseur : par défaut · poids 5',
+			"1 axe d'analyse · fournisseur : par défaut · poids 5",
 		)
 		expect(
 			screen.getByRole('button', { name: 'Ajouter un agent de qualification' }),
@@ -209,6 +209,12 @@ describe('qualification tab', () => {
 		fireEvent.change(sheet().getByLabelText('Nom'), {
 			target: { value: 'Pertinence IAM' },
 		})
+		fireEvent.change(sheet().getByLabelText('Ce que cet agent évalue'), {
+			target: { value: 'Le fit avec Keycloak' },
+		})
+		expect(qualificationList(lastValue(seen))[0]).toMatchObject({
+			description: 'Le fit avec Keycloak',
+		})
 		expect(qualificationList(lastValue(seen))[0]).toMatchObject({
 			name: 'Pertinence IAM',
 			id: 'pertinence-iam',
@@ -217,7 +223,7 @@ describe('qualification tab', () => {
 		expect(qualificationList(lastValue(seen))[0]).toMatchObject({
 			enabled: false,
 		})
-		const group = sheet().getByRole('radiogroup', { name: 'Poids' })
+		const group = sheet().getByRole('radiogroup', { name: "Poids de l'agent" })
 		fireEvent.click(within(group).getByRole('radio', { name: '8' }))
 		expect(qualificationList(lastValue(seen))[0]).toMatchObject({ weight: 8 })
 		fireEvent.change(
@@ -260,7 +266,7 @@ describe('qualification tab', () => {
 		]
 		render(<Harness initial={initial} />)
 		expect(
-			screen.getByText('1 question · fournisseur : introuvable · poids 5'),
+			screen.getByText("1 axe d'analyse · fournisseur : introuvable · poids 5"),
 		).toBeTruthy()
 		fireEvent.click(screen.getByRole('button', { name: 'Modifier Pertinence' }))
 		const select = sheet().getByLabelText(
@@ -272,15 +278,126 @@ describe('qualification tab', () => {
 		).toContain('Fournisseur introuvable')
 	})
 
-	it('edits questions and options', () => {
+	it('groups the editor in named sections without any Avancé block', () => {
+		render(<Harness />)
+		fireEvent.click(screen.getByRole('button', { name: 'Modifier Pertinence' }))
+		const form = sheet()
+		const headings = form
+			.getAllByRole('heading', { level: 3 })
+			.map((heading) => heading.textContent)
+		expect(headings).toEqual(['Agent', 'Prompt système', "Axes d'analyse"])
+		expect(
+			form.getByRole('button', { name: 'Aperçu du JSON contractuel' }),
+		).toBeTruthy()
+		expect(form.queryByText('Avancé')).toBeNull()
+		expect(form.queryByText('Questions')).toBeNull()
+		expect(form.queryByText(/Question \d/)).toBeNull()
+		expect(form.getByLabelText('Axe 1')).toBeTruthy()
+		expect(
+			form.getByRole('button', { name: "Ajouter un axe d'analyse" }),
+		).toBeTruthy()
+		expect(form.getByText("Poids de l'axe")).toBeTruthy()
+	})
+
+	it('shows the agent identifier under its name and edits it', () => {
+		const seen = vi.fn()
+		render(<Harness onValue={seen} />)
+		fireEvent.click(screen.getByRole('button', { name: 'Modifier Pertinence' }))
+		const id = sheet().getByLabelText('Identifiant') as HTMLInputElement
+		expect(id.value).toBe('pertinence')
+		expect(id.className).toContain('font-mono')
+		fireEvent.change(id, { target: { value: 'pertinence-iam' } })
+		expect(qualificationList(lastValue(seen))[0]).toMatchObject({
+			id: 'pertinence-iam',
+		})
+	})
+
+	it('shows the description field with its counter', () => {
+		render(<Harness />)
+		fireEvent.click(screen.getByRole('button', { name: 'Modifier Pertinence' }))
+		const field = sheet().getByLabelText(
+			'Ce que cet agent évalue',
+		) as HTMLTextAreaElement
+		expect(field.tagName).toBe('TEXTAREA')
+		expect(field.rows).toBe(2)
+		expect(field.value).toBe("La pertinence du lead pour l'offre du profil.")
+		expect(sheet().getByText(/45 \/ 300 caractères/)).toBeTruthy()
+	})
+
+	it('shows the axis identifier next to its intitulé and edits it', () => {
+		const seen = vi.fn()
+		render(<Harness onValue={seen} />)
+		fireEvent.click(screen.getByRole('button', { name: 'Modifier Pertinence' }))
+		const axis = within(sheet().getByLabelText('Axe 1'))
+		const id = axis.getByLabelText("Identifiant de l'axe") as HTMLInputElement
+		expect(id.value).toBe('pertinence')
+		expect(id.className).toContain('font-mono')
+		expect(id.getAttribute('type')).not.toBe('hidden')
+		expect(axis.getByLabelText("Intitulé de l'axe")).toBeTruthy()
+		fireEvent.change(id, { target: { value: 'fit' } })
+		expect(questionsOf(qualificationList(lastValue(seen))[0])[0]).toMatchObject(
+			{ id: 'fit' },
+		)
+	})
+
+	it('lays the options out as one table with a single header row', () => {
+		render(<Harness />)
+		fireEvent.click(screen.getByRole('button', { name: 'Modifier Pertinence' }))
+		const axis = within(sheet().getByLabelText('Axe 1'))
+		const table = axis.getByRole('table')
+		const headers = within(table)
+			.getAllByRole('columnheader')
+			.map((header) => header.textContent)
+		expect(headers).toEqual(['Valeur', 'Libellé', 'Score', 'Actions'])
+		expect(axis.getAllByText('Valeur')).toHaveLength(1)
+		expect(axis.getAllByText('Score')).toHaveLength(1)
+		const rows = within(table).getAllByRole('row')
+		expect(rows).toHaveLength(4)
+		expect(within(rows[1] as HTMLElement).getAllByRole('textbox')).toHaveLength(
+			2,
+		)
+		expect(within(rows[1] as HTMLElement).getByRole('spinbutton')).toBeTruthy()
+	})
+
+	it('adds a second axis with its own table', () => {
+		render(<Harness />)
+		fireEvent.click(screen.getByRole('button', { name: 'Modifier Pertinence' }))
+		fireEvent.click(
+			sheet().getByRole('button', { name: "Ajouter un axe d'analyse" }),
+		)
+		expect(sheet().getAllByRole('table')).toHaveLength(2)
+		expect(sheet().getByLabelText('Axe 2')).toBeTruthy()
+	})
+
+	it('shows the description on the agent card', () => {
+		render(<Harness />)
+		expect(
+			screen.getByText("La pertinence du lead pour l'offre du profil."),
+		).toBeTruthy()
+	})
+
+	it('previews the summary field of the contract', () => {
+		render(<Harness />)
+		fireEvent.click(screen.getByRole('button', { name: 'Modifier Pertinence' }))
+		fireEvent.click(
+			sheet().getByRole('button', { name: 'Aperçu du JSON contractuel' }),
+		)
+		const parsed = JSON.parse(
+			screen.getByTestId('contract-preview').textContent ?? '',
+		)
+		expect(parsed.properties.summary.maxLength).toBe(600)
+		expect(parsed.required).toEqual(['summary', 'answers'])
+	})
+
+	it('edits axes and options', () => {
 		const seen = vi.fn()
 		render(<Harness onValue={seen} />)
 		fireEvent.click(screen.getByRole('button', { name: 'Modifier Pertinence' }))
 		fireEvent.click(
-			sheet().getByRole('button', { name: 'Ajouter une question' }),
+			sheet().getByRole('button', { name: "Ajouter un axe d'analyse" }),
 		)
-		let question = within(sheet().getByLabelText('Question 2'))
-		fireEvent.change(question.getByLabelText('Libellé'), {
+		let question = within(sheet().getByLabelText('Axe 2'))
+		fireEvent.change(question.getByLabelText("Intitulé de l'axe"), {
 			target: { value: 'Quel budget ?' },
 		})
 		expect(questionsOf(qualificationList(lastValue(seen))[0])[1]).toMatchObject(
@@ -291,20 +408,23 @@ describe('qualification tab', () => {
 		)
 		fireEvent.click(
 			question.getByRole('button', {
-				name: 'Ajouter une option à la question 2',
+				name: "Ajouter une option à l'axe 2",
 			}),
 		)
-		question = within(sheet().getByLabelText('Question 2'))
+		question = within(sheet().getByLabelText('Axe 2'))
 		expect(
 			optionsOf(questionsOf(qualificationList(lastValue(seen))[0])[1]),
 		).toHaveLength(3)
-		const scores = question.getAllByLabelText('Score')
+		const scores = question.getAllByLabelText(/^Score de l'option/)
 		fireEvent.change(scores[0] as HTMLElement, { target: { value: '0.7' } })
-		fireEvent.change(question.getAllByLabelText('Valeur')[0] as HTMLElement, {
-			target: { value: 'eleve' },
-		})
 		fireEvent.change(
-			question.getAllByLabelText("Libellé de l'option")[0] as HTMLElement,
+			question.getAllByLabelText(/^Valeur de l'option/)[0] as HTMLElement,
+			{
+				target: { value: 'eleve' },
+			},
+		)
+		fireEvent.change(
+			question.getAllByLabelText(/^Libellé de l'option/)[0] as HTMLElement,
 			{ target: { value: 'Élevé' } },
 		)
 		const options = optionsOf(
@@ -313,22 +433,22 @@ describe('qualification tab', () => {
 		expect(options[0]).toEqual({ value: 'eleve', label: 'Élevé', score: 0.7 })
 		fireEvent.click(
 			question.getByRole('button', {
-				name: "Supprimer l'option 3 de la question 2",
+				name: "Supprimer l'option 3 de l'axe 2",
 			}),
 		)
 		expect(
 			optionsOf(questionsOf(qualificationList(lastValue(seen))[0])[1]),
 		).toHaveLength(2)
-		fireEvent.click(
-			sheet().getByRole('button', { name: 'Supprimer la question 2' }),
-		)
+		fireEvent.click(sheet().getByRole('button', { name: "Supprimer l'axe 2" }))
 		expect(questionsOf(qualificationList(lastValue(seen))[0])).toHaveLength(1)
 	})
 
 	it('score inputs step by a tenth between 0 and 1', () => {
 		render(<Harness />)
 		fireEvent.click(screen.getByRole('button', { name: 'Modifier Pertinence' }))
-		const score = sheet().getAllByLabelText('Score')[0] as HTMLInputElement
+		const score = sheet().getAllByLabelText(
+			/^Score de l'option/,
+		)[0] as HTMLInputElement
 		expect(score.step).toBe('0.1')
 		expect(score.min).toBe('0')
 		expect(score.max).toBe('1')
@@ -349,14 +469,14 @@ describe('qualification tab', () => {
 		expect(
 			(
 				sheet().getByRole('button', {
-					name: "Supprimer l'option 1 de la question 1",
+					name: "Supprimer l'option 1 de l'axe 1",
 				}) as HTMLButtonElement
 			).disabled,
 		).toBe(true)
 		expect(
 			(
 				sheet().getByRole('button', {
-					name: 'Supprimer la question 1',
+					name: "Supprimer l'axe 1",
 				}) as HTMLButtonElement
 			).disabled,
 		).toBe(true)
@@ -373,13 +493,19 @@ describe('qualification tab', () => {
 		const preview = screen.getByTestId('contract-preview')
 		expect(preview.tagName).toBe('PRE')
 		const parsed = JSON.parse(preview.textContent ?? '')
+		expect(parsed.required).toEqual(['summary', 'answers'])
+		expect(parsed.properties.summary).toEqual({
+			type: 'string',
+			minLength: 1,
+			maxLength: 600,
+		})
 		expect(parsed.properties.answers.required).toEqual(['pertinence'])
 		expect(
 			parsed.properties.answers.properties.pertinence.properties.choice.enum,
 		).toEqual(['forte', 'moyenne', 'faible'])
 		fireEvent.click(
 			sheet().getByRole('button', {
-				name: 'Ajouter une option à la question 1',
+				name: "Ajouter une option à l'axe 1",
 			}),
 		)
 		expect(
@@ -528,7 +654,7 @@ describe('server problems', () => {
 	it('shows an option score problem under its field', () => {
 		render(<Harness problems={problems} />)
 		fireEvent.click(screen.getByRole('button', { name: 'Modifier Pertinence' }))
-		const scores = sheet().getAllByLabelText('Score')
+		const scores = sheet().getAllByLabelText(/^Score de l'option/)
 		expect(scores[1]?.getAttribute('aria-invalid')).toBe('true')
 		expect(scores[0]?.getAttribute('aria-invalid')).toBe('false')
 		expect(sheet().getByText('Doit être un nombre de 0 à 1')).toBeTruthy()

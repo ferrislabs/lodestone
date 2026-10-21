@@ -133,8 +133,8 @@ fn percent(value: f64) -> String {
 
 pub fn render_agent(agent: &QualificationAgent, result: Option<&QualificationResult>) -> String {
     let mut text = format!(
-        "qualification agent: {} (weight {})\n",
-        agent.name, agent.weight
+        "qualification agent: {} (weight {})\nevaluates: {}\n",
+        agent.name, agent.weight, agent.description
     );
     let Some(result) = result.filter(|result| result.status == ResultStatus::Valid) else {
         let reason = result
@@ -145,6 +145,9 @@ pub fn render_agent(agent: &QualificationAgent, result: Option<&QualificationRes
         ));
         return text;
     };
+    if let Some(summary) = result.summary.as_deref() {
+        text.push_str(&format!("summary: {summary}\n"));
+    }
     text.push_str(&format!(
         "status: valid\nagent score: {}",
         result.agent_score.map_or_else(|| "-".to_owned(), percent)
@@ -216,6 +219,7 @@ mod tests {
             model: "m".to_owned(),
             prompt_hash: String::new(),
             status,
+            summary: (status == ResultStatus::Valid).then(|| "Résumé de l'agent.".to_owned()),
             answers: match status {
                 ResultStatus::Valid => json!({question.id.clone(): {
                     "type": "choice",
@@ -303,6 +307,11 @@ mod tests {
         let agent = &definition.qualification_agents[0];
         let text = render_agent(agent, Some(&result(agent, ResultStatus::Valid)));
         assert!(text.starts_with(&format!("qualification agent: {}", agent.name)));
+        let evaluates = text.find(&format!("evaluates: {}", agent.description));
+        let summary = text.find("summary: Résumé de l'agent.");
+        let measurement = text.find("question: ");
+        assert!(evaluates.is_some() && summary.is_some() && measurement.is_some());
+        assert!(evaluates < summary && summary < measurement);
         assert!(text.contains("status: valid"));
         assert!(text.contains("agent score: 95 %"));
         assert!(text.contains(&agent.questions[0].wording));
@@ -319,6 +328,8 @@ mod tests {
                 .contains("status: invalid, left out of the confidence (fournisseur indisponible)")
         );
         assert!(!invalid.contains("agent score"));
+        assert!(invalid.contains(&format!("evaluates: {}", agent.description)));
+        assert!(!invalid.contains("summary:"));
         let missing = render_agent(agent, None);
         assert!(missing.contains("status: invalid"));
         assert!(missing.contains("no result"));

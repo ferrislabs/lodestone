@@ -31,7 +31,7 @@
       }
     },
     "schema_version": {
-      "description": "Profile format version. Must be 4.",
+      "description": "Profile format version. Must be 5.",
       "type": "integer",
       "format": "uint32",
       "minimum": 0
@@ -720,6 +720,12 @@
       "description": "Evaluates every lead of the profile from one angle by asking a model a list of questions.",
       "type": "object",
       "properties": {
+        "description": {
+          "description": "What this agent evaluates, in one sentence, for example the technical maturity of the lead.",
+          "type": "string",
+          "maxLength": 300,
+          "minLength": 1
+        },
         "enabled": {
           "description": "A disabled agent is kept but not run.",
           "type": "boolean",
@@ -768,6 +774,7 @@
       "required": [
         "id",
         "name",
+        "description",
         "system_prompt",
         "questions"
       ]

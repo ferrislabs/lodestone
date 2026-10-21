@@ -18,6 +18,7 @@ pub mod prompt;
 
 uuid_id!(ResultId);
 
+pub const SUMMARY_MAX_CHARS: usize = 600;
 const PROBABILITY_TOLERANCE: f64 = 0.05;
 const EPSILON: f64 = 1e-9;
 
@@ -27,6 +28,10 @@ pub enum Violation {
     NotAnObject,
     #[error("la clé `answers` est absente ou n'est pas un objet")]
     MissingAnswers,
+    #[error("la clé `summary` est absente ou vide")]
+    MissingSummary,
+    #[error("`summary` fait {length} caractères, le maximum est {SUMMARY_MAX_CHARS}")]
+    SummaryTooLong { length: usize },
     #[error("question `{question}` : pas de réponse")]
     MissingQuestion { question: String },
     #[error("question `{question}` : la réponse n'est pas un objet")]
@@ -48,7 +53,10 @@ pub enum Violation {
 impl Violation {
     pub fn question(&self) -> Option<&str> {
         match self {
-            Self::NotAnObject | Self::MissingAnswers => None,
+            Self::NotAnObject
+            | Self::MissingAnswers
+            | Self::MissingSummary
+            | Self::SummaryTooLong { .. } => None,
             Self::MissingQuestion { question }
             | Self::MalformedAnswer { question }
             | Self::WrongType { question }
@@ -86,6 +94,12 @@ pub struct Answer {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ValidAnswers(pub Vec<Answer>);
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ValidOutput {
+    pub summary: String,
+    pub answers: ValidAnswers,
+}
 
 impl ValidAnswers {
     pub fn to_json(&self) -> Value {
@@ -212,10 +226,24 @@ fn check_probabilities(
     )
 }
 
+fn check_summary(root: &Map<String, Value>) -> Result<String, Violation> {
+    let summary = root
+        .get("summary")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|summary| !summary.is_empty())
+        .ok_or(Violation::MissingSummary)?;
+    let length = summary.chars().count();
+    if length > SUMMARY_MAX_CHARS {
+        return Err(Violation::SummaryTooLong { length });
+    }
+    Ok(summary.to_owned())
+}
+
 pub fn validate_answers(
     agent: &QualificationAgent,
     output: &Value,
-) -> Result<ValidAnswers, Violations> {
+) -> Result<ValidOutput, Violations> {
     let Some(root) = output.as_object() else {
         return Err(Violations(vec![Violation::NotAnObject]));
     };
@@ -224,6 +252,13 @@ pub fn validate_answers(
     };
     let mut valid = Vec::with_capacity(agent.questions.len());
     let mut violations = Vec::new();
+    let summary = match check_summary(root) {
+        Ok(summary) => Some(summary),
+        Err(violation) => {
+            violations.push(violation);
+            None
+        }
+    };
     for question in &agent.questions {
         match answers.get(&question.id) {
             None => violations.push(Violation::MissingQuestion {
@@ -235,10 +270,12 @@ pub fn validate_answers(
             },
         }
     }
-    if violations.is_empty() {
-        Ok(ValidAnswers(valid))
-    } else {
-        Err(Violations(violations))
+    match summary {
+        Some(summary) if violations.is_empty() => Ok(ValidOutput {
+            summary,
+            answers: ValidAnswers(valid),
+        }),
+        _ => Err(Violations(violations)),
     }
 }
 
@@ -346,6 +383,7 @@ pub struct QualificationResult {
     pub model: String,
     pub prompt_hash: String,
     pub status: ResultStatus,
+    pub summary: Option<String>,
     pub answers: Value,
     pub agent_score: Option<f64>,
     pub error: Option<String>,
@@ -418,6 +456,7 @@ mod tests {
         QualificationAgent {
             id: AgentId::new("pertinence"),
             name: "Pertinence".to_owned(),
+            description: "La pertinence".to_owned(),
             enabled: true,
             provider_id: None,
             system_prompt: "prompt".to_owned(),
@@ -436,7 +475,7 @@ mod tests {
     }
 
     fn output(answers: Value) -> Value {
-        json!({"answers": answers})
+        json!({"summary": "Ce que l'agent a observé.", "answers": answers})
     }
 
     fn violations(agent: &QualificationAgent, value: Value) -> Vec<Violation> {
@@ -468,10 +507,10 @@ mod tests {
             &output(json!({"q": answer("forte", 0.9, 0.8, 0.15, 0.05)})),
         )
         .unwrap();
-        assert_eq!(valid.0[0].choice, "forte");
-        assert_eq!(valid.0[0].confidence, 0.9);
-        assert_eq!(valid.to_json()["q"]["type"], "choice");
-        let stored = valid.to_json()["q"]["probabilities"]["forte"]
+        assert_eq!(valid.answers.0[0].choice, "forte");
+        assert_eq!(valid.answers.0[0].confidence, 0.9);
+        assert_eq!(valid.answers.to_json()["q"]["type"], "choice");
+        let stored = valid.answers.to_json()["q"]["probabilities"]["forte"]
             .as_f64()
             .unwrap();
         assert!((stored - 0.8).abs() < 1e-9);
@@ -495,11 +534,56 @@ mod tests {
     }
 
     #[test]
+    fn the_summary_is_required_trimmed_and_bounded() {
+        let agent = agent(vec![question("q", 5)]);
+        let answers = json!({"q": answer("forte", 0.9, 0.8, 0.15, 0.05)});
+        let valid = validate_answers(
+            &agent,
+            &json!({"summary": "  Une observation.  ", "answers": answers}),
+        )
+        .unwrap();
+        assert_eq!(valid.summary, "Une observation.");
+        for bad in [json!(null), json!(""), json!("   "), json!(3)] {
+            assert_eq!(
+                violations(&agent, json!({"summary": bad, "answers": answers})),
+                vec![Violation::MissingSummary]
+            );
+        }
+        assert_eq!(
+            violations(&agent, json!({"answers": answers})),
+            vec![Violation::MissingSummary]
+        );
+        let longest = "é".repeat(600);
+        assert!(validate_answers(&agent, &json!({"summary": longest, "answers": answers})).is_ok());
+        let too_long = "é".repeat(601);
+        assert_eq!(
+            violations(&agent, json!({"summary": too_long, "answers": answers})),
+            vec![Violation::SummaryTooLong { length: 601 }]
+        );
+    }
+
+    #[test]
+    fn a_missing_summary_is_reported_with_the_answer_violations() {
+        let agent = agent(vec![question("q", 5)]);
+        let found = violations(&agent, json!({"answers": {}}));
+        assert_eq!(
+            found,
+            vec![
+                Violation::MissingSummary,
+                Violation::MissingQuestion {
+                    question: "q".to_owned()
+                }
+            ]
+        );
+        assert!(Violations(found).to_string().contains("`summary`"));
+    }
+
+    #[test]
     fn the_output_must_be_an_object_with_answers() {
         let agent = agent(vec![question("q", 5)]);
         assert_eq!(violations(&agent, json!([])), vec![Violation::NotAnObject]);
         assert_eq!(
-            violations(&agent, json!({"answers": 3})),
+            violations(&agent, json!({"summary": "ok", "answers": 3})),
             vec![Violation::MissingAnswers]
         );
         assert_eq!(
@@ -629,15 +713,19 @@ mod tests {
             &output(json!({"q": answer("forte", 0.9, 0.6, 0.3, 0.14)})),
         )
         .unwrap();
-        let total: f64 = valid.0[0].probabilities.iter().map(|(_, p)| p).sum();
+        let total: f64 = valid.answers.0[0]
+            .probabilities
+            .iter()
+            .map(|(_, p)| p)
+            .sum();
         assert!((total - 1.0).abs() < 1e-12);
-        assert!((valid.0[0].probabilities[0].1 - 0.6 / 1.04).abs() < 1e-12);
+        assert!((valid.answers.0[0].probabilities[0].1 - 0.6 / 1.04).abs() < 1e-12);
         let low = validate_answers(
             &agent,
             &output(json!({"q": answer("forte", 0.9, 0.5, 0.3, 0.17)})),
         )
         .unwrap();
-        let total: f64 = low.0[0].probabilities.iter().map(|(_, p)| p).sum();
+        let total: f64 = low.answers.0[0].probabilities.iter().map(|(_, p)| p).sum();
         assert!((total - 1.0).abs() < 1e-12);
     }
 
@@ -656,7 +744,7 @@ mod tests {
     }
 
     fn valid_answers(agent: &QualificationAgent, raw: Value) -> ValidAnswers {
-        validate_answers(agent, &output(raw)).unwrap()
+        validate_answers(agent, &output(raw)).unwrap().answers
     }
 
     #[test]
