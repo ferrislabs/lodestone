@@ -29,6 +29,7 @@ pub mod domain {
     pub struct Signal;
     pub struct SourceProvider;
     pub struct Suppression;
+    pub struct Timeline;
     pub struct User;
 }
 

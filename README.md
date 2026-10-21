@@ -85,6 +85,7 @@ Common flags / env vars (see `libs/args/src/`):
 | `JOBS_RETRY_BASE_SECONDS` | `--jobs-retry-base-seconds` | `10` |
 | `JOBS_SHUTDOWN_GRACE_SECONDS` | `--jobs-shutdown-grace-seconds` | `20` |
 | `JOBS_SOURCE_INTERVAL_MINUTES` | `--jobs-source-interval-minutes` | `60` |
+| `LEAD_EVENTS_RETENTION_DAYS` | `--lead-events-retention-days` | `90` |
 | `LISTENER_IDLE_SECONDS` | `--listener-idle-seconds` | `15` |
 | `LISTENER_LOCK_RETRY_SECONDS` | `--listener-lock-retry-seconds` | `15` |
 | `PROBE_CONCURRENCY` | `--probe-concurrency` | `8` |

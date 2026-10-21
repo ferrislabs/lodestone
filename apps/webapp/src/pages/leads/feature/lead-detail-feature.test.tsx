@@ -57,6 +57,62 @@ const DETAIL: LeadDetailData = {
 	contacts: [],
 }
 
+const TIMELINE = {
+	lead_id: 'l1',
+	in_flight: [],
+	rounds: [
+		{
+			number: 1,
+			trigger: 'detection',
+			sources: ['http_probe'],
+			source_labels: ['http_probe'],
+			reconstructed: false,
+			events: [
+				{
+					id: 'e1',
+					round: 1,
+					step: 'detection',
+					kind: 'signal',
+					status: 'succeeded',
+					actor: { source: 'http_probe' },
+					detail: {},
+					started_at: '2026-01-01T00:00:00Z',
+					reconstructed: false,
+				},
+				{
+					id: 'e2',
+					round: 1,
+					step: 'scoring',
+					kind: 'agent',
+					status: 'succeeded',
+					actor: { agent_name: 'Score global' },
+					detail: {},
+					started_at: '2026-01-01T00:01:00Z',
+					reconstructed: false,
+				},
+			],
+		},
+	],
+	pipeline: {
+		current: 'decision',
+		stages: [
+			{ stage: 'detection', status: 'done', label: 'Détection' },
+			{ stage: 'inspection', status: 'done', label: 'Inspection' },
+			{ stage: 'qualification', status: 'done', label: 'Qualification' },
+			{ stage: 'scoring', status: 'done', label: 'Scoring' },
+			{ stage: 'synthesis', status: 'done', label: 'Synthèse' },
+			{ stage: 'draft', status: 'done', label: 'Brouillon' },
+			{
+				stage: 'decision',
+				status: 'waiting',
+				label: 'Décision',
+				reason: 'Brouillon en attente de décision',
+				next_action: 'Valider ou rejeter le brouillon',
+			},
+		],
+	},
+}
+
 interface Call {
 	method: string
 	path: string
@@ -82,6 +138,7 @@ function install() {
 			const body = typeof init?.body === 'string' ? JSON.parse(init.body) : null
 			calls.push({ method, path: url.pathname, body })
 			if (method === 'PATCH') return statusResponse()
+			if (url.pathname.endsWith('/timeline')) return json({ data: TIMELINE })
 			return json({ data: DETAIL })
 		}),
 	)
@@ -196,5 +253,35 @@ describe('LeadDetailFeature rejection', () => {
 		expect(
 			(screen.getByLabelText('Concurrent') as HTMLInputElement).checked,
 		).toBe(false)
+	})
+})
+
+describe('LeadDetailFeature timeline', () => {
+	it('loads the pipeline and the chronology of the lead', async () => {
+		renderFeature()
+		expect(
+			await screen.findByText(/en attente : Brouillon en attente de décision/),
+		).toBeTruthy()
+		expect(
+			screen.getByText('Prochaine étape : Valider ou rejeter le brouillon'),
+		).toBeTruthy()
+		expect(
+			calls.some((call) => call.path === '/api/v1/leads/l1/timeline'),
+		).toBe(true)
+		expect(
+			screen.getByText(
+				'Évaluation n°1 — déclenchée par : détection (Sonde HTTP)',
+			),
+		).toBeTruthy()
+	})
+
+	it('filters the chronology by step', async () => {
+		renderFeature()
+		await screen.findByText('Signal détecté')
+		fireEvent.click(screen.getByRole('button', { name: 'Scoring' }))
+		await waitFor(() => expect(screen.queryByText('Signal détecté')).toBeNull())
+		expect(document.querySelector('[data-event="agent"]')).toBeTruthy()
+		fireEvent.click(screen.getByRole('button', { name: 'Toutes' }))
+		expect(await screen.findByText('Signal détecté')).toBeTruthy()
 	})
 })

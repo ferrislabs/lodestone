@@ -4,7 +4,7 @@ use lodestone_macros::transactional;
 use tracing::info;
 
 use crate::{
-    application::{LodestoneUseCase, sources::source_job},
+    application::{LodestoneUseCase, sources::source_job, timeline::agent_stopped},
     domain::{
         agent_work::{
             AgentWork, CancelReason, ProfileAgents, WorkTarget, kept_agents, only_removes_agents,
@@ -16,6 +16,7 @@ use crate::{
             ActiveProfile, Profile, ProfileId, Revised, commands::ReviseProfileCommand,
             ports::ProfileRepository,
         },
+        timeline::ports::TimelineRepository,
         values::SourceName,
     },
     infrastructure::job::postgres::PgJobQueue,
@@ -268,10 +269,15 @@ impl LodestoneUseCase {
         repo.clear_retries(id, kept).await
     }
 
-    #[transactional(agent_work)]
+    #[transactional(agent_work, timeline)]
     pub async fn record_agent_stop(&self, stop: &AgentStop) -> Result<(), CoreError> {
         let mut repo = agent_work_repository;
-        repo.record_stop(stop).await
+        let mut timeline = timeline_repository;
+        repo.record_stop(stop).await?;
+        timeline
+            .record(stop.lead_id, &agent_stopped(stop))
+            .await
+            .map(drop)
     }
 
     pub async fn note_stop(

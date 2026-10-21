@@ -11,25 +11,26 @@ use chrono::{DateTime, Utc};
 use common::{EncryptionKey, Secret};
 use lodestone_core::{
     ActiveProfile, AgentRegistry, CancelReason, Clock, CompanyDossier, CompanyRepository,
-    CreateProfileCommand, DossierState, GenerationParams, Lead, LeadId, LeadRepository,
-    LeadScoring, LlmError, LlmProvider, LlmRequest, LlmResponse, LodestoneUseCase, MaxConcurrency,
-    Observation, OfficialData, ProfileId, ProfileName, Provenance, ProviderDefinition, ProviderId,
-    ProviderKind, QualificationResult, ReasoningEffort, ResultId, ResultStatus,
-    ReviseProfileCommand, RevisionNumber, SCORING_VERSION, SignalKind, Siren, SourceName,
-    SuppressionTarget, Tier, TokenPricing, TokenUsage, UnitInterval, ValidatedProfile, Verdict,
-    VerdictCap, VerdictReason, WorkKind,
+    CreateProfileCommand, DossierState, EventStatus, GenerationParams, Lead, LeadId,
+    LeadRepository, LeadScoring, LlmError, LlmProvider, LlmRequest, LlmResponse, LodestoneUseCase,
+    MaxConcurrency, Observation, OfficialData, ProfileId, ProfileName, Provenance,
+    ProviderDefinition, ProviderId, ProviderKind, QualificationResult, ROUND_STARTED,
+    ReasoningEffort, ResultId, ResultStatus, ReviseProfileCommand, RevisionNumber, RoundTrigger,
+    SCORING_VERSION, SignalKind, Siren, SourceName, Stage, StageReason, StageStatus,
+    SuppressionTarget, Tier, TimelineEvent, TimelineStep, TokenPricing, TokenUsage, UnitInterval,
+    ValidatedProfile, Verdict, VerdictCap, VerdictReason, WorkKind,
     evaluation::{EvaluationReport, EvaluationSettings, ProviderBuilder},
     infrastructure::{
         company::postgres::PgCompanyRepository, crypto::AesGcmCipher,
         lead::postgres::PgLeadRepository, llm_cache::postgres::PgLlmCache, postgres::with_tx,
     },
     llm::{CreateLlmProvider, KeyChange, UpdateLlmProvider},
-    verdict_for,
+    timeline_kind, verdict_for,
 };
 use serde_json::{Value, json};
 use sqlx::PgPool;
 use support::{at, domain};
-use tokio::time::sleep;
+use tokio::{spawn, time::sleep};
 
 const IAM: &str = include_str!("../../../docs/examples/profiles/iam-ferriskey.json");
 
@@ -2564,4 +2565,244 @@ async fn disabling_an_agent_mid_flight_drops_the_running_calls_and_stores_nothin
         assert!(harness.results(profile, host).await.is_empty());
         assert!(harness.lead(profile, host).await.qualified_at.is_none());
     }
+}
+
+impl Harness {
+    async fn timeline(&self, profile: ProfileId, host: &str) -> Vec<TimelineEvent> {
+        let lead = self.lead(profile, host).await;
+        self.usecase
+            .lead_timeline(lead.id)
+            .await
+            .unwrap()
+            .rounds
+            .into_iter()
+            .flat_map(|round| round.events)
+            .collect()
+    }
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_qualification_records_its_round_agents_samples_and_combination(pool: PgPool) {
+    let harness = Harness::new(pool, 10);
+    let provider = harness.provider("model-a", 0).await;
+    harness.script(
+        "model-a",
+        vec![Reply::Best, Reply::Fail(LlmError::Refused), Reply::Best],
+    );
+    let profile = harness
+        .profile(vec![sampled(agent("solo", Some(provider), "q"), 3)])
+        .await;
+    harness.observe("acme.com", SourceName::HttpProbe, 10).await;
+
+    harness.step(settings(100, 10)).await;
+
+    let lead = harness.lead(profile, "acme.com").await;
+    let timeline = harness.usecase.lead_timeline(lead.id).await.unwrap();
+    assert_eq!(timeline.rounds.len(), 1);
+    assert_eq!(timeline.rounds[0].number, 1);
+    assert_eq!(timeline.rounds[0].trigger, RoundTrigger::Detection);
+    assert_eq!(timeline.rounds[0].sources, vec!["http_probe".to_owned()]);
+    let events = &timeline.rounds[0].events;
+    let steps: Vec<(TimelineStep, &str, EventStatus)> = events
+        .iter()
+        .map(|event| (event.step, event.kind.as_str(), event.status))
+        .collect();
+    for expected in [
+        (
+            TimelineStep::Detection,
+            timeline_kind::SIGNAL,
+            EventStatus::Succeeded,
+        ),
+        (
+            TimelineStep::Qualification,
+            ROUND_STARTED,
+            EventStatus::Started,
+        ),
+        (
+            TimelineStep::Qualification,
+            timeline_kind::AGENT,
+            EventStatus::Succeeded,
+        ),
+        (
+            TimelineStep::Qualification,
+            timeline_kind::SAMPLE_INVALID,
+            EventStatus::Failed,
+        ),
+        (
+            TimelineStep::Combination,
+            timeline_kind::COMBINED,
+            EventStatus::Succeeded,
+        ),
+    ] {
+        assert!(
+            steps.contains(&expected),
+            "{expected:?} missing in {steps:?}"
+        );
+    }
+    assert!(
+        !steps.contains(&(
+            TimelineStep::Qualification,
+            timeline_kind::AGENT,
+            EventStatus::Started
+        )),
+        "the agent start is folded into its end"
+    );
+    let agent = events
+        .iter()
+        .find(|event| event.kind == timeline_kind::AGENT)
+        .unwrap();
+    assert_eq!(agent.actor.agent_id.as_deref(), Some("solo"));
+    assert_eq!(agent.actor.model.as_deref(), Some("model-a"));
+    assert!(agent.finished_at.is_some());
+    assert!(timeline.in_flight.is_empty());
+    assert!(harness.usecase.in_flight().is_empty());
+    let stage = |stage: Stage| {
+        timeline
+            .pipeline
+            .stages
+            .iter()
+            .find(|state| state.stage == stage)
+            .unwrap()
+            .clone()
+    };
+    assert_eq!(stage(Stage::Qualification).status, StageStatus::Done);
+
+    harness.step(settings(100, 10)).await;
+    assert_eq!(
+        harness.timeline(profile, "acme.com").await.len(),
+        events.len()
+    );
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_failed_model_call_is_recorded_and_the_pipeline_waits_for_the_backoff(pool: PgPool) {
+    let harness = Harness::new(pool, 10);
+    let provider = harness.provider("model-a", 0).await;
+    harness.script("model-a", vec![Reply::Fail(LlmError::Timeout)]);
+    let profile = harness
+        .profile(vec![agent("solo", Some(provider), "q")])
+        .await;
+    harness.observe("acme.com", SourceName::HttpProbe, 10).await;
+
+    let report = harness.step(settings(100, 10)).await;
+
+    assert_eq!(report.deferred, 1);
+    let lead = harness.lead(profile, "acme.com").await;
+    let timeline = harness.usecase.lead_timeline(lead.id).await.unwrap();
+    let events: Vec<&TimelineEvent> = timeline
+        .rounds
+        .iter()
+        .flat_map(|round| round.events.iter())
+        .collect();
+    let failure = events
+        .iter()
+        .find(|event| event.kind == timeline_kind::CALL_FAILED)
+        .unwrap();
+    assert_eq!(failure.status, EventStatus::Waiting);
+    assert_eq!(failure.detail["attempts"], 1);
+    assert!(failure.error.as_deref().unwrap().contains("Échec"));
+    let agent = events
+        .iter()
+        .find(|event| event.kind == timeline_kind::AGENT)
+        .unwrap();
+    assert_eq!(agent.status, EventStatus::Failed);
+    let qualification = timeline
+        .pipeline
+        .stages
+        .iter()
+        .find(|state| state.stage == Stage::Qualification)
+        .unwrap();
+    assert_eq!(qualification.status, StageStatus::Waiting);
+    assert_eq!(
+        qualification.reason_code,
+        Some(StageReason::CallFailureBackoff)
+    );
+    assert!(qualification.next_at.unwrap() > at(1_000));
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn an_escalation_is_recorded_with_its_agents(pool: PgPool) {
+    let harness = Harness::new(pool, 10);
+    let local = harness.provider("model-a", 0).await;
+    let strong = harness.provider("model-b", 0).await;
+    harness.script("model-a", vec![Reply::Middle, Reply::Middle]);
+    harness.script("model-b", vec![Reply::Best, Reply::Best]);
+    let profile = harness
+        .escalating_profile(
+            vec![
+                agent("first", Some(local), "q"),
+                agent("second", Some(local), "q"),
+            ],
+            Some(strong),
+        )
+        .await;
+    harness.observe("acme.com", SourceName::HttpProbe, 10).await;
+
+    harness.step(settings(100, 10)).await;
+
+    let events = harness.timeline(profile, "acme.com").await;
+    assert!(
+        events
+            .iter()
+            .any(|event| event.kind == timeline_kind::ESCALATED)
+    );
+    let escalated: Vec<&TimelineEvent> = events
+        .iter()
+        .filter(|event| {
+            event.step == TimelineStep::Escalation && event.kind == timeline_kind::AGENT
+        })
+        .collect();
+    assert_eq!(escalated.len(), 2);
+    assert!(
+        escalated
+            .iter()
+            .all(|event| event.actor.model.as_deref() == Some("model-b"))
+    );
+    let primary = events
+        .iter()
+        .filter(|event| {
+            event.step == TimelineStep::Qualification && event.kind == timeline_kind::AGENT
+        })
+        .count();
+    assert_eq!(primary, 2);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn running_agents_are_listed_in_flight_while_they_wait_for_the_model(pool: PgPool) {
+    let harness = Arc::new(Harness::new(pool, 10));
+    let provider = harness.provider("model-a", 0).await;
+    let profile = harness
+        .profile(vec![agent("solo", Some(provider), "q")])
+        .await;
+    harness.observe("acme.com", SourceName::HttpProbe, 10).await;
+    let lead = harness.lead(profile, "acme.com").await;
+    harness.pace(Duration::from_millis(400));
+    let running = Arc::clone(&harness);
+    let pass = spawn(async move { running.step(settings(100, 10)).await });
+    let mut seen = Vec::new();
+    for _ in 0..40 {
+        seen = harness
+            .usecase
+            .lead_timeline(lead.id)
+            .await
+            .unwrap()
+            .in_flight;
+        if !seen.is_empty() {
+            break;
+        }
+        sleep(Duration::from_millis(10)).await;
+    }
+    assert_eq!(seen.len(), 1);
+    assert_eq!(seen[0].step, TimelineStep::Qualification);
+    assert_eq!(seen[0].actor.agent_id.as_deref(), Some("solo"));
+    let timeline = harness.usecase.lead_timeline(lead.id).await.unwrap();
+    let qualification = timeline
+        .pipeline
+        .stages
+        .iter()
+        .find(|state| state.stage == Stage::Qualification)
+        .unwrap();
+    assert_eq!(qualification.status, StageStatus::Running);
+    pass.await.unwrap();
+    assert!(harness.usecase.in_flight().is_empty());
 }

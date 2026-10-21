@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO lead_events (\n                id, lead_id, profile_id, round, step, kind, status, actor, detail,\n                started_at, finished_at, error, dedupe_key\n            )\n            SELECT\n                $1, leads.id, leads.profile_id,\n                COALESCE((\n                    SELECT MAX(events.round) FROM lead_events events\n                    WHERE events.lead_id = leads.id AND events.kind = 'round_started'\n                ), 0) + $3,\n                $4, $5, $6, $7, $8, $9, $10, $11, $12\n            FROM leads\n            WHERE leads.id = $2\n            ON CONFLICT (dedupe_key) DO NOTHING\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Int4",
+        "Text",
+        "Text",
+        "Text",
+        "Jsonb",
+        "Jsonb",
+        "Timestamptz",
+        "Timestamptz",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c18328fb65ddee997133cde1c9d67be804182a717fd81443a2f8a80b562b0b7d"
+}

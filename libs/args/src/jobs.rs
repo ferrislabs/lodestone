@@ -66,6 +66,15 @@ pub struct JobsArgs {
         long_help = "Minutes between two runs of the same source"
     )]
     pub source_interval_minutes: u64,
+
+    #[arg(
+        long = "lead-events-retention-days",
+        env = "LEAD_EVENTS_RETENTION_DAYS",
+        name = "LEAD_EVENTS_RETENTION_DAYS",
+        default_value = "90",
+        long_help = "Days the processing events of a lead are kept on its timeline; a daily job removes older ones"
+    )]
+    pub lead_events_retention_days: NonZeroU16,
 }
 
 impl TryFrom<JobsArgs> for JobsConfig {
@@ -104,6 +113,22 @@ mod tests {
         assert_eq!(config.lease, Duration::from_secs(300));
         assert_eq!(config.poll_interval, Duration::from_millis(1000));
         assert_eq!(config.max_attempts.get(), 5);
+        assert_eq!(cmd_retention(), 90);
+    }
+
+    fn cmd_retention() -> u16 {
+        Cmd::try_parse_from(["cmd"])
+            .unwrap()
+            .jobs
+            .lead_events_retention_days
+            .get()
+    }
+
+    #[test]
+    fn the_lead_events_retention_is_configurable_and_never_zero() {
+        let cmd = Cmd::try_parse_from(["cmd", "--lead-events-retention-days", "30"]).unwrap();
+        assert_eq!(cmd.jobs.lead_events_retention_days.get(), 30);
+        assert!(Cmd::try_parse_from(["cmd", "--lead-events-retention-days", "0"]).is_err());
     }
 
     #[test]

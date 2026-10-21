@@ -11,6 +11,7 @@ use chrono::{DateTime, SecondsFormat, Utc};
 use common::{CoreError, generate_uuid_v7};
 use futures_util::{StreamExt, stream};
 use lodestone_macros::transactional;
+use serde_json::json;
 use tracing::{info, warn};
 
 use crate::{
@@ -22,6 +23,10 @@ use crate::{
                 call_with_schema_until,
             },
             limits::{Throttled, locked},
+        },
+        timeline::{
+            AgentTrace, BUDGET_EXHAUSTED, agent_entries, agent_interrupted, agent_span,
+            agent_started, call_failed, combined, in_flight::Subject as Running, round_key,
         },
     },
     domain::{
@@ -47,10 +52,14 @@ use crate::{
         qualification::{
             AgentCallFailure, AgentFailure, AgentKind, AgentOpinion, Completion, DueGates,
             EvidenceStrength, Judgement, QualificationResult, ResultId, ResultStatus,
-            SCORING_VERSION, ValidOutput, Violations, exclusions, judge,
+            SCORING_VERSION, ValidOutput, Verdict, VerdictCap, Violations, agent_retry_delay,
+            exclusions, judge,
             ports::QualificationRepository,
             prompt::{AgentPrompt, build, lead_document, with_ungrounded, with_violations},
             sample_record, validate_answers, vote,
+        },
+        timeline::{
+            EventActor, EventStatus, TimelineEntry, TimelineStep, kind, ports::TimelineRepository,
         },
     },
 };
@@ -334,6 +343,7 @@ enum Escalated {
 struct Pass {
     results: Vec<QualificationResult>,
     opinions: Vec<Option<AgentOpinion>>,
+    entries: Vec<TimelineEntry>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -372,6 +382,7 @@ struct Subject<'a> {
     lead: &'a Lead,
     documents: &'a [UntrustedDocument<'a>],
     fresh: bool,
+    round: String,
     at: DateTime<Utc>,
 }
 
@@ -774,17 +785,18 @@ where
         Ok(AgentOutcome::Result(Box::new(result), Some(opinion)))
     }
 
-    async fn run_agents(
+    async fn run_agents<K: Clock>(
         &self,
         usecase: &LodestoneUseCase,
         subject: &Subject<'_>,
         escalation: Option<ProviderId>,
         providers: &Providers<B::Provider>,
-        budget: &RunBudget,
+        (budget, clock): (&RunBudget, &K),
     ) -> Result<PassOutcome, CoreError> {
         let mut pass = Pass {
             results: Vec::new(),
             opinions: Vec::new(),
+            entries: Vec::new(),
         };
         let agents: &Vec<&QualificationAgent> = &subject
             .definition
@@ -800,9 +812,33 @@ where
                     subject.active,
                     WorkTarget::new(WorkKind::Qualification, &agent.id),
                 );
+                let step = if plan.escalated {
+                    TimelineStep::Escalation
+                } else {
+                    TimelineStep::Qualification
+                };
+                let started = clock.now();
+                let span = agent_span(step, agent.id.as_str(), &subject.round, started);
                 let outcome = match work.stop_reason() {
                     Some(reason) => AgentOutcome::Stopped(reason),
                     None => {
+                        let _running = usecase.enter_step(
+                            Running::Lead(subject.lead.id),
+                            step,
+                            EventActor::agent(agent.id.as_str(), &agent.name),
+                            started,
+                        );
+                        usecase
+                            .record_timeline(
+                                subject.lead.id,
+                                &agent_started(
+                                    step,
+                                    (agent.id.as_str(), &agent.name),
+                                    &span,
+                                    started,
+                                ),
+                            )
+                            .await?;
                         self.evaluate_agent(
                             usecase,
                             subject,
@@ -814,15 +850,53 @@ where
                         .await?
                     }
                 };
-                Ok::<_, CoreError>((agent, plan, work, outcome))
+                Ok::<_, CoreError>((agent, plan, work, outcome, (span, started, clock.now())))
             })
             .buffered(self.settings.concurrency.get());
         while let Some(next) = outcomes.next().await {
-            let (agent, plan, work, outcome) = next?;
+            let (agent, plan, work, outcome, (span, started, finished)) = next?;
+            let step = if plan.escalated {
+                TimelineStep::Escalation
+            } else {
+                TimelineStep::Qualification
+            };
+            let interrupted = |ending: (EventStatus, Option<&str>)| {
+                agent_interrupted(
+                    step,
+                    (agent.id.as_str(), &agent.name),
+                    (&span, started),
+                    finished,
+                    ending,
+                )
+            };
             match outcome {
-                AgentOutcome::BudgetExhausted => return Ok(PassOutcome::BudgetExhausted),
-                AgentOutcome::Stopped(reason) => return Ok(PassOutcome::Stopped(work, reason)),
-                AgentOutcome::CallFailed(failure) => return Ok(PassOutcome::CallFailed(failure)),
+                AgentOutcome::BudgetExhausted => {
+                    usecase
+                        .record_timeline(
+                            subject.lead.id,
+                            &interrupted((EventStatus::Skipped, Some(BUDGET_EXHAUSTED))),
+                        )
+                        .await?;
+                    return Ok(PassOutcome::BudgetExhausted);
+                }
+                AgentOutcome::Stopped(reason) => {
+                    usecase
+                        .record_timeline(
+                            subject.lead.id,
+                            &interrupted((EventStatus::Skipped, Some(reason.as_str()))),
+                        )
+                        .await?;
+                    return Ok(PassOutcome::Stopped(work, reason));
+                }
+                AgentOutcome::CallFailed(failure) => {
+                    usecase
+                        .record_timeline(
+                            subject.lead.id,
+                            &interrupted((EventStatus::Failed, Some(&failure.error))),
+                        )
+                        .await?;
+                    return Ok(PassOutcome::CallFailed(failure));
+                }
                 AgentOutcome::Result(result, opinion) => {
                     info!(
                         monotonic_counter.qualification_results = 1u64,
@@ -831,6 +905,23 @@ where
                         escalated = plan.escalated,
                         "qualification result recorded"
                     );
+                    pass.entries.extend(agent_entries(AgentTrace {
+                        step,
+                        agent: (agent.id.as_str(), &agent.name),
+                        provenance: &result.provenance,
+                        valid: result.status == ResultStatus::Valid,
+                        error: result.error.as_deref(),
+                        raw_samples: &result.raw_samples,
+                        detail: json!({
+                            "agent_score": result.agent_score,
+                            "samples": result.provenance.samples,
+                            "escalated": plan.escalated,
+                            "summary": result.summary,
+                        }),
+                        span: &span,
+                        started_at: started,
+                        finished_at: finished,
+                    }));
                     pass.results.push(*result);
                     pass.opinions.push(opinion);
                 }
@@ -839,14 +930,14 @@ where
         Ok(PassOutcome::Done(pass))
     }
 
-    async fn escalate(
+    async fn escalate<K: Clock>(
         &self,
         usecase: &LodestoneUseCase,
         subject: &Subject<'_>,
         provider: ProviderId,
         pass: &mut Pass,
         providers: &Providers<B::Provider>,
-        budget: &RunBudget,
+        (budget, clock): (&RunBudget, &K),
     ) -> Result<Escalated, CoreError> {
         if self
             .load(usecase, Some(provider), ESCALATION_LABEL, providers)
@@ -857,7 +948,7 @@ where
             return Ok(Escalated::Replaced(false));
         }
         let escalated = match self
-            .run_agents(usecase, subject, Some(provider), providers, budget)
+            .run_agents(usecase, subject, Some(provider), providers, (budget, clock))
             .await?
         {
             PassOutcome::Done(escalated) => escalated,
@@ -873,6 +964,7 @@ where
                 return Ok(Escalated::Replaced(false));
             }
         };
+        pass.entries.extend(escalated.entries);
         let mut replaced = false;
         for (index, (result, opinion)) in escalated
             .results
@@ -921,6 +1013,20 @@ where
             source: &document.source,
             content: &document.content,
         }));
+        let round = round_key(lead.qualified_at);
+        let trigger = if lead.qualified_at.is_none() {
+            "first"
+        } else if fresh {
+            "manual"
+        } else {
+            "requalification"
+        };
+        usecase
+            .record_timeline(
+                lead.id,
+                &TimelineEntry::round_started(read_at, trigger, lead.qualified_at),
+            )
+            .await?;
         let subject = Subject {
             active,
             definition,
@@ -928,12 +1034,13 @@ where
             lead,
             documents: &documents,
             fresh,
+            round,
             at: clock.now(),
         };
         let at = subject.at;
         let revision = active.revision.number;
         let mut pass = match self
-            .run_agents(usecase, &subject, None, providers, budget)
+            .run_agents(usecase, &subject, None, providers, (budget, clock))
             .await?
         {
             PassOutcome::Done(pass) => pass,
@@ -944,7 +1051,7 @@ where
             }
             PassOutcome::CallFailed(failure) => {
                 let record = failure.into_record(lead.id, AgentKind::Qualification, revision);
-                let attempts = usecase.note_agent_failure(&record, at).await?;
+                let attempts = usecase.note_agent_failure(&record, clock.now()).await?;
                 warn!(
                     lead_id = %lead.id,
                     agent = record.agent_id,
@@ -966,6 +1073,16 @@ where
             && definition.escalation.triggers(confidence)
         {
             info!(lead_id = %lead.id, confidence, "grey-zone lead, escalating");
+            pass.entries.push(
+                TimelineEntry::new(
+                    TimelineStep::Escalation,
+                    kind::ESCALATED,
+                    EventStatus::Succeeded,
+                    clock.now(),
+                    format!("escalated:{}", subject.round),
+                )
+                .detail(json!({ "confidence": confidence })),
+            );
             match self
                 .escalate(
                     usecase,
@@ -973,7 +1090,7 @@ where
                     ProviderId(provider),
                     &mut pass,
                     providers,
-                    budget,
+                    (budget, clock),
                 )
                 .await?
             {
@@ -1001,6 +1118,18 @@ where
             .collect();
         sources.sort();
         sources.dedup();
+        pass.entries.push(combined(
+            "indicators",
+            &subject.round,
+            clock.now(),
+            json!({
+                "source": "indicators",
+                "confidence": judgement.confidence,
+                "opinion": judgement.opinion,
+                "verdict": judgement.verdict.map(Verdict::as_str),
+                "cap": judgement.cap.map(VerdictCap::as_str),
+            }),
+        ));
         let completion = Completion {
             lead_id: lead.id,
             profile_revision: revision,
@@ -1020,7 +1149,9 @@ where
             usecase.note_stop(lead.id, work, reason, at).await?;
             return Ok(LeadOutcome::Stopped);
         }
-        usecase.store_evaluation(&pass.results, &completion).await?;
+        usecase
+            .store_evaluation(&pass.results, &completion, &pass.entries)
+            .await?;
         Ok(LeadOutcome::Done { valid, invalid })
     }
 }
@@ -1198,14 +1329,33 @@ impl LodestoneUseCase {
             .await
     }
 
-    #[transactional(qualification)]
+    #[transactional(qualification, timeline)]
     pub(crate) async fn note_agent_failure(
         &self,
         failure: &AgentCallFailure,
         at: DateTime<Utc>,
     ) -> Result<u32, CoreError> {
         let mut repo = qualification_repository;
-        repo.record_agent_failure(failure, at).await
+        let mut timeline = timeline_repository;
+        let attempts = repo.record_agent_failure(failure, at).await?;
+        let step = match failure.kind {
+            AgentKind::Qualification => TimelineStep::Qualification,
+            AgentKind::Scoring => TimelineStep::Scoring,
+        };
+        timeline
+            .record(
+                failure.lead_id,
+                &call_failed(
+                    step,
+                    &failure.agent_id,
+                    attempts,
+                    at + agent_retry_delay(attempts),
+                    &failure.error,
+                    at,
+                ),
+            )
+            .await?;
+        Ok(attempts)
     }
 
     #[transactional(qualification)]
@@ -1217,16 +1367,21 @@ impl LodestoneUseCase {
         repo.agent_failures(lead_id).await
     }
 
-    #[transactional(qualification, agent_work)]
+    #[transactional(qualification, agent_work, timeline)]
     async fn store_evaluation(
         &self,
         results: &[QualificationResult],
         completion: &Completion,
+        entries: &[TimelineEntry],
     ) -> Result<(), CoreError> {
         let mut repo = qualification_repository;
         let mut stops = agent_work_repository;
+        let mut timeline = timeline_repository;
         for result in results {
             repo.store_result(result).await?;
+        }
+        for entry in entries {
+            timeline.record(completion.lead_id, entry).await?;
         }
         stops
             .clear_stops(

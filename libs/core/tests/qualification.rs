@@ -13,12 +13,13 @@ use std::{
 use chrono::{DateTime, SecondsFormat, Utc};
 use common::{EncryptionKey, Secret};
 use lodestone_core::{
-    ActiveProfile, Assessment, Clock, CreateProfileCommand, DraftEdit, DraftStatus,
+    ActiveProfile, Assessment, Clock, CreateProfileCommand, DraftEdit, DraftStatus, EventStatus,
     GenerationParams, Lead, LeadRepository, LeadStatus, LlmError, LlmProvider, LlmRequest,
     LlmResponse, LodestoneUseCase, Observation, ProfileId, ProfileName, Provenance,
     ProviderDefinition, ProviderId, ProviderKind, QualityWarning, Rejection, RejectionReason,
-    ReviseProfileCommand, SignalKind, SourceName, SummaryState, Tier, TokenPricing, TokenUsage,
-    UnitInterval, UserId, ValidatedProfile, Verdict, VerdictFilter,
+    ReviseProfileCommand, SignalKind, SourceName, Stage, StageReason, StageStatus, SummaryState,
+    Tier, TimelineEvent, TimelineStep, TokenPricing, TokenUsage, UnitInterval, UserId,
+    ValidatedProfile, Verdict, VerdictFilter,
     evaluation::{EvaluationSettings, ProviderBuilder},
     infrastructure::{
         crypto::AesGcmCipher, lead::postgres::PgLeadRepository, llm_cache::postgres::PgLlmCache,
@@ -26,7 +27,7 @@ use lodestone_core::{
     },
     llm::CreateLlmProvider,
     qualification::AggregationReport,
-    summary_retry_delay,
+    summary_retry_delay, timeline_kind,
 };
 use serde_json::{Value, json};
 use sqlx::PgPool;
@@ -1588,4 +1589,45 @@ async fn a_decided_draft_stays_untouched_when_the_lead_is_summarised_again(pool:
     assert_eq!(review.reviewed_by, Some(user));
     assert_eq!(review.suggestion, None);
     assert!(harness.queue(&[]).await.is_empty());
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_failed_summary_attempt_is_recorded_and_the_pipeline_waits_for_it(pool: PgPool) {
+    let harness = Harness::new(pool);
+    harness.defaults().await;
+    let profile = harness.profile(vec![agent("solo", None)], None).await;
+    harness.observe("acme.com", SourceName::HttpProbe, 10).await;
+    harness.script(SYNTHESIS, vec![Reply::Fail(LlmError::Refused)]);
+    harness.evaluate().await;
+    harness.set_time(0);
+    harness.summarise(settings(100, 10)).await;
+
+    let lead = harness.lead(profile, "acme.com").await;
+    let timeline = harness.usecase.lead_timeline(lead.id).await.unwrap();
+    let events: Vec<&TimelineEvent> = timeline
+        .rounds
+        .iter()
+        .flat_map(|round| round.events.iter())
+        .collect();
+    let attempt = events
+        .iter()
+        .find(|event| event.kind == timeline_kind::SUMMARY)
+        .unwrap();
+    assert_eq!(attempt.step, TimelineStep::Aggregation);
+    assert_eq!(attempt.status, EventStatus::Failed);
+    let failed = events
+        .iter()
+        .find(|event| event.kind == timeline_kind::SUMMARY_FAILED)
+        .unwrap();
+    assert_eq!(failed.status, EventStatus::Waiting);
+    assert_eq!(failed.detail["attempts"], 1);
+    let synthesis = timeline
+        .pipeline
+        .stages
+        .iter()
+        .find(|state| state.stage == Stage::Synthesis)
+        .unwrap();
+    assert_eq!(synthesis.status, StageStatus::Waiting);
+    assert_eq!(synthesis.reason_code, Some(StageReason::SummaryBackoff));
+    assert!(synthesis.next_at.is_some());
 }

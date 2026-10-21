@@ -4,14 +4,15 @@ use chrono::{DateTime, Duration as Delta, Utc};
 use common::CoreError;
 use fetch::PoliteFetcher;
 use lodestone_core::{
-    CALIBRATION_JOB_KIND, Clock, Job, JobQueue, LodestoneUseCase, PartnerAward, SourceName,
-    WEBHOOK_JOB_KIND,
+    CALIBRATION_JOB_KIND, Clock, DEFAULT_RETENTION_DAYS, Job, JobQueue, LodestoneUseCase,
+    PartnerAward, SourceName, WEBHOOK_JOB_KIND,
     calibration::{calibration_job, is_recurring_calibration, next_calibration},
     company::{PAGE_RECHECK_JOB_KIND, page_recheck_job},
     infrastructure::{contact_target::postgres::PgAtsTargets, job::postgres::PgJobQueue},
     is_continuous,
     jobs::{JobError, JobHandler, JobOutcome, SystemClock},
     sources::{SOURCE_JOB_KIND, SourceRunError, source_job, source_of_job},
+    timeline::{TIMELINE_PURGE_JOB_KIND, next_timeline_purge, timeline_purge_job},
     triage::{CandidateSource, TriageReport},
 };
 use sources::{
@@ -76,6 +77,7 @@ pub struct JobRouter {
     intervals: Intervals,
     webhook: Option<WebhookSink>,
     pages: Option<CompanyPages>,
+    retention_days: u32,
 }
 
 impl JobRouter {
@@ -86,7 +88,28 @@ impl JobRouter {
             intervals,
             webhook: None,
             pages: None,
+            retention_days: DEFAULT_RETENTION_DAYS,
         }
+    }
+
+    pub fn with_timeline_retention(mut self, days: u32) -> Self {
+        self.retention_days = days;
+        self
+    }
+
+    async fn run_timeline_purge(&self) -> Result<JobOutcome, JobError> {
+        let now = SystemClock.now();
+        let removed = self
+            .usecase
+            .purge_lead_events(now, self.retention_days)
+            .await
+            .map_err(|error| JobError::Retryable(error.to_string()))?;
+        info!(
+            removed,
+            retention_days = self.retention_days,
+            "lead timeline purged"
+        );
+        Ok(JobOutcome::RescheduleAt(next_timeline_purge(now)))
     }
 
     pub fn with_page_verifier(mut self, pages: CompanyPages) -> Self {
@@ -332,6 +355,7 @@ impl JobHandler for JobRouter {
             WEBHOOK_JOB_KIND => run_webhook_job(&self.usecase, self.webhook.as_ref(), job).await,
             CALIBRATION_JOB_KIND => self.run_calibration(job).await,
             PAGE_RECHECK_JOB_KIND => self.run_page_recheck().await,
+            TIMELINE_PURGE_JOB_KIND => self.run_timeline_purge().await,
             other => Err(JobError::Permanent(format!(
                 "no handler for job kind `{other}`"
             ))),
@@ -365,6 +389,18 @@ pub async fn schedule_calibration(queue: &Arc<PgJobQueue>) -> Result<(), CoreErr
         .is_some()
     {
         info!("scheduled first calibration run");
+    }
+    Ok(())
+}
+
+pub async fn schedule_timeline_purge(queue: &Arc<PgJobQueue>) -> Result<(), CoreError> {
+    let now = Utc::now();
+    if queue
+        .enqueue(&timeline_purge_job(now)?, now)
+        .await?
+        .is_some()
+    {
+        info!("scheduled the first lead timeline purge");
     }
     Ok(())
 }

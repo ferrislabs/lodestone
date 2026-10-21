@@ -9,8 +9,11 @@ import {
 } from '#/pages/leads/lib/evaluation'
 import { nextStatuses } from '#/pages/leads/lib/transitions'
 import { LeadDetail } from '#/pages/leads/ui/lead-detail'
+import { LeadTimeline } from '#/pages/leads/ui/lead-timeline'
+import { PipelineStepper } from '#/pages/leads/ui/pipeline-stepper'
 import { useRejectionForm } from '#/pages/rejection/feature/use-rejection-form'
 import { RejectionDialog } from '#/pages/rejection/ui/rejection-dialog'
+import { useLeadTimeline } from './use-lead-timeline'
 
 const COMPANY_POLL_MS = 4_000
 
@@ -19,6 +22,7 @@ export function LeadDetailFeature() {
 	const navigate = useNavigate()
 	const queryClient = useQueryClient()
 	const rejection = useRejectionForm()
+	const timeline = useLeadTimeline(leadId)
 
 	const detailQuery = useQuery({
 		...lodestoneApi().get('/api/v1/leads/{lead_id}', {
@@ -113,6 +117,35 @@ export function LeadDetailFeature() {
 			}
 			detail={detail}
 			nextStatuses={detail ? nextStatuses(detail.lead.status) : []}
+			pipeline={
+				timeline.timeline ? (
+					<PipelineStepper
+						stages={timeline.timeline.pipeline.stages}
+						current={timeline.timeline.pipeline.current ?? null}
+						now={timeline.now}
+						error={null}
+					/>
+				) : timeline.state === 'error' ? (
+					<PipelineStepper
+						stages={[]}
+						current={null}
+						now={timeline.now}
+						error={timeline.error}
+					/>
+				) : null
+			}
+			chronology={
+				<LeadTimeline
+					state={timeline.state}
+					errorMessage={timeline.error}
+					rounds={timeline.rounds}
+					inFlight={timeline.timeline?.in_flight ?? []}
+					steps={timeline.steps}
+					selected={timeline.selected}
+					onToggleStep={timeline.toggle}
+					onClearSteps={timeline.clear}
+				/>
+			}
 			onBack={() => {
 				void navigate({
 					to: '/leads',

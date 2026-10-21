@@ -9,11 +9,16 @@ use chrono::{DateTime, Duration, Utc};
 use common::CoreError;
 use futures_util::{StreamExt, future::join_all, stream};
 use lodestone_macros::transactional;
+use serde_json::json;
 use thiserror::Error;
 use tracing::{debug, info};
 
 use crate::{
-    application::{LodestoneUseCase, sources::SourceRunError},
+    application::{
+        LodestoneUseCase,
+        sources::SourceRunError,
+        timeline::{in_flight::Subject, module_ended, module_span, requalification_planned},
+    },
     domain::{
         NormalizedDomain,
         company::{CompanyDossier, Siren, bounded_error},
@@ -31,6 +36,9 @@ use crate::{
         qualification::ports::QualificationRepository,
         source::SourceError,
         suppression::ports::SuppressionRepository,
+        timeline::{
+            EventActor, EventStatus, TimelineEntry, TimelineStep, kind, ports::TimelineRepository,
+        },
     },
 };
 
@@ -329,9 +337,23 @@ impl LodestoneUseCase {
         }
         let module = plan.module;
         let now = clock.now();
+        let span = module_span(module, now);
         let outcome = if not_applicable(module, &item.domain) {
             ModuleOutcome::NotApplicable(None)
         } else {
+            let actor = EventActor::module(module.as_str());
+            let _running = self.enter_step(
+                Subject::Domain(item.domain.clone()),
+                TimelineStep::Inspection,
+                actor.clone(),
+                now,
+            );
+            self.record_domain_timeline(
+                &item.domain,
+                &TimelineEntry::started(TimelineStep::Inspection, kind::MODULE, now, &span)
+                    .actor(actor),
+            )
+            .await?;
             let merged = settings_for(inspected, item);
             let registry = self.registry_context(module, &item.domain).await?;
             let target = InspectionTarget {
@@ -346,7 +368,17 @@ impl LodestoneUseCase {
                 Ok(inspection) => inspection.outcome(),
                 Err(SourceError::RateLimited { retry_after }) => {
                     plan.paused.store(true, Ordering::Release);
-                    self.postpone_ecosystem(&item.domain, module, now + pause_of(retry_after))
+                    let next_run_at = now + pause_of(retry_after);
+                    let waiting = TimelineEntry::ended(
+                        TimelineStep::Inspection,
+                        kind::MODULE,
+                        EventStatus::Waiting,
+                        (&span, now),
+                        clock.now(),
+                    )
+                    .actor(EventActor::module(module.as_str()))
+                    .detail(json!({ "rate_limited": true, "next_run_at": next_run_at }));
+                    self.postpone_ecosystem(&item.domain, module, next_run_at, &waiting)
                         .await?;
                     info!(module = module.as_str(), domain = %item.domain, ?retry_after, "ecosystem inspection paused, host rate limited");
                     return Ok(Inspected::RateLimited);
@@ -364,7 +396,7 @@ impl LodestoneUseCase {
             }
         };
         let changed = self
-            .save_ecosystem_outcome(&item.domain, module, &outcome, now, next_run)
+            .save_ecosystem_outcome(&item.domain, module, &outcome, (now, clock.now()), next_run)
             .await?;
         Ok(Inspected::Ran { outcome, changed })
     }
@@ -531,38 +563,61 @@ impl LodestoneUseCase {
         repo.count_due(modules, profiles, now).await
     }
 
-    #[transactional(ecosystem, qualification)]
+    #[transactional(ecosystem, qualification, timeline)]
     async fn save_ecosystem_outcome(
         &self,
         domain: &NormalizedDomain,
         module: EcosystemModule,
         outcome: &ModuleOutcome,
-        ran_at: DateTime<Utc>,
+        (ran_at, finished_at): (DateTime<Utc>, DateTime<Utc>),
         next_run_at: DateTime<Utc>,
     ) -> Result<bool, CoreError> {
         let mut repo = ecosystem_repository;
         let mut qualification = qualification_repository;
+        let mut timeline = timeline_repository;
         let changed = repo
             .save_outcome(domain, module, outcome, ran_at, next_run_at)
             .await?;
+        let span = module_span(module, ran_at);
+        timeline
+            .record_for_domain(
+                domain,
+                &module_ended(module, outcome, (&span, ran_at), finished_at, changed),
+            )
+            .await?;
         if changed {
+            let after = self.requalify.requalify_after(ran_at);
             let marked = qualification
-                .mark_requalification(domain, self.requalify.requalify_after(ran_at), ran_at)
+                .mark_requalification(domain, after, ran_at)
+                .await?;
+            timeline
+                .record_for_domain(
+                    domain,
+                    &requalification_planned(
+                        after,
+                        finished_at,
+                        "inspection",
+                        Some(module.as_str()),
+                    ),
+                )
                 .await?;
             debug!(module = module.as_str(), %domain, leads = marked, "new findings, requalification planned");
         }
         Ok(changed)
     }
 
-    #[transactional(ecosystem)]
+    #[transactional(ecosystem, timeline)]
     async fn postpone_ecosystem(
         &self,
         domain: &NormalizedDomain,
         module: EcosystemModule,
         next_run_at: DateTime<Utc>,
+        waiting: &TimelineEntry,
     ) -> Result<(), CoreError> {
         let mut repo = ecosystem_repository;
-        repo.postpone(domain, module, next_run_at).await
+        let mut timeline = timeline_repository;
+        repo.postpone(domain, module, next_run_at).await?;
+        timeline.record_for_domain(domain, waiting).await.map(drop)
     }
 
     #[transactional(ecosystem)]

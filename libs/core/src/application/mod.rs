@@ -7,7 +7,7 @@ use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 
 use crate::{
-    application::llm::limits::ProviderGates,
+    application::{llm::limits::ProviderGates, timeline::in_flight::InFlightRegistry},
     domain::{enrichment::RequalifyPolicy, output::WebhookPolicy},
     infrastructure::{agent_registry::InMemoryAgentRegistry, postgres::error::map_sqlx_error},
 };
@@ -37,6 +37,7 @@ pub mod settings;
 pub mod source_providers;
 pub mod sources;
 pub mod suppression;
+pub mod timeline;
 pub mod triage;
 pub mod user;
 
@@ -51,6 +52,7 @@ pub struct LodestoneUseCase {
     pub(crate) requalify: RequalifyPolicy,
     pub(crate) agents: Arc<InMemoryAgentRegistry>,
     pub(crate) gates: Arc<ProviderGates>,
+    pub(crate) in_flight: Arc<InFlightRegistry>,
 }
 
 impl LodestoneUseCase {
@@ -62,6 +64,7 @@ impl LodestoneUseCase {
             requalify: RequalifyPolicy::default(),
             agents: Arc::new(InMemoryAgentRegistry::new()),
             gates: Arc::new(ProviderGates::default()),
+            in_flight: Arc::new(InFlightRegistry::default()),
         }
     }
 

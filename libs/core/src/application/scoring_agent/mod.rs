@@ -19,6 +19,10 @@ use crate::{
             call_with_schema_until,
         },
         rescoring::stored_opinions,
+        timeline::{
+            AgentTrace, BUDGET_EXHAUSTED, agent_entries, agent_interrupted, agent_span,
+            agent_started, combined, in_flight::Subject as Running, round_key,
+        },
     },
     domain::{
         agent_work::{AgentWork, CancelReason, WorkKind, WorkTarget, ports::AgentWorkRepository},
@@ -32,7 +36,7 @@ use crate::{
         },
         profile::{ActiveProfile, contract::scoring_contract_schema, definition::ScoringAgent},
         qualification::{
-            AgentKind, EvidenceStrength, ResultStatus, exclusions, judge,
+            AgentKind, EvidenceStrength, ResultStatus, Verdict, exclusions, judge,
             prompt::{AgentPrompt, lead_document, with_ungrounded},
         },
         scoring_agent::{
@@ -43,6 +47,9 @@ use crate::{
                 report_source, with_violations,
             },
             scoring_sample_record, validate_scoring, vote_scoring,
+        },
+        timeline::{
+            EventActor, EventStatus, TimelineEntry, TimelineStep, ports::TimelineRepository,
         },
     },
 };
@@ -556,6 +563,8 @@ where
             .iter()
             .any(|result| result.status == ResultStatus::Valid);
         let mut results: Vec<ScoringResult> = Vec::new();
+        let mut entries: Vec<TimelineEntry> = Vec::new();
+        let round = &round_key(Some(qualified_at));
         let subject = &subject;
         let agents: &Vec<&ScoringAgent> = &definition.enabled_scoring_agents().collect();
         let mut steps = stream::iter(0..agents.len())
@@ -563,6 +572,8 @@ where
                 let agent = agents[index];
                 let work =
                     usecase.agent_work(active, WorkTarget::new(WorkKind::Scoring, &agent.id));
+                let started = clock.now();
+                let span = agent_span(TimelineStep::Scoring, agent.id.as_str(), round, started);
                 let step = if let Some(reason) = work.stop_reason() {
                     AgentStep::Ran(AgentOutcome::Stopped(reason))
                 } else if !reported {
@@ -574,33 +585,98 @@ where
                         json!([]),
                     )))
                 } else {
+                    let _running = usecase.enter_step(
+                        Running::Lead(lead.id),
+                        TimelineStep::Scoring,
+                        EventActor::agent(agent.id.as_str(), &agent.name),
+                        started,
+                    );
+                    usecase
+                        .record_timeline(
+                            lead.id,
+                            &agent_started(
+                                TimelineStep::Scoring,
+                                (agent.id.as_str(), &agent.name),
+                                &span,
+                                started,
+                            ),
+                        )
+                        .await?;
                     AgentStep::Ran(
                         self.score_agent(usecase, subject, agent, &work, providers, budget)
                             .await?,
                     )
                 };
-                Ok::<_, CoreError>((agent, work, step))
+                Ok::<_, CoreError>((agent, work, step, (span, started, clock.now())))
             })
             .buffered(self.settings.concurrency.get());
         while let Some(next) = steps.next().await {
-            let (agent, work, step) = next?;
+            let (agent, work, step, (span, started, finished)) = next?;
+            let trace = |result: &ScoringResult| {
+                agent_entries(AgentTrace {
+                    step: TimelineStep::Scoring,
+                    agent: (agent.id.as_str(), &agent.name),
+                    provenance: &result.provenance,
+                    valid: result.status == ResultStatus::Valid,
+                    error: result.error.as_deref(),
+                    raw_samples: &result.raw_samples,
+                    detail: json!({
+                        "score": result.score,
+                        "verdict": result.verdict.as_ref().map(|verdict| verdict.choice.as_str()),
+                        "samples": result.provenance.samples,
+                    }),
+                    span: &span,
+                    started_at: started,
+                    finished_at: finished,
+                })
+            };
             let outcome = match step {
                 AgentStep::Unreported(result) => {
+                    entries.extend(trace(&result));
                     results.push(*result);
                     continue;
                 }
                 AgentStep::Ran(outcome) => outcome,
             };
+            let interrupted = |ending: (EventStatus, Option<&str>)| {
+                agent_interrupted(
+                    TimelineStep::Scoring,
+                    (agent.id.as_str(), &agent.name),
+                    (&span, started),
+                    finished,
+                    ending,
+                )
+            };
             match outcome {
-                AgentOutcome::BudgetExhausted => return Ok(LeadOutcome::BudgetExhausted),
+                AgentOutcome::BudgetExhausted => {
+                    usecase
+                        .record_timeline(
+                            lead.id,
+                            &interrupted((EventStatus::Skipped, Some(BUDGET_EXHAUSTED))),
+                        )
+                        .await?;
+                    return Ok(LeadOutcome::BudgetExhausted);
+                }
                 AgentOutcome::Stopped(reason) => {
+                    usecase
+                        .record_timeline(
+                            lead.id,
+                            &interrupted((EventStatus::Skipped, Some(reason.as_str()))),
+                        )
+                        .await?;
                     usecase.note_stop(lead.id, &work, reason, at).await?;
                     return Ok(LeadOutcome::Stopped);
                 }
                 AgentOutcome::CallFailed(failure) => {
+                    usecase
+                        .record_timeline(
+                            lead.id,
+                            &interrupted((EventStatus::Failed, Some(&failure.error))),
+                        )
+                        .await?;
                     let record =
                         failure.into_record(lead.id, AgentKind::Scoring, active.revision.number);
-                    let attempts = usecase.note_agent_failure(&record, at).await?;
+                    let attempts = usecase.note_agent_failure(&record, clock.now()).await?;
                     warn!(
                         lead_id = %lead.id,
                         agent = record.agent_id,
@@ -617,6 +693,7 @@ where
                         status = result.status.as_str(),
                         "scoring result recorded"
                     );
+                    entries.extend(trace(&result));
                     results.push(*result);
                 }
             }
@@ -637,13 +714,29 @@ where
             return Ok(LeadOutcome::Stopped);
         }
         let decision = decide(&definition.scoring_agents, &results, &calibrations, found);
+        entries.push(combined(
+            "scoring",
+            round,
+            clock.now(),
+            json!({
+                "source": "scoring",
+                "score": decision.score,
+                "verdict": decision.verdict.map(Verdict::as_str),
+                "confidence": decision.confidence,
+                "reason": decision.reason_text(),
+                "contributors": decision.contributors,
+            }),
+        ));
         let completion = ScoringCompletion {
             lead_id: lead.id,
             profile_revision: active.revision.number,
             qualified_at,
             decision,
         };
-        if !usecase.store_scoring(&results, &completion).await? {
+        if !usecase
+            .store_scoring(&results, &completion, &entries)
+            .await?
+        {
             warn!(lead_id = %lead.id, "scoring dropped, the lead was qualified again meanwhile");
         }
         Ok(LeadOutcome::Done { valid, invalid })
@@ -773,21 +866,29 @@ impl LodestoneUseCase {
             .await
     }
 
-    #[transactional(scoring_agent, agent_work)]
+    #[transactional(scoring_agent, agent_work, timeline)]
     async fn store_scoring(
         &self,
         results: &[ScoringResult],
         completion: &ScoringCompletion,
+        entries: &[TimelineEntry],
     ) -> Result<bool, CoreError> {
         let mut repo = scoring_agent_repository;
         let mut stops = agent_work_repository;
+        let mut timeline = timeline_repository;
         for result in results {
             repo.store_result(result).await?;
         }
         stops
             .clear_stops(completion.lead_id, &[WorkKind::Scoring])
             .await?;
-        repo.complete(completion).await
+        let completed = repo.complete(completion).await?;
+        if completed {
+            for entry in entries {
+                timeline.record(completion.lead_id, entry).await?;
+            }
+        }
+        Ok(completed)
     }
 
     #[transactional(scoring_agent)]

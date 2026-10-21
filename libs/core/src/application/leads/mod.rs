@@ -9,6 +9,7 @@ use crate::{
         LodestoneUseCase,
         output::schedule_webhook,
         quality::{Decided, record_decisions},
+        timeline::{decision_detail, reevaluation_requested, status_changed},
     },
     domain::{
         agent_work::ports::AgentWorkRepository,
@@ -36,6 +37,7 @@ use crate::{
         quality::{DecisionKind, Rejection},
         scoring_agent::ports::ScoringRepository,
         suppression::ports::SuppressionRepository,
+        timeline::ports::TimelineRepository,
     },
     infrastructure::job::postgres::PgJobOutbox,
 };
@@ -251,7 +253,7 @@ impl LodestoneUseCase {
         self.request_lead_reevaluation_at(lead_id, Utc::now()).await
     }
 
-    #[transactional(lead, suppression, qualification)]
+    #[transactional(lead, suppression, qualification, timeline)]
     pub async fn request_lead_reevaluation_at(
         &self,
         lead_id: LeadId,
@@ -260,6 +262,7 @@ impl LodestoneUseCase {
         let mut leads = lead_repository;
         let mut suppression = suppression_repository;
         let mut qualification = qualification_repository;
+        let mut timeline = timeline_repository;
         let lead = leads.find(lead_id).await?.ok_or(CoreError::NotFound)?;
         if suppression.is_domain_suppressed(&lead.domain).await?
             || suppression.lead_exclusion(lead_id).await?.is_some()
@@ -267,6 +270,9 @@ impl LodestoneUseCase {
             return Err(CoreError::NotFound);
         }
         qualification.request_reevaluation(lead_id, now).await?;
+        timeline
+            .record(lead_id, &reevaluation_requested(now))
+            .await?;
         info!(lead.id = %lead_id, "lead reevaluation requested");
         Ok(lead)
     }
@@ -308,7 +314,8 @@ impl LodestoneUseCase {
         scoring_agent,
         profile,
         decision,
-        assessment
+        assessment,
+        timeline
     )]
     pub async fn change_lead_status(
         &self,
@@ -324,6 +331,7 @@ impl LodestoneUseCase {
         let mut scoring_agents = scoring_agent_repository;
         let mut profiles = profile_repository;
         let mut decisions = decision_repository;
+        let mut timeline = timeline_repository;
 
         let lead = leads.find(lead_id).await?.ok_or(CoreError::NotFound)?;
         if suppression.is_domain_suppressed(&lead.domain).await? {
@@ -349,6 +357,18 @@ impl LodestoneUseCase {
             .ok_or_else(|| {
                 CoreError::Conflict("lead status changed concurrently, reload and retry".to_owned())
             })?;
+        let kinds: Vec<DecisionKind> = DecisionKind::for_lead(target).into_iter().collect();
+        timeline
+            .record(
+                lead_id,
+                &status_changed(
+                    from,
+                    target,
+                    updated.updated_at,
+                    Some(decision_detail(&kinds, actor, rejection.as_ref())),
+                ),
+            )
+            .await?;
         if let Some(kind) = DecisionKind::for_lead(target) {
             record_decisions(
                 &mut decisions,

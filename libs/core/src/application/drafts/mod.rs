@@ -8,6 +8,7 @@ use crate::{
         LodestoneUseCase,
         output::schedule_webhook,
         quality::{Decided, record_decisions},
+        timeline::{decision_detail, status_changed},
     },
     domain::{
         lead::{
@@ -22,6 +23,7 @@ use crate::{
         profile::{ProfileId, ports::ProfileRepository},
         quality::{DecisionKind, Rejection},
         suppression::ports::SuppressionRepository,
+        timeline::ports::TimelineRepository,
     },
     infrastructure::job::postgres::PgJobOutbox,
 };
@@ -208,7 +210,8 @@ impl LodestoneUseCase {
         qualification,
         scoring_agent,
         profile,
-        decision
+        decision,
+        timeline
     )]
     async fn decide_draft(
         &self,
@@ -224,6 +227,7 @@ impl LodestoneUseCase {
         let mut scoring_agents = scoring_agent_repository;
         let mut profiles = profile_repository;
         let mut decisions = decision_repository;
+        let mut timeline = timeline_repository;
 
         let record = visible_draft(&mut assessments, &mut suppression, id).await?;
         let review = require_pending(&record)?;
@@ -255,6 +259,17 @@ impl LodestoneUseCase {
             .ok_or_else(|| conflict("lead status changed concurrently, reload and retry"))?;
         let lead_kind = DecisionKind::for_lead(to);
         let kinds: Vec<DecisionKind> = std::iter::once(decision.kind()).chain(lead_kind).collect();
+        timeline
+            .record(
+                record.lead.id,
+                &status_changed(
+                    from,
+                    to,
+                    now,
+                    Some(decision_detail(&kinds, actor, decision.rejection())),
+                ),
+            )
+            .await?;
         record_decisions(
             &mut decisions,
             &mut qualification,

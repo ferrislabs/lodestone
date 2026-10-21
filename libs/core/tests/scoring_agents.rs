@@ -14,22 +14,25 @@ use chrono::{DateTime, TimeDelta, Utc};
 use common::{EncryptionKey, Secret};
 use lodestone_core::{
     ActiveProfile, AgentKind, AgentRegistry, CancelReason, Clock, CreateProfileCommand,
-    GenerationParams, Lead, LeadDetail, LeadRepository, LlmError, LlmProvider, LlmRequest,
-    LlmResponse, LodestoneUseCase, MaxConcurrency, Observation, ProfileId, ProfileName, Provenance,
-    ProviderDefinition, ProviderId, ProviderKind, ResultStatus, ReviseProfileCommand, SignalKind,
-    SourceName, Tier, TokenPricing, TokenUsage, UnitInterval, ValidatedProfile, Verdict,
-    VerdictReason, VerdictSource, WorkKind,
+    EventStatus, GenerationParams, Lead, LeadDetail, LeadRepository, LeadStatus, LlmError,
+    LlmProvider, LlmRequest, LlmResponse, LodestoneUseCase, MaxConcurrency, Observation, ProfileId,
+    ProfileName, Provenance, ProviderDefinition, ProviderId, ProviderKind, ResultStatus,
+    ReviseProfileCommand, SignalKind, SourceName, Stage, StageReason, StageStatus, Tier,
+    TimelineEvent, TimelineStep, TokenPricing, TokenUsage, UnitInterval, UserId, ValidatedProfile,
+    Verdict, VerdictReason, VerdictSource, WorkKind,
     evaluation::{EvaluationSettings, ProviderBuilder},
     infrastructure::{
         crypto::AesGcmCipher, lead::postgres::PgLeadRepository, llm_cache::postgres::PgLlmCache,
         postgres::with_tx,
     },
     llm::{CreateLlmProvider, KeyChange, UpdateLlmProvider},
+    timeline_kind,
 };
 use serde_json::{Value, json};
-use sqlx::PgPool;
+use sqlx::{PgPool, query};
 use support::{at, domain};
 use tokio::time::sleep;
+use uuid::Uuid;
 
 const IAM: &str = include_str!("../../../docs/examples/profiles/iam-ferriskey.json");
 const CLASSIFIER: &str = "model-class";
@@ -1785,4 +1788,154 @@ async fn scoring_and_aggregation_run_several_leads_at_once_within_the_provider_l
     for host in hosts {
         assert_eq!(harness.detail(profile, host).await.assessments.len(), 1);
     }
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_complete_flow_records_scoring_synthesis_draft_and_decision(pool: PgPool) {
+    let harness = Harness::new(pool.clone()).await;
+    let profile = harness
+        .profile(
+            vec![qualification_agent("fit")],
+            vec![scoring_agent("global", 5, None, 1)],
+        )
+        .await;
+    harness.observe("acme.com", SourceName::HttpProbe, 10).await;
+
+    harness.pass().await;
+
+    let lead = harness.lead(profile, "acme.com").await;
+    let timeline = harness.usecase.lead_timeline(lead.id).await.unwrap();
+    let events: Vec<&TimelineEvent> = timeline
+        .rounds
+        .iter()
+        .flat_map(|round| round.events.iter())
+        .collect();
+    let has = |step: TimelineStep, kind: &str, status: EventStatus| {
+        events
+            .iter()
+            .any(|event| event.step == step && event.kind == kind && event.status == status)
+    };
+    assert!(has(
+        TimelineStep::Scoring,
+        timeline_kind::AGENT,
+        EventStatus::Succeeded
+    ));
+    assert!(has(
+        TimelineStep::Combination,
+        timeline_kind::COMBINED,
+        EventStatus::Succeeded
+    ));
+    assert!(has(
+        TimelineStep::Aggregation,
+        timeline_kind::SUMMARY,
+        EventStatus::Succeeded
+    ));
+    assert!(has(
+        TimelineStep::Aggregation,
+        timeline_kind::DRAFT,
+        EventStatus::Succeeded
+    ));
+    assert!(has(
+        TimelineStep::Decision,
+        timeline_kind::STATUS_CHANGED,
+        EventStatus::Succeeded
+    ));
+    assert!(!has(
+        TimelineStep::Aggregation,
+        timeline_kind::SUMMARY,
+        EventStatus::Started
+    ));
+    let scoring = events
+        .iter()
+        .find(|event| {
+            event.step == TimelineStep::Combination && event.detail["source"] == "scoring"
+        })
+        .unwrap();
+    assert_eq!(scoring.detail["score"], 85);
+    assert_eq!(scoring.detail["verdict"], "fiable");
+    assert!(timeline.rounds.iter().all(|round| round.number == 1));
+    let status = |stage: Stage| {
+        timeline
+            .pipeline
+            .stages
+            .iter()
+            .find(|state| state.stage == stage)
+            .unwrap()
+            .clone()
+    };
+    for done in [
+        Stage::Detection,
+        Stage::Qualification,
+        Stage::Scoring,
+        Stage::Synthesis,
+        Stage::Draft,
+    ] {
+        assert_eq!(status(done).status, StageStatus::Done, "{done:?}");
+    }
+    let decision = status(Stage::Decision);
+    assert_eq!(decision.status, StageStatus::Waiting);
+    assert_eq!(
+        decision.reason_code,
+        Some(StageReason::DraftAwaitingDecision)
+    );
+    assert_eq!(timeline.pipeline.current, Some(Stage::Decision));
+
+    let user = Uuid::now_v7();
+    query("INSERT INTO users (id, sub, username, display_name) VALUES ($1, $1::text, 'alice', 'Alice')")
+        .bind(user)
+        .execute(&pool)
+        .await
+        .unwrap();
+    harness
+        .usecase
+        .change_lead_status(lead.id, LeadStatus::Validated, UserId(user), None)
+        .await
+        .unwrap();
+    let decided = harness.usecase.lead_timeline(lead.id).await.unwrap();
+    let change = decided
+        .rounds
+        .iter()
+        .flat_map(|round| round.events.iter())
+        .find(|event| {
+            event.kind == timeline_kind::STATUS_CHANGED && event.detail["to"] == "validated"
+        })
+        .unwrap();
+    assert_eq!(change.detail["decisions"][0], "lead_validated");
+    assert_eq!(change.step, TimelineStep::Decision);
+    let decision = decided
+        .pipeline
+        .stages
+        .iter()
+        .find(|state| state.stage == Stage::Decision)
+        .unwrap();
+    assert_eq!(decision.status, StageStatus::Done);
+    assert_ne!(decided.pipeline.current, Some(Stage::Decision));
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_scoring_call_failure_is_recorded_with_its_next_attempt(pool: PgPool) {
+    let harness = Harness::new(pool).await;
+    harness.script("model-synth#scoring", vec![network()]);
+    let profile = harness.sample_flow(vec![qualification_agent("fit")]).await;
+    harness.qualify().await;
+    harness.score().await;
+
+    let lead = harness.lead(profile, "acme.com").await;
+    let timeline = harness.usecase.lead_timeline(lead.id).await.unwrap();
+    let failure = timeline
+        .rounds
+        .iter()
+        .flat_map(|round| round.events.iter())
+        .find(|event| event.kind == timeline_kind::CALL_FAILED)
+        .unwrap();
+    assert_eq!(failure.step, TimelineStep::Scoring);
+    assert!(failure.detail["next_attempt_at"].is_string());
+    let scoring = timeline
+        .pipeline
+        .stages
+        .iter()
+        .find(|state| state.stage == Stage::Scoring)
+        .unwrap();
+    assert_eq!(scoring.status, StageStatus::Waiting);
+    assert_eq!(scoring.reason_code, Some(StageReason::CallFailureBackoff));
 }
