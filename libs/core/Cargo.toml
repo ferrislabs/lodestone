@@ -33,3 +33,8 @@ tokio = { workspace = true, features = ["test-util"] }
 proptest = { workspace = true }
 authz = { workspace = true, features = ["mock"] }
 mockall = { workspace = true }
+divan = { workspace = true }
+
+[[bench]]
+name = "domain"
+harness = false

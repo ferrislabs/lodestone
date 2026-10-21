@@ -1,5 +1,7 @@
 # Lodestone
 
+[![CodSpeed](https://img.shields.io/endpoint?url=https://codspeed.io/badge.json)](https://app.codspeed.io/ferrislabs/lodestone?utm_source=badge)
+
 Open-source lead detection. Lodestone finds companies likely to buy a product, qualifies them, and queues message drafts for a human to approve. It never sends a message itself.
 
 Market criteria live in detection profiles stored in Postgres. The first profile targets IAM for FerrisKey and Autharie. Plan: `docs/plan.md`. Vocabulary: `docs/glossary.md`.
