@@ -17,7 +17,12 @@ const entry: DraftEntry = {
 		verdict: 'a_verifier',
 		profile: { id: 'p1', name: 'Fintech' },
 	},
-	draft: { subject: 'Hello Acme', body: 'Body text', status: 'pending' },
+	draft: {
+		subject: 'Hello Acme',
+		body: 'Body text',
+		status: 'pending',
+		revision: 0,
+	},
 	summary: 'Summary text',
 	verdict_narrative: 'Narrative text',
 	approach_angle: 'Angle text',
@@ -174,6 +179,7 @@ describe('DraftReview decided draft', () => {
 	const decidedDraft = {
 		subject: 'Hello Acme',
 		body: 'Line one\nLine two',
+		revision: 0,
 	}
 
 	it.each([

@@ -81,7 +81,7 @@ pub use domain::{
         SignalId, UnknownLeadStatus,
         draft::{
             DraftEdit, DraftEntry, DraftPage, DraftProblem, DraftQueue, DraftRecord, DraftReview,
-            DraftStatus, InvalidDraftTransition, MAX_BODY_CHARS, MAX_REASON_CHARS,
+            DraftRevision, DraftStatus, InvalidDraftTransition, MAX_BODY_CHARS, MAX_REASON_CHARS,
             MAX_SUBJECT_CHARS, normalize_reason,
         },
         ports::{AssessmentRepository, ContactRepository, LeadRepository, SignalRepository},

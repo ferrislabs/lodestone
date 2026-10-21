@@ -7,8 +7,8 @@ use sqlx::{Postgres, QueryBuilder};
 use uuid::Uuid;
 
 use crate::{
-    Assessment, AssessmentId, DraftEdit, DraftPage, DraftRecord, DraftReview, Lead, LeadId,
-    ProfileId, ProfileName,
+    Assessment, AssessmentId, DraftEdit, DraftPage, DraftRecord, DraftReview, DraftRevision, Lead,
+    LeadId, ProfileId, ProfileName,
     domain::lead::{ports::AssessmentRepository, query::VerdictFilter},
     infrastructure::{
         assessment::postgres::model::{ASSESSMENT_COLUMNS, AssessmentRow, evidence_to_json},
@@ -71,6 +71,9 @@ impl<'tx> AssessmentRepository for PgAssessmentRepository<'tx> {
                 .unwrap_or_else(DraftReview::pending)
         });
         let draft = assessment.draft.as_ref();
+        let draft_revision =
+            i32::try_from(review.as_ref().map_or(0, |review| review.revision.get()))
+                .map_err(|_| CoreError::Internal("draft revision out of range".to_owned()))?;
         let warnings: Vec<&str> = assessment
             .quality_warnings
             .iter()
@@ -84,9 +87,9 @@ impl<'tx> AssessmentRepository for PgAssessmentRepository<'tx> {
                 draft_reviewed_by, draft_reviewed_at, draft_edited_at, draft_rejection_reason,
                 draft_original_subject, draft_original_body, draft_suggested_subject,
                 draft_suggested_body, draft_outdated_at, created_at, quality_warnings,
-                provider_id, provider_name, generation, samples
+                provider_id, provider_name, generation, samples, draft_revision
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29)
             "#,
         )
         .bind(assessment.id.0)
@@ -146,6 +149,7 @@ impl<'tx> AssessmentRepository for PgAssessmentRepository<'tx> {
         .bind(&assessment.provenance.provider_name)
         .bind(&generation)
         .bind(samples)
+        .bind(draft_revision)
         .execute(&mut ***tx)
         .await
         .map_err(map_sqlx_error)?;
@@ -246,8 +250,11 @@ impl<'tx> AssessmentRepository for PgAssessmentRepository<'tx> {
         &mut self,
         id: AssessmentId,
         edit: &DraftEdit,
+        expected: DraftRevision,
         at: DateTime<Utc>,
     ) -> Result<bool, CoreError> {
+        let expected = i32::try_from(expected.get())
+            .map_err(|_| CoreError::Internal("draft revision out of range".to_owned()))?;
         let mut tx = self.tx.lock().await;
         let result = sqlx::query(
             r#"
@@ -256,14 +263,16 @@ impl<'tx> AssessmentRepository for PgAssessmentRepository<'tx> {
                 draft_original_body    = COALESCE(draft_original_body, draft_body),
                 draft_subject          = COALESCE($2, draft_subject),
                 draft_body             = COALESCE($3, draft_body),
-                draft_edited_at        = $4
-            WHERE id = $1 AND draft_status = 'pending'
+                draft_edited_at        = $4,
+                draft_revision         = draft_revision + 1
+            WHERE id = $1 AND draft_status = 'pending' AND draft_revision = $5
             "#,
         )
         .bind(id.0)
         .bind(edit.subject())
         .bind(edit.body())
         .bind(at)
+        .bind(expected)
         .execute(&mut ***tx)
         .await
         .map_err(map_sqlx_error)?;
@@ -276,7 +285,10 @@ impl<'tx> AssessmentRepository for PgAssessmentRepository<'tx> {
         &mut self,
         id: AssessmentId,
         review: &DraftReview,
+        expected: DraftRevision,
     ) -> Result<bool, CoreError> {
+        let expected = i32::try_from(expected.get())
+            .map_err(|_| CoreError::Internal("draft revision out of range".to_owned()))?;
         let mut tx = self.tx.lock().await;
         let result = sqlx::query(
             r#"
@@ -285,7 +297,7 @@ impl<'tx> AssessmentRepository for PgAssessmentRepository<'tx> {
                 draft_reviewed_by      = $3,
                 draft_reviewed_at      = $4,
                 draft_rejection_reason = $5
-            WHERE id = $1 AND draft_status = 'pending'
+            WHERE id = $1 AND draft_status = 'pending' AND draft_revision = $6
             "#,
         )
         .bind(id.0)
@@ -293,6 +305,7 @@ impl<'tx> AssessmentRepository for PgAssessmentRepository<'tx> {
         .bind(review.reviewed_by.map(|user| user.0))
         .bind(review.reviewed_at)
         .bind(review.rejection_reason.as_deref())
+        .bind(expected)
         .execute(&mut ***tx)
         .await
         .map_err(map_sqlx_error)?;

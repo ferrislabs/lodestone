@@ -3,13 +3,21 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useParams } from '@tanstack/react-router'
 
 import { errorMessage, lodestoneApi } from '#/api/lodestone'
-import { parseApiError } from '#/lib/api-errors'
+import { type ParsedApiError, parseApiError } from '#/lib/api-errors'
+import { CONFLICT_MESSAGE, isConflict } from '#/pages/drafts/lib/conflict'
 import { valuesFromEntry } from '#/pages/drafts/lib/edit'
 import type { DraftEntry } from '#/pages/drafts/lib/types'
 import { DraftEditor } from '#/pages/drafts/ui/draft-editor'
 import { DraftReview } from '#/pages/drafts/ui/draft-review'
 import { useRejectionForm } from '#/pages/rejection/feature/use-rejection-form'
 import { RejectionDialog } from '#/pages/rejection/ui/rejection-dialog'
+
+function readError(error: unknown): ParsedApiError {
+	const parsed = parseApiError(error)
+	return isConflict(parsed)
+		? { ...parsed, message: CONFLICT_MESSAGE, fields: {} }
+		: parsed
+}
 
 export function DraftReviewFeature() {
 	const { assessmentId } = useParams({ from: '/_app/drafts/$assessmentId' })
@@ -79,9 +87,14 @@ function DraftReviewForms({ entry }: DraftReviewFormsProps) {
 		void navigate({ to: '/drafts', search: {} })
 	}
 
+	const refreshOnConflict = async (error: unknown) => {
+		if (isConflict(parseApiError(error))) await invalidate()
+	}
+
 	const edit = useMutation({
 		...lodestoneApi().mutation('patch', '/api/v1/drafts/{assessment_id}')
 			.mutationOptions,
+		onError: refreshOnConflict,
 		onSuccess: async (response) => {
 			draftForm.reset(valuesFromEntry(response.data))
 			await invalidate()
@@ -90,11 +103,13 @@ function DraftReviewForms({ entry }: DraftReviewFormsProps) {
 	const approve = useMutation({
 		...lodestoneApi().mutation('post', '/api/v1/drafts/{assessment_id}/approve')
 			.mutationOptions,
+		onError: refreshOnConflict,
 		onSuccess: decided,
 	})
 	const reject = useMutation({
 		...lodestoneApi().mutation('post', '/api/v1/drafts/{assessment_id}/reject')
 			.mutationOptions,
+		onError: refreshOnConflict,
 		onSuccess: decided,
 	})
 
@@ -103,7 +118,11 @@ function DraftReviewForms({ entry }: DraftReviewFormsProps) {
 		onSubmit: ({ value }) => {
 			edit.mutate({
 				path: { assessment_id: assessmentId },
-				body: { subject: value.subject, body: value.body },
+				body: {
+					subject: value.subject,
+					body: value.body,
+					expected_revision: entry.draft.revision,
+				},
 			})
 		},
 	})
@@ -112,9 +131,9 @@ function DraftReviewForms({ entry }: DraftReviewFormsProps) {
 	const dirty =
 		values.subject !== entry.draft.subject || values.body !== entry.draft.body
 
-	const editError = edit.isError ? parseApiError(edit.error) : null
-	const approveError = approve.isError ? parseApiError(approve.error) : null
-	const rejectError = reject.isError ? parseApiError(reject.error) : null
+	const editError = edit.isError ? readError(edit.error) : null
+	const approveError = approve.isError ? readError(approve.error) : null
+	const rejectError = reject.isError ? readError(reject.error) : null
 	const decisionError = approveError?.message ?? null
 
 	const copy = (text: string) => {
@@ -174,7 +193,7 @@ function DraftReviewForms({ entry }: DraftReviewFormsProps) {
 				rejection.submit((payload) =>
 					reject.mutate({
 						path: { assessment_id: assessmentId },
-						body: payload,
+						body: { ...payload, expected_revision: entry.draft.revision },
 					}),
 				)
 			}
@@ -201,7 +220,10 @@ function DraftReviewForms({ entry }: DraftReviewFormsProps) {
 				void navigate({ to: '/leads/$leadId', params: { leadId } })
 			}
 			onApprove={() => {
-				approve.mutate({ path: { assessment_id: assessmentId } })
+				approve.mutate({
+					path: { assessment_id: assessmentId },
+					body: { expected_revision: entry.draft.revision },
+				})
 			}}
 			onStartReject={() => rejection.start()}
 			onCopy={copy}

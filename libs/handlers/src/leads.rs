@@ -529,6 +529,8 @@ pub struct DraftDto {
     /// Set when the summary was rewritten after a human edit, so the suggestion is newer than the draft.
     #[schema(format = DateTime)]
     pub outdated_at: Option<String>,
+    /// Increases on each edit; send it back as `expected_revision` to refuse a stale write.
+    pub revision: u32,
 }
 
 impl DraftDto {
@@ -560,6 +562,7 @@ impl DraftDto {
                 .as_ref()
                 .map(|suggestion| suggestion.body.clone()),
             outdated_at: review.outdated_at.map(|at| at.to_rfc3339()),
+            revision: review.revision.get(),
         }
     }
 }

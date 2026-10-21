@@ -1477,6 +1477,7 @@ async fn edit_subject(harness: &Harness, assessment: &Assessment, subject: &str)
         .edit_draft(
             assessment.id,
             DraftEdit::new(Some(subject.to_owned()), None).unwrap(),
+            None,
         )
         .await
         .unwrap();
@@ -1545,7 +1546,7 @@ async fn an_edited_pending_draft_is_kept_with_the_new_one_as_a_suggestion(pool: 
     assert_eq!(harness.queue(&[]).await, ["acme.com"]);
     harness
         .usecase
-        .approve_draft(latest.id, harness.user().await)
+        .approve_draft(latest.id, harness.user().await, None)
         .await
         .unwrap();
 }
@@ -1565,6 +1566,7 @@ async fn a_decided_draft_stays_untouched_when_the_lead_is_summarised_again(pool:
             first.id,
             user,
             Rejection::new(RejectionReason::Other, Some("hors sujet")).unwrap(),
+            None,
         )
         .await
         .unwrap();

@@ -17,7 +17,12 @@ const entry: DraftEntry = {
 		verdict: 'fiable',
 		profile: { id: 'p1', name: 'Fintech' },
 	},
-	draft: { subject: 'Hello Acme', body: 'Body', status: 'pending' },
+	draft: {
+		subject: 'Hello Acme',
+		body: 'Body',
+		status: 'pending',
+		revision: 0,
+	},
 	summary: 's',
 	verdict_narrative: 'v',
 	approach_angle: 'angle',
