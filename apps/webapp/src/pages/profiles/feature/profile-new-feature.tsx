@@ -106,6 +106,13 @@ export function ProfileNewFeature() {
 							tab={tab}
 							value={editor.value}
 							problems={problems}
+							onNavigate={(next) =>
+								void navigate({
+									to: '/profiles/new',
+									search: { tab: next },
+									replace: true,
+								})
+							}
 							onChange={(next) => {
 								if (create.isError) create.reset()
 								setLocalProblems([])

@@ -20,7 +20,7 @@ describe('prepareSave', () => {
 
 	it('accepts a filled definition', () => {
 		const filled = {
-			schema_version: 2,
+			schema_version: 3,
 			identity: { offer: 'o', target_customer: 't' },
 			agents: [newAgent('ats', [])],
 			scoring: { factors: [] },

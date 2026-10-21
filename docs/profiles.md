@@ -8,7 +8,7 @@ Profiles live in Postgres. Each edit creates a new revision; earlier revisions a
 
 ## Schema
 
-The JSON Schema is `docs/schemas/profile.v2.schema.json`. It is generated from `ProfileDefinition` and must not be edited by hand. Regenerate it with:
+The JSON Schema is `docs/schemas/profile.v3.schema.json`. It is generated from `ProfileDefinition` and must not be edited by hand. Regenerate it with:
 
 ```
 UPDATE_SCHEMA=1 cargo test -p lodestone-core --test profile_examples
@@ -23,7 +23,7 @@ Without `UPDATE_SCHEMA=1` the same test fails if the committed file is stale. Th
 
 ## Sections
 
-- `schema_version`: must be 2. See [Version 1 documents](#version-1-documents).
+- `schema_version`: must be 3. See [Older versions](#older-versions).
 - `identity`: the offer and the target customer, in free text.
 - `agents`: the detection agents; at least one is required. An agent searches one source with its own settings (see ADR 0005). Several agents of the same kind are allowed.
   - `id`: slug matching `^[a-z0-9][a-z0-9-]{0,62}$`, unique in the profile.
@@ -31,9 +31,33 @@ Without `UPDATE_SCHEMA=1` the same test fails if the committed file is stale. Th
   - `enabled`: defaults to `true`. A disabled agent is kept but not run.
   - `source`: an object whose `kind` selects the source; the other fields are that kind's settings (table below).
   - `llm.relevance_criteria`: optional, not empty when present. Criteria for triaging this agent's candidates; the profile's criteria apply without it. Qualification of a lead always uses the profile's criteria.
-- `scoring`: weighted factors, each made of a signal, an optional value and a weight. A lead's score is the sum, over factors, of `weight × measure`. For a normal factor the measure is the highest strength (0 to 1) among the lead's signals of that kind, and of that value when one is set; several matching signals count once. The reserved factor `distinct_signals` measures the number of distinct signal kinds on the lead. The score and its per-factor breakdown are recomputed whenever the lead's signals change, and stored on the lead.
-- `contact_ranking`: preferred email local parts, most preferred first.
-- `llm`: the qualification threshold and the relevance criteria given to the model.
+- `scoring`: weighted factors, each made of a signal, an optional value and a weight. The weight is an integer from 1 to 10, validated by the server (`scoring.factors[i].weight`). A lead's score is the sum, over factors, of `weight × measure`. For a normal factor the measure is the highest strength (0 to 1) among the lead's signals of that kind, and of that value when one is set; several matching signals count once. The reserved factor `distinct_signals` measures the number of distinct signal kinds on the lead. The score and its per-factor breakdown are recomputed whenever the lead's signals change, and stored on the lead. Scores stay in points.
+
+  The maximum possible score is the sum, over factors, of `weight × cap`. The cap is 1 for a normal factor; for `distinct_signals` it is the number of distinct signal kinds among the profile's other factors (values are ignored: two `product_detected` factors count one kind). `ProfileDefinition::max_score()` computes it. Example: the IAM example has weights 10, 5, 3, 8, 7, 2 on six kinds plus `distinct_signals` at 2, so its maximum is 35 + 2 × 6 = 47.- `contact_ranking`: preferred email local parts, most preferred first.
+- `llm`: the qualification threshold and the relevance criteria given to the model. `qualification_threshold` is a percentage, an integer from 0 to 100 (`llm.qualification_threshold`), of the maximum possible score. A lead is sent to qualification when its score is at least `threshold / 100 × max_score` (`ProfileDefinition::qualification_points()`). With the IAM example, 40 % of 47 is 18.8 points. Changing a weight moves the points a lead needs, not the percentage.
+
+## How scoring works
+
+Each factor looks for one signal kind, optionally one value. Its contribution is `weight × strength` of the strongest matching signal on the lead (strength from 0 to 1, set by the source). No matching signal gives 0. The `distinct_signals` factor contributes `weight × number of distinct signal kinds` on the lead, which rewards leads seen by several agents.
+
+- Lead score = sum of the contributions, in points.
+- Max score = sum of the weights, with `distinct_signals` counted as `weight × number of distinct signal kinds among the other factors`.
+- A lead is sent to qualification when `score >= threshold / 100 × max score`. Above it, the LLM writes an assessment and a draft for human approval.
+
+Strengths set by the sources:
+
+| Origin | Signal | Strength |
+| --- | --- | --- |
+| HTTP probe | `product_detected` | 0.9 |
+| HTTP probe | `debt_marker` | 0.6 |
+| DNS CNAME | `saas_provider` | 0.9 |
+| Keyword candidate accepted by the rules | keyword sources (`public_tender`, `job_offer`, ...) | 0.7 |
+| Candidate accepted by the LLM triage | keyword sources | 0.6 |
+| Address found in `security.txt` | `role_contact_found` | 0.7 |
+| Address extracted by the LLM | `role_contact_found` | 0.5 |
+| Address guessed from a role | `role_contact_found` | 0.2 |
+
+Example with the IAM weights: a lead with a Keycloak fingerprint (strength 0.9) and a job offer accepted by the rules (strength 0.7) scores `10 × 0.9 + 8 × 0.7 = 14.6` points. With a threshold of 40 % of a maximum of 47, the bar is 18.8 points, so this lead is not qualified until more signals arrive.
 
 ## Agent kinds
 
@@ -54,15 +78,19 @@ Validation paths include the agent index, for example `agents[1].source.keywords
 - `http_probe` probes hosts found by certificate transparency. Without a `certificate_transparency` agent, it only probes hosts imported by an operator.
 - `ats` only visits companies already detected by `certificate_transparency`, `http_probe` or `dns_cname` signals.
 
-## Version 1 documents
+## Older versions
 
-Version 1 listed sources as optional fields of a `sources` object. A version 1 document is still accepted: parsing upgrades it to version 2 with one enabled agent per configured source, in this order: certificate transparency, HTTP probe, DNS CNAME, BOAMP, DECP, TED, France Travail, ATS. The agent `id` is the kind in kebab case (`certificate-transparency`, `france-travail`) and the `name` is its display name. Stored revisions are not rewritten; they are upgraded when read, and new revisions are written in version 2.
+Stored revisions are never rewritten. Versions 1 and 2 are accepted and upgraded when read; new revisions are written in version 3. Errors on an older document keep that document's paths.
 
-## How agents run
+### Version 1 to 2
 
-Each enabled agent of a kind runs on its own. A keyword source (BOAMP, DECP, TED, France Travail, ATS) collects once for the union of the keywords of every enabled agent of the kind, then routes each candidate with each agent's rules. Certificate transparency reads logs for the union of labels and attributes a host to the agents whose labels match. DNS CNAME and HTTP probe apply each agent's patterns, fingerprints and excluded products to the same observations.
+Version 1 listed sources as optional fields of a `sources` object. Parsing upgrades it to one enabled agent per configured source, in this order: certificate transparency, HTTP probe, DNS CNAME, BOAMP, DECP, TED, France Travail, ATS. The agent `id` is the kind in kebab case (`certificate-transparency`, `france-travail`) and the `name` is its display name.
 
-- Every run records its profile and agent, and every signal records the agent that first observed it. Evidence found by two agents of the same profile is one signal: the fingerprint ignores the agent and the first agent is kept. Rows written before agents existed have no agent.
-- A disabled agent produces no run and no signal. A profile without an enabled agent of a kind gets no run for that kind.
-- Triage uses the agent's `llm.relevance_criteria` when set, the profile's criteria otherwise. The LLM cache is scoped per agent.
-- DECP partner awards are recorded per profile, merged over the agents of the profile.
+### Version 2 to 3
+
+Versions 1 and 2 had free number weights and a threshold in points. The upgrade, applied to both:
+
+- Weights: when every weight is an integer from 1 to 10 they are kept. Otherwise each becomes `max(1, round(w × 10 / largest weight))`.
+- Threshold: `clamp(round(old threshold / old maximum × 100), 0, 100)`, with the old maximum computed from the old weights by the same formula. When the old maximum is not positive the threshold becomes 50.
+
+For the IAM v1 and v2 examples the weights 30, 15, 10, 25, 20, 5, 5 become 10, 5, 3, 8, 7, 2, 2, and a threshold of 50 points out of 135 becomes 37 %.

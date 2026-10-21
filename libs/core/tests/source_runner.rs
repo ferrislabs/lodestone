@@ -271,11 +271,11 @@ async fn replaying_a_run_creates_no_duplicate_and_keeps_profiles_apart(pool: PgP
     assert_eq!(leads(&pool, beta).await, vec!["beta.io"]);
 }
 
-async fn active_profile_weighted(pool: &PgPool, name: &str, weight: f64) -> ProfileId {
+async fn active_profile_weighted(pool: &PgPool, name: &str, weight: u8) -> ProfileId {
     let mut value: serde_json::Value = serde_json::from_str(support::MINIMAL_PROFILE).unwrap();
     value["scoring"]["factors"] = json!([
         {"signal": "product_detected", "value": "keycloak", "weight": weight},
-        {"signal": "distinct_signals", "weight": 1.0}
+        {"signal": "distinct_signals", "weight": 1}
     ]);
     let usecase = LodestoneUseCase::new(pool.clone());
     let id = usecase
@@ -306,8 +306,8 @@ async fn lead_score(pool: &PgPool, profile: ProfileId, host: &str) -> lodestone_
 
 #[sqlx::test(migrations = "../../migrations")]
 async fn same_input_gets_separate_leads_and_scores_per_profile(pool: PgPool) {
-    let alpha = active_profile_weighted(&pool, "alpha", 10.0).await;
-    let beta = active_profile_weighted(&pool, "beta", 40.0).await;
+    let alpha = active_profile_weighted(&pool, "alpha", 4).await;
+    let beta = active_profile_weighted(&pool, "beta", 9).await;
     let source = FakeSource::new(vec!["auth.beta.io"]);
 
     LodestoneUseCase::new(pool.clone())
@@ -318,8 +318,8 @@ async fn same_input_gets_separate_leads_and_scores_per_profile(pool: PgPool) {
     let in_alpha = lead_score(&pool, alpha, "beta.io").await;
     let in_beta = lead_score(&pool, beta, "beta.io").await;
     assert_ne!(in_alpha.id, in_beta.id);
-    assert!((in_alpha.score.get() - (10.0 * 0.8 + 1.0)).abs() < 1e-9);
-    assert!((in_beta.score.get() - (40.0 * 0.8 + 1.0)).abs() < 1e-9);
+    assert!((in_alpha.score.get() - (4.0 * 0.8 + 1.0)).abs() < 1e-9);
+    assert!((in_beta.score.get() - (9.0 * 0.8 + 1.0)).abs() < 1e-9);
     assert_eq!(in_beta.score_breakdown.len(), 2);
     assert_eq!(in_beta.score_breakdown[0].signal, "product_detected");
 }

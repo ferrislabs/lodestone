@@ -7,12 +7,14 @@ import {
 	setIn,
 } from '#/lib/schema-form'
 import {
+	DEFAULT_WEIGHT,
 	type Factor,
 	factorList,
 	isAvailable,
-	maxWeight,
+	maxScore,
 	nextSignal,
 	readFactor,
+	readThreshold,
 	signalMeta,
 	valueSuggestions,
 } from '#/pages/profiles/lib/scoring'
@@ -23,7 +25,11 @@ function asObject(next: JsonValue, fallback: JsonObject): JsonObject {
 
 function focusWeight(index: number) {
 	requestAnimationFrame(() => {
-		document.getElementById(`factor-weight-${index}`)?.focus()
+		document
+			.querySelector<HTMLElement>(
+				`[data-factor="${index}"] [role="radio"][tabindex="0"]`,
+			)
+			?.focus()
 	})
 }
 
@@ -36,14 +42,15 @@ export function useScoringUi(
 
 	return {
 		factors,
-		maxWeight: maxWeight(factors),
+		maxScore: maxScore(factors),
+		threshold: readThreshold(value),
 		suggestions: (kind: string) => valueSuggestions(value, kind),
 		available: (kind: string) => isAvailable(value, kind),
 		add: () => {
 			apply(
 				appendIn(value, ['scoring', 'factors'], {
 					signal: nextSignal(value, factors),
-					weight: 10,
+					weight: DEFAULT_WEIGHT,
 				}),
 			)
 			focusWeight(factors.length)
@@ -63,6 +70,14 @@ export function useScoringUi(
 			const path = ['scoring', 'factors', index, 'weight']
 			apply(
 				weight === null ? removeIn(value, path) : setIn(value, path, weight),
+			)
+		},
+		setThreshold: (threshold: number | null) => {
+			const path = ['llm', 'qualification_threshold']
+			apply(
+				threshold === null
+					? removeIn(value, path)
+					: setIn(value, path, threshold),
 			)
 		},
 		setValue: (index: number, next: string) => {

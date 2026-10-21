@@ -242,7 +242,7 @@ async fn signals_of(pool: &PgPool, profile: ProfileId, host: &str) -> Vec<Signal
 #[sqlx::test(migrations = "../../migrations")]
 async fn a_lead_below_the_threshold_is_never_sent_to_the_llm(pool: PgPool) {
     let profile = iam_profile(&pool).await;
-    lead_with_score(&pool, profile, "low.com", 49.9).await;
+    lead_with_score(&pool, profile, "low.com", 18.7).await;
     let provider = ScriptedProvider::new(10);
 
     let report = qualify(&pool, &provider, settings(100, 0)).await;
@@ -251,6 +251,24 @@ async fn a_lead_below_the_threshold_is_never_sent_to_the_llm(pool: PgPool) {
     assert_eq!(report.leads_considered, 0);
     assert!(assessments(&pool, profile, "low.com").await.is_empty());
     assert_eq!(status(&pool, profile, "low.com").await, LeadStatus::New);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_threshold_is_a_percentage_of_the_profile_maximum_score(pool: PgPool) {
+    let profile = iam_profile(&pool).await;
+    lead_with_score(&pool, profile, "below.com", 18.7).await;
+    lead_with_score(&pool, profile, "above.com", 18.9).await;
+    let provider = ScriptedProvider::new(10);
+
+    let report = qualify(&pool, &provider, settings(100, 0)).await;
+
+    assert_eq!(report.leads_considered, 1);
+    assert_eq!(provider.calls(), 1);
+    assert_eq!(
+        status(&pool, profile, "above.com").await,
+        LeadStatus::Qualified
+    );
+    assert_eq!(status(&pool, profile, "below.com").await, LeadStatus::New);
 }
 
 #[sqlx::test(migrations = "../../migrations")]

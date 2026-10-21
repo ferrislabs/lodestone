@@ -5,15 +5,31 @@ import {
 	isJsonObject,
 	type JsonObject,
 	resolve,
+	type UiHints,
 } from '#/lib/schema-form'
 import { useAgentsUi } from '#/pages/profiles/feature/use-agents-ui'
 import { useScoringUi } from '#/pages/profiles/feature/use-scoring-ui'
 import { PROFILE_HINTS } from '#/pages/profiles/lib/form-hints'
 import { PROFILE_SCHEMA } from '#/pages/profiles/lib/profile-schema'
+import {
+	isValidThreshold,
+	qualificationPoints,
+} from '#/pages/profiles/lib/scoring'
+import {
+	thresholdSummary,
+	workedExample,
+} from '#/pages/profiles/lib/scoring-explain'
 import type { EditorTab } from '#/pages/profiles/lib/tabs'
 import type { Problem } from '#/pages/profiles/lib/types'
 import { AgentsEditor } from '#/pages/profiles/ui/agents-editor'
+import { ScoringExplainer } from '#/pages/profiles/ui/scoring-explainer'
 import { ScoringGrid } from '#/pages/profiles/ui/scoring-grid'
+import { ThresholdField } from '#/pages/profiles/ui/threshold-field'
+
+const DEFINITION_HINTS: UiHints = {
+	...PROFILE_HINTS,
+	hidden: [...PROFILE_HINTS.hidden, 'llm.qualification_threshold'],
+}
 
 export function unmatchedProblems(
 	value: JsonObject,
@@ -28,6 +44,7 @@ interface DefinitionTabContentProps {
 	value: JsonObject
 	problems: readonly Problem[]
 	onChange: (next: JsonObject) => void
+	onNavigate?: (tab: EditorTab) => void
 }
 
 function section(key: string) {
@@ -43,12 +60,13 @@ export function DefinitionTabContent({
 	value,
 	problems,
 	onChange,
+	onNavigate,
 }: DefinitionTabContentProps) {
 	const agents = useAgentsUi(value, onChange)
 	const scoring = useScoringUi(value, onChange)
 	const context: FormContext = {
 		root: PROFILE_SCHEMA,
-		hints: PROFILE_HINTS,
+		hints: DEFINITION_HINTS,
 		value,
 		problems,
 		onChange: (next) => {
@@ -69,24 +87,44 @@ export function DefinitionTabContent({
 			return fields('identity')
 		case 'scoring':
 			return (
-				<ScoringGrid
-					factors={scoring.factors}
-					problems={problems}
-					suggestions={scoring.suggestions}
-					available={scoring.available}
-					maxWeight={scoring.maxWeight}
-					onAdd={scoring.add}
-					onRemove={scoring.remove}
-					onSignal={scoring.setSignal}
-					onWeight={scoring.setWeight}
-					onValue={scoring.setValue}
-				/>
+				<div className="flex flex-col gap-4">
+					<ScoringExplainer
+						factorCount={scoring.factors.length}
+						maxScore={scoring.maxScore}
+						thresholdSummary={thresholdSummary(
+							scoring.threshold,
+							isValidThreshold(scoring.threshold)
+								? qualificationPoints(scoring.threshold, scoring.maxScore)
+								: null,
+						)}
+						example={workedExample(scoring.factors)}
+						onNavigate={() => onNavigate?.('settings')}
+					/>
+					<ScoringGrid
+						factors={scoring.factors}
+						problems={problems}
+						suggestions={scoring.suggestions}
+						available={scoring.available}
+						maxScore={scoring.maxScore}
+						onAdd={scoring.add}
+						onRemove={scoring.remove}
+						onSignal={scoring.setSignal}
+						onWeight={scoring.setWeight}
+						onValue={scoring.setValue}
+					/>
+				</div>
 			)
 		case 'settings':
 			return (
 				<div className="flex flex-col gap-6">
 					<section className="flex flex-col gap-3">
 						<h2 className="text-base font-semibold">LLM</h2>
+						<ThresholdField
+							value={scoring.threshold}
+							maxScore={scoring.maxScore}
+							problems={problems}
+							onChange={scoring.setThreshold}
+						/>
 						{fields('llm')}
 					</section>
 					<section className="flex flex-col gap-3">

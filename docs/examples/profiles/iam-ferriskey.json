@@ -1,5 +1,5 @@
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "identity": {
     "offer": "FerrisKey (open source IAM/CIAM in Rust) and Autharie (managed IAM), both by Ferrislabs",
     "target_customer": "Organizations running self-hosted Keycloak or a similar IAM, or paying for a SaaS IAM"
@@ -157,13 +157,13 @@
   ],
   "scoring": {
     "factors": [
-      { "signal": "product_detected", "value": "keycloak", "weight": 30 },
-      { "signal": "debt_marker", "value": "legacy_auth_path", "weight": 15 },
-      { "signal": "saas_provider", "weight": 10 },
-      { "signal": "job_offer", "weight": 25 },
-      { "signal": "public_tender", "weight": 20 },
-      { "signal": "role_contact_found", "weight": 5 },
-      { "signal": "distinct_signals", "weight": 5 }
+      { "signal": "product_detected", "value": "keycloak", "weight": 10 },
+      { "signal": "debt_marker", "value": "legacy_auth_path", "weight": 5 },
+      { "signal": "saas_provider", "weight": 3 },
+      { "signal": "job_offer", "weight": 8 },
+      { "signal": "public_tender", "weight": 7 },
+      { "signal": "role_contact_found", "weight": 2 },
+      { "signal": "distinct_signals", "weight": 2 }
     ]
   },
   "contact_ranking": {
@@ -171,7 +171,7 @@
     "guess_local_parts": ["contact", "info"]
   },
   "llm": {
-    "qualification_threshold": 50,
+    "qualification_threshold": 40,
     "relevance_criteria": "The organization operates its own identity infrastructure, such as a self-hosted Keycloak, or pays for a SaaS IAM, and shows signs of migration, staffing or procurement around it. Physical access control and unrelated directories are not relevant."
   }
 }

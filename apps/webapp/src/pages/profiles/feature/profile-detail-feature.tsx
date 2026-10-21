@@ -125,6 +125,7 @@ export function ProfileDetailFeature() {
 						tab={tab}
 						value={editor.value}
 						problems={problems}
+						onNavigate={setTab}
 						onChange={(next) => {
 							if (update.isError) update.reset()
 							setLocalProblems([])
