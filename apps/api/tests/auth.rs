@@ -5,6 +5,7 @@ use http::StatusCode;
 use serde_json::{Value, json};
 use sqlx::PgPool;
 use support::{Harness, KID, call, client_claims, generate_key, lazy_pool, now, sign, user_claims};
+use telemetry::Metrics;
 
 fn assert_rejected(status: StatusCode, body: &Value, raw: &str, code: &str, token: Option<&str>) {
     assert_eq!(status, StatusCode::UNAUTHORIZED);
@@ -187,7 +188,7 @@ async fn health_and_metrics_are_not_on_the_public_router() {
 #[tokio::test]
 async fn health_and_metrics_are_served_by_the_internal_router() {
     for uri in ["/health", "/metrics"] {
-        let app = internal_router().expect("internal router");
+        let app = internal_router(Metrics::new(), lazy_pool()).expect("internal router");
         let (status, _, _) = call(app, uri, None).await;
         assert_eq!(status, StatusCode::OK, "{uri}");
     }
@@ -195,7 +196,7 @@ async fn health_and_metrics_are_served_by_the_internal_router() {
 
 #[tokio::test]
 async fn business_api_is_not_on_the_internal_router() {
-    let app = internal_router().expect("internal router");
+    let app = internal_router(Metrics::new(), lazy_pool()).expect("internal router");
     let (status, _, _) = call(app, "/api/v1/me", None).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 }

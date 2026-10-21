@@ -45,6 +45,7 @@ use sources::{
     security_txt::SecurityTxtFinder,
     ted::{TedSettings, TedSource},
 };
+use telemetry::Metrics;
 use tokio::sync::watch;
 use tracing::{error, info};
 
@@ -75,7 +76,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let llm_config = LlmConfig::try_from(args.llm.clone())?;
     let app_state = state(Arc::clone(&args)).await?;
     let outbound_config = OutboundConfig::try_from(args.outbound.clone())?;
-    let pool = app_state.usecase.pool().clone();
+    let metrics = Metrics::new();
+    let usecase = app_state.usecase.clone().with_metrics(metrics.clone());
+    let pool = usecase.pool().clone();
     let llm_runtime = LlmRuntime {
         cipher: AesGcmCipher::new(&llm_config.encryption_key)?,
         cache: PgLlmCache::new(pool.clone()),
@@ -207,7 +210,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let http_probe = HttpProbeSource::new(
         fetcher,
         Arc::new(PgCandidateHosts::new(pool)),
-        Arc::new(app_state.usecase.clone()),
+        Arc::new(usecase.clone()),
         HttpProbeSettings {
             batch_size: PROBE_BATCH_SIZE,
             concurrency: PROBE_CONCURRENCY,
@@ -236,7 +239,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
     };
     let job_router = JobRouter::new(
-        app_state.usecase.clone(),
+        usecase,
         WiredSources {
             certificate_transparency,
             dns_cname,
@@ -258,8 +261,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     .with_webhook(webhook);
     schedule_wired_sources(&queue, args.france_travail.credentials().is_some()).await?;
 
+    let internal_router = internal_router(metrics.clone(), app_state.usecase.pool().clone())?;
     let router = router(app_state)?;
-    let internal_router = internal_router()?;
 
     let addr = get_addr(&args.server.host, args.server.port).await?;
     let internal_addr = get_addr(&args.server.internal_host, args.server.internal_port).await?;
@@ -282,7 +285,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
             },
             shutdown_grace: jobs_config.shutdown_grace,
         },
-    );
+    )
+    .with_metrics(metrics);
 
     let shutdown = Shutdown {
         workers: shutdown_tx,

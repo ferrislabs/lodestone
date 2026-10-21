@@ -10,8 +10,8 @@ use dns::HickoryResolver;
 use fetch::PoliteFetcher;
 use llm::any::AnyProvider;
 use lodestone_core::{
-    Clock, Job, JobKind, JobQueue, LodestoneUseCase, NewJob, SourceName, Tier, TierError,
-    TokenPricing, WEBHOOK_JOB_KIND,
+    Clock, Job, JobKind, JobQueue, LodestoneUseCase, NewJob, SourceError, SourceName, Tier,
+    TierError, TokenPricing, WEBHOOK_JOB_KIND,
     contacts::ContactRunSettings,
     infrastructure::{
         candidate_host::postgres::PgCandidateHosts,
@@ -117,6 +117,16 @@ pub struct JobRouter {
     webhook: Option<WebhookSink>,
 }
 
+const QUALIFICATION_SOURCE: &str = "llm_qualification";
+
+pub fn source_error_kind(error: &SourceRunError) -> &'static str {
+    match error {
+        SourceRunError::Source(SourceError::RateLimited { .. }) => "rate_limited",
+        SourceRunError::Source(_) => "upstream",
+        SourceRunError::Core(_) => "other",
+    }
+}
+
 pub fn qualification_job(run_at: chrono::DateTime<Utc>) -> Result<NewJob, CoreError> {
     let kind = JobKind::parse(QUALIFICATION_JOB_KIND)
         .map_err(|_| CoreError::Internal("invalid qualification job kind".to_owned()))?;
@@ -189,11 +199,19 @@ impl JobRouter {
             budget_cents: self.llm.budget_cents,
             batch_size: QUALIFICATION_BATCH_SIZE,
         };
-        match self
+        let usecase = self
             .usecase
+            .clone()
+            .with_llm_provider(resolved.definition.kind, &resolved.definition.model);
+        let result = usecase
             .run_qualification(&provider, &self.llm.cache, settings, &SystemClock)
-            .await
-        {
+            .await;
+        if let Err(error) = &result {
+            self.usecase
+                .metrics()
+                .source_error(QUALIFICATION_SOURCE, source_error_kind(error));
+        }
+        match result {
             Ok(report) => {
                 info!(
                     considered = report.leads_considered,
@@ -257,8 +275,14 @@ impl JobRouter {
             max_tokens: TRIAGE_MAX_TOKENS,
             budget_cents: self.llm.budget_cents,
         };
-        let report = self
-            .usecase
+        let usecase = match &resolved {
+            Some(resolved) => self
+                .usecase
+                .clone()
+                .with_llm_provider(resolved.definition.kind, &resolved.definition.model),
+            None => self.usecase.clone(),
+        };
+        let report = usecase
             .run_triage(
                 source,
                 provider.as_ref(),
@@ -423,6 +447,11 @@ impl JobRouter {
         };
         let next_run = SystemClock.now()
             + chrono::Duration::from_std(interval).unwrap_or(chrono::Duration::hours(1));
+        if let Err(error) = &result {
+            self.usecase
+                .metrics()
+                .source_error(source.as_str(), source_error_kind(error));
+        }
         match result {
             Ok((items, signals)) => {
                 info!(%source, items, signals, "source run finished");
@@ -490,6 +519,28 @@ pub async fn schedule_wired_sources(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn source_errors_map_to_bounded_kinds() {
+        use std::time::Duration;
+
+        assert_eq!(
+            source_error_kind(&SourceRunError::Source(SourceError::RateLimited {
+                retry_after: Duration::from_secs(1)
+            })),
+            "rate_limited"
+        );
+        assert_eq!(
+            source_error_kind(&SourceRunError::Source(SourceError::Upstream(
+                "down".to_owned()
+            ))),
+            "upstream"
+        );
+        assert_eq!(
+            source_error_kind(&SourceRunError::Core(CoreError::Internal("x".to_owned()))),
+            "other"
+        );
+    }
 
     #[test]
     fn the_qualification_job_is_recurring_and_deduplicated() {

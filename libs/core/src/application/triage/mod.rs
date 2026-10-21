@@ -10,6 +10,7 @@ use crate::{
     application::{
         LodestoneUseCase,
         llm::gateway::{CallSettings, LlmCallError, Prompt, RunBudget, call_structured_cached},
+        observe::BUDGET_EXHAUSTED,
         sources::SourceRunError,
     },
     domain::{
@@ -19,6 +20,7 @@ use crate::{
         llm::{
             LlmProvider, UntrustedDocument,
             cache::{CacheScope, LlmCache},
+            provider::Tier,
         },
         profile::{
             ActiveProfile,
@@ -36,7 +38,6 @@ const TITLE_MAX_CHARS: usize = 200;
 const RULES_STRENGTH: f64 = 0.7;
 const LLM_STRENGTH: f64 = 0.6;
 const CONTACT_CONFIDENCE: f64 = 0.5;
-const BUDGET_EXHAUSTED: &str = "llm budget exhausted";
 
 pub trait CandidateSource: Send + Sync {
     fn name(&self) -> SourceName;
@@ -149,8 +150,10 @@ impl LodestoneUseCase {
                     error: error.to_string(),
                 };
                 for run in &runs {
-                    self.finish_triage_run(run.id, &outcome, clock.now())
+                    let finished_at = clock.now();
+                    self.finish_triage_run(run.id, &outcome, finished_at)
                         .await?;
+                    self.observe_run(run, &outcome, finished_at);
                 }
                 return Err(error.into());
             }
@@ -182,8 +185,10 @@ impl LodestoneUseCase {
                         signals: 0,
                         error: error.to_string(),
                     };
-                    self.finish_triage_run(run.id, &outcome, clock.now())
+                    let finished_at = clock.now();
+                    self.finish_triage_run(run.id, &outcome, finished_at)
                         .await?;
+                    self.observe_run(run, &outcome, finished_at);
                     first_error.get_or_insert(error);
                     continue;
                 }
@@ -203,8 +208,10 @@ impl LodestoneUseCase {
                     error: error.to_string(),
                 },
             };
-            self.finish_triage_run(run.id, &outcome, clock.now())
+            let finished_at = clock.now();
+            self.finish_triage_run(run.id, &outcome, finished_at)
                 .await?;
+            self.observe_run(run, &outcome, finished_at);
             if let Err(error) = recorded {
                 first_error.get_or_insert(error);
             }
@@ -308,7 +315,8 @@ impl LodestoneUseCase {
                         max_tokens: settings.max_tokens,
                     };
                     report.sent_to_llm += 1;
-                    let verdict = match call_structured_cached::<TriageVerdict, _, _>(
+                    let spent_before = budget.spent_microcents();
+                    let called = call_structured_cached::<TriageVerdict, _, _>(
                         provider,
                         llm.cache,
                         &scope,
@@ -316,8 +324,15 @@ impl LodestoneUseCase {
                         settings.call,
                         &mut budget,
                     )
-                    .await
-                    {
+                    .await;
+                    self.observe_llm(
+                        Tier::Triage,
+                        active.profile.id,
+                        spent_before,
+                        &budget,
+                        &called,
+                    );
+                    let verdict = match called {
                         Ok(verdict) => verdict,
                         Err(LlmCallError::BudgetExhausted) => {
                             report.sent_to_llm -= 1;

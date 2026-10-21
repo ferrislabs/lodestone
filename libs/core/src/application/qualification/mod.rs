@@ -12,6 +12,7 @@ use crate::{
             CallSettings, LlmCallError, Prompt, RunBudget, Structured, call_structured,
             call_structured_cached, store_cached,
         },
+        observe::BUDGET_EXHAUSTED,
         sources::SourceRunError,
     },
     domain::{
@@ -24,6 +25,7 @@ use crate::{
         llm::{
             LlmProvider, UntrustedDocument,
             cache::{CacheScope, LlmCache},
+            provider::Tier,
         },
         profile::ActiveProfile,
         prompt::{EvidenceProblem, QUALIFICATION_V1, QualificationOutput, verified_evidence},
@@ -32,7 +34,6 @@ use crate::{
     },
 };
 
-const BUDGET_EXHAUSTED: &str = "llm budget exhausted";
 const EVIDENCE_RETRY: &str = "Your previous answer cited text that does not appear verbatim in the documents. Quote only exact substrings of the documents.";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -179,8 +180,10 @@ impl LodestoneUseCase {
                     error: error.to_string(),
                 },
             };
-            self.finish_qualification_run(run.id, &outcome, clock.now())
+            let finished_at = clock.now();
+            self.finish_qualification_run(run.id, &outcome, finished_at)
                 .await?;
+            self.observe_run(&run, &outcome, finished_at);
             report.absorb(&tally);
             if let Err(error) = result {
                 first_error.get_or_insert(error);
@@ -245,19 +248,24 @@ impl LodestoneUseCase {
                 documents: &documents,
                 max_tokens: settings.max_tokens,
             };
-            let first = match classify(
-                call_structured_cached::<QualificationOutput, _, _>(
-                    llm.provider,
-                    llm.cache,
-                    &scope,
-                    prompt,
-                    settings.call,
-                    &mut budget,
-                )
-                .await,
-                tally,
-                lead.domain.as_str(),
-            ) {
+            let spent_before = budget.spent_microcents();
+            let called = call_structured_cached::<QualificationOutput, _, _>(
+                llm.provider,
+                llm.cache,
+                &scope,
+                prompt,
+                settings.call,
+                &mut budget,
+            )
+            .await;
+            self.observe_llm(
+                Tier::Qualification,
+                active.profile.id,
+                spent_before,
+                &budget,
+                &called,
+            );
+            let first = match classify(called, tally, lead.domain.as_str()) {
                 Attempt::Done(structured) => structured,
                 Attempt::Stop => return Ok(()),
                 Attempt::Skip => continue,
@@ -271,17 +279,22 @@ impl LodestoneUseCase {
                         instruction: &instruction,
                         ..prompt
                     };
-                    let second = match classify(
-                        call_structured::<QualificationOutput, _>(
-                            llm.provider,
-                            retry_prompt,
-                            settings.call,
-                            &mut budget,
-                        )
-                        .await,
-                        tally,
-                        lead.domain.as_str(),
-                    ) {
+                    let spent_before = budget.spent_microcents();
+                    let retried = call_structured::<QualificationOutput, _>(
+                        llm.provider,
+                        retry_prompt,
+                        settings.call,
+                        &mut budget,
+                    )
+                    .await;
+                    self.observe_llm(
+                        Tier::Qualification,
+                        active.profile.id,
+                        spent_before,
+                        &budget,
+                        &retried,
+                    );
+                    let second = match classify(retried, tally, lead.domain.as_str()) {
                         Attempt::Done(structured) => structured,
                         Attempt::Stop => return Ok(()),
                         Attempt::Skip => continue,

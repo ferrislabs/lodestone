@@ -1,5 +1,6 @@
 use std::{num::NonZeroU16, pin::pin, sync::Arc, time::Duration};
 
+use telemetry::Metrics;
 use thiserror::Error;
 use tokio::{
     sync::watch,
@@ -62,6 +63,7 @@ where
     handler: Arc<H>,
     clock: Arc<C>,
     settings: WorkerSettings,
+    metrics: Metrics,
 }
 
 impl<Q, H, C> WorkerPool<Q, H, C>
@@ -76,7 +78,13 @@ where
             handler,
             clock,
             settings,
+            metrics: Metrics::default(),
         }
+    }
+
+    pub fn with_metrics(mut self, metrics: Metrics) -> Self {
+        self.metrics = metrics;
+        self
     }
 
     pub async fn run(self, shutdown: watch::Receiver<bool>) {
@@ -87,6 +95,7 @@ where
                 handler: Arc::clone(&self.handler),
                 clock: Arc::clone(&self.clock),
                 settings: self.settings,
+                metrics: self.metrics.clone(),
             };
             let rx = shutdown.clone();
             tasks.spawn(
@@ -112,6 +121,7 @@ struct Worker<Q, H, C> {
     handler: Arc<H>,
     clock: Arc<C>,
     settings: WorkerSettings,
+    metrics: Metrics,
 }
 
 async fn shutdown_requested(rx: &mut watch::Receiver<bool>) {
@@ -147,7 +157,17 @@ where
                         job.id = %claimed.job.id,
                         job.kind = claimed.job.kind.as_str()
                     );
-                    self.process(&claimed, &mut shutdown).instrument(span).await;
+                    let wait = (self.clock.now() - claimed.job.run_at)
+                        .to_std()
+                        .unwrap_or_default();
+                    self.metrics.job_claimed(claimed.job.kind.as_str(), wait);
+                    let started = Instant::now();
+                    let outcome = self.process(&claimed, &mut shutdown).instrument(span).await;
+                    self.metrics.job_finished(
+                        claimed.job.kind.as_str(),
+                        outcome,
+                        started.elapsed(),
+                    );
                 }
                 Ok(None) => self.idle(&mut shutdown).await,
                 Err(error) => {
@@ -165,7 +185,11 @@ where
         }
     }
 
-    async fn process(&self, claimed: &ClaimedJob, shutdown: &mut watch::Receiver<bool>) {
+    async fn process(
+        &self,
+        claimed: &ClaimedJob,
+        shutdown: &mut watch::Receiver<bool>,
+    ) -> &'static str {
         let job = &claimed.job;
         match self.drive(claimed, shutdown).await {
             Outcome::Finished(Ok(JobOutcome::Done)) => {
@@ -174,6 +198,7 @@ where
                     .complete(job.id, claimed.token, self.clock.now())
                     .await;
                 report("complete", result);
+                "done"
             }
             Outcome::Finished(Ok(JobOutcome::RescheduleAt(at))) => {
                 let result = self
@@ -181,6 +206,7 @@ where
                     .reschedule(job.id, claimed.token, at, self.clock.now())
                     .await;
                 report("reschedule", result);
+                "rescheduled"
             }
             Outcome::Finished(Err(error)) => {
                 let failure = self.failure(job, error);
@@ -189,9 +215,14 @@ where
                     .fail(job.id, claimed.token, &failure, self.clock.now())
                     .await;
                 report("fail", result);
+                match failure {
+                    JobFailure::RetryAt { .. } => "retry",
+                    JobFailure::GiveUp { .. } => "failed",
+                }
             }
             Outcome::LeaseLost => {
                 warn!("job lease lost, abandoning handler");
+                "lease_lost"
             }
             Outcome::Abandoned => {
                 warn!("shutdown grace elapsed, releasing job");
@@ -200,6 +231,7 @@ where
                     .release(job.id, claimed.token, self.clock.now())
                     .await;
                 report("release", result);
+                "released"
             }
         }
     }
