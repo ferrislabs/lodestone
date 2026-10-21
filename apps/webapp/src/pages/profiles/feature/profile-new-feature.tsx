@@ -4,13 +4,20 @@ import { useState } from 'react'
 
 import { lodestoneApi } from '#/api/lodestone'
 import { parseApiError } from '#/lib/api-errors'
-import { invalidateProfiles } from '#/pages/profiles/feature/invalidate'
-import { NEW_PROFILE_TEMPLATE } from '#/pages/profiles/lib/definition'
+import { defaultValue, toJsonObject } from '#/lib/schema-form'
 import {
-	parseDefinition,
+	renderDefinitionForm,
+	unmatchedProblems,
+} from '#/pages/profiles/feature/definition-form'
+import { invalidateProfiles } from '#/pages/profiles/feature/invalidate'
+import { useDefinitionEditor } from '#/pages/profiles/feature/use-definition-editor'
+import { PROFILE_HINTS } from '#/pages/profiles/lib/form-hints'
+import {
 	problemsFromError,
 	problemsOutsidePath,
 } from '#/pages/profiles/lib/problems'
+import { PROFILE_SCHEMA } from '#/pages/profiles/lib/profile-schema'
+import { prepareSave } from '#/pages/profiles/lib/save'
 import type { Problem } from '#/pages/profiles/lib/types'
 import { ProfileEditor } from '#/pages/profiles/ui/profile-editor'
 import { ProfileNew } from '#/pages/profiles/ui/profile-new'
@@ -19,7 +26,10 @@ export function ProfileNewFeature() {
 	const navigate = useNavigate()
 	const queryClient = useQueryClient()
 	const [name, setName] = useState('')
-	const [text, setText] = useState(NEW_PROFILE_TEMPLATE)
+	const [initial] = useState(() =>
+		toJsonObject(defaultValue(PROFILE_SCHEMA, PROFILE_SCHEMA, PROFILE_HINTS)),
+	)
+	const editor = useDefinitionEditor(initial)
 	const [localProblems, setLocalProblems] = useState<Problem[]>([])
 
 	const create = useMutation({
@@ -44,7 +54,7 @@ export function ProfileNewFeature() {
 	const formError = parsed && parsed.status !== 422 ? parsed.message : null
 
 	const save = () => {
-		const definition = parseDefinition(text)
+		const definition = prepareSave(editor.value)
 		if (!definition.ok) {
 			setLocalProblems(definition.problems)
 			return
@@ -71,17 +81,16 @@ export function ProfileNewFeature() {
 			onBack={() => void navigate({ to: '/profiles' })}
 			editor={
 				<ProfileEditor
-					text={text}
-					problems={problems}
+					form={renderDefinitionForm(editor.value, problems, (next) => {
+						if (create.isError) create.reset()
+						setLocalProblems([])
+						editor.set(next)
+					})}
+					problems={unmatchedProblems(editor.value, problems)}
 					notice={null}
 					dirty
 					saving={create.isPending}
 					saveLabel="Create profile"
-					onTextChange={(value) => {
-						if (create.isError) create.reset()
-						setLocalProblems([])
-						setText(value)
-					}}
 					onSave={save}
 				/>
 			}
