@@ -5,10 +5,10 @@ use uuid::Uuid;
 
 use crate::{
     Assessment, AssessmentId, DraftMessage, DraftReview, DraftStatus, Evidence, LeadId, Provenance,
-    RevisionNumber, UserId,
+    QualityWarning, RevisionNumber, UserId,
 };
 
-pub const ASSESSMENT_COLUMNS: &str = "assessments.id, assessments.lead_id, assessments.profile_revision, assessments.summary, assessments.verdict_narrative, assessments.approach_angle, assessments.evidence, assessments.evidence_verified, assessments.model, assessments.prompt_version, assessments.draft_subject, assessments.draft_body, assessments.draft_status, assessments.draft_reviewed_by, assessments.draft_reviewed_at, assessments.draft_edited_at, assessments.draft_rejection_reason, assessments.draft_original_subject, assessments.draft_original_body, assessments.draft_suggested_subject, assessments.draft_suggested_body, assessments.draft_outdated_at, assessments.created_at";
+pub const ASSESSMENT_COLUMNS: &str = "assessments.id, assessments.lead_id, assessments.profile_revision, assessments.summary, assessments.verdict_narrative, assessments.approach_angle, assessments.evidence, assessments.evidence_verified, assessments.quality_warnings, assessments.model, assessments.prompt_version, assessments.draft_subject, assessments.draft_body, assessments.draft_status, assessments.draft_reviewed_by, assessments.draft_reviewed_at, assessments.draft_edited_at, assessments.draft_rejection_reason, assessments.draft_original_subject, assessments.draft_original_body, assessments.draft_suggested_subject, assessments.draft_suggested_body, assessments.draft_outdated_at, assessments.created_at";
 
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct AssessmentRow {
@@ -20,6 +20,7 @@ pub struct AssessmentRow {
     pub approach_angle: String,
     pub evidence: serde_json::Value,
     pub evidence_verified: bool,
+    pub quality_warnings: Vec<String>,
     pub model: String,
     pub prompt_version: String,
     pub draft_subject: Option<String>,
@@ -105,6 +106,15 @@ impl TryFrom<AssessmentRow> for Assessment {
             }
             (None, _) => None,
         };
+        let quality_warnings = row
+            .quality_warnings
+            .iter()
+            .map(|raw| {
+                QualityWarning::parse(raw).ok_or_else(|| {
+                    CoreError::Internal("stored assessment quality warning is invalid".to_owned())
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
         Ok(Self {
             id: AssessmentId(row.id),
             lead_id: LeadId(row.lead_id),
@@ -114,6 +124,7 @@ impl TryFrom<AssessmentRow> for Assessment {
             approach_angle: row.approach_angle,
             evidence: evidence_from_json(row.evidence)?,
             evidence_verified: row.evidence_verified,
+            quality_warnings,
             model: row.model,
             prompt_version: row.prompt_version,
             draft: match (row.draft_subject, row.draft_body) {

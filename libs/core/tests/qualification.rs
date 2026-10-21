@@ -10,14 +10,15 @@ use std::{
     time::Duration,
 };
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, SecondsFormat, Utc};
 use common::{EncryptionKey, Secret};
 use lodestone_core::{
-    ActiveProfile, Assessment, Clock, CreateProfileCommand, DraftEdit, DraftStatus, Lead,
-    LeadRepository, LeadStatus, LlmError, LlmProvider, LlmRequest, LlmResponse, LodestoneUseCase,
-    Observation, ProfileId, ProfileName, Provenance, ProviderDefinition, ProviderId, ProviderKind,
-    ReviseProfileCommand, SignalKind, SourceName, SummaryState, Tier, TokenPricing, TokenUsage,
-    UnitInterval, UserId, ValidatedProfile, Verdict, VerdictFilter,
+    ActiveProfile, Assessment, Clock, CreateProfileCommand, DraftEdit, DraftStatus,
+    GenerationParams, Lead, LeadRepository, LeadStatus, LlmError, LlmProvider, LlmRequest,
+    LlmResponse, LodestoneUseCase, Observation, ProfileId, ProfileName, Provenance,
+    ProviderDefinition, ProviderId, ProviderKind, QualityWarning, ReviseProfileCommand, SignalKind,
+    SourceName, SummaryState, Tier, TokenPricing, TokenUsage, UnitInterval, UserId,
+    ValidatedProfile, Verdict, VerdictFilter,
     evaluation::{EvaluationSettings, ProviderBuilder},
     infrastructure::{
         crypto::AesGcmCipher, lead::postgres::PgLeadRepository, llm_cache::postgres::PgLlmCache,
@@ -260,6 +261,7 @@ impl Harness {
                     },
                     api_key: None,
                     reasoning_effort: None,
+                    generation: GenerationParams::default(),
                 },
                 &self.cipher,
             )
@@ -721,9 +723,228 @@ async fn a_partly_verified_answer_keeps_only_the_checked_quotes(pool: PgPool) {
     harness.pass().await;
 
     let stored = &harness.assessments(profile, "acme.com").await[0];
-    assert!(!stored.evidence_verified);
+    assert!(stored.evidence_verified);
     assert_eq!(stored.evidence.len(), 1);
     assert_eq!(stored.evidence[0].quote, GOOD_QUOTE);
+    assert_eq!(stored.quality_warnings, [QualityWarning::DroppedQuotes]);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_verbatim_signal_sentence_with_its_metadata_lines_is_verified_with_its_provenance(
+    pool: PgPool,
+) {
+    let harness = Harness::new(pool);
+    harness.defaults().await;
+    let profile = harness.profile(vec![agent("solo", 5, None)], None).await;
+    harness.observe("acme.com", SourceName::HttpProbe, 10).await;
+    let observed = at(10).to_rfc3339_opts(SecondsFormat::Secs, true);
+    let spanning = format!("{GOOD_QUOTE}\nsource: http_probe\nobserved: {observed}");
+    harness.script(
+        SYNTHESIS,
+        vec![Reply::Raw({
+            let mut value = summary_with(&spanning);
+            value["evidence"] = json!([
+                {"document_index": 0, "quote": spanning},
+                {"document_index": 0, "quote": format!("source: http_probe observed: {observed}")}
+            ]);
+            value
+        })],
+    );
+
+    let report = harness.pass().await;
+
+    assert_eq!(report.unverified, 0);
+    let stored = &harness.assessments(profile, "acme.com").await[0];
+    assert!(stored.evidence_verified);
+    assert!(stored.quality_warnings.is_empty());
+    assert_eq!(stored.evidence.len(), 2);
+    assert!(
+        stored
+            .evidence
+            .iter()
+            .all(|item| item.provenance.as_str() == "https://acme.com/http_probe")
+    );
+}
+
+fn repeating() -> Reply {
+    let mut value = summary_with(GOOD_QUOTE);
+    value["verdict_narrative"] = json!(
+        "Le verdict est fiable avec une confiance de 100,0 %. Le verdict est fiable avec une confiance de 100,0 %."
+    );
+    Reply::Raw(value)
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_repeating_answer_is_retried_with_its_violations_and_a_clean_second_answer_is_stored_clean(
+    pool: PgPool,
+) {
+    let harness = Harness::new(pool);
+    harness.defaults().await;
+    let profile = harness.profile(vec![agent("solo", 5, None)], None).await;
+    harness.observe("acme.com", SourceName::HttpProbe, 10).await;
+    harness.script(SYNTHESIS, vec![repeating(), Reply::Good]);
+
+    let report = harness.pass().await;
+
+    assert_eq!(report.leads, 1);
+    let calls = harness.aggregator_calls();
+    assert_eq!(calls.len(), 2);
+    assert!(!calls[0].instruction.contains("broke these output rules"));
+    assert!(calls[1].instruction.contains("broke these output rules"));
+    assert!(
+        calls[1]
+            .instruction
+            .contains("- `verdict_narrative` repeats a sentence")
+    );
+    assert!(
+        calls[1]
+            .instruction
+            .contains("- `verdict_narrative` states a percentage")
+    );
+    assert!(!calls[1].instruction.contains("does not appear verbatim"));
+    let stored = &harness.assessments(profile, "acme.com").await[0];
+    assert!(stored.quality_warnings.is_empty());
+    assert_eq!(
+        stored.verdict_narrative,
+        "Les agents jugent le lead pertinent."
+    );
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_still_repeating_answer_is_stored_with_its_warnings_and_never_blocks_the_lead(
+    pool: PgPool,
+) {
+    let harness = Harness::new(pool);
+    harness.defaults().await;
+    let profile = harness.profile(vec![agent("solo", 5, None)], None).await;
+    harness.observe("acme.com", SourceName::HttpProbe, 10).await;
+    harness.script(SYNTHESIS, vec![repeating(), repeating()]);
+
+    let report = harness.pass().await;
+
+    assert_eq!(report.leads, 1);
+    assert_eq!(report.failed, 0);
+    assert_eq!(harness.aggregator_calls().len(), 2);
+    let stored = &harness.assessments(profile, "acme.com").await[0];
+    assert_eq!(
+        stored.quality_warnings,
+        [QualityWarning::Repetition, QualityWarning::RestatedFigures]
+    );
+    assert!(stored.evidence_verified);
+    assert!(stored.draft.is_some());
+    let lead = harness.lead(profile, "acme.com").await;
+    assert_eq!(lead.status, LeadStatus::Qualified);
+    assert_eq!(harness.queue(&[]).await, ["acme.com"]);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn an_answer_with_a_violation_and_bad_evidence_gets_both_corrections(pool: PgPool) {
+    let harness = Harness::new(pool);
+    harness.defaults().await;
+    harness.profile(vec![agent("solo", 5, None)], None).await;
+    harness.observe("acme.com", SourceName::HttpProbe, 10).await;
+    let mut both = repeating();
+    if let Reply::Raw(value) = &mut both {
+        value["evidence"] = json!([{"document_index": 0, "quote": "invented"}]);
+    }
+    harness.script(SYNTHESIS, vec![both, Reply::Good]);
+
+    harness.pass().await;
+
+    let calls = harness.aggregator_calls();
+    assert!(calls[1].instruction.contains("does not appear verbatim"));
+    assert!(calls[1].instruction.contains("broke these output rules"));
+}
+
+async fn force_a_different_stored_verdict(pool: &PgPool) {
+    sqlx::query("UPDATE lead_qualification_state SET scoring_version = 0")
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE leads SET verdict = 'a_verifier'")
+        .execute(pool)
+        .await
+        .unwrap();
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_rescore_that_changes_the_verdict_summarises_the_lead_again(pool: PgPool) {
+    let harness = Harness::new(pool.clone());
+    harness.defaults().await;
+    let profile = harness.profile(vec![agent("solo", 5, None)], None).await;
+    harness.observe("acme.com", SourceName::HttpProbe, 10).await;
+    harness.evaluate().await;
+    force_a_different_stored_verdict(&pool).await;
+    harness.summarise(settings(100, 10)).await;
+    assert_eq!(harness.aggregator_calls().len(), 1);
+    assert!(
+        harness.aggregator_calls()[0]
+            .instruction
+            .contains("verdict to check")
+    );
+
+    harness.evaluate().await;
+
+    assert_eq!(
+        harness.lead(profile, "acme.com").await.verdict,
+        Some(Verdict::Reliable)
+    );
+    let report = harness.summarise(settings(100, 10)).await;
+    assert_eq!(report.leads, 1);
+    assert_eq!(harness.aggregator_calls().len(), 2);
+    assert_eq!(harness.assessments(profile, "acme.com").await.len(), 2);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_rescore_that_keeps_the_verdict_leaves_the_summary_alone(pool: PgPool) {
+    let harness = Harness::new(pool.clone());
+    harness.defaults().await;
+    let profile = harness.profile(vec![agent("solo", 5, None)], None).await;
+    harness.observe("acme.com", SourceName::HttpProbe, 10).await;
+    harness.pass().await;
+    sqlx::query("UPDATE lead_qualification_state SET scoring_version = 0")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    harness.evaluate().await;
+    let report = harness.summarise(settings(100, 10)).await;
+
+    assert_eq!(report.leads, 0);
+    assert_eq!(report.backlog, 0);
+    assert_eq!(harness.assessments(profile, "acme.com").await.len(), 1);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn regenerating_after_a_verdict_change_keeps_an_edited_draft(pool: PgPool) {
+    let harness = Harness::new(pool.clone());
+    harness.defaults().await;
+    let profile = harness.profile(vec![agent("solo", 5, None)], None).await;
+    harness.observe("acme.com", SourceName::HttpProbe, 10).await;
+    harness.evaluate().await;
+    force_a_different_stored_verdict(&pool).await;
+    harness.summarise(settings(100, 10)).await;
+    let first = harness.assessments(profile, "acme.com").await.remove(0);
+    edit_subject(&harness, &first, "Mon objet").await;
+    harness.script(SYNTHESIS, vec![rewritten("Objet suggéré")]);
+    harness.set_time(100);
+
+    harness.pass().await;
+
+    let latest = &harness.assessments(profile, "acme.com").await[0];
+    assert_eq!(latest.summary, "Bilan réécrit.");
+    assert_eq!(latest.draft.as_ref().unwrap().subject, "Mon objet");
+    assert_eq!(
+        latest
+            .draft_review
+            .as_ref()
+            .unwrap()
+            .suggestion
+            .as_ref()
+            .unwrap()
+            .subject,
+        "Objet suggéré"
+    );
 }
 
 #[sqlx::test(migrations = "../../migrations")]

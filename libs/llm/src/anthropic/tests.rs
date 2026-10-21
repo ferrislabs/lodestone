@@ -10,8 +10,8 @@ use std::{
 use common::Secret;
 use httpmock::prelude::*;
 use lodestone_core::{
-    LlmError, LlmProvider, LlmRequest, ProviderDefinition, ProviderKind, UntrustedDocument,
-    render_user_content,
+    GenerationParams, LlmError, LlmProvider, LlmRequest, ProviderDefinition, ProviderKind,
+    UntrustedDocument, render_user_content,
 };
 use serde_json::{Value, json};
 use tracing::instrument::WithSubscriber;
@@ -89,6 +89,7 @@ fn definition(server: &MockServer, timeout: Duration) -> ProviderDefinition {
         api_key: Some(Secret::new(KEY)),
         timeout,
         reasoning_effort: None,
+        generation: GenerationParams::default(),
     }
 }
 
@@ -182,6 +183,41 @@ async fn request_has_the_exact_expected_shape() {
     for key in ["tools", "tool_choice", "thinking", "temperature"] {
         assert!(expected.get(key).is_none());
     }
+}
+
+#[tokio::test]
+async fn temperature_and_max_tokens_are_sent_and_penalties_are_not() {
+    let server = MockServer::start();
+    let mut definition = definition(&server, Duration::from_secs(5));
+    definition.generation = GenerationParams {
+        max_tokens: Some(700),
+        temperature: Some(0.3),
+        frequency_penalty: Some(0.5),
+        presence_penalty: Some(0.5),
+        repeat_penalty: Some(1.3),
+    };
+    let provider = AnthropicProvider::new(definition).unwrap();
+    let mock = server.mock(|when, then| {
+        when.method(POST).path("/v1/messages").matches(|request| {
+            request.body.as_ref().is_some_and(|body| {
+                let value: Value = serde_json::from_slice(body).unwrap();
+                value["max_tokens"] == json!(700)
+                    && value["temperature"] == json!(0.3)
+                    && value.get("frequency_penalty").is_none()
+                    && value.get("presence_penalty").is_none()
+                    && value.get("repeat_penalty").is_none()
+            })
+        });
+        then.status(200)
+            .json_body(ok_body("{\"verdict\":\"hot\"}", "end_turn"));
+    });
+    let schema = schema();
+    let documents = documents();
+    provider
+        .complete(&request(&documents, &schema))
+        .await
+        .unwrap();
+    mock.assert();
 }
 
 #[tokio::test]

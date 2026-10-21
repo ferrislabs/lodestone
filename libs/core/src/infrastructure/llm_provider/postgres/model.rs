@@ -6,7 +6,7 @@ use url::Url;
 use uuid::Uuid;
 
 use crate::domain::llm::{
-    ProviderKind, ReasoningEffort,
+    GenerationParams, ProviderKind, ReasoningEffort,
     provider::{LlmProviderRecord, ProviderId, SealedSecret, TokenPricing},
 };
 
@@ -25,6 +25,11 @@ pub struct LlmProviderRow {
     pub api_key_ciphertext: Option<Vec<u8>>,
     pub enabled: bool,
     pub reasoning_effort: Option<String>,
+    pub max_tokens: Option<i32>,
+    pub temperature: Option<f64>,
+    pub frequency_penalty: Option<f64>,
+    pub presence_penalty: Option<f64>,
+    pub repeat_penalty: Option<f64>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -83,6 +88,15 @@ impl TryFrom<LlmProviderRow> for LlmProviderRecord {
             api_key,
             enabled: row.enabled,
             reasoning_effort,
+            generation: GenerationParams {
+                max_tokens: row.max_tokens.map(u32::try_from).transpose().map_err(|_| {
+                    CoreError::Internal("stored llm provider max tokens is invalid".to_owned())
+                })?,
+                temperature: row.temperature,
+                frequency_penalty: row.frequency_penalty,
+                presence_penalty: row.presence_penalty,
+                repeat_penalty: row.repeat_penalty,
+            },
             created_at: row.created_at,
             updated_at: row.updated_at,
         })

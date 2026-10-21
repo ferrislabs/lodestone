@@ -57,8 +57,8 @@ export function DraftContext({ entry, onOpenLead }: DraftContextProps) {
 				</p>
 				{entry.evidence_verified ? null : (
 					<output className="block rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-						Preuves non vérifiées : au moins une citation n'a pas pu être
-						retrouvée mot pour mot dans les signaux.
+						Preuves non vérifiées : aucune citation n'a pu être retrouvée mot
+						pour mot dans les signaux.
 					</output>
 				)}
 				<div className="flex flex-col gap-3">

@@ -10,8 +10,8 @@ use std::{
 use common::Secret;
 use httpmock::prelude::*;
 use lodestone_core::{
-    LlmError, LlmProvider, LlmRequest, ProviderDefinition, ProviderKind, ReasoningEffort,
-    UntrustedDocument,
+    GenerationParams, LlmError, LlmProvider, LlmRequest, ProviderDefinition, ProviderKind,
+    ReasoningEffort, UntrustedDocument,
 };
 use serde_json::json;
 use tracing::{
@@ -38,6 +38,7 @@ fn definition(
         api_key: key.map(Secret::new),
         timeout,
         reasoning_effort: None,
+        generation: GenerationParams::default(),
     }
 }
 
@@ -509,6 +510,118 @@ async fn reasoning_effort_is_absent_when_unset() {
                     .body
                     .as_ref()
                     .is_some_and(|body| !String::from_utf8_lossy(body).contains("reasoning_effort"))
+            })
+            .json_body(expected_body());
+        then.status(200).json_body(success_body());
+    });
+    run(&provider(ProviderKind::OpenAiCompatible, &server, None))
+        .await
+        .unwrap();
+    mock.assert();
+}
+
+fn provider_with_generation(
+    server: &MockServer,
+    generation: GenerationParams,
+) -> OpenAiCompatibleProvider {
+    let mut definition = definition(
+        ProviderKind::OpenAiCompatible,
+        &server.base_url(),
+        None,
+        Duration::from_secs(5),
+    );
+    definition.generation = generation;
+    OpenAiCompatibleProvider::new(&definition).unwrap()
+}
+
+#[tokio::test]
+async fn generation_params_are_sent_when_set_and_replace_the_request_max_tokens() {
+    let server = MockServer::start();
+    let mut expected = expected_body();
+    expected["max_tokens"] = json!(900);
+    expected["temperature"] = json!(0.2);
+    expected["frequency_penalty"] = json!(0.4);
+    expected["presence_penalty"] = json!(-0.5);
+    let mock = server.mock(|when, then| {
+        when.method(POST).json_body(expected);
+        then.status(200).json_body(success_body());
+    });
+    let generation = GenerationParams {
+        max_tokens: Some(900),
+        temperature: Some(0.2),
+        frequency_penalty: Some(0.4),
+        presence_penalty: Some(-0.5),
+        repeat_penalty: None,
+    };
+    run(&provider_with_generation(&server, generation))
+        .await
+        .unwrap();
+    mock.assert();
+}
+
+#[tokio::test]
+async fn a_repeat_penalty_is_sent_as_a_frequency_penalty_because_ollama_ignores_it() {
+    let server = MockServer::start();
+    let mock = server.mock(|when, then| {
+        when.method(POST).matches(|request| {
+            request.body.as_ref().is_some_and(|body| {
+                let value: serde_json::Value = serde_json::from_slice(body).unwrap();
+                value["frequency_penalty"]
+                    .as_f64()
+                    .is_some_and(|penalty| (penalty - 0.3).abs() < 1e-9)
+                    && value.get("repeat_penalty").is_none()
+                    && value.get("options").is_none()
+            })
+        });
+        then.status(200).json_body(success_body());
+    });
+    let generation = GenerationParams {
+        repeat_penalty: Some(1.3),
+        ..GenerationParams::default()
+    };
+    run(&provider_with_generation(&server, generation))
+        .await
+        .unwrap();
+    mock.assert();
+}
+
+#[tokio::test]
+async fn an_explicit_frequency_penalty_wins_over_the_repeat_penalty() {
+    let server = MockServer::start();
+    let mut expected = expected_body();
+    expected["frequency_penalty"] = json!(0.5);
+    let mock = server.mock(|when, then| {
+        when.method(POST).json_body(expected);
+        then.status(200).json_body(success_body());
+    });
+    let generation = GenerationParams {
+        frequency_penalty: Some(0.5),
+        repeat_penalty: Some(1.9),
+        ..GenerationParams::default()
+    };
+    run(&provider_with_generation(&server, generation))
+        .await
+        .unwrap();
+    mock.assert();
+}
+
+#[tokio::test]
+async fn absent_generation_params_are_not_sent() {
+    let server = MockServer::start();
+    let mock = server.mock(|when, then| {
+        when.method(POST)
+            .matches(|request| {
+                request.body.as_ref().is_some_and(|body| {
+                    let text = String::from_utf8_lossy(body);
+                    [
+                        "temperature",
+                        "frequency_penalty",
+                        "presence_penalty",
+                        "repeat_penalty",
+                    ]
+                    .iter()
+                    .all(|key| !text.contains(key))
+                })
             })
             .json_body(expected_body());
         then.status(200).json_body(success_body());

@@ -349,8 +349,10 @@ pub struct AssessmentDto {
     pub verdict_narrative: String,
     pub approach_angle: String,
     pub evidence: Vec<EvidenceDto>,
-    /// False when at least one quote could not be checked verbatim against the signals, or none was given.
+    /// False when no quote could be checked verbatim against the signals. Quotes that failed the check are dropped, never listed.
     pub evidence_verified: bool,
+    /// Why the synthesis is of uncertain quality, when it is: `repetition`, `too_long`, `restated_figures` (a percentage or the verdict restated with a number) or `dropped_quotes` (some quotes could not be verified and were left out).
+    pub quality_warnings: Vec<String>,
     pub model: String,
     pub prompt_version: String,
     pub draft: Option<DraftDto>,
@@ -375,6 +377,11 @@ impl From<&Assessment> for AssessmentDto {
                 })
                 .collect(),
             evidence_verified: assessment.evidence_verified,
+            quality_warnings: assessment
+                .quality_warnings
+                .iter()
+                .map(|warning| warning.as_str().to_owned())
+                .collect(),
             model: assessment.model.clone(),
             prompt_version: assessment.prompt_version.clone(),
             draft: assessment

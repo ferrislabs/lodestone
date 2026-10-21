@@ -102,6 +102,50 @@ mod tests {
         assert!(!sound("alpha gamma"));
     }
 
+    const LUZERN_RAW: &str = "signal: saas_provider\nvalue: auth0\nsource: dns_cname\nobserved: 2026-10-05T23:38:01Z\n{\n  \"host\": \"login.dev.luzernrisk.com\"\n}";
+    const LUZERN_SENTENCE: &str = "login.dev.luzernrisk.com délègue son authentification à Auth0 (CNAME DNS)\nsource: dns_cname\nobserved: 2026-10-05T23:38:01Z";
+
+    #[test]
+    fn the_luzernrisk_raw_signal_lines_quote_verifies_across_lines() {
+        let documents = docs(&[LUZERN_RAW]);
+        let given = quotes(vec![(
+            0,
+            "signal: saas_provider value: auth0 source: dns_cname observed: 2026-10-05T23:38:01Z",
+        )]);
+        assert!(check_evidence(&given, &documents).is_sound());
+        let with_newlines = quotes(vec![(
+            0,
+            "signal: saas_provider\nvalue: auth0\nsource: dns_cname\nobserved: 2026-10-05T23:38:01Z",
+        )]);
+        assert!(check_evidence(&with_newlines, &documents).is_sound());
+    }
+
+    #[test]
+    fn the_luzernrisk_sentence_quote_verifies_alone_or_with_its_metadata_lines() {
+        let documents = docs(&[LUZERN_SENTENCE]);
+        for quote in [
+            "délègue son authentification à Auth0",
+            "login.dev.luzernrisk.com délègue son authentification à Auth0 (CNAME DNS) source: dns_cname",
+            "source: dns_cname\nobserved: 2026-10-05T23:38:01Z",
+            "SOURCE : dns_cname Observed: 2026-10-05t23:38:01z",
+        ] {
+            let given = quotes(vec![(0, quote)]);
+            assert!(check_evidence(&given, &documents).is_sound(), "{quote}");
+        }
+    }
+
+    #[test]
+    fn the_former_raw_line_layout_no_longer_matches_a_sentence_document() {
+        let documents = docs(&[LUZERN_SENTENCE]);
+        let given = quotes(vec![(
+            0,
+            "signal: saas_provider value: auth0 source: dns_cname observed: 2026-10-05T23:38:01Z",
+        )]);
+        let check = check_evidence(&given, &documents);
+        assert_eq!(check.rejected, 1);
+        assert!(check.verified.is_empty());
+    }
+
     proptest! {
         #[test]
         fn any_substring_passes(

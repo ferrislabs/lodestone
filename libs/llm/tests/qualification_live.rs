@@ -2,9 +2,9 @@ use std::{fs, num::NonZeroU32, path::PathBuf, time::Duration};
 
 use llm::openai::OpenAiCompatibleProvider;
 use lodestone_core::{
-    CacheScope, CachedOutput, LlmCache, ProfileId, ProviderDefinition, ProviderKind,
-    ReasoningEffort, RevisionNumber, TokenPricing, UntrustedDocument, ValidatedProfile,
-    agent_prompt, agent_score, contract_schema,
+    CacheScope, CachedOutput, GenerationParams, LlmCache, ProfileId, ProviderDefinition,
+    ProviderKind, ReasoningEffort, RevisionNumber, TokenPricing, UntrustedDocument,
+    ValidatedProfile, agent_prompt, agent_score, contract_schema,
     llm::gateway::{CallSettings, Prompt, RunBudget, SchemaCall, call_with_schema},
     validate_answers,
 };
@@ -50,6 +50,7 @@ async fn the_pertinence_agent_answers_the_contract_live() {
         api_key: None,
         timeout: Duration::from_secs(300),
         reasoning_effort: Some(ReasoningEffort::None),
+        generation: GenerationParams::default(),
     };
     let provider = OpenAiCompatibleProvider::new(&definition).unwrap();
     let case: Value = serde_json::from_str(

@@ -10,7 +10,7 @@ use url::Url;
 use crate::{
     application::LodestoneUseCase,
     domain::llm::{
-        ProviderDefinition, ProviderKind, ReasoningEffort,
+        GenerationParams, ProviderDefinition, ProviderKind, ReasoningEffort,
         provider::{
             CipherError, LlmProviderRecord, LlmProviderRepository, ProviderId, ResolvedProvider,
             SecretCipher, Tier, TierError, TokenPricing,
@@ -29,6 +29,7 @@ pub struct CreateLlmProvider {
     pub pricing: TokenPricing,
     pub api_key: Option<Secret>,
     pub reasoning_effort: Option<ReasoningEffort>,
+    pub generation: GenerationParams,
 }
 
 #[derive(Debug, Clone)]
@@ -50,10 +51,21 @@ pub struct UpdateLlmProvider {
     pub pricing: TokenPricing,
     pub api_key: KeyChange,
     pub reasoning_effort: Option<ReasoningEffort>,
+    pub generation: GenerationParams,
 }
 
 fn requires_key(kind: ProviderKind) -> bool {
     matches!(kind, ProviderKind::Anthropic | ProviderKind::Mistral)
+}
+
+fn check_generation(generation: &GenerationParams) -> Result<(), CoreError> {
+    match generation.problems().into_iter().next() {
+        Some(problem) => Err(CoreError::Invalid {
+            field: problem.field.to_owned(),
+            message: problem.message,
+        }),
+        None => Ok(()),
+    }
 }
 
 fn missing_key() -> CoreError {
@@ -71,6 +83,7 @@ impl LodestoneUseCase {
         cipher: &C,
     ) -> Result<LlmProviderRecord, CoreError> {
         let mut repo = llm_provider_repository;
+        check_generation(&command.generation)?;
         if command.api_key.is_none() && requires_key(command.kind) {
             return Err(missing_key());
         }
@@ -94,6 +107,7 @@ impl LodestoneUseCase {
             api_key,
             enabled: true,
             reasoning_effort: command.reasoning_effort,
+            generation: command.generation,
             created_at: now,
             updated_at: now,
         };
@@ -108,6 +122,7 @@ impl LodestoneUseCase {
         cipher: &C,
     ) -> Result<LlmProviderRecord, CoreError> {
         let mut repo = llm_provider_repository;
+        check_generation(&command.generation)?;
         let current = repo.find(command.id).await?.ok_or(CoreError::NotFound)?;
         let api_key = match &command.api_key {
             KeyChange::Keep => current.api_key,
@@ -133,6 +148,7 @@ impl LodestoneUseCase {
             api_key,
             enabled: current.enabled,
             reasoning_effort: command.reasoning_effort,
+            generation: command.generation,
             created_at: current.created_at,
             updated_at: Utc::now(),
         };
@@ -288,6 +304,7 @@ fn resolve_record<C: SecretCipher>(
             api_key,
             timeout: record.timeout,
             reasoning_effort: record.reasoning_effort,
+            generation: record.generation,
         },
         max_retries: record.max_retries,
         pricing: record.pricing,

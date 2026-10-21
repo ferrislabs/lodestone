@@ -2,8 +2,8 @@ use std::time::Duration;
 
 use common::Secret;
 use lodestone_core::{
-    LlmError, LlmProvider, LlmRequest, LlmResponse, ProviderDefinition, ProviderKind,
-    ReasoningEffort, TokenUsage, render_user_content,
+    GenerationParams, LlmError, LlmProvider, LlmRequest, LlmResponse, ProviderDefinition,
+    ProviderKind, ReasoningEffort, TokenUsage, render_user_content,
 };
 use reqwest::{Client, StatusCode, header};
 use serde::{Deserialize, Serialize};
@@ -19,6 +19,7 @@ pub struct OpenAiCompatibleProvider {
     api_key: Option<Secret>,
     kind: ProviderKind,
     reasoning_effort: Option<ReasoningEffort>,
+    generation: GenerationParams,
 }
 
 #[derive(Serialize)]
@@ -29,6 +30,12 @@ struct ChatRequest<'a> {
     response_format: ResponseFormat<'a>,
     #[serde(skip_serializing_if = "Option::is_none")]
     reasoning_effort: Option<ReasoningEffort>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    temperature: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    frequency_penalty: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    presence_penalty: Option<f64>,
 }
 
 #[derive(Serialize)]
@@ -116,6 +123,7 @@ impl OpenAiCompatibleProvider {
             api_key: definition.api_key.clone(),
             kind: definition.kind,
             reasoning_effort: definition.reasoning_effort,
+            generation: definition.generation,
         })
     }
 
@@ -123,7 +131,7 @@ impl OpenAiCompatibleProvider {
         let user = render_user_content(request);
         let body = ChatRequest {
             model: &self.model,
-            max_tokens: request.max_tokens,
+            max_tokens: self.generation.max_tokens_or(request.max_tokens),
             messages: [
                 Message {
                     role: "system",
@@ -143,6 +151,9 @@ impl OpenAiCompatibleProvider {
                 },
             },
             reasoning_effort: self.reasoning_effort,
+            temperature: self.generation.temperature,
+            frequency_penalty: self.generation.frequency_penalty_for_openai(),
+            presence_penalty: self.generation.presence_penalty,
         };
         let mut builder = self.client.post(&self.endpoint).json(&body);
         if let Some(key) = &self.api_key {

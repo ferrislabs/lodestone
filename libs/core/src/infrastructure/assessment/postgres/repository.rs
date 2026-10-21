@@ -67,6 +67,11 @@ impl<'tx> AssessmentRepository for PgAssessmentRepository<'tx> {
                 .unwrap_or_else(DraftReview::pending)
         });
         let draft = assessment.draft.as_ref();
+        let warnings: Vec<&str> = assessment
+            .quality_warnings
+            .iter()
+            .map(|warning| warning.as_str())
+            .collect();
         sqlx::query(
             r#"
             INSERT INTO assessments (
@@ -74,9 +79,9 @@ impl<'tx> AssessmentRepository for PgAssessmentRepository<'tx> {
                 evidence_verified, model, prompt_version, draft_subject, draft_body, draft_status,
                 draft_reviewed_by, draft_reviewed_at, draft_edited_at, draft_rejection_reason,
                 draft_original_subject, draft_original_body, draft_suggested_subject,
-                draft_suggested_body, draft_outdated_at, created_at
+                draft_suggested_body, draft_outdated_at, created_at, quality_warnings
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)
             "#,
         )
         .bind(assessment.id.0)
@@ -131,6 +136,7 @@ impl<'tx> AssessmentRepository for PgAssessmentRepository<'tx> {
         )
         .bind(review.as_ref().and_then(|review| review.outdated_at))
         .bind(assessment.created_at)
+        .bind(&warnings)
         .execute(&mut ***tx)
         .await
         .map_err(map_sqlx_error)?;

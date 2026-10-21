@@ -7,7 +7,7 @@ use url::Url;
 
 use crate::domain::{
     lead::{str_enum, uuid_id},
-    llm::{ProviderDefinition, ProviderKind, ReasoningEffort},
+    llm::{GenerationParams, ProviderDefinition, ProviderKind, ReasoningEffort},
 };
 
 uuid_id!(ProviderId);
@@ -35,7 +35,7 @@ pub struct SealedSecret {
     pub ciphertext: Vec<u8>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct LlmProviderRecord {
     pub id: ProviderId,
     pub name: String,
@@ -48,6 +48,7 @@ pub struct LlmProviderRecord {
     pub api_key: Option<SealedSecret>,
     pub enabled: bool,
     pub reasoning_effort: Option<ReasoningEffort>,
+    pub generation: GenerationParams,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }

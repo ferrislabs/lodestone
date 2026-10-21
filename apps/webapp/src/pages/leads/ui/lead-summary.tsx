@@ -5,6 +5,7 @@ import { Button } from '#/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '#/components/ui/card'
 import { draftStatusLabel } from '#/pages/drafts/lib/labels'
 import { formatDateTime } from '#/pages/leads/lib/format'
+import { qualityWarningMessage } from '#/pages/leads/lib/quality'
 import type { Assessment, SummaryState } from '#/pages/leads/lib/types'
 import { ProvenanceLink } from './provenance-link'
 
@@ -112,12 +113,24 @@ export function LeadSummary({
 							<span className="font-medium">Angle d'approche : </span>
 							{assessment.approach_angle}
 						</p>
+						{qualityWarningMessage(assessment.quality_warnings) ? (
+							<div
+								role="alert"
+								data-quality-warning="true"
+								className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800"
+							>
+								<TriangleAlert className="mt-0.5 size-4 shrink-0" />
+								<span>
+									{qualityWarningMessage(assessment.quality_warnings)}
+								</span>
+							</div>
+						) : null}
 						{assessment.evidence_verified ? null : (
 							<output className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
 								<TriangleAlert className="mt-0.5 size-4 shrink-0" />
 								<span>
-									Preuves non vérifiées : au moins une citation n'a pas pu être
-									retrouvée mot pour mot dans les signaux.
+									Preuves non vérifiées : aucune citation n'a pu être retrouvée
+									mot pour mot dans les signaux.
 								</span>
 							</output>
 						)}

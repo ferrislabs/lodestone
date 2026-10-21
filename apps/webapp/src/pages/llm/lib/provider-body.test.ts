@@ -22,6 +22,11 @@ const provider: Provider = {
 	timeout_seconds: 30,
 	pricing: { input_cents_per_mtok: 300, output_cents_per_mtok: 1500 },
 	reasoning_effort: null,
+	max_tokens: null,
+	temperature: null,
+	frequency_penalty: null,
+	presence_penalty: null,
+	repeat_penalty: null,
 	tiers: ['triage'],
 	created_at: '2026-01-01T00:00:00Z',
 	updated_at: '2026-01-01T00:00:00Z',
@@ -96,6 +101,92 @@ describe('reasoning effort', () => {
 		expect(
 			fieldErrorsFromPaths({ reasoning_effort: 'must be one of none' }),
 		).toEqual({ reasoning_effort: 'must be one of none' })
+	})
+})
+
+describe('generation parameters', () => {
+	const tuned: Provider = {
+		...provider,
+		max_tokens: 900,
+		temperature: 0.2,
+		frequency_penalty: 0.4,
+		presence_penalty: -0.5,
+		repeat_penalty: 1.3,
+	}
+
+	it('loads stored values as text and absent ones as empty', () => {
+		const values = valuesFromProvider(tuned)
+		expect(values.max_tokens).toBe('900')
+		expect(values.temperature).toBe('0.2')
+		expect(values.presence_penalty).toBe('-0.5')
+		expect(values.repeat_penalty).toBe('1.3')
+		expect(valuesFromProvider(provider).max_tokens).toBe('')
+		expect(valuesFromProvider(provider).temperature).toBe('')
+	})
+
+	it('omits blank values on create', () => {
+		const body = buildCreateBody(EMPTY_PROVIDER_VALUES)
+		for (const field of [
+			'max_tokens',
+			'temperature',
+			'frequency_penalty',
+			'presence_penalty',
+			'repeat_penalty',
+		]) {
+			expect(field in body).toBe(false)
+		}
+	})
+
+	it('sends numbers on create, accepting a decimal comma', () => {
+		const body = buildCreateBody({
+			...EMPTY_PROVIDER_VALUES,
+			max_tokens: '900',
+			temperature: '0,2',
+			repeat_penalty: '1.3',
+		})
+		expect(body.max_tokens).toBe(900)
+		expect(body.temperature).toBe(0.2)
+		expect(body.repeat_penalty).toBe(1.3)
+		expect('presence_penalty' in body).toBe(false)
+	})
+
+	it('sends the values on update and null for cleared ones', () => {
+		const kept = buildUpdateBody(valuesFromProvider(tuned), 'keep')
+		expect(kept.max_tokens).toBe(900)
+		expect(kept.presence_penalty).toBe(-0.5)
+		const cleared = buildUpdateBody(
+			{ ...valuesFromProvider(tuned), max_tokens: '', temperature: '0' },
+			'keep',
+		)
+		expect(cleared.max_tokens).toBeNull()
+		expect(cleared.temperature).toBe(0)
+		expect(JSON.stringify(cleared)).toContain('"max_tokens":null')
+	})
+
+	it('maps the server paths to the fields', () => {
+		expect(
+			fieldErrorsFromPaths({
+				temperature: 'must be between 0 and 2',
+				repeat_penalty: 'must be between 1 and 2',
+			}),
+		).toEqual({
+			temperature: 'must be between 0 and 2',
+			repeat_penalty: 'must be between 1 and 2',
+		})
+	})
+
+	it('flags non numeric input in French', () => {
+		expect(
+			numericErrors({
+				...EMPTY_PROVIDER_VALUES,
+				max_tokens: '1.5',
+				temperature: 'chaud',
+				frequency_penalty: '-0,5',
+			}),
+		).toEqual({
+			max_tokens: 'Doit être un entier positif ou nul',
+			temperature: 'Doit être un nombre',
+		})
 	})
 })
 

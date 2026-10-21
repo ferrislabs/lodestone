@@ -38,6 +38,94 @@ str_enum!(ReasoningEffort {
     High => "high",
 });
 
+pub const MAX_TOKENS_LIMIT: u32 = 200_000;
+pub const TEMPERATURE_RANGE: (f64, f64) = (0.0, 2.0);
+pub const PENALTY_RANGE: (f64, f64) = (-2.0, 2.0);
+pub const REPEAT_PENALTY_RANGE: (f64, f64) = (1.0, 2.0);
+
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct GenerationParams {
+    pub max_tokens: Option<u32>,
+    pub temperature: Option<f64>,
+    pub frequency_penalty: Option<f64>,
+    pub presence_penalty: Option<f64>,
+    pub repeat_penalty: Option<f64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GenerationProblem {
+    pub field: &'static str,
+    pub message: String,
+}
+
+fn check_range(
+    field: &'static str,
+    value: Option<f64>,
+    (min, max): (f64, f64),
+    problems: &mut Vec<GenerationProblem>,
+) {
+    let Some(value) = value else {
+        return;
+    };
+    if !value.is_finite() || value < min || value > max {
+        problems.push(GenerationProblem {
+            field,
+            message: format!("must be between {min} and {max}"),
+        });
+    }
+}
+
+impl GenerationParams {
+    pub fn problems(&self) -> Vec<GenerationProblem> {
+        let mut problems = Vec::new();
+        if let Some(max_tokens) = self.max_tokens
+            && !(1..=MAX_TOKENS_LIMIT).contains(&max_tokens)
+        {
+            problems.push(GenerationProblem {
+                field: "max_tokens",
+                message: format!("must be between 1 and {MAX_TOKENS_LIMIT}"),
+            });
+        }
+        check_range(
+            "temperature",
+            self.temperature,
+            TEMPERATURE_RANGE,
+            &mut problems,
+        );
+        check_range(
+            "frequency_penalty",
+            self.frequency_penalty,
+            PENALTY_RANGE,
+            &mut problems,
+        );
+        check_range(
+            "presence_penalty",
+            self.presence_penalty,
+            PENALTY_RANGE,
+            &mut problems,
+        );
+        check_range(
+            "repeat_penalty",
+            self.repeat_penalty,
+            REPEAT_PENALTY_RANGE,
+            &mut problems,
+        );
+        problems
+    }
+
+    pub fn frequency_penalty_for_openai(&self) -> Option<f64> {
+        self.frequency_penalty.or_else(|| {
+            self.repeat_penalty
+                .map(|repeat| (repeat - 1.0).clamp(PENALTY_RANGE.0, PENALTY_RANGE.1))
+                .filter(|penalty| *penalty > 0.0)
+        })
+    }
+
+    pub fn max_tokens_or(&self, default: u32) -> u32 {
+        self.max_tokens.unwrap_or(default)
+    }
+}
+
 #[derive(Clone)]
 pub struct ProviderDefinition {
     pub kind: ProviderKind,
@@ -46,6 +134,7 @@ pub struct ProviderDefinition {
     pub api_key: Option<Secret>,
     pub timeout: Duration,
     pub reasoning_effort: Option<ReasoningEffort>,
+    pub generation: GenerationParams,
 }
 
 impl fmt::Debug for ProviderDefinition {
@@ -57,6 +146,7 @@ impl fmt::Debug for ProviderDefinition {
             .field("api_key", &self.api_key.as_ref().map(|_| "[redacted]"))
             .field("timeout", &self.timeout)
             .field("reasoning_effort", &self.reasoning_effort)
+            .field("generation", &self.generation)
             .finish()
     }
 }
@@ -211,6 +301,7 @@ mod tests {
             api_key: Some(Secret::new("sk-ant-secret-value")),
             timeout: Duration::from_secs(30),
             reasoning_effort: None,
+            generation: GenerationParams::default(),
         };
         assert!(!format!("{definition:?}").contains("sk-ant-secret-value"));
     }
@@ -230,6 +321,81 @@ mod tests {
             );
         }
         assert_eq!(ReasoningEffort::parse("max"), None);
+    }
+
+    fn problem_fields(params: GenerationParams) -> Vec<&'static str> {
+        params
+            .problems()
+            .iter()
+            .map(|problem| problem.field)
+            .collect()
+    }
+
+    #[test]
+    fn absent_generation_params_are_valid() {
+        assert!(GenerationParams::default().problems().is_empty());
+    }
+
+    #[test]
+    fn generation_params_at_the_bounds_are_valid() {
+        let params = GenerationParams {
+            max_tokens: Some(MAX_TOKENS_LIMIT),
+            temperature: Some(2.0),
+            frequency_penalty: Some(-2.0),
+            presence_penalty: Some(2.0),
+            repeat_penalty: Some(1.0),
+        };
+        assert!(params.problems().is_empty());
+    }
+
+    #[test]
+    fn generation_params_outside_their_range_are_reported_by_field() {
+        let params = GenerationParams {
+            max_tokens: Some(0),
+            temperature: Some(2.5),
+            frequency_penalty: Some(-2.1),
+            presence_penalty: Some(f64::NAN),
+            repeat_penalty: Some(0.9),
+        };
+        assert_eq!(
+            problem_fields(params),
+            vec![
+                "max_tokens",
+                "temperature",
+                "frequency_penalty",
+                "presence_penalty",
+                "repeat_penalty"
+            ]
+        );
+        let too_many = GenerationParams {
+            max_tokens: Some(MAX_TOKENS_LIMIT + 1),
+            ..GenerationParams::default()
+        };
+        assert_eq!(problem_fields(too_many), vec!["max_tokens"]);
+    }
+
+    #[test]
+    fn repeat_penalty_maps_to_a_frequency_penalty_unless_one_is_set() {
+        let repeat = GenerationParams {
+            repeat_penalty: Some(1.3),
+            ..GenerationParams::default()
+        };
+        let mapped = repeat.frequency_penalty_for_openai().unwrap();
+        assert!((mapped - 0.3).abs() < 1e-9);
+        let neutral = GenerationParams {
+            repeat_penalty: Some(1.0),
+            ..GenerationParams::default()
+        };
+        assert_eq!(neutral.frequency_penalty_for_openai(), None);
+        let explicit = GenerationParams {
+            frequency_penalty: Some(0.5),
+            ..repeat
+        };
+        assert_eq!(explicit.frequency_penalty_for_openai(), Some(0.5));
+        assert_eq!(
+            GenerationParams::default().frequency_penalty_for_openai(),
+            None
+        );
     }
 
     #[test]

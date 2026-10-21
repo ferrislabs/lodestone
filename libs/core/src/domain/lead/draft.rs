@@ -282,6 +282,7 @@ mod tests {
             approach_angle: String::new(),
             evidence: Vec::new(),
             evidence_verified: true,
+            quality_warnings: Vec::new(),
             model: String::new(),
             prompt_version: String::new(),
             draft: Some(DraftMessage {

@@ -19,6 +19,11 @@ const provider: Provider = {
 	timeout_seconds: 30,
 	pricing: { input_cents_per_mtok: 300, output_cents_per_mtok: 1500 },
 	reasoning_effort: null,
+	max_tokens: null,
+	temperature: null,
+	frequency_penalty: null,
+	presence_penalty: null,
+	repeat_penalty: null,
 	tiers: [],
 	created_at: '2026-01-01T00:00:00Z',
 	updated_at: '2026-01-01T00:00:00Z',
@@ -127,6 +132,63 @@ describe('ProviderForm', () => {
 		expect(
 			screen.getByText(/La réflexion du modèle n'est jamais affichée/),
 		).toBeTruthy()
+	})
+
+	it('shows the generation parameters with their French labels and help', () => {
+		renderForm()
+		expect(screen.getByText('Paramètres de génération')).toBeTruthy()
+		for (const label of [
+			'Tokens maximum',
+			'Température',
+			'Pénalité de fréquence',
+			'Pénalité de présence',
+			'Pénalité de répétition',
+		]) {
+			const input = screen.getByLabelText(label) as HTMLInputElement
+			expect(input.value).toBe('')
+		}
+		expect(screen.getByText(/Laissés vides, ces paramètres/)).toBeTruthy()
+		expect(
+			screen.getByText(/Ollama l'ignore sur son point d'accès/),
+		).toBeTruthy()
+		expect(
+			screen
+				.getByLabelText('Pénalité de répétition')
+				.getAttribute('aria-describedby'),
+		).toBe('provider-repeat_penalty-help')
+	})
+
+	it('shows stored generation values and reports changes', () => {
+		const props = renderForm({
+			values: {
+				...valuesFromProvider({
+					...provider,
+					max_tokens: 900,
+					temperature: 0.2,
+					repeat_penalty: 1.3,
+				}),
+			},
+		})
+		expect(
+			(screen.getByLabelText('Tokens maximum') as HTMLInputElement).value,
+		).toBe('900')
+		expect(
+			(screen.getByLabelText('Température') as HTMLInputElement).value,
+		).toBe('0.2')
+		fireEvent.change(screen.getByLabelText('Pénalité de répétition'), {
+			target: { value: '1,2' },
+		})
+		expect(props.onChange).toHaveBeenCalledWith('repeat_penalty', '1,2')
+	})
+
+	it('shows a generation field error next to its field', () => {
+		renderForm({
+			fieldErrors: { temperature: 'Doit être compris entre 0 et 2' },
+		})
+		expect(screen.getByText('Doit être compris entre 0 et 2')).toBeTruthy()
+		expect(
+			screen.getByLabelText('Température').getAttribute('aria-invalid'),
+		).toBe('true')
 	})
 
 	it('reports reasoning changes and shows the stored value', () => {
