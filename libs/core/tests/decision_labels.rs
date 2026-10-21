@@ -3,8 +3,9 @@ mod support;
 use chrono::{Duration, Utc};
 use common::CoreError;
 use lodestone_core::{
-    AssessmentId, DecisionSnapshot, EvidenceComponents, EvidenceStrength, LeadId, LeadStatus,
-    LodestoneUseCase, ProfileId, Suggestion, UserId,
+    AssessmentId, CreateProfileCommand, DecisionSnapshot, EvidenceComponents, EvidenceStrength,
+    LeadId, LeadStatus, LodestoneUseCase, ProfileId, ProfileName, Rejection, RejectionReason,
+    Suggestion, UserId, ValidatedProfile,
 };
 use serde_json::{Value, json};
 use sqlx::PgPool;
@@ -73,8 +74,8 @@ async fn qualify(pool: &PgPool, lead: LeadId, confidence: f64, verdict: &str) {
             .await
             .unwrap();
         sqlx::query(
-            "INSERT INTO qualification_results (id, lead_id, profile_id, profile_revision, agent_id, model, prompt_hash, status, answers, agent_score, created_at)
-             VALUES ($1, $2, $3, 1, $4, 'model-x', 'hash', $5, '{}'::jsonb, $6, now())",
+            "INSERT INTO qualification_results (id, lead_id, profile_id, profile_revision, agent_id, model, prompt_version, status, answers, agent_score, created_at, provider_name, generation, samples)
+             VALUES ($1, $2, $3, 1, $4, 'model-x', 'qualification-agent@hash', $5, '{}'::jsonb, $6, now(), 'local', '{\"temperature\":0.2,\"max_tokens\":512,\"reasoning_effort\":\"low\"}'::jsonb, 1)",
         )
         .bind(Uuid::now_v7())
         .bind(lead.0)
@@ -123,9 +124,18 @@ async fn validating_a_lead_records_the_qualification_at_decision_time(pool: PgPo
     let actor = user(&pool).await;
     let id = lead(&pool, profile, "a.com", "qualified").await;
     qualify(&pool, id, 72.5, "a_verifier").await;
+    sqlx::query(
+        "INSERT INTO assessments (id, lead_id, profile_revision, summary, approach_angle, evidence, model, prompt_version, created_at, provider_name, generation, samples)
+         VALUES ($1, $2, 1, 'summary', 'angle', '[]'::jsonb, 'big-model', 'aggregator@abc', now(), 'cloud', '{\"temperature\":0.0}'::jsonb, 1)",
+    )
+    .bind(Uuid::now_v7())
+    .bind(id.0)
+    .execute(&pool)
+    .await
+    .unwrap();
 
     LodestoneUseCase::new(pool.clone())
-        .change_lead_status(id, LeadStatus::Validated, actor)
+        .change_lead_status(id, LeadStatus::Validated, actor, None)
         .await
         .unwrap();
 
@@ -147,14 +157,40 @@ async fn validating_a_lead_records_the_qualification_at_decision_time(pool: PgPo
     assert_eq!(snapshot["verdict_reason"], json!("weak_evidence"));
     assert_eq!(snapshot["evidence"]["score"], json!(0.62));
     assert_eq!(snapshot["evidence"]["components"]["diversity"], json!(1.0));
+    let provenance = json!({
+        "provider_id": null,
+        "provider_name": "local",
+        "model": "model-x",
+        "prompt_version": "qualification-agent@hash",
+        "generation": {
+            "temperature": 0.2,
+            "max_tokens": 512,
+            "frequency_penalty": null,
+            "presence_penalty": null,
+            "repeat_penalty": null,
+            "reasoning_effort": "low"
+        },
+        "samples": 1
+    });
     assert_eq!(
         snapshot["agents"]["fit"],
-        json!({"status": "valid", "score": 0.9})
+        json!({"status": "valid", "score": 0.9, "provenance": provenance})
     );
     assert_eq!(
         snapshot["agents"]["market"],
-        json!({"status": "invalid", "score": null})
+        json!({"status": "invalid", "score": null, "provenance": provenance})
     );
+    assert_eq!(snapshot["aggregator"]["model"], json!("big-model"));
+    assert_eq!(
+        snapshot["aggregator"]["prompt_version"],
+        json!("aggregator@abc")
+    );
+    assert_eq!(snapshot["aggregator"]["provider_name"], json!("cloud"));
+    assert_eq!(
+        snapshot["aggregator"]["generation"]["temperature"],
+        json!(0.0)
+    );
+    assert_eq!(snapshot["aggregator"]["samples"], json!(1));
     let parsed: DecisionSnapshot = serde_json::from_value(snapshot).unwrap();
     assert_eq!(parsed.evidence, Some(evidence()));
 }
@@ -168,17 +204,30 @@ async fn rejecting_records_a_label_and_going_back_to_new_records_nothing(pool: P
     let usecase = LodestoneUseCase::new(pool.clone());
 
     usecase
-        .change_lead_status(rejected, LeadStatus::Rejected, actor)
+        .change_lead_status(
+            rejected,
+            LeadStatus::Rejected,
+            actor,
+            Some(Rejection::new(RejectionReason::OffTarget, None).unwrap()),
+        )
         .await
         .unwrap();
     assert_eq!(kinds(&pool, rejected).await, ["lead_rejected"]);
+    let stored: (Option<String>, Option<String>) = sqlx::query_as(
+        "SELECT rejection_reason, rejection_note FROM decision_labels WHERE lead_id = $1",
+    )
+    .bind(rejected.0)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(stored, (Some("hors_cible".to_owned()), None));
 
     usecase
-        .change_lead_status(rejected, LeadStatus::New, actor)
+        .change_lead_status(rejected, LeadStatus::New, actor, None)
         .await
         .unwrap();
     usecase
-        .change_lead_status(reopened, LeadStatus::New, actor)
+        .change_lead_status(reopened, LeadStatus::New, actor, None)
         .await
         .unwrap();
     assert_eq!(kinds(&pool, rejected).await, ["lead_rejected"]);
@@ -200,7 +249,7 @@ async fn a_refused_transition_records_nothing(pool: PgPool) {
     let actor = user(&pool).await;
     let id = lead(&pool, profile, "a.com", "new").await;
     let error = LodestoneUseCase::new(pool.clone())
-        .change_lead_status(id, LeadStatus::Validated, actor)
+        .change_lead_status(id, LeadStatus::Validated, actor, None)
         .await
         .unwrap_err();
     assert!(matches!(error, CoreError::Conflict(_)));
@@ -239,11 +288,142 @@ async fn rejecting_a_draft_records_the_draft_and_the_lead_decision(pool: PgPool)
     let assessment = draft(&pool, id).await;
 
     LodestoneUseCase::new(pool.clone())
-        .reject_draft(assessment, actor, Some("off target".to_owned()))
+        .reject_draft(
+            assessment,
+            actor,
+            Rejection::new(RejectionReason::Other, Some("off target")).unwrap(),
+        )
         .await
         .unwrap();
 
     assert_eq!(kinds(&pool, id).await, ["draft_rejected", "lead_rejected"]);
+    let stored: Vec<(Option<String>, Option<String>)> = sqlx::query_as(
+        "SELECT rejection_reason, rejection_note FROM decision_labels WHERE lead_id = $1",
+    )
+    .bind(id.0)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(stored.len(), 2);
+    assert!(
+        stored
+            .iter()
+            .all(|row| *row == (Some("autre".to_owned()), Some("off target".to_owned())))
+    );
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn rejecting_a_lead_without_a_reason_is_refused_and_records_nothing(pool: PgPool) {
+    let profile = create_profile(&pool, "alpha").await;
+    let actor = user(&pool).await;
+    let id = lead(&pool, profile, "a.com", "qualified").await;
+    let error = LodestoneUseCase::new(pool.clone())
+        .change_lead_status(id, LeadStatus::Rejected, actor, None)
+        .await
+        .unwrap_err();
+    assert!(matches!(error, CoreError::Invalid { .. }));
+    assert_eq!(total(&pool).await, 0);
+    let status: String = sqlx::query_scalar("SELECT status FROM leads WHERE id = $1")
+        .bind(id.0)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(status, "qualified");
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn validations_and_approvals_carry_no_rejection_reason(pool: PgPool) {
+    let profile = create_profile(&pool, "alpha").await;
+    let actor = user(&pool).await;
+    let id = lead(&pool, profile, "a.com", "qualified").await;
+    let assessment = draft(&pool, id).await;
+    LodestoneUseCase::new(pool.clone())
+        .approve_draft(assessment, actor)
+        .await
+        .unwrap();
+    let reasons: Vec<Option<String>> =
+        sqlx::query_scalar("SELECT rejection_reason FROM decision_labels WHERE lead_id = $1")
+            .bind(id.0)
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(reasons, [None, None]);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_report_names_agents_after_the_profile_revisions_and_lists_reasons_and_versions(
+    pool: PgPool,
+) {
+    let mut definition: Value = serde_json::from_str(include_str!(
+        "../../../docs/examples/profiles/iam-ferriskey.json"
+    ))
+    .unwrap();
+    definition["qualification_agents"] = json!([{
+        "id": "fit",
+        "name": "Adéquation",
+        "description": "Fit",
+        "enabled": true,
+        "system_prompt": "PROMPT",
+        "weight": 5,
+        "questions": [{
+            "id": "q",
+            "wording": "Pertinent ?",
+            "weight": 5,
+            "options": [
+                {"value": "oui", "label": "Oui", "score": 1.0},
+                {"value": "non", "label": "Non", "score": 0.0}
+            ]
+        }]
+    }]);
+    let profile = LodestoneUseCase::new(pool.clone())
+        .create_profile(CreateProfileCommand {
+            name: ProfileName::parse("alpha").unwrap(),
+            definition: ValidatedProfile::parse(definition).unwrap(),
+            created_by: None,
+        })
+        .await
+        .unwrap()
+        .profile
+        .id;
+    let actor = user(&pool).await;
+    let id = lead(&pool, profile, "a.com", "qualified").await;
+    qualify(&pool, id, 40.0, "a_verifier").await;
+    let usecase = LodestoneUseCase::new(pool.clone());
+    usecase
+        .change_lead_status(
+            id,
+            LeadStatus::Rejected,
+            actor,
+            Some(Rejection::new(RejectionReason::Competitor, None).unwrap()),
+        )
+        .await
+        .unwrap();
+
+    let report = usecase
+        .quality_report(None, None, Some(profile))
+        .await
+        .unwrap();
+
+    assert_eq!(report.agents.len(), 1);
+    assert_eq!(report.agents[0].agent_id, "fit");
+    assert_eq!(report.agents[0].name, "Adéquation");
+    assert_eq!(report.versions[0].agent_name.as_deref(), Some("Adéquation"));
+    assert_eq!(report.versions.len(), 1);
+    assert_eq!(report.versions[0].model, "model-x");
+    assert_eq!(
+        report.versions[0].prompt_version,
+        "qualification-agent@hash"
+    );
+    assert_eq!(
+        (report.versions[0].validated, report.versions[0].rejected),
+        (0, 1)
+    );
+    assert_eq!(report.profiles[0].reasons.len(), 1);
+    assert_eq!(
+        report.profiles[0].reasons[0].reason,
+        RejectionReason::Competitor
+    );
+    assert_eq!(report.profiles[0].reasons[0].count, 1);
 }
 
 #[sqlx::test(migrations = "../../migrations")]
@@ -278,7 +458,16 @@ async fn the_report_filters_by_period_and_profile_and_ignores_suppressed_domains
         (other, LeadStatus::Validated),
         (hidden, LeadStatus::Validated),
     ] {
-        usecase.change_lead_status(lead, to, actor).await.unwrap();
+        usecase
+            .change_lead_status(
+                lead,
+                to,
+                actor,
+                (to == LeadStatus::Rejected)
+                    .then(|| Rejection::new(RejectionReason::OffTarget, None).unwrap()),
+            )
+            .await
+            .unwrap();
     }
     sqlx::query(
         "UPDATE decision_labels SET decided_at = now() - interval '40 days' WHERE lead_id = $1",

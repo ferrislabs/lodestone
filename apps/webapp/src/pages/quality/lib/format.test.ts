@@ -11,6 +11,7 @@ import {
 	histogramMax,
 	insufficientMessage,
 	reliableSuggestion,
+	versionAgentLabel,
 } from './format'
 import type { ProfileQuality } from './types'
 
@@ -28,6 +29,7 @@ const profile: ProfileQuality = {
 		reliable_from: 65,
 		discard_below: 25,
 	},
+	rejection_reasons: [],
 }
 
 function plain(text: string): string {
@@ -95,5 +97,17 @@ describe('hasDecisions', () => {
 		expect(hasDecisions({ decisions: { ...zero, drafts_rejected: 1 } })).toBe(
 			true,
 		)
+	})
+})
+
+describe('versionAgentLabel', () => {
+	it('names the aggregator, the agent, or falls back to the id', () => {
+		expect(versionAgentLabel({ agent_id: null, agent_name: null })).toBe(
+			'Agrégateur',
+		)
+		expect(
+			versionAgentLabel({ agent_id: 'fit', agent_name: 'Adéquation' }),
+		).toBe('Adéquation')
+		expect(versionAgentLabel({ agent_id: 'fit', agent_name: null })).toBe('fit')
 	})
 })

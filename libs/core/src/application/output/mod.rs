@@ -275,8 +275,10 @@ mod tests {
             }],
             evidence_verified: true,
             quality_warnings: Vec::new(),
-            model: "m".to_owned(),
-            prompt_version: "qualification@1".to_owned(),
+            provenance: crate::domain::llm::RunProvenance::legacy(
+                "m".to_owned(),
+                "qualification@1".to_owned(),
+            ),
             draft: Some(DraftMessage {
                 subject: "Hello".to_owned(),
                 body: "Body".to_owned(),

@@ -18,8 +18,10 @@ use crate::{
         job::ports::Clock,
         lead::{Lead, LeadId, Signal},
         llm::{
-            LlmError, LlmProvider, ProviderDefinition, UntrustedDocument,
+            GenerationParams, GenerationSnapshot, LlmError, LlmProvider, ProviderDefinition,
+            ReasoningEffort, RunProvenance, UntrustedDocument,
             cache::{CacheScope, LlmCache},
+            provenance::DEFAULT_SAMPLES,
             provider::{ProviderId, SecretCipher, Tier, TierError, TokenPricing},
         },
         profile::{
@@ -68,9 +70,34 @@ pub struct EvaluationReport {
 pub(crate) struct Loaded<P> {
     pub(crate) provider: P,
     pub(crate) id: ProviderId,
+    pub(crate) name: String,
     pub(crate) model: String,
+    pub(crate) generation: GenerationParams,
+    pub(crate) reasoning_effort: Option<ReasoningEffort>,
     pub(crate) max_retries: u8,
     pub(crate) pricing: TokenPricing,
+}
+
+impl<P> Loaded<P> {
+    pub(crate) fn provenance(
+        &self,
+        model: &str,
+        prompt_version: String,
+        default_max_tokens: u32,
+    ) -> RunProvenance {
+        RunProvenance {
+            provider_id: Some(self.id),
+            provider_name: self.name.clone(),
+            model: model.to_owned(),
+            prompt_version,
+            generation: GenerationSnapshot::new(
+                &self.generation,
+                self.reasoning_effort,
+                default_max_tokens,
+            ),
+            samples: DEFAULT_SAMPLES,
+        }
+    }
 }
 
 pub(crate) async fn load_provider<B, S>(
@@ -98,7 +125,10 @@ where
             Ok(provider) => Some(Loaded {
                 provider,
                 id: resolved.id,
+                name: resolved.name.clone(),
                 model: resolved.definition.model.clone(),
+                generation: resolved.definition.generation,
+                reasoning_effort: resolved.definition.reasoning_effort,
                 max_retries: resolved.max_retries,
                 pricing: resolved.pricing,
             }),
@@ -165,12 +195,14 @@ fn count(value: usize) -> u64 {
     u64::try_from(value).unwrap_or(u64::MAX)
 }
 
+pub(crate) fn agent_prompt_version(prompt: &AgentPrompt) -> String {
+    format!("qualification-agent@{}", prompt.hash)
+}
+
 fn failed(
     subject: &Subject<'_>,
     agent: &QualificationAgent,
-    prompt: &AgentPrompt,
-    provider: Option<ProviderId>,
-    model: &str,
+    provenance: RunProvenance,
     error: String,
     at: DateTime<Utc>,
 ) -> QualificationResult {
@@ -180,9 +212,7 @@ fn failed(
         profile_id: subject.active.profile.id,
         profile_revision: subject.active.revision.number,
         agent_id: agent.id.clone(),
-        provider_id: provider,
-        model: model.to_owned(),
-        prompt_hash: prompt.hash.clone(),
+        provenance,
         status: ResultStatus::Invalid,
         summary: None,
         answers: serde_json::json!({}),
@@ -195,9 +225,7 @@ fn failed(
 fn succeeded(
     subject: &Subject<'_>,
     agent: &QualificationAgent,
-    prompt: &AgentPrompt,
-    provider: ProviderId,
-    model: &str,
+    provenance: RunProvenance,
     output: &ValidOutput,
     at: DateTime<Utc>,
 ) -> (QualificationResult, AgentOpinion) {
@@ -212,9 +240,7 @@ fn succeeded(
         profile_id: subject.active.profile.id,
         profile_revision: subject.active.revision.number,
         agent_id: agent.id.clone(),
-        provider_id: Some(provider),
-        model: model.to_owned(),
-        prompt_hash: prompt.hash.clone(),
+        provenance,
         status: ResultStatus::Valid,
         summary: Some(output.summary.clone()),
         answers: output.answers.to_json(),
@@ -314,13 +340,12 @@ where
         let schema = contract_schema(agent);
         let prompt = build(subject.definition, agent, &schema);
         let requested = agent.provider_id.map(ProviderId);
+        let version = agent_prompt_version(&prompt);
         let Some(index) = self.load(usecase, agent, providers).await? else {
             let result = failed(
                 subject,
                 agent,
-                &prompt,
-                requested,
-                "",
+                RunProvenance::unresolved(requested, version),
                 PROVIDER_UNAVAILABLE.to_owned(),
                 at,
             );
@@ -344,9 +369,7 @@ where
                     let result = failed(
                         subject,
                         agent,
-                        &prompt,
-                        Some(loaded.id),
-                        &loaded.model,
+                        loaded.provenance(&loaded.model, version, self.settings.max_tokens),
                         format!("Échec de l'appel au modèle : {error}"),
                         at,
                     );
@@ -358,9 +381,7 @@ where
                     let (result, opinion) = succeeded(
                         subject,
                         agent,
-                        &prompt,
-                        loaded.id,
-                        &structured.model,
+                        loaded.provenance(&structured.model, version, self.settings.max_tokens),
                         &output,
                         at,
                     );
@@ -377,9 +398,7 @@ where
         let result = failed(
             subject,
             agent,
-            &prompt,
-            Some(loaded.id),
-            &loaded.model,
+            loaded.provenance(&loaded.model, version, self.settings.max_tokens),
             format!("Réponse non conforme au contrat : {message}"),
             at,
         );

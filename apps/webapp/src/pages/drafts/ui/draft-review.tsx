@@ -99,7 +99,7 @@ export function DraftReview({
 										Rejeter
 									</Button>
 								</div>
-								{rejectOpen ? rejectForm : null}
+								{rejectForm}
 							</section>
 						</>
 					) : (

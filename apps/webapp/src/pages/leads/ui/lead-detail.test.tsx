@@ -6,6 +6,15 @@ import { LeadDetail } from './lead-detail'
 
 afterEach(cleanup)
 
+const provenance = {
+	provider_id: 'prov-1',
+	provider_name: 'Laya',
+	model: 'gemma_laya',
+	prompt_version: 'qualification-agent@abc',
+	generation: { temperature: 0.2, max_tokens: 2048 },
+	samples: 1,
+}
+
 const detail: LeadDetailData = {
 	lead: {
 		id: 'l1',
@@ -43,6 +52,7 @@ const detail: LeadDetailData = {
 			provider_id: 'prov-1',
 			provider_name: 'Laya',
 			model: 'gemma_laya',
+			provenance,
 			status: 'valid',
 			agent_score: 0.625,
 			answers: [
@@ -70,6 +80,7 @@ const detail: LeadDetailData = {
 			provider_id: null,
 			provider_name: null,
 			model: '',
+			provenance: { ...provenance, model: '' },
 			status: 'invalid',
 			agent_score: null,
 			answers: [],
@@ -141,6 +152,11 @@ const detail: LeadDetailData = {
 			quality_warnings: [],
 			model: 'model-x',
 			prompt_version: 'v2',
+			provenance: {
+				...provenance,
+				model: 'model-x',
+				prompt_version: 'v2',
+			},
 			draft: { subject: 'Hello', body: 'Body text', status: 'pending' },
 			created_at: '2026-02-01T00:00:00Z',
 		},
@@ -158,6 +174,7 @@ function renderDetail(
 			nextStatuses={['validated', 'rejected', 'new']}
 			onBack={() => {}}
 			onChangeStatus={() => {}}
+			rejectionDialog={<div>rejection-dialog</div>}
 			onOpenDraft={() => {}}
 			onRetrySummary={() => {}}
 			retryingSummary={false}
@@ -771,6 +788,14 @@ describe('LeadDetail', () => {
 		expect(
 			container.querySelector('[data-section="facts"]')?.textContent,
 		).toContain('Pays probableFrance (siège)')
+	})
+
+	it('asks for a status change and renders the rejection dialog slot', () => {
+		const onChangeStatus = vi.fn()
+		renderDetail({ onChangeStatus })
+		expect(screen.getByText('rejection-dialog')).toBeTruthy()
+		fireEvent.click(screen.getByRole('button', { name: 'Rejeté' }))
+		expect(onChangeStatus).toHaveBeenCalledWith('rejected')
 	})
 
 	it('shows the error state', () => {

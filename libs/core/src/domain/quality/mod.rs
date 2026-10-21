@@ -7,7 +7,8 @@ use uuid::Uuid;
 use crate::{
     UserId,
     domain::{
-        lead::{Lead, LeadId, LeadStatus, str_enum},
+        lead::{Assessment, Lead, LeadId, LeadStatus, str_enum},
+        llm::RunProvenance,
         profile::{ProfileId, RevisionNumber},
         qualification::{EvidenceStrength, LeadScoring, QualificationResult},
     },
@@ -15,11 +16,14 @@ use crate::{
 
 pub mod metrics;
 pub mod ports;
+pub mod rejection;
 
 pub use metrics::{
     AgentSeparation, ConfidenceBucket, DecisionCounts, DiscardedShare, MIN_LABELLED_LEADS,
-    ProfileInfo, ProfileQuality, QualityReport, Suggestion, VerdictCounts, VerdictPrecision,
+    ProfileInfo, ProfileQuality, QualityReport, ReasonCount, Suggestion, VerdictCounts,
+    VerdictPrecision, VersionPrecision,
 };
+pub use rejection::{MAX_NOTE_CHARS, Rejection, RejectionProblem, RejectionReason};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DecisionKind {
@@ -45,6 +49,10 @@ impl DecisionKind {
         }
     }
 
+    pub fn is_approval(self) -> bool {
+        matches!(self, Self::LeadValidated | Self::DraftApproved)
+    }
+
     pub fn is_lead(self) -> bool {
         matches!(self, Self::LeadValidated | Self::LeadRejected)
     }
@@ -54,6 +62,8 @@ impl DecisionKind {
 pub struct AgentSnapshot {
     pub status: String,
     pub score: Option<f64>,
+    #[serde(default)]
+    pub provenance: Option<RunProvenance>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -64,6 +74,8 @@ pub struct DecisionSnapshot {
     pub verdict: Option<String>,
     pub verdict_reason: Option<String>,
     pub agents: BTreeMap<String, AgentSnapshot>,
+    #[serde(default)]
+    pub aggregator: Option<RunProvenance>,
 }
 
 impl DecisionSnapshot {
@@ -71,6 +83,7 @@ impl DecisionSnapshot {
         lead: &Lead,
         scoring: Option<&LeadScoring>,
         results: &[QualificationResult],
+        assessment: Option<&Assessment>,
     ) -> Self {
         Self {
             confidence: lead.confidence,
@@ -88,10 +101,12 @@ impl DecisionSnapshot {
                         AgentSnapshot {
                             status: result.status.as_str().to_owned(),
                             score: result.agent_score,
+                            provenance: Some(result.provenance.clone()),
                         },
                     )
                 })
                 .collect(),
+            aggregator: assessment.map(|assessment| assessment.provenance.clone()),
         }
     }
 }
@@ -106,6 +121,7 @@ pub struct DecisionLabel {
     pub decided_by: Option<UserId>,
     pub decided_at: DateTime<Utc>,
     pub snapshot: DecisionSnapshot,
+    pub rejection: Option<Rejection>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -167,9 +183,7 @@ mod tests {
             profile_id: ProfileId(Uuid::nil()),
             profile_revision: RevisionNumber::FIRST,
             agent_id: AgentId::new(agent),
-            provider_id: None,
-            model: "m".to_owned(),
-            prompt_hash: "h".to_owned(),
+            provenance: RunProvenance::legacy("m".to_owned(), "h".to_owned()),
             status,
             summary: None,
             answers: serde_json::Value::Null,
@@ -216,7 +230,7 @@ mod tests {
             result("fit", ResultStatus::Valid, Some(0.9)),
             result("market", ResultStatus::Invalid, None),
         ];
-        let snapshot = DecisionSnapshot::capture(&lead(), Some(&scoring), &results);
+        let snapshot = DecisionSnapshot::capture(&lead(), Some(&scoring), &results, None);
         assert_eq!(snapshot.confidence, Some(72.5));
         assert_eq!(snapshot.opinion, Some(0.8));
         assert_eq!(snapshot.evidence, Some(evidence()));
@@ -233,7 +247,7 @@ mod tests {
         let mut unqualified = lead();
         unqualified.confidence = None;
         unqualified.verdict = None;
-        let snapshot = DecisionSnapshot::capture(&unqualified, None, &[]);
+        let snapshot = DecisionSnapshot::capture(&unqualified, None, &[], None);
         assert_eq!(snapshot.confidence, None);
         assert_eq!(snapshot.evidence, None);
         assert_eq!(snapshot.verdict, None);
@@ -247,11 +261,60 @@ mod tests {
             evidence: evidence(),
             cap: None,
         };
-        let snapshot = DecisionSnapshot::capture(&lead(), Some(&scoring), &[]);
+        let snapshot = DecisionSnapshot::capture(&lead(), Some(&scoring), &[], None);
         let json = serde_json::to_value(&snapshot).unwrap();
         assert_eq!(
             serde_json::from_value::<DecisionSnapshot>(json).unwrap(),
             snapshot
         );
+    }
+
+    fn assessment() -> Assessment {
+        Assessment {
+            id: crate::domain::lead::AssessmentId(Uuid::nil()),
+            lead_id: LeadId(Uuid::nil()),
+            profile_revision: RevisionNumber::FIRST,
+            summary: String::new(),
+            verdict_narrative: String::new(),
+            approach_angle: String::new(),
+            evidence: Vec::new(),
+            evidence_verified: true,
+            quality_warnings: Vec::new(),
+            provenance: RunProvenance::legacy("big".to_owned(), "aggregator@z".to_owned()),
+            draft: None,
+            draft_review: None,
+            created_at: Utc.timestamp_opt(1_800_000_000, 0).unwrap(),
+        }
+    }
+
+    #[test]
+    fn the_snapshot_keeps_the_provenance_of_each_agent_and_of_the_aggregator() {
+        let results = [result("fit", ResultStatus::Valid, Some(0.9))];
+        let snapshot = DecisionSnapshot::capture(&lead(), None, &results, Some(&assessment()));
+        assert_eq!(
+            snapshot.agents["fit"].provenance,
+            Some(RunProvenance::legacy("m".to_owned(), "h".to_owned()))
+        );
+        assert_eq!(
+            snapshot.aggregator.as_ref().map(|p| p.model.as_str()),
+            Some("big")
+        );
+        let without = DecisionSnapshot::capture(&lead(), None, &results, None);
+        assert_eq!(without.aggregator, None);
+    }
+
+    #[test]
+    fn a_snapshot_stored_before_provenance_still_reads() {
+        let json = serde_json::json!({
+            "confidence": 50.0,
+            "opinion": null,
+            "evidence": null,
+            "verdict": "fiable",
+            "verdict_reason": null,
+            "agents": {"fit": {"status": "valid", "score": 0.5}},
+        });
+        let snapshot: DecisionSnapshot = serde_json::from_value(json).unwrap();
+        assert_eq!(snapshot.agents["fit"].provenance, None);
+        assert_eq!(snapshot.aggregator, None);
     }
 }

@@ -34,6 +34,7 @@ const EMPTY: Quality = {
 		rejected: 0,
 	})),
 	agents: [],
+	versions: [],
 	profiles: [],
 }
 
@@ -54,11 +55,44 @@ const FILLED: Quality = {
 	agents: [
 		{
 			agent_id: 'pertinence',
+			name: 'Pertinence métier',
 			mean_validated: 0.82,
 			mean_rejected: 0.31,
 			separation: 0.51,
 			validated: 12,
 			rejected: 8,
+		},
+	],
+	versions: [
+		{
+			agent_id: null,
+			agent_name: null,
+			model: 'gros-modele',
+			prompt_version: 'aggregator@f00',
+			validated: 7,
+			rejected: 3,
+			n: 10,
+			precision: 0.7,
+		},
+		{
+			agent_id: 'pertinence',
+			agent_name: 'Pertinence métier',
+			model: 'qwen3',
+			prompt_version: 'qualification-agent@abc123',
+			validated: 9,
+			rejected: 1,
+			n: 10,
+			precision: 0.9,
+		},
+		{
+			agent_id: 'pertinence',
+			agent_name: 'Pertinence métier',
+			model: 'qwen3',
+			prompt_version: 'qualification-agent@def456',
+			validated: 3,
+			rejected: 7,
+			n: 10,
+			precision: 0.3,
 		},
 	],
 	profiles: [
@@ -76,6 +110,11 @@ const FILLED: Quality = {
 				reliable_from: 65,
 				discard_below: 25,
 			},
+			rejection_reasons: [
+				{ reason: 'hors_cible', count: 5 },
+				{ reason: 'hebergeur_agence', count: 2 },
+				{ reason: 'autre', count: 1 },
+			],
 		},
 		{
 			profile_id: 'p2',
@@ -91,6 +130,7 @@ const FILLED: Quality = {
 				reliable_from: null,
 				discard_below: null,
 			},
+			rejection_reasons: [],
 		},
 	],
 }
@@ -182,11 +222,79 @@ describe('QualityPage', () => {
 	it('lists the agents with their separation', () => {
 		renderPage()
 		const row = within(screen.getByLabelText('Agents')).getByRole('row', {
-			name: /pertinence/,
+			name: /Pertinence métier/,
 		})
+		expect(within(row).getByText('pertinence')).toBeTruthy()
 		expect(within(row).getByText('82 %')).toBeTruthy()
 		expect(within(row).getByText('31 %')).toBeTruthy()
 		expect(within(row).getByText('+51 pts')).toBeTruthy()
+	})
+
+	it('compares the precision by agent, model and prompt version', () => {
+		renderPage()
+		const card = within(screen.getByLabelText('Précision par version'))
+		const headers = card
+			.getAllByRole('columnheader')
+			.map((cell) => cell.textContent)
+		expect(headers).toEqual([
+			'Agent',
+			'Modèle',
+			'Version du prompt',
+			'n',
+			'Précision',
+		])
+		const first = card.getByRole('row', { name: /abc123/ })
+		expect(within(first).getByText('Pertinence métier')).toBeTruthy()
+		expect(within(first).getByText('qwen3')).toBeTruthy()
+		expect(within(first).getByText('90 %')).toBeTruthy()
+		expect(within(first).getByText('10')).toBeTruthy()
+		const second = card.getByRole('row', { name: /def456/ })
+		expect(within(second).getByText('30 %')).toBeTruthy()
+		const aggregator = card.getByRole('row', { name: /aggregator@f00/ })
+		expect(within(aggregator).getByText('Agrégateur')).toBeTruthy()
+		expect(within(aggregator).getByText('gros-modele')).toBeTruthy()
+		expect(within(aggregator).getByText('70 %')).toBeTruthy()
+	})
+
+	it('says so when no version was recorded', () => {
+		renderPage({ quality: { ...FILLED, versions: [] } })
+		expect(
+			within(screen.getByLabelText('Précision par version')).getByText(
+				/Aucune version enregistrée/,
+			),
+		).toBeTruthy()
+	})
+
+	it('shows the rejection reasons per profile and skips profiles without any', () => {
+		renderPage()
+		const card = within(screen.getByLabelText('Raisons de rejet'))
+		const fintech = within(card.getByLabelText('Raisons de rejet de Fintech'))
+		const items = fintech
+			.getAllByRole('listitem')
+			.map((item) => item.textContent)
+		expect(items).toEqual([
+			'Hors cible5',
+			'Hébergeur ou agence (le signal concerne un client)2',
+			'Autre1',
+		])
+		expect(card.queryByLabelText('Raisons de rejet de Santé')).toBeNull()
+	})
+
+	it('says so when no rejection reason was recorded', () => {
+		renderPage({
+			quality: {
+				...FILLED,
+				profiles: FILLED.profiles.map((profile) => ({
+					...profile,
+					rejection_reasons: [],
+				})),
+			},
+		})
+		expect(
+			within(screen.getByLabelText('Raisons de rejet')).getByText(
+				/Aucune raison de rejet enregistrée/,
+			),
+		).toBeTruthy()
 	})
 
 	it('words the suggestions and never applies them', () => {

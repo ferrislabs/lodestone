@@ -64,9 +64,9 @@ pub use domain::{
         is_continuous, lock_key, stale_after,
     },
     llm::{
-        GenerationParams, GenerationProblem, LlmError, LlmProvider, LlmRequest, LlmResponse,
-        MAX_TOKENS_LIMIT, ProviderDefinition, ProviderKind, ReasoningEffort, TokenUsage,
-        UntrustedDocument,
+        GenerationParams, GenerationProblem, GenerationSnapshot, LlmError, LlmProvider, LlmRequest,
+        LlmResponse, MAX_TOKENS_LIMIT, ProviderDefinition, ProviderKind, ReasoningEffort,
+        RunProvenance, TokenUsage, UntrustedDocument,
         cache::{CacheScope, CachedOutput, LlmCache},
         provider::{
             CipherError, LlmProviderRecord, LlmProviderRepository, ProviderId, ResolvedProvider,
@@ -100,9 +100,10 @@ pub use domain::{
     },
     quality::{
         AgentSeparation, AgentSnapshot, ConfidenceBucket, DecisionCounts, DecisionKind,
-        DecisionLabel, DecisionSnapshot, DiscardedShare, LabelFilter, MIN_LABELLED_LEADS,
-        ProfileInfo, ProfileQuality, QualityReport, Suggestion, VerdictCounts, VerdictPrecision,
-        ports::DecisionRepository,
+        DecisionLabel, DecisionSnapshot, DiscardedShare, LabelFilter, MAX_NOTE_CHARS,
+        MIN_LABELLED_LEADS, ProfileInfo, ProfileQuality, QualityReport, ReasonCount, Rejection,
+        RejectionProblem, RejectionReason, Suggestion, VerdictCounts, VerdictPrecision,
+        VersionPrecision, ports::DecisionRepository,
     },
     run::{Run, RunId, RunOutcome, RunStatus, ports::RunRepository},
     scoring::{DISTINCT_SIGNALS_FACTOR, ScoreBreakdown, ScoreContribution, score},

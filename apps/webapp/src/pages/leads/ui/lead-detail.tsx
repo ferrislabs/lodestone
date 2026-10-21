@@ -1,4 +1,5 @@
 import { ArrowLeft } from 'lucide-react'
+import type { ReactNode } from 'react'
 
 import { Button } from '#/components/ui/button'
 import { Skeleton } from '#/components/ui/skeleton'
@@ -20,6 +21,7 @@ interface LeadDetailProps {
 	nextStatuses: readonly LeadStatus[]
 	onBack: () => void
 	onChangeStatus: (status: LeadStatus) => void
+	rejectionDialog: ReactNode
 	onOpenDraft: (assessmentId: string) => void
 	onRetrySummary: () => void
 	retryingSummary: boolean
@@ -38,6 +40,7 @@ export function LeadDetail({
 	nextStatuses,
 	onBack,
 	onChangeStatus,
+	rejectionDialog,
 	onOpenDraft,
 	onRetrySummary,
 	retryingSummary,
@@ -99,6 +102,7 @@ export function LeadDetail({
 					{detail.assessments.length > 1 ? (
 						<AssessmentsList assessments={detail.assessments.slice(1)} />
 					) : null}
+					{rejectionDialog}
 				</>
 			) : null}
 		</div>

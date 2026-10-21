@@ -1,5 +1,8 @@
 import { formatNumber, formatPercent } from '#/lib/format'
-import type { ProfileQuality } from '#/pages/quality/lib/types'
+import type {
+	ProfileQuality,
+	VersionPrecision,
+} from '#/pages/quality/lib/types'
 
 export function formatRatio(ratio: number | null | undefined): string {
 	return ratio == null ? '—' : formatPercent(ratio)
@@ -75,4 +78,11 @@ export function histogramMax(
 
 export function barHeight(count: number, max: number): number {
 	return max === 0 ? 0 : Math.round((count / max) * 100)
+}
+
+export function versionAgentLabel(
+	row: Pick<VersionPrecision, 'agent_id' | 'agent_name'>,
+): string {
+	if (row.agent_id == null) return 'Agrégateur'
+	return row.agent_name ?? row.agent_id
 }

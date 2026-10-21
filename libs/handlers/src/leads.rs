@@ -7,17 +7,21 @@ use axum::{
 use lodestone_core::{
     Assessment, ContactEmail, DraftMessage, DraftReview, DraftStatus, Lead, LeadDetail, LeadFacts,
     LeadId, LeadQuery, LeadScoring, LeadSort, LeadStatus, LlmProviderRecord, Profile, ProfileId,
-    QualificationResult, ResultStatus, SUMMARY_FAILED_AFTER, ScoreContribution, Signal, SignalKind,
-    SummaryState, Verdict, VerdictCap, VerdictFilter, definition::QualificationAgent,
-    signal_sentence,
+    QualificationResult, Rejection, RejectionProblem, ResultStatus, RunProvenance,
+    SUMMARY_FAILED_AFTER, ScoreContribution, Signal, SignalKind, SummaryState, Verdict, VerdictCap,
+    VerdictFilter, definition::QualificationAgent, signal_sentence,
 };
 use pagination::{MAX_PAGE, MAX_PER_PAGE, Page, PaginationMetadata, PaginationParams};
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
 use crate::{
-    auth::AuthenticatedUser, company::CompanyDto, errors::ApiError, profiles::ProfileRefDto,
-    response::Response, state::AppState,
+    auth::AuthenticatedUser,
+    company::CompanyDto,
+    errors::{ApiError, ErrorDetail},
+    profiles::ProfileRefDto,
+    response::Response,
+    state::AppState,
 };
 
 const MAX_DOMAIN_FILTER_LENGTH: usize = 253;
@@ -341,6 +345,54 @@ impl DraftDto {
 }
 
 #[derive(Debug, Serialize, PartialEq, ToSchema)]
+pub struct GenerationDto {
+    pub temperature: Option<f64>,
+    pub max_tokens: Option<u32>,
+    pub frequency_penalty: Option<f64>,
+    pub presence_penalty: Option<f64>,
+    pub repeat_penalty: Option<f64>,
+    /// One of `none`, `low`, `medium`, `high`; absent when the provider sets none.
+    pub reasoning_effort: Option<String>,
+}
+
+#[derive(Debug, Serialize, PartialEq, ToSchema)]
+pub struct ProvenanceDto {
+    pub provider_id: Option<String>,
+    /// Name of the provider when the result was produced; empty when none could be resolved.
+    pub provider_name: String,
+    pub model: String,
+    /// Prompt version, `qualification-agent@<hash>` for an agent and `aggregator@<hash>` for the aggregator.
+    pub prompt_version: String,
+    /// Generation settings in effect when the result was produced.
+    pub generation: GenerationDto,
+    /// Number of samples the result was drawn from.
+    pub samples: u32,
+}
+
+impl From<&RunProvenance> for ProvenanceDto {
+    fn from(provenance: &RunProvenance) -> Self {
+        let generation = &provenance.generation;
+        Self {
+            provider_id: provenance.provider_id.map(|id| id.to_string()),
+            provider_name: provenance.provider_name.clone(),
+            model: provenance.model.clone(),
+            prompt_version: provenance.prompt_version.clone(),
+            generation: GenerationDto {
+                temperature: generation.temperature,
+                max_tokens: generation.max_tokens,
+                frequency_penalty: generation.frequency_penalty,
+                presence_penalty: generation.presence_penalty,
+                repeat_penalty: generation.repeat_penalty,
+                reasoning_effort: generation
+                    .reasoning_effort
+                    .map(|effort| effort.as_str().to_owned()),
+            },
+            samples: provenance.samples,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, PartialEq, ToSchema)]
 pub struct AssessmentDto {
     pub id: String,
     pub profile_revision: u32,
@@ -355,6 +407,7 @@ pub struct AssessmentDto {
     pub quality_warnings: Vec<String>,
     pub model: String,
     pub prompt_version: String,
+    pub provenance: ProvenanceDto,
     pub draft: Option<DraftDto>,
     #[schema(format = DateTime)]
     pub created_at: String,
@@ -382,8 +435,9 @@ impl From<&Assessment> for AssessmentDto {
                 .iter()
                 .map(|warning| warning.as_str().to_owned())
                 .collect(),
-            model: assessment.model.clone(),
-            prompt_version: assessment.prompt_version.clone(),
+            model: assessment.provenance.model.clone(),
+            prompt_version: assessment.provenance.prompt_version.clone(),
+            provenance: ProvenanceDto::from(&assessment.provenance),
             draft: assessment
                 .draft
                 .as_ref()
@@ -442,6 +496,7 @@ pub struct QualificationResultDto {
     pub provider_id: Option<String>,
     pub provider_name: Option<String>,
     pub model: String,
+    pub provenance: ProvenanceDto,
     /// One of `valid`, `invalid`.
     pub status: String,
     /// Agent score from 0 to 1, absent when the result is invalid.
@@ -504,6 +559,7 @@ impl QualificationResultDto {
     ) -> Self {
         let agent = agents.iter().find(|agent| agent.id == result.agent_id);
         let provider = result
+            .provenance
             .provider_id
             .and_then(|id| providers.iter().find(|record| record.id == id));
         Self {
@@ -514,9 +570,12 @@ impl QualificationResultDto {
             ),
             agent_description: agent.map(|agent| agent.description.clone()),
             summary: result.summary.clone(),
-            provider_id: result.provider_id.map(|id| id.to_string()),
-            provider_name: provider.map(|record| record.name.clone()),
-            model: result.model.clone(),
+            provider_id: result.provenance.provider_id.map(|id| id.to_string()),
+            provider_name: provider.map(|record| record.name.clone()).or_else(|| {
+                Some(result.provenance.provider_name.clone()).filter(|name| !name.is_empty())
+            }),
+            model: result.provenance.model.clone(),
+            provenance: ProvenanceDto::from(&result.provenance),
             status: result.status.as_str().to_owned(),
             agent_score: match result.status {
                 ResultStatus::Valid => result.agent_score,
@@ -886,6 +945,30 @@ impl ListLeadsParams {
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct ChangeLeadStatusRequest {
     pub status: LeadStatusDto,
+    /// Required when the status is `rejected`: one of `hors_cible`, `deja_client`, `concurrent`, `editeur_integrateur`, `hebergeur_agence`, `mauvaise_donnee`, `autre`.
+    #[schema(value_type = Option<RejectionReasonDto>)]
+    pub reason: Option<String>,
+    /// Free text, at most 500 characters. Required when the reason is `autre`.
+    pub note: Option<String>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RejectionReasonDto {
+    HorsCible,
+    DejaClient,
+    Concurrent,
+    EditeurIntegrateur,
+    HebergeurAgence,
+    MauvaiseDonnee,
+    Autre,
+}
+
+pub(crate) fn rejection_problem(problem: RejectionProblem) -> ApiError {
+    ApiError::Rejected(vec![ErrorDetail {
+        path: problem.field.to_owned(),
+        message: problem.message,
+    }])
 }
 
 pub(crate) fn lead_id(raw: &str) -> Result<LeadId, ApiError> {
@@ -984,6 +1067,7 @@ pub async fn lead_detail(
         (status = 403, description = "The caller is not a user"),
         (status = 404, description = "Unknown lead, or its domain is suppressed"),
         (status = 409, description = "The transition is not allowed from the current status, or the status changed concurrently"),
+        (status = 422, description = "Rejecting without a valid reason, or a note that is too long or missing for `autre`"),
     )
 )]
 pub async fn change_lead_status(
@@ -998,9 +1082,18 @@ pub async fn change_lead_status(
     let id = lead_id(&lead_id_raw)?;
     let Json(request) = body.map_err(|rejection| invalid("status", &rejection.body_text()))?;
 
+    let target = LeadStatus::from(request.status);
+    let rejection = if target == LeadStatus::Rejected {
+        Some(
+            Rejection::parse(request.reason.as_deref(), request.note.as_deref())
+                .map_err(rejection_problem)?,
+        )
+    } else {
+        None
+    };
     let lead = state
         .usecase
-        .change_lead_status(id, request.status.into(), actor)
+        .change_lead_status(id, target, actor, rejection)
         .await?;
     let detail = state.usecase.lead_detail(lead.id).await?;
     let summary = detail

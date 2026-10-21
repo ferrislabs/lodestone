@@ -472,7 +472,7 @@ async fn rejecting_records_the_reason_and_rejects_the_lead(pool: PgPool) {
     let (status, body) = api
         .post(
             &format!("/api/v1/drafts/{draft}/reject"),
-            Some(json!({"reason": "  Not a fit  "})),
+            Some(json!({"reason": "autre", "note": "  Not a fit  "})),
         )
         .await;
 
@@ -484,21 +484,42 @@ async fn rejecting_records_the_reason_and_rejects_the_lead(pool: PgPool) {
 }
 
 #[sqlx::test(migrations = "../../migrations")]
-async fn rejecting_without_a_body_is_allowed_and_a_long_reason_is_not(pool: PgPool) {
+async fn rejecting_requires_a_known_reason_and_a_bounded_note(pool: PgPool) {
     let (seed, lead, draft) = single(&pool).await;
-    let api = Api::new(pool).await;
+    let api = Api::new(pool.clone()).await;
     let uri = format!("/api/v1/drafts/{draft}/reject");
 
-    let (status, body) = api
-        .post(&uri, Some(json!({"reason": "r".repeat(1001)})))
-        .await;
-    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
-    assert_eq!(paths(&body), ["reason"]);
+    for (body, path) in [
+        (None, "reason"),
+        (Some(json!({})), "reason"),
+        (Some(json!({"reason": ""})), "reason"),
+        (Some(json!({"reason": "pas_une_raison"})), "reason"),
+        (Some(json!({"reason": "autre"})), "note"),
+        (Some(json!({"reason": "autre", "note": "  "})), "note"),
+        (
+            Some(json!({"reason": "hors_cible", "note": "n".repeat(501)})),
+            "note",
+        ),
+    ] {
+        let (status, response) = api.post(&uri, body.clone()).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body:?}");
+        assert_eq!(paths(&response), [path], "{body:?}");
+    }
     assert_eq!(seed.lead_status(&lead).await, "qualified");
+    assert_eq!(seed.count("decision_labels").await, 0);
 
-    let (status, body) = api.post(&uri, None).await;
+    let (status, body) = api.post(&uri, Some(json!({"reason": "hors_cible"}))).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["data"]["draft"]["rejection_reason"], Value::Null);
+    let reasons: Vec<Option<String>> =
+        sqlx::query_scalar("SELECT rejection_reason FROM decision_labels ORDER BY kind")
+            .fetch_all(&pool)
+            .await
+            .expect("labels");
+    assert_eq!(
+        reasons,
+        [Some("hors_cible".to_owned()), Some("hors_cible".to_owned())]
+    );
 }
 
 #[sqlx::test(migrations = "../../migrations")]
@@ -511,7 +532,12 @@ async fn a_decided_draft_cannot_be_decided_or_edited_again(pool: PgPool) {
     assert_eq!(api.post(&approve, None).await.0, StatusCode::OK);
 
     assert_eq!(api.post(&approve, None).await.0, StatusCode::CONFLICT);
-    assert_eq!(api.post(&reject, None).await.0, StatusCode::CONFLICT);
+    assert_eq!(
+        api.post(&reject, Some(json!({"reason": "hors_cible"})))
+            .await
+            .0,
+        StatusCode::CONFLICT
+    );
     assert_eq!(
         api.patch(&draft, json!({"subject": "late"})).await.0,
         StatusCode::CONFLICT
@@ -525,7 +551,10 @@ async fn concurrent_decisions_let_exactly_one_win(pool: PgPool) {
     let approve = format!("/api/v1/drafts/{draft}/approve");
     let reject = format!("/api/v1/drafts/{draft}/reject");
 
-    let ((first, _), (second, _)) = tokio::join!(api.post(&approve, None), api.post(&reject, None));
+    let ((first, _), (second, _)) = tokio::join!(
+        api.post(&approve, None),
+        api.post(&reject, Some(json!({"reason": "hors_cible"})))
+    );
 
     let mut statuses = [first, second];
     statuses.sort();
@@ -586,9 +615,12 @@ async fn a_suppressed_lead_hides_its_draft_and_blocks_every_action(pool: PgPool)
         StatusCode::NOT_FOUND
     );
     assert_eq!(
-        api.post(&format!("/api/v1/drafts/{draft}/reject"), None)
-            .await
-            .0,
+        api.post(
+            &format!("/api/v1/drafts/{draft}/reject"),
+            Some(json!({"reason": "hors_cible"}))
+        )
+        .await
+        .0,
         StatusCode::NOT_FOUND
     );
     let (_, listed) = api.get("/api/v1/drafts").await;
