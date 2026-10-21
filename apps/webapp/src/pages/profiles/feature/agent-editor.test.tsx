@@ -19,7 +19,7 @@ import {
 import { defaultValue, type JsonObject, toJsonObject } from '#/lib/schema-form'
 import { DefinitionTabContent } from '#/pages/profiles/feature/definition-form'
 import { useDefinitionEditor } from '#/pages/profiles/feature/use-definition-editor'
-import { newAgent } from '#/pages/profiles/lib/agents'
+import { KIND_META, newAgent } from '#/pages/profiles/lib/agents'
 import { COUNTRY_CODES, countryName } from '#/pages/profiles/lib/countries'
 import { PROFILE_HINTS } from '#/pages/profiles/lib/form-hints'
 import { PROFILE_SCHEMA } from '#/pages/profiles/lib/profile-schema'
@@ -72,7 +72,16 @@ const CATALOG = [
 			filters: { remote: false, countries: true, contract: false },
 		},
 	}),
-	summary({ key: 'ats', name: 'Pages carrières', status: 'ready' }),
+	summary({
+		key: 'ats',
+		name: "Offres d'emploi de l'entreprise",
+		category: 'companies',
+		status: 'ready',
+		capabilities: {
+			keyword_search: false,
+			filters: { remote: false, countries: false, contract: false },
+		},
+	}),
 	summary({
 		key: 'dns_cname',
 		name: 'DNS CNAME',
@@ -223,19 +232,21 @@ describe('sourcing agent page', () => {
 		).toBeNull()
 	})
 
-	it('shows the provider of an agent upgraded from a v15 ats agent as selected', () => {
+	it('keeps a leftover ats provider selected so it can be removed', () => {
 		render(<Layout agents={[UPGRADED_ATS_AGENT]} />)
 		const card = document.querySelector('[data-agent="0"]') as HTMLElement
-		expect(within(card).getByText('Pages carrières')).toBeTruthy()
-		expect(within(card).queryByText('Aucun fournisseur choisi.')).toBeNull()
+		expect(
+			card.querySelector('[data-provider-logo="ats"]')?.getAttribute('title'),
+		).toBe("Offres d'emploi de l'entreprise · Prêt")
+		expect(within(card).queryByText('Aucune source choisie.')).toBeNull()
 		openAgent('Offres de missions')
 		expect(tile('ats').getAttribute('data-state')).toBe('selected')
-		expect(within(tile('ats')).getByText('Ajouté')).toBeTruthy()
-		expect(
-			within(tile('ats'))
-				.getByRole('button', { name: 'Pages carrières' })
-				.getAttribute('aria-pressed'),
-		).toBe('true')
+		fireEvent.click(
+			within(tile('ats')).getByRole('button', {
+				name: "Offres d'emploi de l'entreprise",
+			}),
+		)
+		expect(document.querySelector('[data-provider-tile="ats"]')).toBeNull()
 	})
 
 	it('edits the criteria into the profile draft and shows the unsaved bar', () => {
@@ -587,7 +598,24 @@ describe('new agent wizard', () => {
 		expect(latest.agents).toEqual([])
 	})
 
-	it('creates a signal agent with its own settings step', () => {
+	it('offers the three agent types with a one-line explanation', () => {
+		render(<Layout agents={[]} />)
+		fireEvent.click(screen.getByRole('button', { name: 'Ajouter un agent' }))
+		const radios = wizard().getAllByRole('radio')
+		expect(radios.map((radio) => radio.getAttribute('value'))).toEqual([
+			'search',
+			'certificates',
+			'dns',
+		])
+		const group = wizard().getByRole('radiogroup', { name: "Type d'agent" })
+		for (const kind of ['search', 'certificates', 'dns'] as const) {
+			expect(within(group).getByText(KIND_META[kind].label)).toBeTruthy()
+			expect(within(group).getByText(KIND_META[kind].description)).toBeTruthy()
+		}
+		expect(within(group).queryByText('Signaux techniques')).toBeNull()
+	})
+
+	it('creates a dns agent with its patterns editor', () => {
 		render(<Layout agents={[]} />)
 		fireEvent.click(screen.getByRole('button', { name: 'Ajouter un agent' }))
 		fireEvent.click(wizard().getByRole('radio', { name: /^DNS/ }))
@@ -597,11 +625,74 @@ describe('new agent wizard', () => {
 		expect(wizard().getAllByText('Motifs CNAME').length).toBeGreaterThan(0)
 		expect(wizard().queryByLabelText('Mots-clés')).toBeNull()
 		fireEvent.click(wizard().getByRole('button', { name: 'Suivant' }))
-		expect(wizard().getByText('Signal · DNS')).toBeTruthy()
+		expect(wizard().getByRole('alert').textContent).toBe(
+			'Ajouter au moins un motif CNAME.',
+		)
+		fireEvent.click(wizard().getByText('Ajouter un motif'))
+		const row = document.querySelector<HTMLElement>(
+			'[data-row="agents[0].patterns[0]"]',
+		) as HTMLElement
+		fireEvent.change(within(row).getByLabelText('Fournisseur'), {
+			target: { value: 'Okta' },
+		})
+		fireEvent.change(within(row).getByLabelText('Suffixe cible'), {
+			target: { value: 'okta.com' },
+		})
+		fireEvent.click(wizard().getByRole('button', { name: 'Suivant' }))
+		const recap = within(wizard().getByLabelText('Récapitulatif'))
+		expect(recap.getByText('DNS')).toBeTruthy()
+		expect(recap.getByText('1 motif CNAME')).toBeTruthy()
 		fireEvent.click(wizard().getByRole('button', { name: 'Créer' }))
 		expect(latest.agents).toMatchObject([
-			{ type: 'dns', id: 'dns', patterns: [] },
+			{
+				type: 'dns',
+				id: 'dns',
+				patterns: [{ provider: 'Okta', target_suffix: 'okta.com' }],
+			},
 		])
+	})
+
+	it('creates a certificates agent with its labels tag input', () => {
+		render(<Layout agents={[]} />)
+		fireEvent.click(screen.getByRole('button', { name: 'Ajouter un agent' }))
+		fireEvent.click(wizard().getByRole('radio', { name: /^Certificats/ }))
+		fireEvent.click(wizard().getByRole('button', { name: 'Suivant' }))
+		expect(
+			wizard().getByText(/Libellés de nom d'hôte à rechercher/),
+		).toBeTruthy()
+		fireEvent.click(wizard().getByRole('button', { name: 'Suivant' }))
+		expect(wizard().getByRole('alert').textContent).toBe(
+			'Ajouter au moins un libellé.',
+		)
+		const labels = wizard().getByLabelText('Libellés')
+		fireEvent.change(labels, { target: { value: 'sso' } })
+		fireEvent.keyDown(labels, { key: 'Enter' })
+		fireEvent.click(wizard().getByRole('button', { name: 'Suivant' }))
+		fireEvent.click(wizard().getByRole('button', { name: 'Créer' }))
+		expect(latest.agents).toMatchObject([
+			{ type: 'certificates', labels: ['sso'] },
+		])
+	})
+
+	it('edits the labels of a certificates agent on its page', () => {
+		render(
+			<Layout
+				agents={[
+					{
+						...newAgent('certificates', []),
+						name: 'Certificats IAM',
+						labels: ['auth'],
+					},
+				]}
+			/>,
+		)
+		openAgent('Certificats IAM')
+		const settings = within(screen.getByRole('region', { name: 'Réglages' }))
+		expect(settings.getByLabelText('Retirer auth')).toBeTruthy()
+		const labels = settings.getByLabelText('Libellés')
+		fireEvent.change(labels, { target: { value: 'login' } })
+		fireEvent.keyDown(labels, { key: 'Enter' })
+		expect(latest.agents).toMatchObject([{ labels: ['auth', 'login'] }])
 	})
 
 	it('closes without touching the draft', () => {

@@ -29,17 +29,17 @@ export const KIND_META: Record<AgentKind, KindMeta> = {
 	search: {
 		label: 'Recherche',
 		description:
-			'Recherche par mots-clés sur un ou plusieurs fournisseurs du catalogue, avec des critères communs.',
+			'Cherche des mots-clés dans une ou plusieurs sources du catalogue, avec des critères communs.',
 	},
 	certificates: {
 		label: 'Certificats',
 		description:
-			"Crée des leads à partir des noms d'hôte des journaux de certificats publics.",
+			"Repère dans les certificats publics les noms d'hôte qui contiennent vos libellés.",
 	},
 	dns: {
 		label: 'DNS',
 		description:
-			'Identifie des fournisseurs à partir de la cible CNAME des hôtes connus.',
+			'Reconnaît un fournisseur SaaS à la cible CNAME des hôtes connus.',
 	},
 }
 
@@ -47,11 +47,6 @@ export const SIGNAL_PROVIDERS: Record<SignalKind, string> = {
 	certificates: 'certificate_transparency',
 	dns: 'dns_cname',
 }
-
-export const KIND_GROUPS: { title: string; kinds: readonly AgentKind[] }[] = [
-	{ title: 'Fournisseurs du catalogue', kinds: ['search'] },
-	{ title: 'Signaux techniques', kinds: SIGNAL_KINDS },
-]
 
 export function isAgentKind(value: unknown): value is AgentKind {
 	return AGENT_KINDS.some((kind) => kind === value)
@@ -93,8 +88,7 @@ export function agentProviders(agent: JsonValue | undefined): string[] {
 
 export function agentTypeLabel(agent: JsonValue | undefined): string {
 	const kind = agentKind(agent)
-	if (kind === null) return ''
-	return kind === 'search' ? 'Recherche' : 'Signal'
+	return kind === null ? '' : KIND_META[kind].label
 }
 
 export function agentField(agent: JsonValue | undefined, key: string): string {

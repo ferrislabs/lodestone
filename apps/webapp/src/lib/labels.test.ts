@@ -15,6 +15,7 @@ describe('labels', () => {
 			'Types de signaux distincts',
 		)
 		expect(signalKindLabel('hiring_page')).toBe('hiring_page')
+		expect(signalKindLabel('certificate_seen')).toBe('Certificat observé')
 	})
 
 	it('translates sources and keeps proper names', () => {

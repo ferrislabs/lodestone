@@ -13,7 +13,8 @@ use crate::{
         calibration::{Calibrations, ports::CalibrationRepository},
         company::{CompanyDossier, CompanyEntity, SiblingLead, ports::CompanyRepository},
         enrichment::{
-            EnrichmentState, LeadEnrichmentRecord, enrichment_state, ports::EnrichmentRepository,
+            EnrichmentState, LeadEnrichmentRecord, enrichment_state, listed_enrichment_state,
+            ports::EnrichmentRepository,
         },
         facts::{LeadFacts, SiblingSignals},
         host::{CandidateHost, ports::KnownHostRepository},
@@ -75,7 +76,7 @@ async fn company_context(
 }
 
 impl LodestoneUseCase {
-    #[transactional(lead, profile, assessment, qualification)]
+    #[transactional(lead, profile, assessment, qualification, enrichment)]
     pub async fn list_leads(
         &self,
         profile_id: ProfileId,
@@ -85,6 +86,7 @@ impl LodestoneUseCase {
         let mut profiles = profile_repository;
         let mut assessments = assessment_repository;
         let mut qualification = qualification_repository;
+        let mut enrichment = enrichment_repository;
         let profile = profiles
             .find(profile_id)
             .await?
@@ -93,11 +95,25 @@ impl LodestoneUseCase {
         let ids: Vec<LeadId> = page.items.iter().map(|lead| lead.id).collect();
         let summaries = assessments.latest_summaries(&ids).await?;
         let scorings = qualification.scorings(&ids).await?;
+        let wait = self.wait_duration();
+        let now = Utc::now();
+        let enrichments = enrichment
+            .records(&ids)
+            .await?
+            .into_iter()
+            .map(|(id, listed)| {
+                (
+                    id,
+                    listed_enrichment_state(&listed.record, listed.only_certificates, wait, now),
+                )
+            })
+            .collect();
         Ok(LeadListing {
             profile,
             page,
             summaries,
             scorings,
+            enrichments,
         })
     }
 
@@ -218,8 +234,11 @@ impl LodestoneUseCase {
         record: &LeadEnrichmentRecord,
         signals: &[Signal],
     ) -> EnrichmentState {
-        let wait = Duration::from_std(self.enrichment_wait).unwrap_or_default();
-        enrichment_state(record, signals, wait, Utc::now())
+        enrichment_state(record, signals, self.wait_duration(), Utc::now())
+    }
+
+    fn wait_duration(&self) -> Duration {
+        Duration::from_std(self.enrichment_wait).unwrap_or_default()
     }
 
     #[transactional(signal, known_host, company)]

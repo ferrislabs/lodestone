@@ -275,6 +275,26 @@ pub struct LeadDto {
     pub last_seen_at: String,
     #[schema(format = DateTime)]
     pub updated_at: String,
+    /// Whether the lead waits for its enrichment before qualification. Present in the list and the detail, absent in status change answers.
+    pub enrichment_waiting: Option<EnrichmentWaitingDto>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq, ToSchema)]
+pub struct EnrichmentWaitingDto {
+    /// `awaiting_enrichment` while an enabled step has not run and the wait is not over, `awaiting_enrichment_evidence` for a lead whose only evidence is a certificate; null when the lead does not wait.
+    pub waiting_reason: Option<WaitingReasonDto>,
+    /// End of the wait while `awaiting_enrichment`.
+    #[schema(format = DateTime)]
+    pub wait_until: Option<String>,
+}
+
+impl From<&EnrichmentState> for EnrichmentWaitingDto {
+    fn from(state: &EnrichmentState) -> Self {
+        Self {
+            waiting_reason: state.waiting_reason.map(WaitingReasonDto::from),
+            wait_until: state.wait_until.map(|at| at.to_rfc3339()),
+        }
+    }
 }
 
 #[derive(Debug, Serialize, PartialEq, ToSchema)]
@@ -303,6 +323,11 @@ impl From<&Lead> for GroupedLeadDto {
 impl LeadDto {
     fn grouped(mut self, members: &[Lead]) -> Self {
         self.grouped_leads = members.iter().map(GroupedLeadDto::from).collect();
+        self
+    }
+
+    fn waiting(mut self, state: Option<&EnrichmentState>) -> Self {
+        self.enrichment_waiting = state.map(EnrichmentWaitingDto::from);
         self
     }
 
@@ -343,6 +368,7 @@ impl LeadDto {
             first_seen_at: lead.first_seen_at.to_rfc3339(),
             last_seen_at: lead.last_seen_at.to_rfc3339(),
             updated_at: lead.updated_at.to_rfc3339(),
+            enrichment_waiting: None,
         }
     }
 }
@@ -1243,7 +1269,8 @@ impl LeadDetailDto {
                     .first()
                     .map(|assessment| assessment.summary.as_str()),
                 detail.scoring.as_ref(),
-            ),
+            )
+            .waiting(Some(&detail.enrichment)),
             facts: LeadFactsDto::from(&detail.facts),
             signals: detail.signals.iter().map(SignalDto::from).collect(),
             contacts: detail.contacts.iter().map(ContactDto::from).collect(),
@@ -1504,6 +1531,7 @@ pub async fn list_leads(
                     .get(&lead.id)
                     .map_or(&[], Vec::as_slice),
             )
+            .waiting(listing.enrichments.get(&lead.id))
         })
         .collect();
     let meta = PaginationMetadata::new(

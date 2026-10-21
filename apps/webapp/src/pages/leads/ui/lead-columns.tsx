@@ -5,6 +5,7 @@ import {
 	exclusionSummary,
 	exclusionTitle,
 } from '#/pages/leads/lib/confidence'
+import { listWaitingLabel } from '#/pages/leads/lib/enrichment'
 import { formatDateTime } from '#/pages/leads/lib/format'
 import type { Lead } from '#/pages/leads/lib/types'
 import { summaryExcerpt } from '#/pages/leads/lib/verdict'
@@ -57,7 +58,10 @@ export function buildLeadColumns(
 						className="flex flex-col items-start gap-1"
 						title={exclusions.map(exclusionTitle).join('\n') || undefined}
 					>
-						<VerdictBadge verdict={row.original.verdict} />
+						<VerdictBadge
+							verdict={row.original.verdict}
+							waiting={listWaitingLabel(row.original.enrichment_waiting)}
+						/>
 						{summary ? (
 							<span
 								className="text-xs text-muted-foreground"

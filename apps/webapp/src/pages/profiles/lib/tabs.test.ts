@@ -10,16 +10,22 @@ import {
 } from '#/pages/profiles/lib/tabs'
 
 describe('tabs', () => {
-	it('orders sourcing, qualification and scoring after identity', () => {
+	it('orders sourcing, enrichment, qualification and scoring after identity', () => {
 		expect(EDITOR_TABS).toEqual([
 			'identity',
 			'sourcing',
+			'enrichment',
 			'qualification',
 			'scoring',
 		])
 		expect(Object.keys(TAB_LABELS)).not.toContain('settings')
 		expect(TAB_LABELS.sourcing).toBe('Sourcing')
 		expect(TAB_LABELS.qualification).toBe('Qualification')
+		expect(TAB_LABELS.enrichment).toBe('Enrichissement')
+	})
+
+	it('reads the enrichment tab from the search', () => {
+		expect(tabSearchSchema.parse({ tab: 'enrichment' }).tab).toBe('enrichment')
 	})
 
 	it('keeps the legacy agents tab as an alias of sourcing', () => {
@@ -42,6 +48,11 @@ describe('tabs', () => {
 
 	it('maps server paths to their tab', () => {
 		expect(tabOfPath('agents[0].id')).toBe('sourcing')
+		expect(tabOfPath('enrichment')).toBe('enrichment')
+		expect(tabOfPath('enrichment.http_probe.fingerprints[0].path')).toBe(
+			'enrichment',
+		)
+		expect(tabOfPath('enrichment.company_jobs.keywords')).toBe('enrichment')
 		expect(tabOfPath('qualification_agents')).toBe('qualification')
 		expect(tabOfPath('scoring_agents')).toBe('scoring')
 		expect(tabOfPath('scoring_agents[0].criteria[1].id')).toBe('scoring')

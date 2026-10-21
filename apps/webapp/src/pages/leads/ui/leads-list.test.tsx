@@ -113,6 +113,45 @@ describe('LeadsList', () => {
 		expect(screen.getAllByText('—')).toHaveLength(2)
 	})
 
+	it('shows the enrichment wait in the verdict area of a pending lead', () => {
+		const waiting: Lead[] = [
+			{
+				...leads[1],
+				id: 'w1',
+				domain: 'wait.test',
+				enrichment_waiting: {
+					waiting_reason: 'awaiting_enrichment',
+					wait_until: '2026-02-02T00:30:00Z',
+				},
+			},
+			{
+				...leads[1],
+				id: 'w2',
+				domain: 'cert.test',
+				enrichment_waiting: {
+					waiting_reason: 'awaiting_enrichment_evidence',
+					wait_until: null,
+				},
+			},
+			{
+				...leads[0],
+				id: 'w3',
+				domain: 'done.test',
+				enrichment_waiting: {
+					waiting_reason: 'awaiting_enrichment',
+					wait_until: null,
+				},
+			},
+		]
+		const { container } = render(<Harness data={waiting} state="ready" />)
+		const badges = Array.from(container.querySelectorAll('[data-verdict]'))
+		expect(badges.map((badge) => badge.textContent)).toEqual([
+			"En attente d'enrichissement",
+			"En attente de preuve d'enrichissement",
+			'Fiable',
+		])
+	})
+
 	it('shows the score decided by the scoring agents out of 100', () => {
 		const { container } = render(<Harness data={leads} state="ready" />)
 		const bars = Array.from(

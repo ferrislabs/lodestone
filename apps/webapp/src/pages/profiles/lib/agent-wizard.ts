@@ -1,4 +1,4 @@
-import type { JsonValue } from '#/lib/schema-form'
+import { isJsonObject, type JsonValue } from '#/lib/schema-form'
 import {
 	agentField,
 	agentKind,
@@ -30,10 +30,43 @@ function typeProblems(agent: JsonValue): string[] {
 		: []
 }
 
+function filled(item: JsonValue, keys: readonly string[]): boolean {
+	return (
+		isJsonObject(item) &&
+		keys.every((key) => {
+			const field = item[key]
+			return typeof field === 'string' && field.trim() !== ''
+		})
+	)
+}
+
+function list(agent: JsonValue, key: string): JsonValue[] {
+	if (!isJsonObject(agent)) return []
+	const items = agent[key]
+	return Array.isArray(items) ? items : []
+}
+
 function criteriaProblems(agent: JsonValue): string[] {
-	return agentKind(agent) === 'search' && agentKeywordCount(agent) === 0
-		? ['Ajouter au moins un mot-clé.']
-		: []
+	switch (agentKind(agent)) {
+		case 'search':
+			return agentKeywordCount(agent) === 0
+				? ['Ajouter au moins un mot-clé.']
+				: []
+		case 'certificates':
+			return list(agent, 'labels').some(
+				(label) => typeof label === 'string' && label.trim() !== '',
+			)
+				? []
+				: ['Ajouter au moins un libellé.']
+		case 'dns':
+			return list(agent, 'patterns').some((pattern) =>
+				filled(pattern, ['provider', 'target_suffix']),
+			)
+				? []
+				: ['Ajouter au moins un motif CNAME.']
+		default:
+			return []
+	}
 }
 
 export function stepProblems(step: WizardStep, agent: JsonValue): string[] {

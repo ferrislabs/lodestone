@@ -127,6 +127,7 @@ pub struct LeadListing {
     pub page: LeadPage,
     pub summaries: HashMap<LeadId, String>,
     pub scorings: HashMap<LeadId, LeadScoring>,
+    pub enrichments: HashMap<LeadId, EnrichmentState>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

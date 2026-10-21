@@ -233,6 +233,52 @@ async fn leads_are_listed_by_score_with_their_profile_and_pagination(pool: PgPoo
 }
 
 #[sqlx::test(migrations = "../../migrations")]
+async fn each_listed_lead_says_whether_it_waits_for_its_enrichment(pool: PgPool) {
+    let seed = Seed { pool: pool.clone() };
+    let profile = seed.profile("keycloak-ops").await;
+    let certificate = seed.lead(&profile, "cert.com", "new", 30.0, 1).await;
+    let probed = seed.lead(&profile, "probe.com", "new", 20.0, 1).await;
+    seed.host_signal(
+        &certificate,
+        "certificate_seen",
+        "sso.cert.com",
+        "certificate_transparency",
+        "sso.cert.com",
+    )
+    .await;
+    seed.host_signal(
+        &certificate,
+        "role_contact_found",
+        "security@cert.com",
+        "role_guess",
+        "cert.com",
+    )
+    .await;
+    seed.signal(&probed, "product_detected").await;
+    let api = Api::new(pool).await;
+
+    let (status, body) = api.get(&format!("/api/v1/profiles/{profile}/leads")).await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(domains(&body), ["cert.com", "probe.com"]);
+    assert_eq!(
+        body["data"][0]["enrichment_waiting"],
+        json!({ "waiting_reason": "awaiting_enrichment_evidence", "wait_until": null })
+    );
+    assert_eq!(
+        body["data"][1]["enrichment_waiting"],
+        json!({ "waiting_reason": null, "wait_until": null })
+    );
+    let (_, detail) = api.get(&format!("/api/v1/leads/{certificate}")).await;
+    assert_eq!(
+        detail["data"]["lead"]["enrichment_waiting"]["waiting_reason"],
+        "awaiting_enrichment_evidence"
+    );
+    let (_, changed) = api.patch_status(&probed, "qualified").await;
+    assert_eq!(changed["data"]["enrichment_waiting"], Value::Null);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
 async fn each_filter_narrows_the_list(pool: PgPool) {
     let (_seed, profile) = listing_fixture(&pool).await;
     let api = Api::new(pool).await;

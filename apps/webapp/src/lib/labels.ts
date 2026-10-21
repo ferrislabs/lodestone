@@ -6,7 +6,7 @@ const SIGNAL_KIND_LABELS: Readonly<Record<string, string>> = {
 	public_tender: "Appel d'offres",
 	awarded_contract: 'Marché attribué',
 	role_contact_found: 'Contact par rôle trouvé',
-	certificate_seen: 'Certificat vu',
+	certificate_seen: 'Certificat observé',
 	distinct_signals: 'Types de signaux distincts',
 }
 

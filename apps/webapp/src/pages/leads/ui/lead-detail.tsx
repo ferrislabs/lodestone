@@ -4,11 +4,13 @@ import type { ReactNode } from 'react'
 import { Button } from '#/components/ui/button'
 import { Skeleton } from '#/components/ui/skeleton'
 import { failureOfKind } from '#/pages/leads/lib/agent-failure'
+import { waitingBadge } from '#/pages/leads/lib/enrichment'
 import type { LeadDetailData, LeadStatus } from '#/pages/leads/lib/types'
 import { AssessmentsList } from './assessments-list'
 import { CompanyCard } from './company-card'
 import { ContactsList } from './contacts-list'
 import { ExclusionNotice } from './exclusion-notice'
+import { LeadEnrichment } from './lead-enrichment'
 import { LeadFacts } from './lead-facts'
 import { LeadHeader } from './lead-header'
 import { LeadSummary } from './lead-summary'
@@ -91,6 +93,7 @@ export function LeadDetail({
 						onChangeStatus={onChangeStatus}
 						changing={changing}
 						changeError={changeError}
+						waiting={waitingBadge(detail.enrichment)?.label ?? null}
 					/>
 					<ExclusionNotice exclusions={detail.lead.exclusions} />
 					<CompanyCard
@@ -100,6 +103,9 @@ export function LeadDetail({
 						onRefresh={onRefreshCompany}
 					/>
 					{detail.facts ? <LeadFacts facts={detail.facts} /> : null}
+					{detail.enrichment ? (
+						<LeadEnrichment enrichment={detail.enrichment} />
+					) : null}
 					<QualificationResults
 						results={detail.qualification_results}
 						failure={failureOfKind(detail.agent_failures, 'qualification')}

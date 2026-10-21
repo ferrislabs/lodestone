@@ -18,6 +18,12 @@ import {
 	NO_CALIBRATION_STATES,
 } from '#/pages/profiles/lib/agent-calibration'
 import { dependencyNote } from '#/pages/profiles/lib/agents'
+import {
+	enrichmentStep,
+	searchKeywordUnion,
+	stepHasProblem,
+	withStepEnabled,
+} from '#/pages/profiles/lib/enrichment'
 import { PROFILE_HINTS } from '#/pages/profiles/lib/form-hints'
 import { PROFILE_SCHEMA } from '#/pages/profiles/lib/profile-schema'
 import type { ProviderOption } from '#/pages/profiles/lib/qualification'
@@ -28,6 +34,8 @@ import { AgentPage } from '#/pages/profiles/ui/agent-page'
 import { AgentWizard } from '#/pages/profiles/ui/agent-wizard'
 import { AgentsEditor } from '#/pages/profiles/ui/agents-editor'
 import { AgentsHelp } from '#/pages/profiles/ui/agents-help'
+import { EnrichmentEditor } from '#/pages/profiles/ui/enrichment-editor'
+import { EnrichmentHelp } from '#/pages/profiles/ui/enrichment-help'
 import { QualificationEditor } from '#/pages/profiles/ui/qualification-editor'
 import { QualificationHelp } from '#/pages/profiles/ui/qualification-help'
 import { ScoringAgentsEditor } from '#/pages/profiles/ui/scoring-agents-editor'
@@ -160,6 +168,34 @@ export function DefinitionTabContent({
 							confirmingRemove={scoringAgents.confirmingRemove}
 							previewing={scoringAgents.previewing}
 							actions={scoringAgents.actions}
+						/>
+					</div>
+				</div>
+			)
+		case 'enrichment':
+			return (
+				<div
+					data-testid="help-layout"
+					className="flex flex-col gap-4 lg:grid lg:grid-cols-4 lg:gap-6"
+				>
+					<EnrichmentHelp
+						collapsed={helpCollapsed}
+						onToggle={() => setHelpCollapsed((current) => !current)}
+					/>
+					<div className="lg:order-1 lg:col-span-3">
+						<EnrichmentEditor
+							context={context}
+							probe={enrichmentStep(value, 'http_probe')}
+							jobs={enrichmentStep(value, 'company_jobs')}
+							keywordUnion={searchKeywordUnion(value)}
+							advancedOpen={stepHasProblem(
+								problems,
+								'company_jobs',
+								'accept_min_keywords',
+							)}
+							onEnabled={(step, enabled) =>
+								onChange(withStepEnabled(value, step, enabled))
+							}
 						/>
 					</div>
 				</div>

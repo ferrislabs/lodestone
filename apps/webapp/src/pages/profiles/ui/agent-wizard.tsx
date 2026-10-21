@@ -20,12 +20,12 @@ import {
 	type WizardStep,
 } from '#/pages/profiles/lib/agent-wizard'
 import {
+	AGENT_KINDS,
 	type AgentKind,
 	agentField,
 	agentProviders,
 	agentSummary,
 	isSignalKind,
-	KIND_GROUPS,
 	KIND_META,
 	settingsSchema,
 } from '#/pages/profiles/lib/agents'
@@ -130,37 +130,28 @@ function TypeStep({
 			<div
 				role="radiogroup"
 				aria-label="Type d'agent"
-				className="flex flex-col gap-3"
+				className="grid gap-2 md:grid-cols-3"
 			>
-				{KIND_GROUPS.map((group) => (
-					<div key={group.title} className="flex flex-col gap-2">
-						<p className="text-xs font-medium uppercase text-muted-foreground">
-							{group.title}
-						</p>
-						<div className="grid gap-2 md:grid-cols-3">
-							{group.kinds.map((option) => (
-								<label
-									key={option}
-									className="flex h-full cursor-pointer flex-col gap-0.5 rounded-md border bg-background p-3 text-left hover:border-primary has-checked:border-primary has-checked:ring-2 has-checked:ring-primary has-focus-visible:ring-[3px] has-focus-visible:ring-ring/50"
-								>
-									<input
-										type="radio"
-										name="agent-wizard-kind"
-										value={option}
-										className="sr-only"
-										checked={kind === option}
-										onChange={() => actions.onKind(option)}
-									/>
-									<span className="text-sm font-medium">
-										{KIND_META[option].label}
-									</span>
-									<span className="text-xs text-muted-foreground">
-										{KIND_META[option].description}
-									</span>
-								</label>
-							))}
-						</div>
-					</div>
+				{AGENT_KINDS.map((option) => (
+					<label
+						key={option}
+						className="flex h-full cursor-pointer flex-col gap-0.5 rounded-md border bg-background p-3 text-left hover:border-primary has-checked:border-primary has-checked:ring-2 has-checked:ring-primary has-focus-visible:ring-[3px] has-focus-visible:ring-ring/50"
+					>
+						<input
+							type="radio"
+							name="agent-wizard-kind"
+							value={option}
+							className="sr-only"
+							checked={kind === option}
+							onChange={() => actions.onKind(option)}
+						/>
+						<span className="text-sm font-medium">
+							{KIND_META[option].label}
+						</span>
+						<span className="text-xs text-muted-foreground">
+							{KIND_META[option].description}
+						</span>
+					</label>
 				))}
 			</div>
 			{kind === 'search' ? (
@@ -227,7 +218,7 @@ function SummaryStep({
 					},
 				]
 			: [
-					{ label: 'Type', value: `Signal · ${KIND_META[kind].label}` },
+					{ label: 'Type', value: KIND_META[kind].label },
 					{ label: 'Réglages', value: agentSummary(agent) },
 				]
 	return (

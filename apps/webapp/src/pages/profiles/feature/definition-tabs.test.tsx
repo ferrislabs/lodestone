@@ -114,10 +114,21 @@ function addAgent(kind: AgentKind) {
 		fireEvent.click(dialog.getByRole('button', { name: 'BOAMP' }))
 	}
 	fireEvent.click(dialog.getByRole('button', { name: 'Suivant' }))
-	if (kind === 'search') {
-		const keywords = dialog.getByLabelText('Mots-clés')
-		fireEvent.change(keywords, { target: { value: 'sso' } })
-		fireEvent.keyDown(keywords, { key: 'Enter' })
+	if (kind === 'search' || kind === 'certificates') {
+		const tags = dialog.getByLabelText(
+			kind === 'search' ? 'Mots-clés' : 'Libellés',
+		)
+		fireEvent.change(tags, { target: { value: 'sso' } })
+		fireEvent.keyDown(tags, { key: 'Enter' })
+	}
+	if (kind === 'dns') {
+		fireEvent.click(dialog.getByText('Ajouter un motif'))
+		fireEvent.change(dialog.getByLabelText('Fournisseur'), {
+			target: { value: 'Okta' },
+		})
+		fireEvent.change(dialog.getByLabelText('Suffixe cible'), {
+			target: { value: 'okta.com' },
+		})
 	}
 	fireEvent.click(dialog.getByRole('button', { name: 'Suivant' }))
 	fireEvent.click(dialog.getByRole('button', { name: 'Créer' }))
@@ -382,8 +393,6 @@ describe('definition tabs', () => {
 		render(<Harness startTab="sourcing" />)
 		addAgent('dns')
 		openAgent()
-		const scoped = screen
-		fireEvent.click(scoped.getByText('Ajouter un motif'))
 		const row = document.querySelector<HTMLElement>(
 			'[data-row="agents[0].patterns[0]"]',
 		) as HTMLElement
@@ -438,7 +447,113 @@ describe('definition tabs', () => {
 		expect(screen.queryByRole('tab', { name: 'Réglages' })).toBeNull()
 		expect(
 			screen.getAllByRole('tab').map((tab) => tab.textContent?.trim()),
-		).toEqual(['Identité', 'Sourcing', 'Qualification', 'Scoring'])
+		).toEqual([
+			'Identité',
+			'Sourcing',
+			'Enrichissement',
+			'Qualification',
+			'Scoring',
+		])
+	})
+
+	it('explains the catalog, the three agent types and the enrichment tab', () => {
+		render(<Harness startTab="sourcing" />)
+		const panel = screen.getByTestId('help-panel')
+		const paragraphs = panel.querySelectorAll('p')
+		expect(paragraphs[0]?.textContent).toBe(
+			"Le catalogue liste les sources disponibles pour toute l'organisation ; un agent décide quoi chercher, et dans quelles sources.",
+		)
+		const help = within(panel)
+		for (const kind of AGENT_KINDS) {
+			expect(help.getByText(KIND_META[kind].label)).toBeTruthy()
+		}
+		expect(help.getByText(/onglet Enrichissement/)).toBeTruthy()
+		expect(panel.textContent).not.toMatch(/Pages carrières|pages carrières/)
+		expect(panel.textContent).not.toContain('Sonde HTTP ←')
+	})
+
+	it('edits the enrichment steps on their own tab', () => {
+		render(<Harness />)
+		fireEvent.click(screen.getByRole('tab', { name: TAB_LABELS.enrichment }))
+		const probe = within(screen.getByRole('region', { name: 'Sonde HTTP' }))
+		const jobs = within(
+			screen.getByRole('region', {
+				name: "Offres d'emploi de l'entreprise",
+			}),
+		)
+		const dossier = within(
+			screen.getByRole('region', { name: 'Dossier entreprise' }),
+		)
+		expect(probe.getByText('Empreintes')).toBeTruthy()
+		expect(probe.getByText('Sous-domaines supplémentaires')).toBeTruthy()
+		expect(probe.getByText('Produits exclus')).toBeTruthy()
+		expect(probe.getByLabelText('Retirer auth')).toBeTruthy()
+		const probeSwitch = probe.getByRole('switch', {
+			name: 'Activer la sonde HTTP',
+		})
+		expect(probeSwitch.getAttribute('aria-checked')).toBe('false')
+		fireEvent.click(probeSwitch)
+		expect(probeSwitch.getAttribute('aria-checked')).toBe('true')
+		fireEvent.click(probe.getByText('Ajouter une empreinte'))
+		const row = document.querySelector<HTMLElement>(
+			'[data-row="enrichment.http_probe.fingerprints[0]"]',
+		) as HTMLElement
+		expect(within(row).getByText(/^Chemin/)).toBeTruthy()
+		expect(
+			jobs.getByText(/Vide : les mots-clés des agents de recherche/),
+		).toBeTruthy()
+		expect(jobs.getByText('Avancé')).toBeTruthy()
+		expect(
+			jobs.getByText('Mots-clés distincts pour un signal fort'),
+		).toBeTruthy()
+		fireEvent.click(
+			jobs.getByRole('switch', {
+				name: "Activer les offres d'emploi de l'entreprise",
+			}),
+		)
+		expect(
+			jobs
+				.getByRole('switch', {
+					name: "Activer les offres d'emploi de l'entreprise",
+				})
+				.getAttribute('aria-checked'),
+		).toBe('true')
+		expect(dossier.getByText(/Toujours actif/)).toBeTruthy()
+		expect(dossier.queryByRole('switch')).toBeNull()
+		const help = within(screen.getByTestId('help-panel'))
+		expect(help.getByText(/ne crée jamais de lead/)).toBeTruthy()
+		expect(help.getByText(/30 minutes/)).toBeTruthy()
+		expect(
+			screen.queryByRole('button', { name: 'Ajouter un agent' }),
+		).toBeNull()
+	})
+
+	it('shows the search keywords used when the job keywords are empty', () => {
+		const agent = { ...newAgent('search', [], ['boamp']), keywords: ['sso'] }
+		render(
+			<Harness
+				startTab="enrichment"
+				initial={{ ...blank(), agents: [agent] }}
+			/>,
+		)
+		expect(screen.getByText("Utilisés aujourd'hui : sso")).toBeTruthy()
+	})
+
+	it('badges the enrichment tab for a problem inside an enrichment step', () => {
+		render(
+			<Harness
+				problems={[
+					{
+						path: 'enrichment.http_probe.fingerprints',
+						message: 'Au moins une empreinte',
+					},
+				]}
+			/>,
+		)
+		const tab = screen.getByRole('tab', { name: /Enrichissement/ })
+		expect(within(tab).getByLabelText('1 problème')).toBeTruthy()
+		fireEvent.click(tab)
+		expect(screen.getByText('Au moins une empreinte')).toBeTruthy()
 	})
 
 	it('offers the LLM answer language as a french select in the identity tab', () => {
@@ -474,6 +589,7 @@ describe('definition tabs', () => {
 		for (const tab of [
 			'identity',
 			'sourcing',
+			'enrichment',
 			'qualification',
 			'scoring',
 		] as const) {
@@ -490,6 +606,7 @@ describe('definition tabs', () => {
 		const tabs: EditorTab[] = [
 			'identity',
 			'sourcing',
+			'enrichment',
 			'qualification',
 			'scoring',
 		]
