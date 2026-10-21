@@ -45,6 +45,8 @@ interface Call {
 }
 
 let calls: Call[]
+let current: DraftEntry
+let writeText: ReturnType<typeof vi.fn>
 
 function json(body: unknown, status = 200): Response {
 	return new Response(JSON.stringify(body), {
@@ -56,6 +58,12 @@ function json(body: unknown, status = 200): Response {
 beforeEach(() => {
 	Object.assign(window, { apiUrl: 'http://api.test' })
 	calls = []
+	current = ENTRY
+	writeText = vi.fn(async () => {})
+	Object.defineProperty(navigator, 'clipboard', {
+		value: { writeText },
+		configurable: true,
+	})
 	router.navigate.mockReset()
 	vi.stubGlobal(
 		'fetch',
@@ -64,7 +72,7 @@ beforeEach(() => {
 			const method = init?.method ?? 'GET'
 			const body = typeof init?.body === 'string' ? JSON.parse(init.body) : null
 			calls.push({ method, path: url.pathname, body })
-			return json({ data: ENTRY })
+			return json({ data: current })
 		}),
 	)
 })
@@ -72,6 +80,7 @@ beforeEach(() => {
 afterEach(() => {
 	cleanup()
 	vi.unstubAllGlobals()
+	Reflect.deleteProperty(navigator, 'clipboard')
 })
 
 function renderFeature() {
@@ -126,5 +135,63 @@ describe('DraftReviewFeature rejection', () => {
 				search: {},
 			}),
 		)
+	})
+})
+
+describe('DraftReviewFeature copy actions', () => {
+	it('copies the edited text of a pending draft, not the original', async () => {
+		current = {
+			...ENTRY,
+			contact: { address: 'cto@acme.test', method: 'scraped', confidence: 0.9 },
+		}
+		renderFeature()
+		fireEvent.change(await screen.findByLabelText('Objet'), {
+			target: { value: 'Edited subject' },
+		})
+		fireEvent.change(screen.getByLabelText('Corps'), {
+			target: { value: 'Edited body' },
+		})
+		fireEvent.click(screen.getByRole('button', { name: "Copier l'objet" }))
+		expect(writeText).toHaveBeenLastCalledWith('Edited subject')
+		fireEvent.click(screen.getByRole('button', { name: 'Copier le corps' }))
+		expect(writeText).toHaveBeenLastCalledWith('Edited body')
+		fireEvent.click(screen.getByRole('button', { name: 'Copier le brouillon' }))
+		expect(writeText).toHaveBeenLastCalledWith('Edited subject\n\nEdited body')
+		expect(
+			screen
+				.getByRole('link', { name: 'Ouvrir dans la messagerie' })
+				.getAttribute('href'),
+		).toBe('mailto:cto@acme.test?subject=Edited%20subject&body=Edited%20body')
+	})
+
+	it('offers no mail link to a pending draft without a contact', async () => {
+		renderFeature()
+		await screen.findByLabelText('Objet')
+		expect(screen.queryByRole('link', { name: /messagerie/ })).toBeNull()
+		fireEvent.click(screen.getByRole('button', { name: 'Copier le corps' }))
+		expect(writeText).toHaveBeenLastCalledWith('Body text')
+	})
+
+	it.each([
+		'approved',
+		'rejected',
+	] as const)('shows a %s draft read-only and copies it', async (status) => {
+		current = {
+			...ENTRY,
+			contact: { address: 'cto@acme.test', method: 'scraped', confidence: 0.9 },
+			draft: { subject: 'Hello Acme', body: 'Body text', status },
+		}
+		renderFeature()
+		expect(await screen.findByText('Hello Acme')).toBeTruthy()
+		expect(screen.getByText('Body text')).toBeTruthy()
+		expect(screen.queryAllByRole('textbox')).toHaveLength(0)
+		expect(screen.queryByRole('button', { name: 'Rejeter' })).toBeNull()
+		fireEvent.click(screen.getByRole('button', { name: 'Copier le brouillon' }))
+		expect(writeText).toHaveBeenLastCalledWith('Hello Acme\n\nBody text')
+		expect(
+			screen
+				.getByRole('link', { name: 'Ouvrir dans la messagerie' })
+				.getAttribute('href'),
+		).toBe('mailto:cto@acme.test?subject=Hello%20Acme&body=Body%20text')
 	})
 })

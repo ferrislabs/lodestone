@@ -6,6 +6,7 @@ import { Skeleton } from '#/components/ui/skeleton'
 import { isEdited } from '#/pages/drafts/lib/edit'
 import { draftStatusLabel } from '#/pages/drafts/lib/labels'
 import type { DraftEntry } from '#/pages/drafts/lib/types'
+import { DecidedDraft } from './decided-draft'
 import { DraftContext } from './draft-context'
 import { DraftSuggestion } from './draft-suggestion'
 import { OriginalDraft } from './original-draft'
@@ -103,10 +104,17 @@ export function DraftReview({
 							</section>
 						</>
 					) : (
-						<p className="text-sm text-muted-foreground">
-							Ce brouillon a déjà été{' '}
-							{draftStatusLabel(entry.draft.status).toLowerCase()}.
-						</p>
+						<>
+							<p className="text-sm text-muted-foreground">
+								Ce brouillon a déjà été{' '}
+								{draftStatusLabel(entry.draft.status).toLowerCase()}.
+							</p>
+							<DecidedDraft
+								draft={entry.draft}
+								contactAddress={entry.contact?.address ?? null}
+								onCopy={onCopy}
+							/>
+						</>
 					)}
 				</>
 			) : null}

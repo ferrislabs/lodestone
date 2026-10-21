@@ -117,6 +117,10 @@ function DraftReviewForms({ entry }: DraftReviewFormsProps) {
 	const rejectError = reject.isError ? parseApiError(reject.error) : null
 	const decisionError = approveError?.message ?? null
 
+	const copy = (text: string) => {
+		void navigator.clipboard?.writeText(text)
+	}
+
 	const editor = (
 		<DraftEditor
 			values={values}
@@ -131,11 +135,13 @@ function DraftReviewForms({ entry }: DraftReviewFormsProps) {
 			}
 			dirty={dirty}
 			saving={edit.isPending}
+			contactAddress={entry.contact?.address ?? null}
 			onChange={(field, value) => {
 				if (edit.isError) edit.reset()
 				draftForm.setFieldValue(field, value)
 			}}
 			onSave={() => void draftForm.handleSubmit()}
+			onCopy={copy}
 		/>
 	)
 
@@ -198,9 +204,7 @@ function DraftReviewForms({ entry }: DraftReviewFormsProps) {
 				approve.mutate({ path: { assessment_id: assessmentId } })
 			}}
 			onStartReject={() => rejection.start()}
-			onCopy={(text) => {
-				void navigator.clipboard?.writeText(text)
-			}}
+			onCopy={copy}
 		/>
 	)
 }
