@@ -1,6 +1,8 @@
+pub mod robots;
 pub mod secret;
 pub mod settings;
 
+pub use robots::{InvalidRobotsPolicy, RobotsPolicy};
 pub use secret::Secret;
 pub use settings::{
     ENCRYPTION_KEY_LENGTH, EncryptionKey, JobsConfig, LlmConfig, OutboundConfig, OutboundContact,

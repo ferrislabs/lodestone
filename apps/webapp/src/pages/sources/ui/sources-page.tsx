@@ -22,6 +22,7 @@ interface SourcesPageProps {
 	pending: ReadonlySet<string>
 	errors: Readonly<Record<string, string>>
 	onRun: (source: string) => void
+	onOpenProvider: (key: string) => void
 }
 
 export function SourcesPage({
@@ -33,6 +34,7 @@ export function SourcesPage({
 	pending,
 	errors,
 	onRun,
+	onOpenProvider,
 }: SourcesPageProps) {
 	return (
 		<div className="flex flex-col gap-6 p-4 md:p-8">
@@ -84,6 +86,7 @@ export function SourcesPage({
 														source={source}
 														listener={source.listener}
 														now={now}
+														onOpenProvider={onOpenProvider}
 													/>
 												) : null,
 											)}
@@ -110,6 +113,7 @@ export function SourcesPage({
 													pending={pending.has(source.source)}
 													error={errors[source.source] ?? null}
 													onRun={onRun}
+													onOpenProvider={onOpenProvider}
 												/>
 											))}
 										</TableBody>

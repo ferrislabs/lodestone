@@ -1,5 +1,46 @@
 export namespace Schemas {
   // <Schemas>
+  export type ReliabilityBinDto = { n: number; observed: number; predicted: number };
+  export type AgentCalibrationDto = {
+    agent_id: string;
+    brier_after?: (number | null) | undefined;
+    brier_before?: (number | null) | undefined;
+    fitted_at?: (string | null) | undefined;
+    kind: string;
+    n: number;
+    name: string;
+    positives: number;
+    reliability: Array<ReliabilityBinDto>;
+    status: string;
+  };
+  export type AgentKind = "qualification" | "scoring";
+  export type AgentFailureDto = {
+    agent_id: string;
+    agent_name: string;
+    attempts: number;
+    error: string;
+    failed: boolean;
+    kind: AgentKind;
+    next_attempt_at?: (string | null) | undefined;
+  };
+  export type AgentQualityDto = {
+    agent_id: string;
+    mean_rejected?: (number | null) | undefined;
+    mean_validated?: (number | null) | undefined;
+    name: string;
+    rejected: number;
+    separation?: (number | null) | undefined;
+    validated: number;
+  };
+  export type AgentStopDto = {
+    agent_id: string;
+    agent_name: string;
+    kind: string;
+    profile_revision: number;
+    reason: string;
+    stopped_at: string;
+  };
+  export type ApproveDraftRequest = Partial<{ expected_revision: number | null }>;
   export type DraftStatusDto = "pending" | "approved" | "rejected";
   export type DraftDto = {
     body: string;
@@ -10,12 +51,29 @@ export namespace Schemas {
     rejection_reason?: (string | null) | undefined;
     reviewed_at?: (string | null) | undefined;
     reviewed_by?: (string | null) | undefined;
+    revision: number;
     status: DraftStatusDto;
     subject: string;
     suggested_body?: (string | null) | undefined;
     suggested_subject?: (string | null) | undefined;
   };
   export type EvidenceDto = { provenance: string; quote: string };
+  export type GenerationDto = Partial<{
+    frequency_penalty: number | null;
+    max_tokens: number | null;
+    presence_penalty: number | null;
+    reasoning_effort: string | null;
+    repeat_penalty: number | null;
+    temperature: number | null;
+  }>;
+  export type ProvenanceDto = {
+    generation: GenerationDto;
+    model: string;
+    prompt_version: string;
+    provider_id?: (string | null) | undefined;
+    provider_name: string;
+    samples: number;
+  };
   export type AssessmentDto = {
     approach_angle: string;
     created_at: string;
@@ -26,6 +84,8 @@ export namespace Schemas {
     model: string;
     profile_revision: number;
     prompt_version: string;
+    provenance: ProvenanceDto;
+    quality_warnings: Array<string>;
     summary: string;
     verdict_narrative: string;
   };
@@ -38,8 +98,67 @@ export namespace Schemas {
     summary: string;
   };
   export type AssignTierRequest = { provider_id: string };
+  export type AuthorizeUrlDto = { authorize_url: string };
+  export type ProfileCalibrationDto = { agents: Array<AgentCalibrationDto>; name: string; profile_id: string };
+  export type CalibrationDto = { profiles: Array<ProfileCalibrationDto>; required: number; required_per_class: number };
+  export type CalibrationRunDto = { queued: boolean };
+  export type FiltersDto = { contract: boolean; countries: boolean; remote: boolean };
+  export type CapabilitiesDto = { filters: FiltersDto; keyword_search: boolean };
+  export type RejectionReasonDto =
+    | "hors_cible"
+    | "deja_client"
+    | "concurrent"
+    | "editeur_integrateur"
+    | "hebergeur_agence"
+    | "mauvaise_donnee"
+    | "autre";
   export type LeadStatusDto = "new" | "qualified" | "validated" | "rejected" | "contacted" | "uncertain";
-  export type ChangeLeadStatusRequest = { status: LeadStatusDto };
+  export type ChangeLeadStatusRequest = {
+    note?: (string | null) | undefined;
+    reason?: (null | RejectionReasonDto) | undefined;
+    status: LeadStatusDto;
+  };
+  export type OfficialDataDto = {
+    annuaire_url: string;
+    created_on?: (string | null) | undefined;
+    head_office_city?: (string | null) | undefined;
+    head_office_country?: (string | null) | undefined;
+    head_office_postcode?: (string | null) | undefined;
+    headcount_range?: (string | null) | undefined;
+    legal_name: string;
+    naf_code?: (string | null) | undefined;
+    naf_label?: (string | null) | undefined;
+    siren: string;
+  };
+  export type CompanyPageDto = { url: string };
+  export type ProfileRefDto = { id: string; name: string };
+  export type VerdictDto = "fiable" | "a_verifier" | "ecarte";
+  export type SiblingLeadDto = {
+    confidence?: (number | null) | undefined;
+    domain: string;
+    id: string;
+    profile: ProfileRefDto;
+    verdict?: (null | VerdictDto) | undefined;
+  };
+  export type CompanyDto = {
+    built_at?: (string | null) | undefined;
+    error?: (string | null) | undefined;
+    ignored_links: number;
+    legal_name?: (string | null) | undefined;
+    next_attempt_at: string;
+    official?: (null | OfficialDataDto) | undefined;
+    pages: Array<CompanyPageDto>;
+    siblings: Array<SiblingLeadDto>;
+    siren?: (string | null) | undefined;
+    state: string;
+  };
+  export type ConfidenceBucketDto = { from: number; rejected: number; to: number; validated: number };
+  export type ConnectedAccountDto = {
+    account_id?: (string | null) | undefined;
+    display_name: string;
+    expires_at?: (string | null) | undefined;
+    scopes: Array<string>;
+  };
   export type ContactDto = {
     address: string;
     confidence: number;
@@ -51,30 +170,35 @@ export namespace Schemas {
   };
   export type ContactRecord = { address: string; confidence: number; method: string; provenance: string };
   export type CountryDto = { code: string; name: string };
+  export type CrawlSettingsDto = {
+    environment_default: string;
+    origin: string;
+    robots_ignored: number;
+    robots_policy: string;
+    updated_at?: (string | null) | undefined;
+    updated_by?: (string | null) | undefined;
+    updated_by_name?: (string | null) | undefined;
+  };
+  export type CrawlSettingsUpdateDto = { dossiers_retried: number; settings: CrawlSettingsDto };
   export type CreateProfileRequest = { definition: Record<string, unknown>; name?: (string | null) | undefined };
   export type PricingRequest = Partial<{ input_cents_per_mtok: number | null; output_cents_per_mtok: number | null }>;
   export type ReasoningEffort = "none" | "low" | "medium" | "high";
   export type CreateProviderRequest = {
     api_key?: (string | null) | undefined;
     base_url: string;
+    frequency_penalty?: (number | null) | undefined;
     kind: string;
+    max_concurrency?: (number | null) | undefined;
     max_retries?: (number | null) | undefined;
+    max_tokens?: (number | null) | undefined;
     model: string;
     name: string;
+    presence_penalty?: (number | null) | undefined;
     pricing?: (null | PricingRequest) | undefined;
     reasoning_effort?: (null | ReasoningEffort) | undefined;
+    repeat_penalty?: (number | null) | undefined;
+    temperature?: (number | null) | undefined;
     timeout_seconds?: (number | null) | undefined;
-  };
-  export type DraftContactDto = { address: string; confidence: number; method: string };
-  export type ProfileRefDto = { id: string; name: string };
-  export type VerdictDto = "fiable" | "a_verifier" | "ecarte";
-  export type DraftLeadDto = {
-    confidence?: (number | null) | undefined;
-    domain: string;
-    id: string;
-    profile: ProfileRefDto;
-    score: number;
-    verdict?: (null | VerdictDto) | undefined;
   };
   export type PaginationMetadata = {
     current_page: number;
@@ -85,6 +209,58 @@ export namespace Schemas {
     per_page: number;
     prev_page?: (number | null) | undefined;
     total?: (number | null) | undefined;
+  };
+  export type DataEnvelope_AuthorizeUrlDto = {
+    data: { authorize_url: string };
+    pagination?: (null | PaginationMetadata) | undefined;
+  };
+  export type DataEnvelope_CalibrationDto = {
+    data: { profiles: Array<ProfileCalibrationDto>; required: number; required_per_class: number };
+    pagination?: (null | PaginationMetadata) | undefined;
+  };
+  export type DataEnvelope_CalibrationRunDto = {
+    data: { queued: boolean };
+    pagination?: (null | PaginationMetadata) | undefined;
+  };
+  export type DataEnvelope_CompanyDto = {
+    data: {
+      built_at?: (string | null) | undefined;
+      error?: (string | null) | undefined;
+      ignored_links: number;
+      legal_name?: (string | null) | undefined;
+      next_attempt_at: string;
+      official?: (null | OfficialDataDto) | undefined;
+      pages: Array<CompanyPageDto>;
+      siblings: Array<SiblingLeadDto>;
+      siren?: (string | null) | undefined;
+      state: string;
+    };
+    pagination?: (null | PaginationMetadata) | undefined;
+  };
+  export type DataEnvelope_CrawlSettingsDto = {
+    data: {
+      environment_default: string;
+      origin: string;
+      robots_ignored: number;
+      robots_policy: string;
+      updated_at?: (string | null) | undefined;
+      updated_by?: (string | null) | undefined;
+      updated_by_name?: (string | null) | undefined;
+    };
+    pagination?: (null | PaginationMetadata) | undefined;
+  };
+  export type DataEnvelope_CrawlSettingsUpdateDto = {
+    data: { dossiers_retried: number; settings: CrawlSettingsDto };
+    pagination?: (null | PaginationMetadata) | undefined;
+  };
+  export type DraftContactDto = { address: string; confidence: number; method: string };
+  export type DraftLeadDto = {
+    confidence?: (number | null) | undefined;
+    domain: string;
+    id: string;
+    profile: ProfileRefDto;
+    score: number;
+    verdict?: (null | VerdictDto) | undefined;
   };
   export type DataEnvelope_DraftEntryDto = {
     data: {
@@ -101,27 +277,147 @@ export namespace Schemas {
     };
     pagination?: (null | PaginationMetadata) | undefined;
   };
+  export type EcosystemModule =
+    | "official_identity"
+    | "legal_life"
+    | "public_contracts"
+    | "website_stack"
+    | "dns_email"
+    | "hiring_activity"
+    | "recent_activity";
+  export type EcosystemFindingDto = {
+    details: Record<string, unknown>;
+    key: string;
+    kind: string;
+    label: string;
+    module: EcosystemModule;
+    observed_at: string;
+    source_url: string;
+    value: string;
+  };
+  export type EcosystemModuleStatus = "pending" | "done" | "not_applicable" | "failed";
+  export type DataEnvelope_EcosystemDryRunDto = {
+    data: {
+      domain: string;
+      duration_ms: number;
+      error?: (string | null) | undefined;
+      findings: Array<EcosystemFindingDto>;
+      hosting_platform?: (string | null) | undefined;
+      module: EcosystemModule;
+      status: EcosystemModuleStatus;
+    };
+    pagination?: (null | PaginationMetadata) | undefined;
+  };
+  export type ModuleStateDto = {
+    changed_at?: (string | null) | undefined;
+    error?: (string | null) | undefined;
+    label: string;
+    last_run?: (string | null) | undefined;
+    module: EcosystemModule;
+    status: EcosystemModuleStatus;
+  };
+  export type EcosystemModuleReportDto = ModuleStateDto & {
+    findings: Array<EcosystemFindingDto>;
+    provider?: (string | null) | undefined;
+    provider_ready: boolean;
+  };
+  export type EcosystemDto = {
+    hosting_platform?: (string | null) | undefined;
+    modules: Array<EcosystemModuleReportDto>;
+  };
+  export type EnrichmentDto = { hosting_platform?: (string | null) | undefined; modules: Array<ModuleStateDto> };
   export type HostFactDto = { environment: string; host: string; signals: number };
+  export type OfficialFactsDto = {
+    head_office_country?: (string | null) | undefined;
+    headcount_range?: (string | null) | undefined;
+    legal_name: string;
+    naf_code?: (string | null) | undefined;
+    naf_label?: (string | null) | undefined;
+    siren: string;
+  };
   export type LeadFactsDto = {
+    country_basis?: (string | null) | undefined;
     distinct_hosts: number;
     distinct_subdomains: number;
     first_seen_at: string;
     hosts: Array<HostFactDto>;
+    independent_signals: number;
+    kinds: Array<string>;
     last_seen_at: string;
+    official?: (null | OfficialFactsDto) | undefined;
     only_non_production: boolean;
     probable_country?: (null | CountryDto) | undefined;
     production_hosts: number;
     production_share?: (number | null) | undefined;
+    sibling_domains: Array<string>;
     signal_count: number;
     source_count: number;
     sources: Array<string>;
   };
+  export type RequalifyReason = "new_information" | "manual";
+  export type EvaluationStage =
+    | "not_evaluated"
+    | "certificate_only"
+    | "requalification_planned"
+    | "inspection_running"
+    | "inspection_complete"
+    | "evaluated";
+  export type EvaluationDto = {
+    changed_modules: Array<ModuleStateDto>;
+    evaluated_at?: (string | null) | undefined;
+    modules_available: number;
+    modules_done: number;
+    requalify_at?: (string | null) | undefined;
+    requalify_reason?: (null | RequalifyReason) | undefined;
+    stage: EvaluationStage;
+  };
+  export type EvidenceComponentsDto = { diversity: number; environment: number; strength: number; volume: number };
+  export type EvidenceStrengthDto = {
+    components: EvidenceComponentsDto;
+    decayed_signals: number;
+    independent_signals: number;
+    kind_count: number;
+    only_non_production: boolean;
+    signal_count: number;
+    signal_score: number;
+    source_count: number;
+    strength: number;
+  };
+  export type ExclusionDto = {
+    agent_id: string;
+    agent_name: string;
+    evidence: string;
+    evidence_source?: (string | null) | undefined;
+    label: string;
+    option: string;
+    probability: number;
+    question_id: string;
+  };
+  export type GroupedLeadDto = {
+    confidence?: (number | null) | undefined;
+    domain: string;
+    id: string;
+    llm_score?: (number | null) | undefined;
+    status: LeadStatusDto;
+    verdict?: (null | VerdictDto) | undefined;
+  };
+  export type VerdictReasonDto = "single_angle" | "weak_evidence" | "non_production" | "excluded" | "awaiting_scoring";
+  export type VerdictProbabilitiesDto = { a_verifier: number; ecarte: number; fiable: number };
+  export type VerdictSourceDto = "indicators" | "scoring";
   export type LeadDto = {
     confidence?: (number | null) | undefined;
     domain: string;
+    evaluation?: (null | EvaluationDto) | undefined;
+    evidence?: (null | EvidenceStrengthDto) | undefined;
+    exclusions: Array<ExclusionDto>;
     first_seen_at: string;
+    grouped_leads: Array<GroupedLeadDto>;
     id: string;
+    indicator_cap?: (null | VerdictReasonDto) | undefined;
+    indicator_confidence?: (number | null) | undefined;
     last_seen_at: string;
+    llm_score?: (number | null) | undefined;
+    opinion?: (number | null) | undefined;
     profile: ProfileRefDto;
     qualified_at?: (string | null) | undefined;
     score: number;
@@ -129,12 +425,21 @@ export namespace Schemas {
     summary?: (string | null) | undefined;
     updated_at: string;
     verdict?: (null | VerdictDto) | undefined;
+    verdict_probabilities?: (null | VerdictProbabilitiesDto) | undefined;
+    verdict_reason?: (null | VerdictReasonDto) | undefined;
+    verdict_source?: (null | VerdictSourceDto) | undefined;
   };
   export type ProbabilityDto = { label: string; probability: number; value: string };
   export type QualificationAnswerDto = {
+    agreement?: (number | null) | undefined;
     choice: string;
     choice_label: string;
     confidence: number;
+    evidence: string;
+    evidence_source?: (string | null) | undefined;
+    grounded: boolean;
+    original_choice?: (string | null) | undefined;
+    original_choice_label?: (string | null) | undefined;
     probabilities: Array<ProbabilityDto>;
     question_id: string;
     wording: string;
@@ -147,18 +452,38 @@ export namespace Schemas {
     answers: Array<QualificationAnswerDto>;
     created_at: string;
     error?: (string | null) | undefined;
+    escalated: boolean;
     model: string;
+    provenance: ProvenanceDto;
     provider_id?: (string | null) | undefined;
     provider_name?: (string | null) | undefined;
     status: string;
     summary?: (string | null) | undefined;
   };
-  export type ScoreContributionDto = {
-    contribution: number;
-    measure: number;
-    signal: string;
-    value?: (string | null) | undefined;
-    weight: number;
+  export type ScoringCalibrationDto = { n: number; probabilities: VerdictProbabilitiesDto };
+  export type ScoringVerdictDto = {
+    choice: VerdictDto;
+    confidence: number;
+    declared_choice?: (null | VerdictDto) | undefined;
+    probabilities: VerdictProbabilitiesDto;
+  };
+  export type ScoringResultDto = {
+    agent_description?: (string | null) | undefined;
+    agent_id: string;
+    agent_name: string;
+    calibration?: (null | ScoringCalibrationDto) | undefined;
+    created_at: string;
+    criteria: Array<QualificationAnswerDto>;
+    error?: (string | null) | undefined;
+    model: string;
+    provenance: ProvenanceDto;
+    provider_id?: (string | null) | undefined;
+    provider_name?: (string | null) | undefined;
+    reasons: Array<string>;
+    score?: (number | null) | undefined;
+    status: string;
+    verdict?: (null | ScoringVerdictDto) | undefined;
+    weight?: (number | null) | undefined;
   };
   export type SignalDto = {
     agent?: (string | null) | undefined;
@@ -180,12 +505,17 @@ export namespace Schemas {
   };
   export type DataEnvelope_LeadDetailDto = {
     data: {
+      agent_failures: Array<AgentFailureDto>;
+      agent_stops: Array<AgentStopDto>;
       assessments: Array<AssessmentDto>;
+      company?: (null | CompanyDto) | undefined;
       contacts: Array<ContactDto>;
+      ecosystem: EcosystemDto;
+      enrichment: EnrichmentDto;
       facts: LeadFactsDto;
       lead: LeadDto;
       qualification_results: Array<QualificationResultDto>;
-      score_breakdown: Array<ScoreContributionDto>;
+      scoring_results: Array<ScoringResultDto>;
       signals: Array<SignalDto>;
       summary_state?: (null | SummaryStateDto) | undefined;
     };
@@ -195,9 +525,17 @@ export namespace Schemas {
     data: {
       confidence?: (number | null) | undefined;
       domain: string;
+      evaluation?: (null | EvaluationDto) | undefined;
+      evidence?: (null | EvidenceStrengthDto) | undefined;
+      exclusions: Array<ExclusionDto>;
       first_seen_at: string;
+      grouped_leads: Array<GroupedLeadDto>;
       id: string;
+      indicator_cap?: (null | VerdictReasonDto) | undefined;
+      indicator_confidence?: (number | null) | undefined;
       last_seen_at: string;
+      llm_score?: (number | null) | undefined;
+      opinion?: (number | null) | undefined;
       profile: ProfileRefDto;
       qualified_at?: (string | null) | undefined;
       score: number;
@@ -205,7 +543,74 @@ export namespace Schemas {
       summary?: (string | null) | undefined;
       updated_at: string;
       verdict?: (null | VerdictDto) | undefined;
+      verdict_probabilities?: (null | VerdictProbabilitiesDto) | undefined;
+      verdict_reason?: (null | VerdictReasonDto) | undefined;
+      verdict_source?: (null | VerdictSourceDto) | undefined;
     };
+    pagination?: (null | PaginationMetadata) | undefined;
+  };
+  export type EventActorDto = Partial<{
+    agent_id: string | null;
+    agent_name: string | null;
+    model: string | null;
+    module: string | null;
+    module_label: string | null;
+    provider: string | null;
+    source: string | null;
+  }>;
+  export type TimelineStepDto =
+    | "detection"
+    | "exclusion"
+    | "inspection"
+    | "qualification"
+    | "escalation"
+    | "scoring"
+    | "combination"
+    | "aggregation"
+    | "requalification"
+    | "stop"
+    | "decision";
+  export type InFlightDto = { actor: EventActorDto; started_at: string; step: TimelineStepDto };
+  export type StageDto = "detection" | "inspection" | "qualification" | "scoring" | "synthesis" | "draft" | "decision";
+  export type StageStatusDto = "done" | "running" | "waiting" | "blocked" | "skipped";
+  export type PipelineStageDto = {
+    label: string;
+    next_action?: (string | null) | undefined;
+    next_at?: (string | null) | undefined;
+    reason?: (string | null) | undefined;
+    reason_code?: (string | null) | undefined;
+    since?: (string | null) | undefined;
+    stage: StageDto;
+    status: StageStatusDto;
+  };
+  export type PipelineDto = { current?: (null | StageDto) | undefined; stages: Array<PipelineStageDto> };
+  export type EventStatusDto = "started" | "succeeded" | "failed" | "skipped" | "waiting";
+  export type TimelineEventDto = {
+    actor: EventActorDto;
+    detail: Record<string, unknown>;
+    duration_ms?: (number | null) | undefined;
+    error?: (string | null) | undefined;
+    finished_at?: (string | null) | undefined;
+    id: string;
+    kind: string;
+    reconstructed: boolean;
+    round: number;
+    started_at: string;
+    status: EventStatusDto;
+    step: TimelineStepDto;
+  };
+  export type RoundTriggerDto = "detection" | "new_information" | "manual" | "requalification" | "pending";
+  export type TimelineRoundDto = {
+    events: Array<TimelineEventDto>;
+    number: number;
+    reconstructed: boolean;
+    source_labels: Array<string>;
+    sources: Array<string>;
+    started_at?: (string | null) | undefined;
+    trigger: RoundTriggerDto;
+  };
+  export type DataEnvelope_LeadTimelineDto = {
+    data: { in_flight: Array<InFlightDto>; lead_id: string; pipeline: PipelineDto; rounds: Array<TimelineRoundDto> };
     pagination?: (null | PaginationMetadata) | undefined;
   };
   export type UserId = string;
@@ -222,23 +627,138 @@ export namespace Schemas {
     data: { active: boolean; created_at: string; id: string; name: string; updated_at: string };
     pagination?: (null | PaginationMetadata) | undefined;
   };
+  export type FieldDto = {
+    default?: (string | null) | undefined;
+    help: string;
+    key: string;
+    kind: string;
+    label: string;
+    options: Array<string>;
+    required: boolean;
+  };
+  export type SecretStateDto = { hint?: (string | null) | undefined; is_set: boolean; key: string };
+  export type ProviderSummaryDto = {
+    auth_kind: string;
+    capabilities: CapabilitiesDto;
+    category: string;
+    connected_account?: (null | ConnectedAccountDto) | undefined;
+    description: string;
+    key: string;
+    last_test_at?: (string | null) | undefined;
+    name: string;
+    status: string;
+  };
+  export type DataEnvelope_ProviderDetailDto = {
+    data: {
+      fields: Array<FieldDto>;
+      last_test_message?: (string | null) | undefined;
+      oauth_redirect_uri?: (string | null) | undefined;
+      scopes: Array<string>;
+      secrets: Array<SecretStateDto>;
+      settings: Record<string, unknown>;
+      summary: ProviderSummaryDto;
+      terms_note?: (string | null) | undefined;
+    };
+    pagination?: (null | PaginationMetadata) | undefined;
+  };
   export type PricingDto = { input_cents_per_mtok: number; output_cents_per_mtok: number };
   export type DataEnvelope_ProviderDto = {
     data: {
       base_url: string;
       created_at: string;
       enabled: boolean;
+      frequency_penalty?: (number | null) | undefined;
       has_api_key: boolean;
       id: string;
+      in_flight: number;
       kind: string;
+      max_concurrency: number;
       max_retries: number;
+      max_tokens?: (number | null) | undefined;
       model: string;
       name: string;
+      presence_penalty?: (number | null) | undefined;
       pricing: PricingDto;
       reasoning_effort?: (null | ReasoningEffort) | undefined;
+      repeat_penalty?: (number | null) | undefined;
+      temperature?: (number | null) | undefined;
       tiers: Array<string>;
       timeout_seconds: number;
       updated_at: string;
+    };
+    pagination?: (null | PaginationMetadata) | undefined;
+  };
+  export type DecisionCountsDto = {
+    drafts_approved: number;
+    drafts_rejected: number;
+    rejected: number;
+    validated: number;
+  };
+  export type DiscardedShareDto = { discarded: number; share?: (number | null) | undefined; total: number };
+  export type ExclusionCandidateDto = {
+    decided_at: string;
+    domain: string;
+    lead_id: string;
+    legal_name?: (string | null) | undefined;
+    reason: RejectionReasonDto;
+  };
+  export type ExclusionCountDto = {
+    agent_id: string;
+    agent_name: string;
+    count: number;
+    label: string;
+    option: string;
+    question_id: string;
+  };
+  export type ThresholdsDto = { discard_below: number; reliable_from: number };
+  export type ReasonCountDto = { count: number; reason: RejectionReasonDto };
+  export type SuggestionDto = {
+    discard_below?: (number | null) | undefined;
+    labelled: number;
+    ready: boolean;
+    reliable_from?: (number | null) | undefined;
+    required: number;
+  };
+  export type ProfileQualityDto = {
+    current: ThresholdsDto;
+    name: string;
+    precision?: (number | null) | undefined;
+    profile_id: string;
+    rejected: number;
+    rejection_reasons: Array<ReasonCountDto>;
+    suggestion: SuggestionDto;
+    validated: number;
+  };
+  export type VerdictPrecisionDto = {
+    n: number;
+    precision?: (number | null) | undefined;
+    rejected: number;
+    validated: number;
+    verdict?: (null | VerdictDto) | undefined;
+  };
+  export type VersionPrecisionDto = {
+    agent_id?: (string | null) | undefined;
+    agent_name?: (string | null) | undefined;
+    escalated: boolean;
+    kind: string;
+    model: string;
+    n: number;
+    precision?: (number | null) | undefined;
+    prompt_version: string;
+    rejected: number;
+    validated: number;
+  };
+  export type DataEnvelope_QualityDto = {
+    data: {
+      agents: Array<AgentQualityDto>;
+      confidence: Array<ConfidenceBucketDto>;
+      decisions: DecisionCountsDto;
+      discarded: DiscardedShareDto;
+      exclusion_candidates: Array<ExclusionCandidateDto>;
+      exclusions: Array<ExclusionCountDto>;
+      profiles: Array<ProfileQualityDto>;
+      verdicts: Array<VerdictPrecisionDto>;
+      versions: Array<VersionPrecisionDto>;
     };
     pagination?: (null | PaginationMetadata) | undefined;
   };
@@ -249,6 +769,7 @@ export namespace Schemas {
   };
   export type SourceRunDto = {
     agent_id?: (string | null) | undefined;
+    cancel_reason?: (string | null) | undefined;
     error?: (string | null) | undefined;
     finished_at?: (string | null) | undefined;
     profile_id: string;
@@ -264,10 +785,12 @@ export namespace Schemas {
     items_total: number;
     last_activity_at?: (string | null) | undefined;
     last_error?: (string | null) | undefined;
+    last_error_at?: (string | null) | undefined;
     signals_total: number;
     state: string;
     updated_at?: (string | null) | undefined;
   };
+  export type SourceProviderRefDto = { key: string; name: string; status: string };
   export type DataEnvelope_SourceDto = {
     data: {
       attempts: number;
@@ -279,6 +802,7 @@ export namespace Schemas {
       listener?: (null | ListenerDto) | undefined;
       mode: string;
       next_run_at?: (string | null) | undefined;
+      provider?: (null | SourceProviderRefDto) | undefined;
       running_since?: (string | null) | undefined;
       source: string;
       status: string;
@@ -315,13 +839,43 @@ export namespace Schemas {
     }>;
     pagination?: (null | PaginationMetadata) | undefined;
   };
+  export type FindingExampleDto = { domain: string; label: string; source_url: string; value: string };
+  export type ModuleStatsDto = {
+    findings_count: number;
+    last_run?: (string | null) | undefined;
+    latest_example?: (null | FindingExampleDto) | undefined;
+    leads_inspected: number;
+  };
+  export type DataEnvelope_Vec_EcosystemModuleInfoDto = {
+    data: Array<{
+      available: boolean;
+      label: string;
+      learns: string;
+      module: EcosystemModule;
+      provider?: (string | null) | undefined;
+      provider_ready: boolean;
+      question: string;
+      reads_site: boolean;
+      refresh_days: number;
+      stats: ModuleStatsDto;
+    }>;
+    pagination?: (null | PaginationMetadata) | undefined;
+  };
   export type DataEnvelope_Vec_LeadDto = {
     data: Array<{
       confidence?: (number | null) | undefined;
       domain: string;
+      evaluation?: (null | EvaluationDto) | undefined;
+      evidence?: (null | EvidenceStrengthDto) | undefined;
+      exclusions: Array<ExclusionDto>;
       first_seen_at: string;
+      grouped_leads: Array<GroupedLeadDto>;
       id: string;
+      indicator_cap?: (null | VerdictReasonDto) | undefined;
+      indicator_confidence?: (number | null) | undefined;
       last_seen_at: string;
+      llm_score?: (number | null) | undefined;
+      opinion?: (number | null) | undefined;
       profile: ProfileRefDto;
       qualified_at?: (string | null) | undefined;
       score: number;
@@ -329,6 +883,9 @@ export namespace Schemas {
       summary?: (string | null) | undefined;
       updated_at: string;
       verdict?: (null | VerdictDto) | undefined;
+      verdict_probabilities?: (null | VerdictProbabilitiesDto) | undefined;
+      verdict_reason?: (null | VerdictReasonDto) | undefined;
+      verdict_source?: (null | VerdictSourceDto) | undefined;
     }>;
     pagination?: (null | PaginationMetadata) | undefined;
   };
@@ -347,17 +904,38 @@ export namespace Schemas {
       base_url: string;
       created_at: string;
       enabled: boolean;
+      frequency_penalty?: (number | null) | undefined;
       has_api_key: boolean;
       id: string;
+      in_flight: number;
       kind: string;
+      max_concurrency: number;
       max_retries: number;
+      max_tokens?: (number | null) | undefined;
       model: string;
       name: string;
+      presence_penalty?: (number | null) | undefined;
       pricing: PricingDto;
       reasoning_effort?: (null | ReasoningEffort) | undefined;
+      repeat_penalty?: (number | null) | undefined;
+      temperature?: (number | null) | undefined;
       tiers: Array<string>;
       timeout_seconds: number;
       updated_at: string;
+    }>;
+    pagination?: (null | PaginationMetadata) | undefined;
+  };
+  export type DataEnvelope_Vec_ProviderSummaryDto = {
+    data: Array<{
+      auth_kind: string;
+      capabilities: CapabilitiesDto;
+      category: string;
+      connected_account?: (null | ConnectedAccountDto) | undefined;
+      description: string;
+      key: string;
+      last_test_at?: (string | null) | undefined;
+      name: string;
+      status: string;
     }>;
     pagination?: (null | PaginationMetadata) | undefined;
   };
@@ -376,6 +954,7 @@ export namespace Schemas {
       listener?: (null | ListenerDto) | undefined;
       mode: string;
       next_run_at?: (string | null) | undefined;
+      provider?: (null | SourceProviderRefDto) | undefined;
       running_since?: (string | null) | undefined;
       source: string;
       status: string;
@@ -399,7 +978,32 @@ export namespace Schemas {
     summary: string;
     verdict_narrative: string;
   };
-  export type EditDraftRequest = Partial<{ body: string | null; subject: string | null }>;
+  export type EcosystemDryRunDto = {
+    domain: string;
+    duration_ms: number;
+    error?: (string | null) | undefined;
+    findings: Array<EcosystemFindingDto>;
+    hosting_platform?: (string | null) | undefined;
+    module: EcosystemModule;
+    status: EcosystemModuleStatus;
+  };
+  export type EcosystemModuleInfoDto = {
+    available: boolean;
+    label: string;
+    learns: string;
+    module: EcosystemModule;
+    provider?: (string | null) | undefined;
+    provider_ready: boolean;
+    question: string;
+    reads_site: boolean;
+    refresh_days: number;
+    stats: ModuleStatsDto;
+  };
+  export type EditDraftRequest = Partial<{
+    body: string | null;
+    expected_revision: number | null;
+    subject: string | null;
+  }>;
   export type ErrorBody = {
     code: string;
     details?: (Array<ErrorDetail> | null) | undefined;
@@ -408,12 +1012,17 @@ export namespace Schemas {
   };
   export type ErrorDetail = { message: string; path: string };
   export type LeadDetailDto = {
+    agent_failures: Array<AgentFailureDto>;
+    agent_stops: Array<AgentStopDto>;
     assessments: Array<AssessmentDto>;
+    company?: (null | CompanyDto) | undefined;
     contacts: Array<ContactDto>;
+    ecosystem: EcosystemDto;
+    enrichment: EnrichmentDto;
     facts: LeadFactsDto;
     lead: LeadDto;
     qualification_results: Array<QualificationResultDto>;
-    score_breakdown: Array<ScoreContributionDto>;
+    scoring_results: Array<ScoringResultDto>;
     signals: Array<SignalDto>;
     summary_state?: (null | SummaryStateDto) | undefined;
   };
@@ -434,9 +1043,14 @@ export namespace Schemas {
     lead_id: string;
     profile: ProfileRecord;
     score: number;
-    score_breakdown: Array<Record<string, unknown>>;
     signals: Array<SignalRecord>;
     status: string;
+  };
+  export type LeadTimelineDto = {
+    in_flight: Array<InFlightDto>;
+    lead_id: string;
+    pipeline: PipelineDto;
+    rounds: Array<TimelineRoundDto>;
   };
   export type MeResponse = { kind: "user"; subject: string; user_id: UserId } | { client_id: string; kind: "client" };
   export type ProfileDetailDto = ProfileDto & { definition: Record<string, unknown>; revision: number };
@@ -447,24 +1061,57 @@ export namespace Schemas {
     name: string;
     revision?: (number | null) | undefined;
   };
+  export type ProviderDetailDto = {
+    fields: Array<FieldDto>;
+    last_test_message?: (string | null) | undefined;
+    oauth_redirect_uri?: (string | null) | undefined;
+    scopes: Array<string>;
+    secrets: Array<SecretStateDto>;
+    settings: Record<string, unknown>;
+    summary: ProviderSummaryDto;
+    terms_note?: (string | null) | undefined;
+  };
   export type ProviderDto = {
     base_url: string;
     created_at: string;
     enabled: boolean;
+    frequency_penalty?: (number | null) | undefined;
     has_api_key: boolean;
     id: string;
+    in_flight: number;
     kind: string;
+    max_concurrency: number;
     max_retries: number;
+    max_tokens?: (number | null) | undefined;
     model: string;
     name: string;
+    presence_penalty?: (number | null) | undefined;
     pricing: PricingDto;
     reasoning_effort?: (null | ReasoningEffort) | undefined;
+    repeat_penalty?: (number | null) | undefined;
+    temperature?: (number | null) | undefined;
     tiers: Array<string>;
     timeout_seconds: number;
     updated_at: string;
   };
-  export type RejectDraftRequest = Partial<{ reason: string | null }>;
+  export type QualityDto = {
+    agents: Array<AgentQualityDto>;
+    confidence: Array<ConfidenceBucketDto>;
+    decisions: DecisionCountsDto;
+    discarded: DiscardedShareDto;
+    exclusion_candidates: Array<ExclusionCandidateDto>;
+    exclusions: Array<ExclusionCountDto>;
+    profiles: Array<ProfileQualityDto>;
+    verdicts: Array<VerdictPrecisionDto>;
+    versions: Array<VersionPrecisionDto>;
+  };
+  export type RejectDraftRequest = Partial<{
+    expected_revision: number | null;
+    note: string | null;
+    reason: null | RejectionReasonDto;
+  }>;
   export type RevisionDto = RevisionSummaryDto & { definition: Record<string, unknown> };
+  export type SaveProviderRequest = Partial<{ secrets: Record<string, unknown>; settings: Record<string, unknown> }>;
   export type SourceDto = {
     attempts: number;
     kind: string;
@@ -475,6 +1122,7 @@ export namespace Schemas {
     listener?: (null | ListenerDto) | undefined;
     mode: string;
     next_run_at?: (string | null) | undefined;
+    provider?: (null | SourceProviderRefDto) | undefined;
     running_since?: (string | null) | undefined;
     source: string;
     status: string;
@@ -487,16 +1135,23 @@ export namespace Schemas {
     ok: boolean;
   };
   export type TierDto = { provider_id?: (string | null) | undefined; tier: string };
+  export type UpdateCrawlSettingsRequest = { robots_policy: string };
   export type UpdateProfileRequest = { definition: Record<string, unknown> };
   export type UpdateProviderRequest = Partial<{
     api_key: string | null;
     base_url: string | null;
+    frequency_penalty: number | null;
     kind: string | null;
+    max_concurrency: number | null;
     max_retries: number | null;
+    max_tokens: number | null;
     model: string | null;
     name: string | null;
+    presence_penalty: number | null;
     pricing: null | PricingRequest;
     reasoning_effort: null | ReasoningEffort;
+    repeat_penalty: number | null;
+    temperature: number | null;
     timeout_seconds: number | null;
   }>;
 
@@ -549,6 +1204,8 @@ export namespace Endpoints {
     requestFormat: "json";
     parameters: {
       path: { assessment_id: string };
+
+      body: null | Schemas.ApproveDraftRequest;
     };
     responses: {
       200: Schemas.DataEnvelope_DraftEntryDto;
@@ -578,6 +1235,13 @@ export namespace Endpoints {
       422: unknown;
     };
   };
+  export type get_List_ecosystem_modules = {
+    method: "GET";
+    path: "/api/v1/ecosystem/modules";
+    requestFormat: "json";
+    parameters: never;
+    responses: { 200: Schemas.DataEnvelope_Vec_EcosystemModuleInfoDto; 401: unknown };
+  };
   export type get_Lead_detail = {
     method: "GET";
     path: "/api/v1/leads/{lead_id}";
@@ -586,6 +1250,60 @@ export namespace Endpoints {
       path: { lead_id: string };
     };
     responses: { 200: Schemas.DataEnvelope_LeadDetailDto; 400: unknown; 401: unknown; 404: unknown };
+  };
+  export type post_Retry_lead_agents = {
+    method: "POST";
+    path: "/api/v1/leads/{lead_id}/agents/retry";
+    requestFormat: "json";
+    parameters: {
+      path: { lead_id: string };
+    };
+    responses: { 200: Schemas.DataEnvelope_LeadDto; 400: unknown; 401: unknown; 403: unknown; 404: unknown };
+  };
+  export type post_Refresh_company = {
+    method: "POST";
+    path: "/api/v1/leads/{lead_id}/company/refresh";
+    requestFormat: "json";
+    parameters: {
+      path: { lead_id: string };
+    };
+    responses: { 202: Schemas.DataEnvelope_CompanyDto; 400: unknown; 401: unknown; 403: unknown; 404: unknown };
+  };
+  export type post_Dry_run_ecosystem_module = {
+    method: "POST";
+    path: "/api/v1/leads/{lead_id}/ecosystem/dry-run";
+    requestFormat: "json";
+    parameters: {
+      query: {
+        module:
+          | "official_identity"
+          | "legal_life"
+          | "public_contracts"
+          | "website_stack"
+          | "dns_email"
+          | "hiring_activity"
+          | "recent_activity";
+      };
+      path: { lead_id: string };
+    };
+    responses: {
+      200: Schemas.DataEnvelope_EcosystemDryRunDto;
+      400: unknown;
+      401: unknown;
+      403: unknown;
+      404: unknown;
+      409: unknown;
+      429: unknown;
+    };
+  };
+  export type post_Reevaluate_lead = {
+    method: "POST";
+    path: "/api/v1/leads/{lead_id}/reevaluate";
+    requestFormat: "json";
+    parameters: {
+      path: { lead_id: string };
+    };
+    responses: { 200: Schemas.DataEnvelope_LeadDto; 400: unknown; 401: unknown; 403: unknown; 404: unknown };
   };
   export type patch_Change_lead_status = {
     method: "PATCH";
@@ -603,6 +1321,7 @@ export namespace Endpoints {
       403: unknown;
       404: unknown;
       409: unknown;
+      422: unknown;
     };
   };
   export type post_Retry_lead_summary = {
@@ -620,6 +1339,15 @@ export namespace Endpoints {
       404: unknown;
       409: unknown;
     };
+  };
+  export type get_Lead_timeline = {
+    method: "GET";
+    path: "/api/v1/leads/{lead_id}/timeline";
+    requestFormat: "json";
+    parameters: {
+      path: { lead_id: string };
+    };
+    responses: { 200: Schemas.DataEnvelope_LeadTimelineDto; 400: unknown; 401: unknown; 403: unknown; 404: unknown };
   };
   export type get_List_providers = {
     method: "GET";
@@ -808,6 +1536,15 @@ export namespace Endpoints {
       422: Schemas.ErrorBody;
     };
   };
+  export type delete_Delete_profile = {
+    method: "DELETE";
+    path: "/api/v1/profiles/{profile_id}";
+    requestFormat: "json";
+    parameters: {
+      path: { profile_id: string };
+    };
+    responses: { 204: unknown; 400: unknown; 401: unknown; 403: unknown; 404: unknown };
+  };
   export type post_Activate_profile = {
     method: "POST";
     path: "/api/v1/profiles/{profile_id}/activate";
@@ -847,6 +1584,7 @@ export namespace Endpoints {
         min_score: number;
         domain: string;
         signal: string;
+        group_by: string;
         sort: string;
         page: number;
         per_page: number;
@@ -892,6 +1630,117 @@ export namespace Endpoints {
     };
     responses: { 200: Schemas.DataEnvelope_RevisionDto; 400: unknown; 401: unknown; 404: unknown };
   };
+  export type get_Quality = {
+    method: "GET";
+    path: "/api/v1/quality";
+    requestFormat: "json";
+    parameters: {
+      query: Partial<{ from: string; to: string; profile_id: string }>;
+    };
+    responses: { 200: Schemas.DataEnvelope_QualityDto; 400: unknown; 401: unknown; 403: unknown; 404: unknown };
+  };
+  export type get_Calibration = {
+    method: "GET";
+    path: "/api/v1/quality/calibration";
+    requestFormat: "json";
+    parameters: never;
+    responses: { 200: Schemas.DataEnvelope_CalibrationDto; 401: unknown; 403: unknown };
+  };
+  export type post_Run_calibration = {
+    method: "POST";
+    path: "/api/v1/quality/calibration/run";
+    requestFormat: "json";
+    parameters: never;
+    responses: { 202: Schemas.DataEnvelope_CalibrationRunDto; 401: unknown; 403: unknown };
+  };
+  export type get_Get_crawl_settings = {
+    method: "GET";
+    path: "/api/v1/settings/crawl";
+    requestFormat: "json";
+    parameters: never;
+    responses: { 200: Schemas.DataEnvelope_CrawlSettingsDto; 401: unknown; 403: unknown };
+  };
+  export type put_Put_crawl_settings = {
+    method: "PUT";
+    path: "/api/v1/settings/crawl";
+    requestFormat: "json";
+    parameters: {
+      body: Schemas.UpdateCrawlSettingsRequest;
+    };
+    responses: { 200: Schemas.DataEnvelope_CrawlSettingsUpdateDto; 401: unknown; 403: unknown; 422: unknown };
+  };
+  export type get_List_source_providers = {
+    method: "GET";
+    path: "/api/v1/source-providers";
+    requestFormat: "json";
+    parameters: never;
+    responses: { 200: Schemas.DataEnvelope_Vec_ProviderSummaryDto; 401: unknown; 403: unknown };
+  };
+  export type get_Source_provider_oauth_callback = {
+    method: "GET";
+    path: "/api/v1/source-providers/oauth/callback";
+    requestFormat: "json";
+    parameters: {
+      query: Partial<{ code: string; state: string; error: string }>;
+    };
+    responses: { 303: unknown };
+  };
+  export type get_Get_source_provider = {
+    method: "GET";
+    path: "/api/v1/source-providers/{key}";
+    requestFormat: "json";
+    parameters: {
+      path: { key: string };
+    };
+    responses: { 200: Schemas.DataEnvelope_ProviderDetailDto; 401: unknown; 403: unknown; 404: unknown };
+  };
+  export type put_Put_source_provider = {
+    method: "PUT";
+    path: "/api/v1/source-providers/{key}";
+    requestFormat: "json";
+    parameters: {
+      path: { key: string };
+
+      body: Schemas.SaveProviderRequest;
+    };
+    responses: { 200: Schemas.DataEnvelope_ProviderDetailDto; 401: unknown; 403: unknown; 404: unknown; 422: unknown };
+  };
+  export type delete_Delete_source_provider = {
+    method: "DELETE";
+    path: "/api/v1/source-providers/{key}";
+    requestFormat: "json";
+    parameters: {
+      path: { key: string };
+    };
+    responses: { 204: unknown; 401: unknown; 403: unknown; 404: unknown };
+  };
+  export type post_Disconnect_source_provider = {
+    method: "POST";
+    path: "/api/v1/source-providers/{key}/disconnect";
+    requestFormat: "json";
+    parameters: {
+      path: { key: string };
+    };
+    responses: { 200: Schemas.DataEnvelope_ProviderDetailDto; 401: unknown; 403: unknown; 404: unknown; 409: unknown };
+  };
+  export type post_Start_source_provider_oauth = {
+    method: "POST";
+    path: "/api/v1/source-providers/{key}/oauth/start";
+    requestFormat: "json";
+    parameters: {
+      path: { key: string };
+    };
+    responses: { 200: Schemas.DataEnvelope_AuthorizeUrlDto; 401: unknown; 403: unknown; 404: unknown; 409: unknown };
+  };
+  export type post_Test_source_provider = {
+    method: "POST";
+    path: "/api/v1/source-providers/{key}/test";
+    requestFormat: "json";
+    parameters: {
+      path: { key: string };
+    };
+    responses: { 200: Schemas.DataEnvelope_ProviderDetailDto; 401: unknown; 403: unknown; 404: unknown; 409: unknown };
+  };
   export type get_List_sources = {
     method: "GET";
     path: "/api/v1/sources";
@@ -924,7 +1773,9 @@ export type EndpointByMethod = {
   get: {
     "/api/v1/drafts": Endpoints.get_List_drafts;
     "/api/v1/drafts/{assessment_id}": Endpoints.get_Get_draft;
+    "/api/v1/ecosystem/modules": Endpoints.get_List_ecosystem_modules;
     "/api/v1/leads/{lead_id}": Endpoints.get_Lead_detail;
+    "/api/v1/leads/{lead_id}/timeline": Endpoints.get_Lead_timeline;
     "/api/v1/llm/providers": Endpoints.get_List_providers;
     "/api/v1/llm/providers/{provider_id}": Endpoints.get_Get_provider;
     "/api/v1/llm/tiers": Endpoints.get_List_tiers;
@@ -936,6 +1787,12 @@ export type EndpointByMethod = {
     "/api/v1/profiles/{profile_id}/leads/export": Endpoints.get_Export_leads;
     "/api/v1/profiles/{profile_id}/revisions": Endpoints.get_List_revisions;
     "/api/v1/profiles/{profile_id}/revisions/{number}": Endpoints.get_Get_revision;
+    "/api/v1/quality": Endpoints.get_Quality;
+    "/api/v1/quality/calibration": Endpoints.get_Calibration;
+    "/api/v1/settings/crawl": Endpoints.get_Get_crawl_settings;
+    "/api/v1/source-providers": Endpoints.get_List_source_providers;
+    "/api/v1/source-providers/oauth/callback": Endpoints.get_Source_provider_oauth_callback;
+    "/api/v1/source-providers/{key}": Endpoints.get_Get_source_provider;
     "/api/v1/sources": Endpoints.get_List_sources;
   };
   patch: {
@@ -946,6 +1803,10 @@ export type EndpointByMethod = {
   post: {
     "/api/v1/drafts/{assessment_id}/approve": Endpoints.post_Approve_draft;
     "/api/v1/drafts/{assessment_id}/reject": Endpoints.post_Reject_draft;
+    "/api/v1/leads/{lead_id}/agents/retry": Endpoints.post_Retry_lead_agents;
+    "/api/v1/leads/{lead_id}/company/refresh": Endpoints.post_Refresh_company;
+    "/api/v1/leads/{lead_id}/ecosystem/dry-run": Endpoints.post_Dry_run_ecosystem_module;
+    "/api/v1/leads/{lead_id}/reevaluate": Endpoints.post_Reevaluate_lead;
     "/api/v1/leads/{lead_id}/summary/retry": Endpoints.post_Retry_lead_summary;
     "/api/v1/llm/providers": Endpoints.post_Create_provider;
     "/api/v1/llm/providers/{provider_id}/disable": Endpoints.post_Disable_provider;
@@ -955,15 +1816,23 @@ export type EndpointByMethod = {
     "/api/v1/profiles/import": Endpoints.post_Import_profile;
     "/api/v1/profiles/{profile_id}/activate": Endpoints.post_Activate_profile;
     "/api/v1/profiles/{profile_id}/deactivate": Endpoints.post_Deactivate_profile;
+    "/api/v1/quality/calibration/run": Endpoints.post_Run_calibration;
+    "/api/v1/source-providers/{key}/disconnect": Endpoints.post_Disconnect_source_provider;
+    "/api/v1/source-providers/{key}/oauth/start": Endpoints.post_Start_source_provider_oauth;
+    "/api/v1/source-providers/{key}/test": Endpoints.post_Test_source_provider;
     "/api/v1/sources/{source}/run": Endpoints.post_Run_source;
   };
   delete: {
     "/api/v1/llm/providers/{provider_id}": Endpoints.delete_Delete_provider;
     "/api/v1/llm/tiers/{tier}": Endpoints.delete_Unassign_tier;
+    "/api/v1/profiles/{profile_id}": Endpoints.delete_Delete_profile;
+    "/api/v1/source-providers/{key}": Endpoints.delete_Delete_source_provider;
   };
   put: {
     "/api/v1/llm/tiers/{tier}": Endpoints.put_Assign_tier;
     "/api/v1/profiles/{profile_id}": Endpoints.put_Update_profile;
+    "/api/v1/settings/crawl": Endpoints.put_Put_crawl_settings;
+    "/api/v1/source-providers/{key}": Endpoints.put_Put_source_provider;
   };
 };
 

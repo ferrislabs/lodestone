@@ -70,6 +70,7 @@ fn hostile_documents_cannot_break_out_of_their_block() {
         Facts {
             confidence: Some(12.0),
             verdict: Some(Verdict::Discarded),
+            score: Some(12),
         },
         1,
     );
@@ -93,13 +94,14 @@ fn hostile_documents_cannot_break_out_of_their_block() {
         schema_name: "output",
         schema: &request_schema,
         max_tokens: 1024,
+        temperature: None,
     });
 
     assert_eq!(user.matches("</document>\n").count(), docs.len());
     assert_eq!(user.matches("<document ").count(), docs.len());
     let last_block_end = user.rfind("</document>\n").unwrap() + "</document>\n".len();
     assert_eq!(&user[last_block_end..], instruction);
-    assert!(user.ends_with("verdict discarded."));
+    assert!(user.ends_with("verdict discarded; score 12 out of 100."));
 }
 
 #[test]

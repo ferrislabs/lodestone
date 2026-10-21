@@ -405,7 +405,6 @@ mod tests {
                 domain: "acme.com".to_owned(),
                 status: "validated".to_owned(),
                 score: 1.0,
-                score_breakdown: vec![],
                 first_seen_at: at,
                 last_seen_at: at,
                 contact: None,

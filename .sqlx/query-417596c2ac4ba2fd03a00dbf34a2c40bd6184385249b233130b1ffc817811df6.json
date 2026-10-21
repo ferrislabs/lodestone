@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO lead_ecosystem_modules (domain, module, status, last_run, next_run_at, error, content_hash, changed_at)\n            VALUES ($1, $2, $3, $4::timestamptz, $5, $6, $7, CASE WHEN $8::boolean THEN $4::timestamptz END)\n            ON CONFLICT (domain, module) DO UPDATE SET\n                status = EXCLUDED.status,\n                last_run = EXCLUDED.last_run,\n                next_run_at = EXCLUDED.next_run_at,\n                error = EXCLUDED.error,\n                content_hash = COALESCE(EXCLUDED.content_hash, lead_ecosystem_modules.content_hash),\n                changed_at = CASE WHEN $8::boolean THEN EXCLUDED.last_run ELSE lead_ecosystem_modules.changed_at END\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text",
+        "Timestamptz",
+        "Timestamptz",
+        "Text",
+        "Text",
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "417596c2ac4ba2fd03a00dbf34a2c40bd6184385249b233130b1ffc817811df6"
+}

@@ -2,8 +2,8 @@ use std::time::Duration;
 
 use common::{CoreError, EncryptionKey, Secret};
 use lodestone_core::{
-    CipherError, LodestoneUseCase, ProviderId, ProviderKind, ReasoningEffort, Tier, TierError,
-    TokenPricing,
+    CipherError, GenerationParams, LodestoneUseCase, MaxConcurrency, ProviderId, ProviderKind,
+    ReasoningEffort, Tier, TierError, TokenPricing,
     infrastructure::crypto::AesGcmCipher,
     llm::{CreateLlmProvider, KeyChange, UpdateLlmProvider},
 };
@@ -27,12 +27,14 @@ fn create(name: &str, key: Option<&str>) -> CreateLlmProvider {
         model: "model-a".to_owned(),
         timeout: Duration::from_secs(30),
         max_retries: 2,
+        max_concurrency: None,
         pricing: TokenPricing {
             input_cents_per_mtok: 100,
             output_cents_per_mtok: 300,
         },
         api_key: key.map(Secret::new),
         reasoning_effort: None,
+        generation: GenerationParams::default(),
     }
 }
 
@@ -45,12 +47,14 @@ fn update(id: ProviderId, api_key: KeyChange) -> UpdateLlmProvider {
         model: "model-b".to_owned(),
         timeout: Duration::from_secs(10),
         max_retries: 4,
+        max_concurrency: MaxConcurrency::new(4).unwrap(),
         pricing: TokenPricing {
             input_cents_per_mtok: 1,
             output_cents_per_mtok: 2,
         },
         api_key,
         reasoning_effort: None,
+        generation: GenerationParams::default(),
     }
 }
 
@@ -347,4 +351,107 @@ async fn reasoning_effort_outside_the_set_is_rejected_by_the_database(pool: PgPo
         .execute(&pool)
         .await;
     assert!(result.is_err());
+}
+
+fn tuned() -> GenerationParams {
+    GenerationParams {
+        max_tokens: Some(900),
+        temperature: Some(0.2),
+        frequency_penalty: Some(0.4),
+        presence_penalty: Some(-0.5),
+        repeat_penalty: Some(1.3),
+    }
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn generation_params_round_trip_and_are_resolved(pool: PgPool) {
+    let uc = LodestoneUseCase::new(pool.clone());
+    let c = cipher(1);
+    let mut cmd = create("a", Some(CLEAR_KEY));
+    cmd.generation = tuned();
+    let created = uc.create_llm_provider(cmd, &c).await.unwrap();
+    assert_eq!(created.generation, tuned());
+    assert_eq!(
+        uc.get_llm_provider(created.id).await.unwrap().generation,
+        tuned()
+    );
+    uc.assign_llm_tier(Tier::Triage, created.id).await.unwrap();
+    let resolved = uc.resolve_llm_tier(Tier::Triage, &c).await.unwrap();
+    assert_eq!(resolved.definition.generation, tuned());
+
+    let mut change = update(created.id, KeyChange::Keep);
+    change.generation = GenerationParams {
+        temperature: Some(0.0),
+        ..GenerationParams::default()
+    };
+    let updated = uc.update_llm_provider(change, &c).await.unwrap();
+    assert_eq!(updated.generation.temperature, Some(0.0));
+    assert_eq!(updated.generation.max_tokens, None);
+    assert_eq!(updated.generation.repeat_penalty, None);
+    assert_eq!(
+        uc.list_llm_providers().await.unwrap()[0].generation,
+        updated.generation
+    );
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn absent_generation_params_are_stored_as_null(pool: PgPool) {
+    let uc = LodestoneUseCase::new(pool.clone());
+    let created = uc
+        .create_llm_provider(create("a", Some(CLEAR_KEY)), &cipher(1))
+        .await
+        .unwrap();
+    let nulls: bool = sqlx::query_scalar(
+        "SELECT max_tokens IS NULL AND temperature IS NULL AND frequency_penalty IS NULL AND presence_penalty IS NULL AND repeat_penalty IS NULL FROM llm_providers WHERE id = $1",
+    )
+    .bind(created.id.0)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(nulls);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn out_of_range_generation_params_are_refused_before_storage(pool: PgPool) {
+    let uc = LodestoneUseCase::new(pool.clone());
+    let c = cipher(1);
+    let mut cmd = create("a", Some(CLEAR_KEY));
+    cmd.generation.temperature = Some(2.5);
+    match uc.create_llm_provider(cmd, &c).await {
+        Err(CoreError::Invalid { field, .. }) => assert_eq!(field, "temperature"),
+        other => panic!("unexpected {other:?}"),
+    }
+    assert!(uc.list_llm_providers().await.unwrap().is_empty());
+    let created = uc
+        .create_llm_provider(create("b", Some(CLEAR_KEY)), &c)
+        .await
+        .unwrap();
+    let mut change = update(created.id, KeyChange::Keep);
+    change.generation.max_tokens = Some(0);
+    match uc.update_llm_provider(change, &c).await {
+        Err(CoreError::Invalid { field, .. }) => assert_eq!(field, "max_tokens"),
+        other => panic!("unexpected {other:?}"),
+    }
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn generation_params_outside_their_range_are_rejected_by_the_database(pool: PgPool) {
+    let uc = LodestoneUseCase::new(pool.clone());
+    let created = uc
+        .create_llm_provider(create("a", Some(CLEAR_KEY)), &cipher(1))
+        .await
+        .unwrap();
+    for column in [
+        "temperature = 3",
+        "repeat_penalty = 0.5",
+        "max_tokens = 0",
+        "frequency_penalty = -3",
+        "presence_penalty = 3",
+    ] {
+        let result = sqlx::query(&format!("UPDATE llm_providers SET {column} WHERE id = $1"))
+            .bind(created.id.0)
+            .execute(&pool)
+            .await;
+        assert!(result.is_err(), "{column}");
+    }
 }

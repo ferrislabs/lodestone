@@ -1,0 +1,36 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT lead_id,\n                bool_or(kind = $2) AS \"certificate!\",\n                bool_or(kind <> $2 AND NOT (source = ANY($3))) AS \"evidence!\"\n            FROM signals\n            WHERE lead_id = ANY($1)\n            GROUP BY lead_id\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "lead_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "certificate!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 2,
+        "name": "evidence!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray",
+        "Text",
+        "TextArray"
+      ]
+    },
+    "nullable": [
+      false,
+      null,
+      null
+    ]
+  },
+  "hash": "b2259eb284403e92edd7f133ac61ca35bc35ebc1767f2bb7f8b0d03332b00eb3"
+}

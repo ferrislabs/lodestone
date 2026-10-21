@@ -10,7 +10,7 @@ use lodestone_core::{
     LeadRepository, LodestoneUseCase, NormalizedDomain, Observation, ProfileId, Provenance,
     SignalKind, Source, SourceError, SourceName, SuppressionTarget, UnitInterval,
     contacts::ContactRunSettings,
-    definition::Agent,
+    definition::SourceTarget,
     infrastructure::{
         candidate_host::postgres::PgCandidateHosts, contact::postgres::PgContactRepository,
         contact_target::postgres::PgContactTargets, lead::postgres::PgLeadRepository,
@@ -64,7 +64,7 @@ impl Source for HostsSource {
     type Item = &'static str;
 
     fn name(&self) -> SourceName {
-        SourceName::HttpProbe
+        SourceName::DnsCname
     }
 
     async fn collect(
@@ -79,7 +79,7 @@ impl Source for HostsSource {
         &self,
         item: &Self::Item,
         _profile: &ActiveProfile,
-        _agent: &Agent,
+        _target: &SourceTarget<'_>,
     ) -> Vec<Observation> {
         vec![Observation {
             domain: domain(item),

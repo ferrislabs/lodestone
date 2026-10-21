@@ -56,16 +56,17 @@ describe('SchemaForm', () => {
 		expect(screen.getByText('Offre').parentElement?.textContent).toContain('*')
 		expect(screen.getAllByTitle('Obligatoire').length).toBeGreaterThan(5)
 		expect(screen.queryByLabelText(/Version du schéma/)).toBeNull()
-		expect(screen.getByLabelText(/Seuil de qualification/)).toHaveProperty(
+		expect(screen.getByLabelText('Langue des réponses')).toHaveProperty(
 			'value',
-			'50',
+			'fr',
 		)
+		expect(screen.queryByLabelText(/Seuil de qualification/)).toBeNull()
 	})
 
 	it('edits a list of strings as tags', () => {
 		const seen = vi.fn()
 		render(<Harness onValue={seen} />)
-		const input = screen.getByLabelText('Parties locales préférées')
+		const input = screen.getByLabelText('Adresses à privilégier')
 		fireEvent.change(input, { target: { value: 'contact' } })
 		fireEvent.keyDown(input, { key: 'Enter' })
 		fireEvent.keyDown(input, { key: ',' })
@@ -78,7 +79,7 @@ describe('SchemaForm', () => {
 		expect(seen.mock.calls.at(-1)?.[0]).toMatchObject({
 			contact_ranking: { preferred_local_parts: ['contact'] },
 		})
-		expect(screen.queryByLabelText('Parties locales préférées 1')).toBeNull()
+		expect(screen.queryByLabelText('Adresses à privilégier 1')).toBeNull()
 	})
 
 	it('uses tags for keywords and rows for objects', () => {
@@ -87,19 +88,20 @@ describe('SchemaForm', () => {
 			['agents'],
 			[
 				{
+					type: 'search',
 					id: 'a',
 					name: 'A',
 					enabled: true,
-					source: { kind: 'ats', keywords: ['x', 'y'], exclusions: [] },
+					providers: [],
+					keywords: ['x', 'y'],
+					exclusions: [],
 				},
 				{
+					type: 'dns',
 					id: 'b',
 					name: 'B',
 					enabled: true,
-					source: {
-						kind: 'dns_cname',
-						patterns: [{ provider: 'Okta', target_suffix: 'okta.com' }],
-					},
+					patterns: [{ provider: 'Okta', target_suffix: 'okta.com' }],
 				},
 			],
 		)
@@ -108,7 +110,7 @@ describe('SchemaForm', () => {
 		expect(screen.getByLabelText('Retirer y')).toBeTruthy()
 		expect(screen.queryByLabelText('Mots-clés 1')).toBeNull()
 		const row = document.querySelector<HTMLElement>(
-			'[data-row="agents[1].source.patterns[0]"]',
+			'[data-row="agents[1].patterns[0]"]',
 		)
 		expect(row).toBeTruthy()
 		expect(
@@ -122,14 +124,21 @@ describe('SchemaForm', () => {
 
 	it('marks the faulty chip and lists the message under the field', () => {
 		const initial = setIn(
-			defaultValue(root, root, PROFILE_HINTS),
+			setIn(
+				defaultValue(root, root, PROFILE_HINTS),
+				['enrichment', 'custom', 'extra_subdomains'],
+				[],
+			),
 			['agents'],
 			[
 				{
+					type: 'search',
 					id: 'a',
 					name: 'A',
 					enabled: true,
-					source: { kind: 'ats', keywords: ['a', 'b', ''], exclusions: [] },
+					providers: [],
+					keywords: ['a', 'b', ''],
+					exclusions: [],
 				},
 			],
 		)
@@ -138,7 +147,7 @@ describe('SchemaForm', () => {
 				initial={initial}
 				problems={[
 					{
-						path: 'agents[0].source.keywords[2]',
+						path: 'agents[0].keywords[2]',
 						message: 'Ne doit pas être vide',
 					},
 				]}
@@ -154,41 +163,46 @@ describe('SchemaForm', () => {
 	it('adds a card for lists of objects', () => {
 		const seen = vi.fn()
 		render(<Harness onValue={seen} />)
-		fireEvent.click(screen.getByLabelText('Ajouter : Facteurs'))
-		expect(screen.getByText('Facteur 1')).toBeTruthy()
-		const last = seen.mock.calls.at(-1)?.[0]
-		expect(last).toMatchObject({
-			scoring: { factors: [{ signal: '', weight: 5 }] },
-		})
+		fireEvent.click(screen.getByLabelText('Ajouter : Agents de scoring'))
+		expect(screen.getByText('Agent de scoring 1')).toBeTruthy()
+		const last = seen.mock.calls.at(-1)?.[0] as {
+			scoring_agents: unknown[]
+		}
+		expect(last.scoring_agents).toHaveLength(1)
 	})
 
 	it('toggles optional sections and omits the key when off', () => {
 		const initial = setIn(
 			defaultValue(root, root, PROFILE_HINTS),
-			['agents'],
-			[
-				{
-					id: 'a',
-					name: 'A',
-					enabled: true,
-					source: { kind: 'ats', keywords: ['x'], exclusions: [] },
-				},
-			],
+			['enrichment', 'custom'],
+			{
+				fingerprints: [
+					{
+						id: 'f',
+						path: '/x',
+						product: 'p',
+						matchers: [],
+						debt_markers: [],
+					},
+				],
+				excluded_products: [],
+				extra_subdomains: [],
+			},
 		)
 		const seen = vi.fn()
 		render(<Harness initial={initial} onValue={seen} />)
-		const before = screen.getAllByLabelText(/Critères de pertinence/).length
-		fireEvent.click(screen.getByLabelText("Activer : Réglages LLM de l'agent"))
-		expect(screen.getAllByLabelText(/Critères de pertinence/)).toHaveLength(
+		const before = screen.queryAllByLabelText(/Expression régulière/).length
+		fireEvent.click(screen.getByLabelText('Activer : Extracteur de version'))
+		expect(screen.getAllByLabelText(/Expression régulière/)).toHaveLength(
 			before + 1,
 		)
-		expect(seen.mock.calls.at(-1)?.[0]).toMatchObject({
-			agents: [{ llm: {} }],
-		})
-		fireEvent.click(screen.getByLabelText("Activer : Réglages LLM de l'agent"))
+		expect(seen.mock.calls.at(-1)?.[0]).toHaveProperty(
+			'enrichment.custom.fingerprints.0.version',
+		)
+		fireEvent.click(screen.getByLabelText('Activer : Extracteur de version'))
 		const last = seen.mock.calls.at(-1)?.[0]
-		expect(last).not.toHaveProperty('agents.0.llm')
-		expect(screen.getAllByLabelText(/Critères de pertinence/)).toHaveLength(
+		expect(last).not.toHaveProperty('enrichment.custom.fingerprints.0.version')
+		expect(screen.queryAllByLabelText(/Expression régulière/)).toHaveLength(
 			before,
 		)
 	})
@@ -196,63 +210,47 @@ describe('SchemaForm', () => {
 	it('switches union variants and resets their fields', () => {
 		const initial = setIn(
 			defaultValue(root, root, PROFILE_HINTS),
-			['agents'],
-			[
-				{
-					id: 'a',
-					name: 'A',
-					enabled: true,
-					source: {
-						kind: 'http_probe',
-						fingerprints: [
-							{
-								id: 'a',
-								path: '/',
-								product: 'p',
-								matchers: [{ kind: 'header', name: 'x', pattern: 'y' }],
-							},
-						],
+			['enrichment', 'custom'],
+			{
+				fingerprints: [
+					{
+						id: 'a',
+						path: '/',
+						product: 'p',
+						matchers: [{ kind: 'header', name: 'x', pattern: 'y' }],
 					},
-				},
-			],
+				],
+				excluded_products: [],
+				extra_subdomains: [],
+			},
 		)
 		const seen = vi.fn()
 		render(<Harness initial={initial} onValue={seen} />)
-		expect(screen.getAllByLabelText(/^Nom/)).toHaveLength(2)
+		expect(screen.getAllByLabelText(/^Nom/)).toHaveLength(1)
 		fireEvent.change(screen.getByLabelText('Type : Condition'), {
 			target: { value: '2' },
 		})
-		expect(screen.getAllByLabelText(/^Nom/)).toHaveLength(1)
+		expect(screen.queryAllByLabelText(/^Nom/)).toHaveLength(0)
 		expect(screen.getByLabelText(/Expression régulière/)).toHaveProperty(
 			'value',
 			'',
 		)
 		expect(seen.mock.calls.at(-1)?.[0]).toMatchObject({
-			agents: [
-				{
-					source: {
-						fingerprints: [{ matchers: [{ kind: 'body', pattern: '' }] }],
-					},
+			enrichment: {
+				custom: {
+					fingerprints: [{ matchers: [{ kind: 'body', pattern: '' }] }],
 				},
-			],
+			},
 		})
 	})
 
 	it('shows a server error under the faulty field', () => {
-		const initial = setIn(
-			defaultValue(root, root, PROFILE_HINTS),
-			['scoring', 'factors'],
-			[{ signal: 's', weight: 1 }],
-		)
 		render(
 			<Harness
-				initial={initial}
-				problems={[
-					{ path: 'scoring.factors[0].weight', message: 'must be positive' },
-				]}
+				problems={[{ path: 'evidence.influence', message: 'must be positive' }]}
 			/>,
 		)
-		const weight = screen.getByLabelText(/Poids/)
+		const weight = screen.getByLabelText(/Influence des preuves/)
 		const message = screen.getByText('must be positive')
 		expect(weight.getAttribute('aria-invalid')).toBe('true')
 		expect(weight.getAttribute('aria-describedby')).toBe(

@@ -1,6 +1,7 @@
 pub mod gateway;
+pub mod limits;
 
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 use chrono::Utc;
 use common::{CoreError, Secret, generate_uuid_v7};
@@ -8,14 +9,15 @@ use lodestone_macros::transactional;
 use url::Url;
 
 use crate::{
-    application::LodestoneUseCase,
+    application::{LodestoneUseCase, llm::limits::Gate},
     domain::llm::{
-        ProviderDefinition, ProviderKind, ReasoningEffort,
+        GenerationParams, ProviderDefinition, ProviderKind, ReasoningEffort,
         provider::{
-            CipherError, LlmProviderRecord, LlmProviderRepository, ProviderId, ResolvedProvider,
-            SecretCipher, Tier, TierError, TokenPricing,
+            CipherError, LlmProviderRecord, LlmProviderRepository, MaxConcurrency, ProviderId,
+            ResolvedProvider, SecretCipher, Tier, TierError, TokenPricing,
         },
     },
+    domain::qualification::ports::QualificationRepository,
 };
 
 #[derive(Debug, Clone)]
@@ -26,9 +28,11 @@ pub struct CreateLlmProvider {
     pub model: String,
     pub timeout: Duration,
     pub max_retries: u8,
+    pub max_concurrency: Option<MaxConcurrency>,
     pub pricing: TokenPricing,
     pub api_key: Option<Secret>,
     pub reasoning_effort: Option<ReasoningEffort>,
+    pub generation: GenerationParams,
 }
 
 #[derive(Debug, Clone)]
@@ -47,13 +51,25 @@ pub struct UpdateLlmProvider {
     pub model: String,
     pub timeout: Duration,
     pub max_retries: u8,
+    pub max_concurrency: MaxConcurrency,
     pub pricing: TokenPricing,
     pub api_key: KeyChange,
     pub reasoning_effort: Option<ReasoningEffort>,
+    pub generation: GenerationParams,
 }
 
 fn requires_key(kind: ProviderKind) -> bool {
     matches!(kind, ProviderKind::Anthropic | ProviderKind::Mistral)
+}
+
+fn check_generation(generation: &GenerationParams) -> Result<(), CoreError> {
+    match generation.problems().into_iter().next() {
+        Some(problem) => Err(CoreError::Invalid {
+            field: problem.field.to_owned(),
+            message: problem.message,
+        }),
+        None => Ok(()),
+    }
 }
 
 fn missing_key() -> CoreError {
@@ -71,6 +87,7 @@ impl LodestoneUseCase {
         cipher: &C,
     ) -> Result<LlmProviderRecord, CoreError> {
         let mut repo = llm_provider_repository;
+        check_generation(&command.generation)?;
         if command.api_key.is_none() && requires_key(command.kind) {
             return Err(missing_key());
         }
@@ -82,6 +99,9 @@ impl LodestoneUseCase {
             .transpose()
             .map_err(|_| CoreError::Internal("llm provider key could not be sealed".to_owned()))?;
         let now = Utc::now();
+        let max_concurrency = command
+            .max_concurrency
+            .unwrap_or_else(|| MaxConcurrency::default_for(command.kind, &command.base_url));
         let record = LlmProviderRecord {
             id,
             name: command.name,
@@ -90,10 +110,12 @@ impl LodestoneUseCase {
             model: command.model,
             timeout: command.timeout,
             max_retries: command.max_retries,
+            max_concurrency,
             pricing: command.pricing,
             api_key,
             enabled: true,
             reasoning_effort: command.reasoning_effort,
+            generation: command.generation,
             created_at: now,
             updated_at: now,
         };
@@ -101,13 +123,15 @@ impl LodestoneUseCase {
         Ok(record)
     }
 
-    #[transactional(llm_provider)]
+    #[transactional(llm_provider, qualification)]
     pub async fn update_llm_provider<C: SecretCipher>(
         &self,
         command: UpdateLlmProvider,
         cipher: &C,
     ) -> Result<LlmProviderRecord, CoreError> {
         let mut repo = llm_provider_repository;
+        let mut qualification = qualification_repository;
+        check_generation(&command.generation)?;
         let current = repo.find(command.id).await?.ok_or(CoreError::NotFound)?;
         let api_key = match &command.api_key {
             KeyChange::Keep => current.api_key,
@@ -129,16 +153,20 @@ impl LodestoneUseCase {
             model: command.model,
             timeout: command.timeout,
             max_retries: command.max_retries,
+            max_concurrency: command.max_concurrency,
             pricing: command.pricing,
             api_key,
             enabled: current.enabled,
             reasoning_effort: command.reasoning_effort,
+            generation: command.generation,
             created_at: current.created_at,
             updated_at: Utc::now(),
         };
         if !repo.update(&record).await? {
             return Err(CoreError::NotFound);
         }
+        self.gates.resize(record.id, record.max_concurrency);
+        qualification.reset_provider_backoff(record.id).await?;
         Ok(record)
     }
 
@@ -204,6 +232,7 @@ impl LodestoneUseCase {
             )));
         }
         if repo.delete(id).await? {
+            self.gates.forget(id);
             Ok(())
         } else {
             Err(CoreError::NotFound)
@@ -232,6 +261,14 @@ impl LodestoneUseCase {
     ) -> Result<Option<LlmProviderRecord>, CoreError> {
         let mut repo = llm_provider_repository;
         repo.find(id).await
+    }
+
+    pub fn llm_in_flight(&self, id: ProviderId) -> u32 {
+        self.gates.in_flight(id)
+    }
+
+    pub(crate) fn provider_gate(&self, id: ProviderId, limit: MaxConcurrency) -> Arc<Gate> {
+        self.gates.gate(id, limit)
     }
 
     pub async fn resolve_llm_tier<C: SecretCipher>(
@@ -281,6 +318,7 @@ fn resolve_record<C: SecretCipher>(
         .transpose()?;
     Ok(ResolvedProvider {
         id: record.id,
+        name: record.name,
         definition: ProviderDefinition {
             kind: record.kind,
             base_url: record.base_url,
@@ -288,8 +326,10 @@ fn resolve_record<C: SecretCipher>(
             api_key,
             timeout: record.timeout,
             reasoning_effort: record.reasoning_effort,
+            generation: record.generation,
         },
         max_retries: record.max_retries,
+        max_concurrency: record.max_concurrency,
         pricing: record.pricing,
     })
 }

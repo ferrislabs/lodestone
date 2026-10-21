@@ -10,8 +10,9 @@ use common::{CoreError, Secret};
 use http::{HeaderValue, StatusCode, header::LOCATION};
 use llm::any::AnyProvider;
 use lodestone_core::{
-    LlmError, LlmProvider, LlmProviderRecord, LlmRequest, ProviderDefinition, ProviderId,
-    ProviderKind, ReasoningEffort, SecretCipher, Tier, TokenPricing,
+    GenerationParams, LlmError, LlmProvider, LlmProviderRecord, LlmRequest, MAX_TOKENS_LIMIT,
+    MaxConcurrency, ProviderDefinition, ProviderId, ProviderKind, ReasoningEffort, SecretCipher,
+    Tier, TokenPricing,
     llm::{CreateLlmProvider, KeyChange, UpdateLlmProvider},
 };
 use serde::{Deserialize, Serialize};
@@ -62,7 +63,7 @@ pub struct PricingDto {
     pub output_cents_per_mtok: u32,
 }
 
-#[derive(Debug, Serialize, PartialEq, Eq, ToSchema)]
+#[derive(Debug, Serialize, PartialEq, ToSchema)]
 pub struct ProviderDto {
     pub id: String,
     pub name: String,
@@ -74,12 +75,25 @@ pub struct ProviderDto {
     /// Whether an API key is stored. The key itself is never returned.
     pub has_api_key: bool,
     pub max_retries: u8,
+    #[schema(minimum = 1, maximum = 32)]
+    pub max_concurrency: u8,
+    pub in_flight: u32,
     pub timeout_seconds: u64,
     pub pricing: PricingDto,
     /// Defaults this provider is assigned to: `triage` (default of the qualification agents) or `qualification` (default of the aggregator).
     pub tiers: Vec<String>,
     /// Sent to OpenAI-compatible providers only when set; `null` when not sent.
     pub reasoning_effort: Option<ReasoningEffortDto>,
+    /// Replaces the `max_tokens` of every request when set; `null` when not set.
+    pub max_tokens: Option<u32>,
+    /// Sampling temperature, 0 to 2; `null` when not sent.
+    pub temperature: Option<f64>,
+    /// -2 to 2, OpenAI-compatible providers only; `null` when not sent.
+    pub frequency_penalty: Option<f64>,
+    /// -2 to 2, OpenAI-compatible providers only; `null` when not sent.
+    pub presence_penalty: Option<f64>,
+    /// 1 to 2, OpenAI-compatible providers only. Ollama ignores a repeat penalty on its OpenAI endpoint, so it is sent as a `frequency_penalty` of `repeat_penalty - 1` unless `frequency_penalty` is set; `null` when not sent.
+    pub repeat_penalty: Option<f64>,
     #[schema(format = DateTime)]
     pub created_at: String,
     #[schema(format = DateTime)]
@@ -87,7 +101,7 @@ pub struct ProviderDto {
 }
 
 impl ProviderDto {
-    fn new(record: &LlmProviderRecord, assignments: &[(Tier, ProviderId)]) -> Self {
+    fn new(record: &LlmProviderRecord, assignments: &[(Tier, ProviderId)], in_flight: u32) -> Self {
         Self {
             id: record.id.to_string(),
             name: record.name.clone(),
@@ -97,6 +111,8 @@ impl ProviderDto {
             enabled: record.enabled,
             has_api_key: record.has_api_key(),
             max_retries: record.max_retries,
+            max_concurrency: record.max_concurrency.get(),
+            in_flight,
             timeout_seconds: record.timeout.as_secs(),
             pricing: PricingDto {
                 input_cents_per_mtok: record.pricing.input_cents_per_mtok,
@@ -108,6 +124,11 @@ impl ProviderDto {
                 .map(|(tier, _)| tier.as_str().to_owned())
                 .collect(),
             reasoning_effort: record.reasoning_effort.map(ReasoningEffortDto::from),
+            max_tokens: record.generation.max_tokens,
+            temperature: record.generation.temperature,
+            frequency_penalty: record.generation.frequency_penalty,
+            presence_penalty: record.generation.presence_penalty,
+            repeat_penalty: record.generation.repeat_penalty,
             created_at: record.created_at.to_rfc3339(),
             updated_at: record.updated_at.to_rfc3339(),
         }
@@ -123,7 +144,7 @@ pub struct TierDto {
 
 #[derive(Debug, Serialize, PartialEq, Eq, ToSchema)]
 pub struct TestErrorDto {
-    /// One of `authentication`, `unreachable`, `timeout`, `invalid_response`, `rate_limited`, `reasoning_exhausted`, `other`.
+    /// One of `authentication`, `unreachable`, `timeout`, `invalid_response`, `rate_limited`, `reasoning_exhausted`, `reasoning_unsupported`, `other`.
     pub kind: String,
     pub message: String,
 }
@@ -157,12 +178,24 @@ pub struct CreateProviderRequest {
     pub api_key: Option<String>,
     /// 0 to 10, defaults to 2.
     pub max_retries: Option<u8>,
+    #[schema(minimum = 1, maximum = 32)]
+    pub max_concurrency: Option<u8>,
     /// Defaults to zero.
     pub pricing: Option<PricingRequest>,
     /// 1 to 600, defaults to 30.
     pub timeout_seconds: Option<u64>,
     /// `none`, `low`, `medium` or `high`. Sent to OpenAI-compatible providers only when set.
     pub reasoning_effort: Option<ReasoningEffortDto>,
+    /// 1 to 200000. Replaces the `max_tokens` of every request when set.
+    pub max_tokens: Option<u32>,
+    /// 0 to 2. Not sent when absent.
+    pub temperature: Option<f64>,
+    /// -2 to 2. OpenAI-compatible providers only.
+    pub frequency_penalty: Option<f64>,
+    /// -2 to 2. OpenAI-compatible providers only.
+    pub presence_penalty: Option<f64>,
+    /// 1 to 2. OpenAI-compatible providers only; sent as a `frequency_penalty` of `repeat_penalty - 1` unless `frequency_penalty` is set.
+    pub repeat_penalty: Option<f64>,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -175,11 +208,24 @@ pub struct UpdateProviderRequest {
     #[schema(value_type = Option<String>, nullable)]
     pub api_key: Option<Option<String>>,
     pub max_retries: Option<u8>,
+    #[schema(minimum = 1, maximum = 32)]
+    pub max_concurrency: Option<u8>,
     pub pricing: Option<PricingRequest>,
     pub timeout_seconds: Option<u64>,
     /// Absent keeps the stored value, `null` stops sending it, a value sets it.
     #[schema(value_type = Option<ReasoningEffortDto>, nullable)]
     pub reasoning_effort: Option<Option<ReasoningEffortDto>>,
+    /// Absent keeps the stored value, `null` stops sending it, a value sets it.
+    #[schema(value_type = Option<u32>, nullable)]
+    pub max_tokens: Option<Option<u32>>,
+    #[schema(value_type = Option<f64>, nullable)]
+    pub temperature: Option<Option<f64>>,
+    #[schema(value_type = Option<f64>, nullable)]
+    pub frequency_penalty: Option<Option<f64>>,
+    #[schema(value_type = Option<f64>, nullable)]
+    pub presence_penalty: Option<Option<f64>>,
+    #[schema(value_type = Option<f64>, nullable)]
+    pub repeat_penalty: Option<Option<f64>>,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -203,10 +249,33 @@ struct ProviderInput {
     model: Option<String>,
     api_key: KeyInput,
     max_retries: Option<u8>,
+    max_concurrency: Option<MaxConcurrency>,
     input_cents: Option<u32>,
     output_cents: Option<u32>,
     timeout: Option<Duration>,
     reasoning_effort: Option<Option<ReasoningEffort>>,
+    generation: GenerationInput,
+}
+
+#[derive(Debug, Default, Clone)]
+struct GenerationInput {
+    max_tokens: Option<Option<u32>>,
+    temperature: Option<Option<f64>>,
+    frequency_penalty: Option<Option<f64>>,
+    presence_penalty: Option<Option<f64>>,
+    repeat_penalty: Option<Option<f64>>,
+}
+
+impl GenerationInput {
+    fn over(self, current: GenerationParams) -> GenerationParams {
+        GenerationParams {
+            max_tokens: self.max_tokens.unwrap_or(current.max_tokens),
+            temperature: self.temperature.unwrap_or(current.temperature),
+            frequency_penalty: self.frequency_penalty.unwrap_or(current.frequency_penalty),
+            presence_penalty: self.presence_penalty.unwrap_or(current.presence_penalty),
+            repeat_penalty: self.repeat_penalty.unwrap_or(current.repeat_penalty),
+        }
+    }
 }
 
 struct Parser {
@@ -279,6 +348,48 @@ impl Parser {
                 None
             }
         }
+    }
+
+    fn number(&mut self, map: &mut Map<String, Value>, field: &str) -> Option<Option<f64>> {
+        match map.remove(field)? {
+            Value::Null => Some(None),
+            Value::Number(number) => number.as_f64().map(Some),
+            _ => {
+                self.problem(field, "must be a number or null");
+                None
+            }
+        }
+    }
+
+    fn max_tokens(&mut self, map: &mut Map<String, Value>) -> Option<Option<u32>> {
+        match map.remove("max_tokens")? {
+            Value::Null => Some(None),
+            value => self
+                .integer("max_tokens", value, 1, u64::from(MAX_TOKENS_LIMIT))
+                .and_then(|number| u32::try_from(number).ok())
+                .map(Some),
+        }
+    }
+
+    fn generation(&mut self, map: &mut Map<String, Value>) -> GenerationInput {
+        let input = GenerationInput {
+            max_tokens: self.max_tokens(map),
+            temperature: self.number(map, "temperature"),
+            frequency_penalty: self.number(map, "frequency_penalty"),
+            presence_penalty: self.number(map, "presence_penalty"),
+            repeat_penalty: self.number(map, "repeat_penalty"),
+        };
+        let candidate = input.clone().over(GenerationParams::default());
+        for problem in candidate.problems() {
+            if !self
+                .problems
+                .iter()
+                .any(|known| known.path == problem.field)
+            {
+                self.problem(problem.field, &problem.message);
+            }
+        }
+        input
     }
 
     fn base_url(&mut self, map: &mut Map<String, Value>) -> Option<Url> {
@@ -373,12 +484,25 @@ fn parse_input(body: &[u8], required: bool) -> Result<ProviderInput, ApiError> {
         .remove("max_retries")
         .and_then(|value| parser.integer("max_retries", value, 0, MAX_RETRIES))
         .and_then(|number| u8::try_from(number).ok());
+    let max_concurrency = map
+        .remove("max_concurrency")
+        .and_then(|value| {
+            parser.integer(
+                "max_concurrency",
+                value,
+                u64::from(MaxConcurrency::MIN),
+                u64::from(MaxConcurrency::MAX),
+            )
+        })
+        .and_then(|number| u8::try_from(number).ok())
+        .and_then(MaxConcurrency::new);
     let (input_cents, output_cents) = parser.pricing(&mut map);
     let timeout = map
         .remove("timeout_seconds")
         .and_then(|value| parser.integer("timeout_seconds", value, 1, MAX_TIMEOUT_SECONDS))
         .map(Duration::from_secs);
     let reasoning_effort = parser.reasoning_effort(&mut map);
+    let generation = parser.generation(&mut map);
 
     if required {
         for (field, present) in [
@@ -405,10 +529,12 @@ fn parse_input(body: &[u8], required: bool) -> Result<ProviderInput, ApiError> {
             model,
             api_key,
             max_retries,
+            max_concurrency,
             input_cents,
             output_cents,
             timeout,
             reasoning_effort,
+            generation,
         })
     } else {
         Err(ApiError::Rejected(parser.problems))
@@ -462,7 +588,11 @@ fn created(location: String, body: ProviderDto) -> HttpResponse {
 
 async fn view(state: &AppState, record: &LlmProviderRecord) -> Result<ProviderDto, ApiError> {
     let assignments = state.usecase.list_llm_tiers().await?;
-    Ok(ProviderDto::new(record, &assignments))
+    Ok(ProviderDto::new(
+        record,
+        &assignments,
+        state.usecase.llm_in_flight(record.id),
+    ))
 }
 
 #[utoipa::path(
@@ -483,7 +613,9 @@ pub async fn list_providers(
     Ok(Response::OK(
         records
             .iter()
-            .map(|record| ProviderDto::new(record, &assignments))
+            .map(|record| {
+                ProviderDto::new(record, &assignments, state.usecase.llm_in_flight(record.id))
+            })
             .collect(),
     ))
 }
@@ -547,12 +679,14 @@ pub async fn create_provider(
                     .timeout
                     .unwrap_or(Duration::from_secs(DEFAULT_TIMEOUT_SECONDS)),
                 max_retries: input.max_retries.unwrap_or(DEFAULT_MAX_RETRIES),
+                max_concurrency: input.max_concurrency,
                 pricing: TokenPricing {
                     input_cents_per_mtok: input.input_cents.unwrap_or(0),
                     output_cents_per_mtok: input.output_cents.unwrap_or(0),
                 },
                 api_key: key_secret(input.api_key),
                 reasoning_effort: input.reasoning_effort.flatten(),
+                generation: input.generation.over(GenerationParams::default()),
             },
             state.cipher.as_ref(),
         )
@@ -605,6 +739,7 @@ pub async fn update_provider(
                 model: input.model.unwrap_or(current.model),
                 timeout: input.timeout.unwrap_or(current.timeout),
                 max_retries: input.max_retries.unwrap_or(current.max_retries),
+                max_concurrency: input.max_concurrency.unwrap_or(current.max_concurrency),
                 pricing: TokenPricing {
                     input_cents_per_mtok: input
                         .input_cents
@@ -615,6 +750,7 @@ pub async fn update_provider(
                 },
                 api_key,
                 reasoning_effort: input.reasoning_effort.unwrap_or(current.reasoning_effort),
+                generation: input.generation.over(current.generation),
             },
             state.cipher.as_ref(),
         )
@@ -822,6 +958,9 @@ pub async fn unassign_tier(
     Ok(Response::NoContent)
 }
 
+const REASONING_UNSUPPORTED: &str =
+    "Ce modèle n'accepte pas le réglage de raisonnement : choisissez « Par défaut (non envoyé) ».";
+
 fn failure(kind: &str, message: &str, key: Option<&Secret>) -> TestResultDto {
     TestResultDto {
         ok: false,
@@ -841,6 +980,13 @@ fn scrub(text: &str, key: Option<&Secret>) -> String {
     }
 }
 
+fn with_provider_message(base: &str, message: Option<&str>) -> String {
+    match message {
+        Some(text) => format!("{base}: {text}"),
+        None => format!("{base}."),
+    }
+}
+
 fn classify(error: &LlmError, key: Option<&Secret>) -> TestResultDto {
     match error {
         LlmError::Timeout => failure("timeout", "The provider did not answer in time.", key),
@@ -849,14 +995,20 @@ fn classify(error: &LlmError, key: Option<&Secret>) -> TestResultDto {
             "The provider rate limited the request.",
             key,
         ),
-        LlmError::Status { status: 401 | 403 } => failure(
+        LlmError::Status {
+            status: 401 | 403,
+            message,
+        } => failure(
             "authentication",
-            "The provider rejected the credentials.",
+            &with_provider_message("The provider rejected the credentials", message.as_deref()),
             key,
         ),
-        LlmError::Status { status } => failure(
+        LlmError::Status { status, message } => failure(
             "other",
-            &format!("The provider answered with status {status}."),
+            &with_provider_message(
+                &format!("The provider answered with status {status}"),
+                message.as_deref(),
+            ),
             key,
         ),
         LlmError::Network(_) => failure("unreachable", "The endpoint could not be reached.", key),
@@ -899,9 +1051,10 @@ async fn run_test(record: &LlmProviderRecord, cipher: &impl SecretCipher) -> Tes
         api_key,
         timeout: record.timeout.min(TEST_TIMEOUT),
         reasoning_effort: record.reasoning_effort,
+        generation: record.generation,
     };
     let key = definition.api_key.as_ref();
-    let provider = match AnyProvider::from_definition(&definition) {
+    let provider = match AnyProvider::reporting_from_definition(&definition) {
         Ok(provider) => provider,
         Err(error) => return classify(&error, key),
     };
@@ -918,6 +1071,7 @@ async fn run_test(record: &LlmProviderRecord, cipher: &impl SecretCipher) -> Tes
         schema_name: "connectivity_check",
         schema: &schema,
         max_tokens: TEST_MAX_TOKENS,
+        temperature: None,
     };
     let started = Instant::now();
     match provider.complete(&request).await {
@@ -932,6 +1086,9 @@ async fn run_test(record: &LlmProviderRecord, cipher: &impl SecretCipher) -> Tes
             "The provider answered with an unusable response.",
             key,
         ),
+        Err(error) if record.reasoning_effort.is_some() && error.is_reasoning_rejection() => {
+            failure("reasoning_unsupported", REASONING_UNSUPPORTED, key)
+        }
         Err(error) => classify(&error, key),
     }
 }
@@ -958,4 +1115,128 @@ pub async fn test_provider(
     actor(user)?;
     let record = state.usecase.get_llm_provider(provider_id(&raw)?).await?;
     Ok(Response::OK(run_test(&record, state.cipher.as_ref()).await))
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::Utc;
+    use httpmock::prelude::*;
+    use lodestone_core::{CipherError, SealedSecret};
+
+    use super::*;
+
+    const KEY: &str = "mistral-secret-key-0123456789";
+
+    struct PlainCipher;
+
+    impl SecretCipher for PlainCipher {
+        fn seal(&self, secret: &Secret, _: &[u8]) -> Result<SealedSecret, CipherError> {
+            Ok(SealedSecret {
+                nonce: Vec::new(),
+                ciphertext: secret.expose().as_bytes().to_vec(),
+            })
+        }
+
+        fn open(&self, sealed: &SealedSecret, _: &[u8]) -> Result<Secret, CipherError> {
+            Ok(Secret::new(String::from_utf8_lossy(&sealed.ciphertext)))
+        }
+    }
+
+    fn record(server: &MockServer) -> LlmProviderRecord {
+        let now = Utc::now();
+        LlmProviderRecord {
+            id: ProviderId(uuid::Uuid::nil()),
+            name: "mistral".to_owned(),
+            kind: ProviderKind::Mistral,
+            base_url: Url::parse(&server.base_url()).unwrap(),
+            model: "ministral-8b-2512".to_owned(),
+            timeout: Duration::from_secs(5),
+            max_retries: 0,
+            max_concurrency: MaxConcurrency::new(4).unwrap(),
+            pricing: TokenPricing {
+                input_cents_per_mtok: 0,
+                output_cents_per_mtok: 0,
+            },
+            api_key: Some(SealedSecret {
+                nonce: Vec::new(),
+                ciphertext: KEY.as_bytes().to_vec(),
+            }),
+            enabled: true,
+            reasoning_effort: None,
+            generation: GenerationParams::default(),
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    #[tokio::test]
+    async fn tester_shows_the_provider_message() {
+        let server = MockServer::start();
+        server.mock(|when, then| {
+            when.method(POST);
+            then.status(400).json_body(json!({
+                "object": "error",
+                "message": "Extra inputs are not permitted: reasoning_effort",
+            }));
+        });
+        let result = run_test(&record(&server), &PlainCipher).await;
+        let error = result.error.unwrap();
+        assert!(!result.ok);
+        assert_eq!(error.kind, "other");
+        assert_eq!(
+            error.message,
+            "The provider answered with status 400: Extra inputs are not permitted: reasoning_effort"
+        );
+    }
+
+    #[tokio::test]
+    async fn tester_explains_a_rejected_reasoning_effort_without_retrying() {
+        let server = MockServer::start();
+        let mock = server.mock(|when, then| {
+            when.method(POST);
+            then.status(400).json_body(json!({
+                "message": "reasoning_effort is not enabled for this model",
+            }));
+        });
+        let mut configured = record(&server);
+        configured.reasoning_effort = Some(ReasoningEffort::Medium);
+        let result = run_test(&configured, &PlainCipher).await;
+        let error = result.error.unwrap();
+        assert!(!result.ok);
+        assert_eq!(error.kind, "reasoning_unsupported");
+        assert_eq!(
+            error.message,
+            "Ce modèle n'accepte pas le réglage de raisonnement : choisissez « Par défaut (non envoyé) »."
+        );
+        mock.assert_hits(1);
+    }
+
+    #[tokio::test]
+    async fn tester_never_echoes_the_key() {
+        let server = MockServer::start();
+        server.mock(|when, then| {
+            when.method(POST);
+            then.status(401)
+                .json_body(json!({"error": {"message": format!("bad key {KEY}")}}));
+        });
+        let result = run_test(&record(&server), &PlainCipher).await;
+        let error = result.error.unwrap();
+        assert_eq!(error.kind, "authentication");
+        assert!(!error.message.contains(KEY));
+        assert!(error.message.contains("bad key [redacted]"));
+    }
+
+    #[tokio::test]
+    async fn tester_without_a_message_keeps_the_status_line() {
+        let server = MockServer::start();
+        server.mock(|when, then| {
+            when.method(POST);
+            then.status(502);
+        });
+        let result = run_test(&record(&server), &PlainCipher).await;
+        assert_eq!(
+            result.error.unwrap().message,
+            "The provider answered with status 502."
+        );
+    }
 }

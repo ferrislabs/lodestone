@@ -2,6 +2,7 @@ import { TriangleAlert } from 'lucide-react'
 
 import { Badge } from '#/components/ui/badge'
 import { sourceLabel } from '#/lib/labels'
+import { countryBasisLabel } from '#/pages/leads/lib/company'
 import { countryName, hostsSummary } from '#/pages/leads/lib/facts'
 import { formatDateTime } from '#/pages/leads/lib/format'
 import type { LeadFacts as LeadFactsData } from '#/pages/leads/lib/types'
@@ -41,6 +42,16 @@ export function LeadFacts({ facts }: LeadFactsProps) {
 					<dd>{facts.signal_count}</dd>
 				</div>
 				<div>
+					<dt className="text-muted-foreground">Signaux indépendants</dt>
+					<dd>{facts.independent_signals}</dd>
+				</div>
+				{facts.sibling_domains.length > 0 ? (
+					<div data-facts="siblings">
+						<dt className="text-muted-foreground">Domaines regroupés</dt>
+						<dd>{facts.sibling_domains.join(', ')}</dd>
+					</div>
+				) : null}
+				<div>
 					<dt className="text-muted-foreground">Sources</dt>
 					<dd>
 						{facts.source_count === 0
@@ -59,7 +70,9 @@ export function LeadFacts({ facts }: LeadFactsProps) {
 				<div>
 					<dt className="text-muted-foreground">Pays probable</dt>
 					<dd>
-						{country ? countryName(country.code, country.name) : 'Inconnu'}
+						{country
+							? `${countryName(country.code, country.name)}${facts.country_basis ? ` (${countryBasisLabel(facts.country_basis)})` : ''}`
+							: 'Inconnu'}
 					</dd>
 				</div>
 			</dl>

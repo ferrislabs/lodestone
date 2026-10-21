@@ -45,6 +45,7 @@ pub enum JobStatus {
     Running,
     Succeeded,
     Failed,
+    Cancelled,
 }
 
 str_enum!(JobStatus {
@@ -52,6 +53,7 @@ str_enum!(JobStatus {
     Running => "running",
     Succeeded => "succeeded",
     Failed => "failed",
+    Cancelled => "cancelled",
 });
 
 #[derive(Debug, Clone, PartialEq)]

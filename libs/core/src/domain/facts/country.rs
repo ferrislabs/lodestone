@@ -331,6 +331,15 @@ const COUNTRIES: &[(&str, Country)] = &[
     ),
 ];
 
+impl Country {
+    pub fn from_code(code: &str) -> Option<Self> {
+        COUNTRIES
+            .iter()
+            .find(|(_, country)| country.code.eq_ignore_ascii_case(code))
+            .map(|(_, country)| *country)
+    }
+}
+
 pub fn country_of(domain: &NormalizedDomain) -> Option<Country> {
     let tld = domain.as_str().rsplit('.').next()?;
     COUNTRIES
@@ -352,6 +361,13 @@ mod tests {
         assert_eq!(country("acme.fr").unwrap().code, "FR");
         assert_eq!(country("acme.de").unwrap().name, "Germany");
         assert_eq!(country("acme.ch").unwrap().code, "CH");
+    }
+
+    #[test]
+    fn a_country_is_found_from_its_iso_code() {
+        assert_eq!(Country::from_code("fr").unwrap().name, "France");
+        assert_eq!(Country::from_code("GB").unwrap().name, "United Kingdom");
+        assert_eq!(Country::from_code("ZZ"), None);
     }
 
     #[test]

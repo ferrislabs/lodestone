@@ -21,8 +21,9 @@ Only a source whose endpoint is a documented public API may use `FetchPurpose::A
 - DECP (#46), three documented public interfaces:
   - the data.gouv.fr dataset API and the monthly consolidated files it lists (`www.data.gouv.fr/api/1/datasets/...`, then `static.data.gouv.fr`), published by the Ministères économiques et financiers under the Licence Ouverte
   - the Annuaire de l'administration OpenDataSoft API (`api-lannuaire.service-public.fr/api/explore/v2.1/...`), whose robots.txt disallows `/api/` like BOAMP, used to resolve a buyer SIRET to its public website
-  - the Recherche d'entreprises API (`recherche-entreprises.api.gouv.fr`, documented, 7 requests per second), used to resolve a SIRET to a company name
+  - the Recherche d'entreprises API (`recherche-entreprises.api.gouv.fr`, documented, 7 requests per second), used to resolve a SIRET to a company name, and by the company dossier (ADR 0007) to read the official data of a SIREN found on a company's own legal notice (legal name, activity, headcount range, head office, creation date); the SIREN is never guessed from a name
 - France Travail (#48), the Offres d'emploi v2 API (`api.francetravail.io/partenaire/offresdemploi/v2/offres/search`, GET with a bearer token obtained by the OAuth2 client credentials grant on `entreprise.francetravail.fr/connexion/oauth2/access_token`). It is a partner API that requires credentials registered by the operator; only fields returned by the API are used and the `urlOrigine` of an offer (often a job board) is never fetched
+- Hacker News "Ask HN: Who is hiring?" (#193), through the official HN search API (`hn.algolia.com/api/v1/`: `search_by_date` lists the monthly threads of the `whoishiring` account, `search` returns the comments of one thread matching a keyword). The data is published by Y Combinator under the MIT-licensed API terms, no key, no stated rate limit; the shared per-host limit applies and the collection runs once a day. Only the comment text, author, date and item id are used, and the item URL on `news.ycombinator.com` is the provenance
 - ATS job boards (#49), three documented public job board APIs, read for a lead only after its own careers page linked to the board (a slug is never guessed from the domain, and the careers pages themselves stay `Crawl`):
   - Greenhouse Job Board API (`boards-api.greenhouse.io/v1/boards/<token>/jobs?content=true`, GET, no key; its robots.txt only disallows `/embed/`)
   - Lever Postings API (`api.lever.co/v0/postings/<site>?mode=json`, and `api.eu.lever.co` for EU tenants, GET, no key; its robots.txt allows `/` with a crawl delay of 1 second, covered by the per-host rate limit)
@@ -36,3 +37,15 @@ Adding a source to this list requires amending this ADR.
 - The exemption is per request kind and cannot be applied to arbitrary web pages by accident: pages fetched from company sites stay `Crawl` or `Probe`.
 - The rate limit stays the only brake on API traffic, so each such source must keep a quota and respect upstream quota headers.
 - If the publisher later asks for crawlers to stay away from the API, the source is disabled rather than worked around.
+
+## Amendment (2026-10-09): operator override for site reading (#221)
+
+Some company sites disallow every agent in robots.txt, so their dossier stays unreachable (« robots.txt disallows the home page ») and the lead is qualified without its site. The operator may decide to read those sites anyway. This is an explicit, organisation-wide decision, never a silent default.
+
+- Setting `RobotsPolicy`: `respect` (default) or `ignore`. `CRAWL_ROBOTS_POLICY` seeds it; once an operator saves it in the web UI (Catalogue des sources → Règles de collecte, `PUT /api/v1/settings/crawl`), the saved value wins. The saved value is stored in `organisation_settings` with the user who saved it and the time.
+- Scope: only `FetchPurpose::Crawl` changes, which covers the pages read from company sites (company dossier, ecosystem site modules, career pages, contact pages). `FetchPurpose::Probe` (HTTP probe, well-known files) never consulted robots.txt and is unchanged. `FetchPurpose::Api` is unchanged and the list above still governs it. With `ignore`, robots.txt is not requested at all.
+- What stays enforced: public-target check, per-host and per-source rate limits, same-site redirect policy, body cap, confirmed links, and the identifying `User-Agent` with a contact.
+- The fetcher reads the policy at request time from an in-memory value refreshed on save and every minute from the database, so every instance converges.
+- Requests that a robots.txt rule already known to the process would have refused are counted as `robots_ignored`, logged, and returned by `GET /api/v1/settings/crawl`.
+- Saving `ignore` schedules the dossiers left unreachable by robots.txt for a new attempt; a successful rebuild clears the robots.txt error shown on the lead page.
+- The web UI shows a warning next to the switch: robots.txt can carry the site owner's text-and-data-mining opt-out (Directive (EU) 2019/790 art. 4; French CPI art. L.122-5-3). Ignoring it is the operator's responsibility, and enabling it asks for confirmation.

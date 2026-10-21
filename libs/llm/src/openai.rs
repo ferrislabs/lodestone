@@ -1,15 +1,38 @@
-use std::time::Duration;
+use std::{
+    collections::HashSet,
+    sync::{LazyLock, Mutex},
+    time::Duration,
+};
 
 use common::Secret;
 use lodestone_core::{
-    LlmError, LlmProvider, LlmRequest, LlmResponse, ProviderDefinition, ProviderKind,
-    ReasoningEffort, TokenUsage, render_user_content,
+    GenerationParams, LlmError, LlmProvider, LlmRequest, LlmResponse, ProviderDefinition,
+    ProviderKind, ReasoningEffort, TokenUsage, render_user_content,
 };
 use reqwest::{Client, StatusCode, header};
 use serde::{Deserialize, Serialize};
-use tracing::{Instrument, field};
+use tracing::{Instrument, field, warn};
+
+use crate::provider_message;
 
 const COMPLETIONS_PATH: &str = "/v1/chat/completions";
+
+static WITHOUT_REASONING: LazyLock<Mutex<HashSet<String>>> =
+    LazyLock::new(|| Mutex::new(HashSet::new()));
+
+fn remembers_without_reasoning(key: &str) -> bool {
+    WITHOUT_REASONING
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .contains(key)
+}
+
+fn remember_without_reasoning(key: &str) -> bool {
+    WITHOUT_REASONING
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .insert(key.to_owned())
+}
 
 #[derive(Debug, Clone)]
 pub struct OpenAiCompatibleProvider {
@@ -19,6 +42,8 @@ pub struct OpenAiCompatibleProvider {
     api_key: Option<Secret>,
     kind: ProviderKind,
     reasoning_effort: Option<ReasoningEffort>,
+    generation: GenerationParams,
+    fallback_key: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -29,6 +54,12 @@ struct ChatRequest<'a> {
     response_format: ResponseFormat<'a>,
     #[serde(skip_serializing_if = "Option::is_none")]
     reasoning_effort: Option<ReasoningEffort>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    temperature: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    frequency_penalty: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    presence_penalty: Option<f64>,
 }
 
 #[derive(Serialize)]
@@ -116,14 +147,56 @@ impl OpenAiCompatibleProvider {
             api_key: definition.api_key.clone(),
             kind: definition.kind,
             reasoning_effort: definition.reasoning_effort,
+            generation: definition.generation,
+            fallback_key: definition.reasoning_effort.map(|effort| {
+                format!(
+                    "{}{COMPLETIONS_PATH}|{}|{}",
+                    definition.base_url.as_str().trim_end_matches('/'),
+                    definition.model,
+                    effort.as_str()
+                )
+            }),
         })
     }
 
-    async fn send(&self, request: &LlmRequest<'_>) -> Result<LlmResponse, LlmError> {
+    #[must_use]
+    pub fn without_fallback(mut self) -> Self {
+        self.fallback_key = None;
+        self
+    }
+
+    async fn send_adapting(&self, request: &LlmRequest<'_>) -> Result<LlmResponse, LlmError> {
+        let Some(key) = self.fallback_key.as_deref() else {
+            return self.send(request, self.reasoning_effort).await;
+        };
+        if remembers_without_reasoning(key) {
+            return self.send(request, None).await;
+        }
+        match self.send(request, self.reasoning_effort).await {
+            Err(error) if error.is_reasoning_rejection() => {
+                if remember_without_reasoning(key) {
+                    warn!(
+                        provider = self.kind.as_str(),
+                        model = %self.model,
+                        %error,
+                        "the model rejects reasoning_effort, retrying without it from now on"
+                    );
+                }
+                self.send(request, None).await
+            }
+            other => other,
+        }
+    }
+
+    async fn send(
+        &self,
+        request: &LlmRequest<'_>,
+        reasoning_effort: Option<ReasoningEffort>,
+    ) -> Result<LlmResponse, LlmError> {
         let user = render_user_content(request);
         let body = ChatRequest {
             model: &self.model,
-            max_tokens: request.max_tokens,
+            max_tokens: self.generation.max_tokens_or(request.max_tokens),
             messages: [
                 Message {
                     role: "system",
@@ -142,7 +215,10 @@ impl OpenAiCompatibleProvider {
                     strict: true,
                 },
             },
-            reasoning_effort: self.reasoning_effort,
+            reasoning_effort,
+            temperature: request.temperature.or(self.generation.temperature),
+            frequency_penalty: self.generation.frequency_penalty_for_openai(),
+            presence_penalty: self.generation.presence_penalty,
         };
         let mut builder = self.client.post(&self.endpoint).json(&body);
         if let Some(key) = &self.api_key {
@@ -163,8 +239,10 @@ impl OpenAiCompatibleProvider {
             return Err(LlmError::RateLimited { retry_after });
         }
         if !status.is_success() {
+            let key = self.api_key.as_ref().map(Secret::expose);
             return Err(LlmError::Status {
                 status: status.as_u16(),
+                message: provider_message::read(response, key).await,
             });
         }
         let parsed: ChatResponse = response.json().await.map_err(|error| {
@@ -256,7 +334,7 @@ impl LlmProvider for OpenAiCompatibleProvider {
         );
         let recorder = span.clone();
         async move {
-            let response = self.send(request).await?;
+            let response = self.send_adapting(request).await?;
             recorder.record("input_tokens", response.usage.input_tokens);
             recorder.record("output_tokens", response.usage.output_tokens);
             Ok(response)

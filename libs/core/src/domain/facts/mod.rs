@@ -4,16 +4,17 @@ use chrono::{DateTime, SecondsFormat, Utc};
 
 use crate::domain::{
     NormalizedDomain,
+    company::{CompanyDossier, DossierState},
     host::{CandidateHost, Hostname},
     lead::{Lead, Signal},
-    values::SourceName,
+    values::{SignalKind, SourceName, UnitInterval},
 };
 
 mod country;
 mod environment;
 mod sentence;
 
-pub use country::Country;
+pub use country::{Country, country_of};
 pub use environment::{Environment, environment_of};
 pub use sentence::signal_sentence;
 
@@ -24,15 +25,65 @@ pub struct HostFact {
     pub signals: usize,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CountryBasis {
+    HeadOffice,
+    Tld,
+}
+
+impl CountryBasis {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::HeadOffice => "head_office",
+            Self::Tld => "tld",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OfficialFacts {
+    pub siren: String,
+    pub legal_name: String,
+    pub naf_code: Option<String>,
+    pub naf_label: Option<String>,
+    pub headcount_range: Option<String>,
+    pub head_office_country: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompanyFacts {
+    pub state: DossierState,
+    pub siren_found: bool,
+    pub official: Option<OfficialFacts>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct IndependentSignal {
+    pub kind: SignalKind,
+    pub strength: UnitInterval,
+    pub observed_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct SiblingSignals<'a> {
+    pub domain: &'a NormalizedDomain,
+    pub signals: &'a [Signal],
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct LeadFacts {
     pub hosts: Vec<HostFact>,
     pub distinct_subdomains: usize,
     pub signal_count: usize,
+    pub independent: Vec<IndependentSignal>,
+    pub kinds: Vec<SignalKind>,
     pub sources: Vec<SourceName>,
+    pub sibling_domains: Vec<NormalizedDomain>,
     pub first_seen_at: DateTime<Utc>,
     pub last_seen_at: DateTime<Utc>,
     pub probable_country: Option<Country>,
+    pub country_basis: Option<CountryBasis>,
+    pub company: Option<CompanyFacts>,
 }
 
 fn belongs_to(host: &Hostname, domain: &NormalizedDomain) -> bool {
@@ -46,28 +97,132 @@ fn signal_host(signal: &Signal, domain: &NormalizedDomain) -> Option<Hostname> {
         .find(|host| belongs_to(host, domain))
 }
 
+impl CompanyFacts {
+    fn render(&self) -> String {
+        match (&self.official, self.state) {
+            (Some(official), _) => {
+                let mut parts = vec![format!("legal name {}", official.legal_name)];
+                match (&official.naf_code, &official.naf_label) {
+                    (Some(code), Some(label)) => parts.push(format!("activity NAF {code} ({label})")),
+                    (Some(code), None) => parts.push(format!("activity NAF {code}")),
+                    _ => {}
+                }
+                if let Some(range) = &official.headcount_range {
+                    parts.push(format!("headcount range {range}"));
+                }
+                if let Some(country) = &official.head_office_country {
+                    parts.push(format!("head office country {country}"));
+                }
+                format!(
+                    "- official data (French company register, SIREN {}): {}",
+                    official.siren,
+                    parts.join("; ")
+                )
+            }
+            (None, DossierState::HostingPlatform) => {
+                "- company dossier: none, the domain is hosted on a platform, no company site was read".to_owned()
+            }
+            (None, DossierState::Unreachable) => {
+                "- company dossier: unreachable, the company site could not be read".to_owned()
+            }
+            (None, _) if self.siren_found => {
+                "- company dossier: partial, the official lookup of the SIREN found on the site failed".to_owned()
+            }
+            (None, _) => {
+                "- company dossier: partial, SIREN not found on the company site (SIREN introuvable), no official data".to_owned()
+            }
+        }
+    }
+}
+
+fn normalised_value(value: Option<&str>) -> String {
+    value
+        .map(|raw| raw.trim().to_lowercase())
+        .unwrap_or_default()
+}
+
+pub fn independent_signals<'a>(
+    signals: impl Iterator<Item = &'a Signal>,
+) -> Vec<IndependentSignal> {
+    let mut latest: BTreeMap<(&str, String, &str), &Signal> = BTreeMap::new();
+    for signal in signals {
+        let key = (
+            signal.kind.as_str(),
+            normalised_value(signal.value.as_deref()),
+            signal.source.as_str(),
+        );
+        latest
+            .entry(key)
+            .and_modify(|kept| {
+                if (signal.observed_at, signal.strength.get())
+                    .partial_cmp(&(kept.observed_at, kept.strength.get()))
+                    .is_some_and(std::cmp::Ordering::is_gt)
+                {
+                    *kept = signal;
+                }
+            })
+            .or_insert(signal);
+    }
+    latest
+        .into_values()
+        .map(|signal| IndependentSignal {
+            kind: signal.kind.clone(),
+            strength: signal.strength,
+            observed_at: signal.observed_at,
+        })
+        .collect()
+}
+
 impl LeadFacts {
     pub fn compute(lead: &Lead, signals: &[Signal], known_hosts: &[CandidateHost]) -> Self {
+        Self::compute_aggregated(lead, signals, known_hosts, &[])
+    }
+
+    pub fn compute_aggregated(
+        lead: &Lead,
+        signals: &[Signal],
+        known_hosts: &[CandidateHost],
+        siblings: &[SiblingSignals<'_>],
+    ) -> Self {
+        let pools: Vec<(&NormalizedDomain, &[Signal])> = std::iter::once((&lead.domain, signals))
+            .chain(
+                siblings
+                    .iter()
+                    .map(|sibling| (sibling.domain, sibling.signals)),
+            )
+            .collect();
+        let domains: Vec<&NormalizedDomain> = pools.iter().map(|(domain, _)| *domain).collect();
+        let all_signals = || pools.iter().flat_map(|(_, pool)| pool.iter());
         let mut counts: BTreeMap<Hostname, usize> = BTreeMap::new();
-        for signal in signals {
-            if let Some(host) = signal_host(signal, &lead.domain) {
-                *counts.entry(host).or_default() += 1;
+        for (domain, pool) in &pools {
+            for signal in *pool {
+                if let Some(host) = signal_host(signal, domain) {
+                    *counts.entry(host).or_default() += 1;
+                }
             }
         }
         let mut subdomains: BTreeSet<&Hostname> = counts.keys().collect();
         subdomains.extend(
             known_hosts
                 .iter()
-                .filter(|known| known.domain == lead.domain)
+                .filter(|known| domains.contains(&&known.domain))
                 .map(|known| &known.host),
         );
         let distinct_subdomains = subdomains
             .iter()
-            .filter(|host| host.as_str() != lead.domain.as_str())
+            .filter(|host| {
+                !domains
+                    .iter()
+                    .any(|domain| host.as_str() == domain.as_str())
+            })
             .count();
-        let mut sources: Vec<SourceName> = signals.iter().map(|signal| signal.source).collect();
+        let mut sources: Vec<SourceName> = all_signals().map(|signal| signal.source).collect();
         sources.sort_by_key(|source| source.as_str());
         sources.dedup();
+        let mut kinds: Vec<SignalKind> = all_signals().map(|signal| signal.kind.clone()).collect();
+        kinds.sort_by(|left, right| left.as_str().cmp(right.as_str()));
+        kinds.dedup();
+        let probable_country = country::country_of(&lead.domain);
         Self {
             hosts: counts
                 .into_iter()
@@ -78,12 +233,53 @@ impl LeadFacts {
                 })
                 .collect(),
             distinct_subdomains,
-            signal_count: signals.len(),
+            signal_count: all_signals().count(),
+            independent: independent_signals(all_signals()),
+            kinds,
             sources,
+            sibling_domains: siblings
+                .iter()
+                .map(|sibling| sibling.domain.clone())
+                .collect(),
             first_seen_at: lead.first_seen_at,
             last_seen_at: lead.last_seen_at,
-            probable_country: country::country_of(&lead.domain),
+            country_basis: probable_country.map(|_| CountryBasis::Tld),
+            probable_country,
+            company: None,
         }
+    }
+
+    pub fn independent_signals(&self) -> usize {
+        self.independent.len()
+    }
+
+    pub fn with_dossier(mut self, dossier: Option<&CompanyDossier>) -> Self {
+        let Some(dossier) = dossier.filter(|dossier| dossier.state != DossierState::Pending) else {
+            return self;
+        };
+        let official = dossier.official.as_ref().map(|official| OfficialFacts {
+            siren: official.siren.to_string(),
+            legal_name: official.legal_name.clone(),
+            naf_code: official.naf_code.clone(),
+            naf_label: official.naf_label.clone(),
+            headcount_range: official.headcount_range.clone(),
+            head_office_country: official.head_office_country.clone(),
+        });
+        let head_office = dossier
+            .official
+            .as_ref()
+            .and_then(|official| official.head_office_country_code.as_deref())
+            .and_then(Country::from_code);
+        if let Some(country) = head_office {
+            self.probable_country = Some(country);
+            self.country_basis = Some(CountryBasis::HeadOffice);
+        }
+        self.company = Some(CompanyFacts {
+            state: dossier.state,
+            siren_found: dossier.siren.is_some(),
+            official,
+        });
+        self
     }
 
     pub fn distinct_hosts(&self) -> usize {
@@ -144,6 +340,17 @@ impl LeadFacts {
             "- distinct subdomains seen for the domain: {}",
             self.distinct_subdomains
         ));
+        if !self.sibling_domains.is_empty() {
+            let domains: Vec<&str> = self
+                .sibling_domains
+                .iter()
+                .map(NormalizedDomain::as_str)
+                .collect();
+            lines.push(format!(
+                "- aggregated with the other domains of the same company in this profile: {}",
+                domains.join(", ")
+            ));
+        }
         let sources: Vec<&str> = self.sources.iter().map(|source| source.as_str()).collect();
         lines.push(format!(
             "- signals: {} from {} distinct source(s){}",
@@ -164,12 +371,21 @@ impl LeadFacts {
             "- last seen: {}",
             self.last_seen_at.to_rfc3339_opts(SecondsFormat::Secs, true)
         ));
-        match self.probable_country {
-            Some(country) => lines.push(format!(
+        match (self.probable_country, self.country_basis) {
+            (Some(country), Some(CountryBasis::HeadOffice)) => lines.push(format!(
+                "- probable country, from the head office in the official company register: {} ({})",
+                country.name, country.code
+            )),
+            (Some(country), _) => lines.push(format!(
                 "- probable country, from the domain extension only: {} ({})",
                 country.name, country.code
             )),
-            None => lines.push("- probable country: unknown (generic domain extension)".to_owned()),
+            (None, _) => {
+                lines.push("- probable country: unknown (generic domain extension)".to_owned());
+            }
+        }
+        if let Some(company) = &self.company {
+            lines.push(company.render());
         }
         lines.join("\n")
     }
@@ -199,9 +415,9 @@ mod tests {
             domain: NormalizedDomain::from_host(domain).unwrap(),
             status: LeadStatus::New,
             score: Score::default(),
-            score_breakdown: Vec::new(),
             confidence: None,
             verdict: None,
+            llm_score: None,
             qualified_at: None,
             first_seen_at: at(1_800_000_000),
             last_seen_at: at(1_800_086_400),
@@ -391,6 +607,252 @@ mod tests {
         assert!(
             text.contains("- probable country, from the domain extension only: Switzerland (CH)")
         );
+    }
+
+    fn dossier(
+        state: DossierState,
+        official: Option<crate::domain::company::OfficialData>,
+        siren_found: bool,
+    ) -> CompanyDossier {
+        let mut dossier = CompanyDossier::pending(
+            NormalizedDomain::from_host("acme.com").unwrap(),
+            at(1_800_000_000),
+        );
+        dossier.state = state;
+        dossier.siren =
+            siren_found.then(|| crate::domain::company::Siren::parse("552081317").unwrap());
+        dossier.official = official;
+        dossier
+    }
+
+    fn official(code: Option<&str>) -> crate::domain::company::OfficialData {
+        crate::domain::company::OfficialData {
+            siren: crate::domain::company::Siren::parse("552081317").unwrap(),
+            legal_name: "ACME SAS".to_owned(),
+            naf_code: Some("62.01Z".to_owned()),
+            naf_label: Some("Information et communication".to_owned()),
+            headcount_code: Some("12".to_owned()),
+            headcount_range: Some("20 à 49 salariés".to_owned()),
+            head_office_city: Some("PARIS".to_owned()),
+            head_office_postcode: Some("75008".to_owned()),
+            head_office_country: Some("France".to_owned()),
+            head_office_country_code: code.map(str::to_owned),
+            created_on: None,
+        }
+    }
+
+    #[test]
+    fn the_head_office_country_wins_over_the_extension_and_names_its_basis() {
+        let plain = LeadFacts::compute(&lead("acme.com"), &[], &[]);
+        assert_eq!(plain.probable_country, None);
+        assert_eq!(plain.country_basis, None);
+        let facts = plain.with_dossier(Some(&dossier(
+            DossierState::Complete,
+            Some(official(Some("FR"))),
+            true,
+        )));
+        assert_eq!(facts.probable_country.unwrap().code, "FR");
+        assert_eq!(facts.country_basis, Some(CountryBasis::HeadOffice));
+        let official = facts.company.as_ref().unwrap().official.as_ref().unwrap();
+        assert_eq!(official.legal_name, "ACME SAS");
+        assert_eq!(official.naf_code.as_deref(), Some("62.01Z"));
+        assert_eq!(
+            official.headcount_range.as_deref(),
+            Some("20 à 49 salariés")
+        );
+        assert_eq!(official.head_office_country.as_deref(), Some("France"));
+        let text = facts.render();
+        assert!(text.contains(
+            "- probable country, from the head office in the official company register: France (FR)"
+        ));
+        assert!(!text.contains("from the domain extension only"));
+        assert!(text.contains(
+            "- official data (French company register, SIREN 552081317): legal name ACME SAS; activity NAF 62.01Z (Information et communication); headcount range 20 à 49 salariés; head office country France"
+        ));
+    }
+
+    #[test]
+    fn the_extension_stays_the_basis_when_the_head_office_country_is_unknown() {
+        let facts = LeadFacts::compute(&lead("acme.de"), &[], &[]).with_dossier(Some(&dossier(
+            DossierState::Complete,
+            Some(official(None)),
+            true,
+        )));
+        assert_eq!(facts.probable_country.unwrap().code, "DE");
+        assert_eq!(facts.country_basis, Some(CountryBasis::Tld));
+    }
+
+    #[test]
+    fn a_dossier_without_official_data_says_why() {
+        let base = LeadFacts::compute(&lead("acme.fr"), &[], &[]);
+        let not_found =
+            base.clone()
+                .with_dossier(Some(&dossier(DossierState::Partial, None, false)));
+        assert!(
+            not_found
+                .render()
+                .contains("SIREN not found on the company site (SIREN introuvable)")
+        );
+        assert_eq!(not_found.country_basis, Some(CountryBasis::Tld));
+        let failed = base
+            .clone()
+            .with_dossier(Some(&dossier(DossierState::Partial, None, true)));
+        assert!(
+            failed
+                .render()
+                .contains("the official lookup of the SIREN found on the site failed")
+        );
+        let unreachable =
+            base.clone()
+                .with_dossier(Some(&dossier(DossierState::Unreachable, None, false)));
+        assert!(
+            unreachable
+                .render()
+                .contains("unreachable, the company site could not be read")
+        );
+        let hosted =
+            base.clone()
+                .with_dossier(Some(&dossier(DossierState::HostingPlatform, None, false)));
+        assert!(
+            hosted
+                .render()
+                .contains("the domain is hosted on a platform, no company site was read")
+        );
+    }
+
+    #[test]
+    fn a_pending_or_missing_dossier_adds_nothing() {
+        let base = LeadFacts::compute(&lead("acme.fr"), &[], &[]);
+        let pending = base
+            .clone()
+            .with_dossier(Some(&dossier(DossierState::Pending, None, false)));
+        assert_eq!(pending, base);
+        assert_eq!(base.clone().with_dossier(None), base);
+        assert!(!base.render().contains("company dossier"));
+    }
+
+    fn valued(kind: &str, value: &str, source: SourceName, host: &str, seconds: i64) -> Signal {
+        Signal {
+            value: Some(value.to_owned()),
+            observed_at: at(seconds),
+            ..signal(kind, source, Some(host), &format!("https://{host}/{value}"))
+        }
+    }
+
+    #[test]
+    fn identical_kind_value_and_source_are_one_independent_signal() {
+        let signals = [
+            valued(
+                "saas_provider",
+                "Auth0",
+                SourceName::DnsCname,
+                "a.acme.com",
+                10,
+            ),
+            valued(
+                "saas_provider",
+                " auth0 ",
+                SourceName::DnsCname,
+                "b.acme.com",
+                30,
+            ),
+            valued(
+                "saas_provider",
+                "auth0",
+                SourceName::HttpProbe,
+                "a.acme.com",
+                20,
+            ),
+            valued(
+                "saas_provider",
+                "okta",
+                SourceName::DnsCname,
+                "a.acme.com",
+                20,
+            ),
+            valued(
+                "product_detected",
+                "auth0",
+                SourceName::DnsCname,
+                "a.acme.com",
+                20,
+            ),
+        ];
+        let facts = LeadFacts::compute(&lead("acme.com"), &signals, &[]);
+        assert_eq!(facts.signal_count, 5);
+        assert_eq!(facts.independent_signals(), 4);
+        assert_eq!(facts.sources.len(), 2);
+        assert_eq!(facts.kinds.len(), 2);
+        let merged = facts
+            .independent
+            .iter()
+            .find(|signal| signal.kind.as_str() == "saas_provider" && signal.observed_at == at(30))
+            .unwrap();
+        assert_eq!(merged.kind.as_str(), "saas_provider");
+    }
+
+    #[test]
+    fn siblings_add_their_signals_sources_kinds_and_hosts() {
+        let own = [valued(
+            "saas_provider",
+            "auth0",
+            SourceName::DnsCname,
+            "sso.acme.com",
+            0,
+        )];
+        let other = [
+            valued(
+                "saas_provider",
+                "auth0",
+                SourceName::DnsCname,
+                "sso.acme.fr",
+                0,
+            ),
+            valued("job_offer", "devops", SourceName::Ats, "jobs.acme.fr", 0),
+        ];
+        let sibling_domain = NormalizedDomain::from_host("acme.fr").unwrap();
+        let facts = LeadFacts::compute_aggregated(
+            &lead("acme.com"),
+            &own,
+            &[known("www.acme.fr"), known("www.elsewhere.com")],
+            &[SiblingSignals {
+                domain: &sibling_domain,
+                signals: &other,
+            }],
+        );
+        assert_eq!(facts.signal_count, 3);
+        assert_eq!(facts.independent_signals(), 2);
+        assert_eq!(facts.sources, vec![SourceName::Ats, SourceName::DnsCname]);
+        assert_eq!(facts.kinds.len(), 2);
+        assert_eq!(facts.distinct_hosts(), 3);
+        assert_eq!(facts.distinct_subdomains, 4);
+        assert_eq!(facts.sibling_domains, vec![sibling_domain]);
+        assert!(facts.render().contains(
+            "aggregated with the other domains of the same company in this profile: acme.fr"
+        ));
+    }
+
+    #[test]
+    fn a_sibling_signal_naming_a_foreign_host_adds_no_host() {
+        let sibling_domain = NormalizedDomain::from_host("acme.fr").unwrap();
+        let other = [valued(
+            "saas_provider",
+            "auth0",
+            SourceName::DnsCname,
+            "sso.acme.com",
+            0,
+        )];
+        let facts = LeadFacts::compute_aggregated(
+            &lead("acme.com"),
+            &[],
+            &[],
+            &[SiblingSignals {
+                domain: &sibling_domain,
+                signals: &other,
+            }],
+        );
+        assert!(facts.hosts.is_empty());
+        assert_eq!(facts.signal_count, 1);
     }
 
     #[test]

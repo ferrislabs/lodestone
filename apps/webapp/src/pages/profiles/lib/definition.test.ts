@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
 
+import { validateValue } from '#/lib/schema-form'
+import { PROFILE_SCHEMA } from '#/pages/profiles/lib/profile-schema'
+
 import {
 	exportFilename,
 	NEW_PROFILE_TEMPLATE,
@@ -28,6 +31,23 @@ describe('definition text', () => {
 
 	it('ships a template that is valid JSON', () => {
 		expect(() => JSON.parse(NEW_PROFILE_TEMPLATE)).not.toThrow()
+	})
+
+	it('ships a template at the current version that fits the bundled schema', () => {
+		const template = JSON.parse(NEW_PROFILE_TEMPLATE)
+		expect(template.schema_version).toBe(18)
+		expect(template.inspection).toEqual({ enabled: true })
+		expect(template.enrichment.custom.extra_subdomains).toEqual([])
+		const properties = Object.keys(PROFILE_SCHEMA.properties ?? {})
+		for (const key of Object.keys(template)) expect(properties).toContain(key)
+		for (const key of PROFILE_SCHEMA.required ?? [])
+			expect(template).toHaveProperty(key)
+		const structural = validateValue(
+			PROFILE_SCHEMA,
+			PROFILE_SCHEMA,
+			template,
+		).filter((problem) => problem.message !== 'must not be empty')
+		expect(structural).toEqual([])
 	})
 
 	it('builds a safe export filename', () => {

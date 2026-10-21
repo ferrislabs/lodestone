@@ -16,6 +16,8 @@ function provider(id: string, name: string, enabled: boolean): Provider {
 		enabled,
 		has_api_key: false,
 		max_retries: 2,
+		max_concurrency: 4,
+		in_flight: 0,
 		timeout_seconds: 30,
 		pricing: { input_cents_per_mtok: 0, output_cents_per_mtok: 0 },
 		tiers: [],

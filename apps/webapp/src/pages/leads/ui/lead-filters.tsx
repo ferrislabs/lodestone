@@ -14,8 +14,10 @@ import { VERDICT_KEYS, verdictKeyLabel } from '#/pages/leads/lib/verdict'
 const SORT_LABELS: Record<(typeof LEAD_SORTS)[number], string> = {
 	confidence_desc: 'Confiance décroissante',
 	confidence_asc: 'Confiance croissante',
-	score_desc: 'Score décroissant',
-	score_asc: 'Score croissant',
+	llm_score_desc: 'Score décroissant',
+	llm_score_asc: 'Score croissant',
+	score_desc: 'Force des signaux décroissante',
+	score_asc: 'Force des signaux croissante',
 	last_seen_desc: 'Dernière détection, la plus récente',
 	first_seen_desc: 'Première détection, la plus récente',
 	domain_asc: 'Domaine, de A à Z',
@@ -112,12 +114,15 @@ export function LeadFiltersForm({
 					/>
 				</div>
 				<div className="flex flex-col gap-1.5">
-					<Label htmlFor="min_score">Score minimum</Label>
+					<Label htmlFor="min_score">
+						Force des signaux minimale (0 à 100)
+					</Label>
 					<Input
 						id="min_score"
 						name="min_score"
 						type="number"
 						min={0}
+						max={100}
 						step="any"
 						defaultValue={filters.minScore}
 					/>
@@ -150,6 +155,14 @@ export function LeadFiltersForm({
 						))}
 					</select>
 				</div>
+				<label className="flex items-end gap-2 pb-2 text-sm">
+					<input
+						type="checkbox"
+						name="group"
+						defaultChecked={filters.grouped}
+					/>
+					Regrouper par entreprise
+				</label>
 				<div className="flex items-end gap-2">
 					<Button type="submit">Appliquer</Button>
 					<Button type="button" variant="outline" onClick={onReset}>

@@ -5,9 +5,9 @@ import type { Problem } from '#/pages/profiles/lib/types'
 export const EDITOR_TABS = [
 	'identity',
 	'sourcing',
+	'enrichment',
 	'qualification',
 	'scoring',
-	'settings',
 ] as const
 
 export type EditorTab = (typeof EDITOR_TABS)[number]
@@ -16,14 +16,15 @@ export type ProfileTab = EditorTab | 'history'
 export const TAB_LABELS: Record<ProfileTab, string> = {
 	identity: 'Identité',
 	sourcing: 'Sourcing',
+	enrichment: 'Enrichissement',
 	qualification: 'Qualification',
 	scoring: 'Scoring',
-	settings: 'Réglages',
 	history: 'Historique des révisions',
 }
 
 const LEGACY_TABS: Readonly<Record<string, ProfileTab>> = {
 	agents: 'sourcing',
+	settings: 'identity',
 }
 
 export const tabSearchSchema = z.object({
@@ -34,6 +35,7 @@ export const tabSearchSchema = z.object({
 		)
 		.optional()
 		.catch(undefined),
+	agent: z.string().optional().catch(undefined),
 })
 
 export interface TabItem<T extends string = ProfileTab> {
@@ -49,18 +51,25 @@ function belongsTo(path: string, root: string): boolean {
 }
 
 export function tabOfPath(path: string): EditorTab | null {
-	if (belongsTo(path, 'identity')) return 'identity'
-	if (belongsTo(path, 'agents')) return 'sourcing'
+	if (belongsTo(path, 'identity') || belongsTo(path, 'language')) {
+		return 'identity'
+	}
+	if (belongsTo(path, 'agents') || belongsTo(path, 'contact_ranking')) {
+		return 'sourcing'
+	}
+	if (belongsTo(path, 'enrichment') || belongsTo(path, 'inspection')) {
+		return 'enrichment'
+	}
 	if (
 		belongsTo(path, 'qualification_agents') ||
 		belongsTo(path, 'aggregator') ||
-		belongsTo(path, 'verdict')
+		belongsTo(path, 'verdict') ||
+		belongsTo(path, 'evidence')
 	) {
 		return 'qualification'
 	}
-	if (belongsTo(path, 'scoring')) return 'scoring'
-	if (belongsTo(path, 'llm') || belongsTo(path, 'contact_ranking')) {
-		return 'settings'
+	if (belongsTo(path, 'scoring_agents')) {
+		return 'scoring'
 	}
 	return null
 }
@@ -71,9 +80,9 @@ export function problemCounts(
 	const counts: Record<EditorTab, number> = {
 		identity: 0,
 		sourcing: 0,
+		enrichment: 0,
 		qualification: 0,
 		scoring: 0,
-		settings: 0,
 	}
 	for (const problem of problems) {
 		const tab = tabOfPath(problem.path)

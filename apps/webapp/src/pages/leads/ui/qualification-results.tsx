@@ -1,66 +1,24 @@
 import { Badge } from '#/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '#/components/ui/card'
+import { escalationLabel } from '#/pages/leads/lib/agreement'
 import { formatDateTime } from '#/pages/leads/lib/format'
-import type {
-	QualificationAnswer,
-	QualificationResult,
-} from '#/pages/leads/lib/types'
-import {
-	formatAgentScore,
-	formatProbability,
-	probabilityWidth,
-} from '#/pages/leads/lib/verdict'
+import type { AgentFailure, QualificationResult } from '#/pages/leads/lib/types'
+import { formatAgentScore } from '#/pages/leads/lib/verdict'
+import { AgentFailureNotice } from '#/pages/leads/ui/agent-failure-notice'
+import { AnswerMeasure } from '#/pages/leads/ui/answer-measure'
 
 interface QualificationResultsProps {
 	results: readonly QualificationResult[]
+	failure: AgentFailure | null
+	onRetry: () => void
+	retrying: boolean
+	retryError: string | null
 }
 
 function providerText(result: QualificationResult): string {
 	const name = result.provider_name
 	if (name && result.model) return `${name} (${result.model})`
 	return name ?? (result.model || 'Fournisseur inconnu')
-}
-
-function Measure({ answer }: { answer: QualificationAnswer }) {
-	return (
-		<li
-			className="flex flex-col gap-1.5 rounded-md bg-muted/30 p-2.5"
-			data-question={answer.question_id}
-		>
-			<div className="flex flex-wrap items-baseline gap-x-2">
-				<p className="text-sm font-medium">{answer.wording}</p>
-				<code className="font-mono text-[11px] text-muted-foreground">
-					{answer.question_id}
-				</code>
-			</div>
-			<p className="text-sm">
-				<span className="text-muted-foreground">Réponse : </span>
-				<span className="font-medium">{answer.choice_label}</span>
-				<span className="text-muted-foreground">
-					{' '}
-					· confiance {formatProbability(answer.confidence)}
-				</span>
-			</p>
-			<ul className="flex flex-col gap-1">
-				{answer.probabilities.map((item) => (
-					<li key={item.value} className="flex items-center gap-2 text-xs">
-						<span className="w-28 shrink-0 truncate">{item.label}</span>
-						<div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
-							<div
-								role="presentation"
-								data-probability={item.value}
-								className="h-full rounded-full bg-orange-500"
-								style={{ width: `${probabilityWidth(item.probability)}%` }}
-							/>
-						</div>
-						<span className="w-12 text-right font-mono tabular-nums">
-							{formatProbability(item.probability)}
-						</span>
-					</li>
-				))}
-			</ul>
-		</li>
-	)
 }
 
 function AgentReport({ result }: { result: QualificationResult }) {
@@ -77,6 +35,11 @@ function AgentReport({ result }: { result: QualificationResult }) {
 					<Badge variant={valid ? 'secondary' : 'destructive'}>
 						{valid ? 'Valide' : 'Invalide'}
 					</Badge>
+					{result.escalated ? (
+						<Badge variant="outline" data-part="escalated">
+							{escalationLabel(result.provider_name, result.model)}
+						</Badge>
+					) : null}
 					{valid ? (
 						<span className="ml-auto text-sm">
 							Score de l'agent :{' '}
@@ -116,7 +79,11 @@ function AgentReport({ result }: { result: QualificationResult }) {
 					</h4>
 					<ul className="flex flex-col gap-2">
 						{result.answers.map((answer) => (
-							<Measure key={answer.question_id} answer={answer} />
+							<AnswerMeasure
+								key={answer.question_id}
+								answer={answer}
+								samples={result.provenance.samples}
+							/>
 						))}
 					</ul>
 				</div>
@@ -125,7 +92,13 @@ function AgentReport({ result }: { result: QualificationResult }) {
 	)
 }
 
-export function QualificationResults({ results }: QualificationResultsProps) {
+export function QualificationResults({
+	results,
+	failure,
+	onRetry,
+	retrying,
+	retryError,
+}: QualificationResultsProps) {
 	return (
 		<Card data-section="agents">
 			<CardHeader>
@@ -135,7 +108,15 @@ export function QualificationResults({ results }: QualificationResultsProps) {
 					observé et ses mesures. La synthèse ci-dessous les résume.
 				</p>
 			</CardHeader>
-			<CardContent>
+			<CardContent className="flex flex-col gap-4">
+				{failure ? (
+					<AgentFailureNotice
+						failure={failure}
+						onRetry={onRetry}
+						retrying={retrying}
+						retryError={retryError}
+					/>
+				) : null}
 				{results.length === 0 ? (
 					<p className="text-sm text-muted-foreground">
 						Aucune qualification pour le moment.

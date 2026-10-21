@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM source_provider_secrets WHERE provider_key = $1 AND name <> ALL($2)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "fe971ae5b2c302487fbecbd258de3d2636d2222f37d8021378e080c23cb273f3"
+}

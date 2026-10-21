@@ -80,6 +80,12 @@ describe('translateApiMessage', () => {
 			'Doit être un pourcentage de 0 à 100',
 		],
 		['at least one agent is required', 'Au moins un agent est requis'],
+		['at least one provider is required', 'Au moins un fournisseur est requis'],
+		['unknown source provider `linkedin`', 'Fournisseur inconnu : `linkedin`'],
+		[
+			'provider `ted2` does not support keyword search',
+			'Le fournisseur `ted2` ne prend pas en charge la recherche par mots-clés',
+		],
 		['invalid regular expression', 'Expression régulière invalide'],
 		['Authentication failed', "Échec de l'authentification"],
 		['Too many requests', 'Trop de requêtes, réessayez dans un instant'],
@@ -100,6 +106,12 @@ describe('translateApiMessage', () => {
 		expect(translateApiMessage('must be between 1 and 100')).toBe(
 			'Doit être compris entre 1 et 100',
 		)
+		expect(translateApiMessage('must be between -2 and 2')).toBe(
+			'Doit être compris entre -2 et 2',
+		)
+		expect(translateApiMessage('must be a number or null')).toBe(
+			'Doit être un nombre ou null',
+		)
 		expect(translateApiMessage('duplicate value `ct`')).toBe(
 			'Valeur en double : `ct`',
 		)
@@ -114,9 +126,14 @@ describe('translateApiMessage', () => {
 		expect(
 			translateApiMessage('at least one qualification agent is required'),
 		).toBe('Au moins un agent de qualification est requis')
-		expect(translateApiMessage('must have from 2 to 10 options')).toBe(
-			'Doit avoir de 2 à 10 options',
+		expect(translateApiMessage('must have from 2 to 11 options')).toBe(
+			'Doit avoir de 2 à 11 options',
 		)
+		expect(
+			translateApiMessage(
+				'must have exactly one option with `is_unknown` set to true',
+			),
+		).toBe('Doit avoir exactement une option « inconnu »')
 		expect(translateApiMessage('must be a number from 0 to 1')).toBe(
 			'Doit être un nombre de 0 à 1',
 		)
@@ -126,6 +143,18 @@ describe('translateApiMessage', () => {
 		expect(translateApiMessage('The provider answered with status 502.')).toBe(
 			'Le fournisseur a répondu avec le statut 502.',
 		)
+		expect(
+			translateApiMessage(
+				'The provider answered with status 400: Extra inputs are not permitted',
+			),
+		).toBe(
+			'Le fournisseur a répondu avec le statut 400 : Extra inputs are not permitted',
+		)
+		expect(
+			translateApiMessage(
+				'The provider rejected the credentials: Unauthorized',
+			),
+		).toBe('Le fournisseur a refusé les identifiants : Unauthorized')
 		expect(translateApiMessage('HTTP 503: Service Unavailable')).toBe(
 			'Service indisponible',
 		)
@@ -196,5 +225,19 @@ describe('source run errors', () => {
 		)
 		expect(parsed.status).toBe(409)
 		expect(parsed.message).toBe('La source est déjà en cours')
+	})
+})
+
+describe('rejection messages', () => {
+	it('translates the reason requirements', () => {
+		expect(translateApiMessage('is required to reject')).toBe(
+			'Choisissez une raison de rejet',
+		)
+		expect(translateApiMessage('is required when the reason is autre')).toBe(
+			'Précisez la raison quand elle est « Autre »',
+		)
+		expect(translateApiMessage('must be at most 500 characters')).toBe(
+			'Doit contenir au maximum 500 caractères',
+		)
 	})
 })

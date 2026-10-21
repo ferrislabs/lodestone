@@ -37,6 +37,15 @@ pub struct DecpArgs {
     pub entreprises_url: Url,
 
     #[arg(
+        long = "decp-holders-url",
+        env = "DECP_HOLDERS_URL",
+        name = "DECP_HOLDERS_URL",
+        default_value = "https://tabular-api.data.gouv.fr/api/resources/22847056-61df-452d-837d-8b8ceadbfc52/data/",
+        long_help = "data.gouv.fr tabular API of the consolidated DECP, read by holder SIREN for the public contracts a company won; the provider catalog overrides it"
+    )]
+    pub holders_url: Url,
+
+    #[arg(
         long = "decp-lookback-days",
         env = "DECP_LOOKBACK_DAYS",
         name = "DECP_LOOKBACK_DAYS",
@@ -112,6 +121,10 @@ mod tests {
         assert_eq!(
             cmd.decp.entreprises_url.host_str(),
             Some("recherche-entreprises.api.gouv.fr")
+        );
+        assert_eq!(
+            cmd.decp.holders_url.host_str(),
+            Some("tabular-api.data.gouv.fr")
         );
     }
 

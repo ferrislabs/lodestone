@@ -703,7 +703,10 @@ async fn test_endpoint_reports_a_rejected_key_without_echoing_it(pool: PgPool) {
             .is_empty()
     );
     assert!(!raw.contains(KEY));
-    assert!(!raw.contains("Incorrect"));
+    assert_eq!(
+        body["data"]["error"]["message"],
+        "The provider rejected the credentials: Incorrect API key provided: [redacted]"
+    );
 }
 
 #[sqlx::test(migrations = "../../migrations")]
@@ -904,6 +907,123 @@ async fn invalid_reasoning_effort_is_rejected_with_its_path(pool: PgPool) {
     assert_eq!(paths(&details), vec!["reasoning_effort"]);
 }
 
+#[sqlx::test(migrations = "../../migrations")]
+async fn generation_params_are_created_read_patched_and_cleared(pool: PgPool) {
+    let api = Api::new(pool).await;
+    let mut with = provider("tuned", "https://x.example");
+    with["max_tokens"] = json!(900);
+    with["temperature"] = json!(0.2);
+    with["frequency_penalty"] = json!(0.4);
+    with["presence_penalty"] = json!(-0.5);
+    with["repeat_penalty"] = json!(1.3);
+    let id = api.create(with).await;
+    let uri = format!("/api/v1/llm/providers/{id}");
+    let (_, body) = api.call(Method::GET, &uri, None).await;
+    assert_eq!(body["data"]["max_tokens"], 900);
+    assert_eq!(body["data"]["temperature"], 0.2);
+    assert_eq!(body["data"]["frequency_penalty"], 0.4);
+    assert_eq!(body["data"]["presence_penalty"], -0.5);
+    assert_eq!(body["data"]["repeat_penalty"], 1.3);
+
+    let (status, body) = api
+        .call(Method::PATCH, &uri, Some(json!({ "name": "renamed" })))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["data"]["max_tokens"], 900);
+
+    let (_, body) = api
+        .call(
+            Method::PATCH,
+            &uri,
+            Some(json!({ "max_tokens": null, "temperature": 0, "repeat_penalty": null })),
+        )
+        .await;
+    assert_eq!(body["data"]["max_tokens"], Value::Null);
+    assert_eq!(body["data"]["temperature"], 0.0);
+    assert_eq!(body["data"]["repeat_penalty"], Value::Null);
+    assert_eq!(body["data"]["frequency_penalty"], 0.4);
+
+    let (_, plain) = api
+        .call(
+            Method::POST,
+            "/api/v1/llm/providers",
+            Some(provider("plain", "https://z.example")),
+        )
+        .await;
+    for field in [
+        "max_tokens",
+        "temperature",
+        "frequency_penalty",
+        "presence_penalty",
+        "repeat_penalty",
+    ] {
+        assert_eq!(plain["data"][field], Value::Null, "{field}");
+    }
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn invalid_generation_params_are_rejected_with_their_paths(pool: PgPool) {
+    let api = Api::new(pool).await;
+    let mut body = provider("bad", "https://x.example");
+    body["max_tokens"] = json!(0);
+    body["temperature"] = json!(2.5);
+    body["frequency_penalty"] = json!(-3);
+    body["presence_penalty"] = json!("high");
+    body["repeat_penalty"] = json!(0.5);
+    let (status, details) = api
+        .call(Method::POST, "/api/v1/llm/providers", Some(body))
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{details}");
+    let mut found = paths(&details);
+    found.sort_unstable();
+    assert_eq!(
+        found,
+        vec![
+            "frequency_penalty",
+            "max_tokens",
+            "presence_penalty",
+            "repeat_penalty",
+            "temperature"
+        ]
+    );
+    let id = api.create(provider("ok", "https://x.example")).await;
+    let (status, details) = api
+        .call(
+            Method::PATCH,
+            &format!("/api/v1/llm/providers/{id}"),
+            Some(json!({ "temperature": 3 })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(paths(&details), vec!["temperature"]);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn test_endpoint_sends_the_configured_generation_params(pool: PgPool) {
+    let api = Api::new(pool).await;
+    let upstream = MockServer::start_async().await;
+    let mock = upstream
+        .mock_async(|when, then| {
+            when.method(POST)
+                .path("/v1/chat/completions")
+                .json_body_partial(r#"{"temperature": 0.2, "presence_penalty": 0.5}"#);
+            then.status(200).json_body(json!({
+                "model": "m",
+                "choices": [{ "message": { "role": "assistant", "content": "{\"ok\": true}" }, "finish_reason": "stop" }],
+            }));
+        })
+        .await;
+    let mut body = provider("tuned", &upstream.base_url());
+    body["temperature"] = json!(0.2);
+    body["presence_penalty"] = json!(0.5);
+    let id = api.create(body).await;
+
+    let (_, body, raw) = api.test(&id).await;
+
+    assert_eq!(body["data"]["ok"], true, "{raw}");
+    mock.assert_async().await;
+}
+
 #[test]
 fn openapi_documents_every_llm_path_with_bearer_auth() {
     let spec = serde_json::to_value(api::openapi::ApiDoc::openapi()).expect("spec");
@@ -927,4 +1047,136 @@ fn openapi_documents_every_llm_path_with_bearer_auth() {
             assert!(secured, "{method} {path}");
         }
     }
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn test_endpoint_explains_a_model_that_rejects_the_reasoning_effort(pool: PgPool) {
+    let api = Api::new(pool).await;
+    let upstream = MockServer::start_async().await;
+    let mock = upstream
+        .mock_async(|when, then| {
+            when.method(POST)
+                .path("/v1/chat/completions")
+                .json_body_partial(r#"{"reasoning_effort": "medium"}"#);
+            then.status(400)
+                .json_body(json!({ "message": "reasoning_effort is not enabled for this model" }));
+        })
+        .await;
+    let mut body = provider("ministral", &upstream.base_url());
+    body["reasoning_effort"] = json!("medium");
+    let id = api.create(body).await;
+
+    let (status, body, raw) = api.test(&id).await;
+
+    assert_eq!(status, StatusCode::OK, "{raw}");
+    assert_eq!(body["data"]["ok"], false);
+    assert_eq!(body["data"]["error"]["kind"], "reasoning_unsupported");
+    assert_eq!(
+        body["data"]["error"]["message"],
+        "Ce modèle n'accepte pas le réglage de raisonnement : choisissez « Par défaut (non envoyé) »."
+    );
+    mock.assert_hits(1);
+    assert!(!raw.contains(KEY), "{raw}");
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn max_concurrency_defaults_by_host_and_kind_and_is_read_and_patched(pool: PgPool) {
+    let api = Api::new(pool).await;
+    let cases = [
+        (
+            "ollama",
+            "openai_compatible",
+            "http://localhost:11434/v1",
+            2,
+        ),
+        (
+            "loopback",
+            "openai_compatible",
+            "http://127.0.0.1:11434/v1",
+            2,
+        ),
+        ("ipv6", "openai_compatible", "http://[::1]:11434/v1", 2),
+        ("remote", "openai_compatible", "https://llm.example/v1", 4),
+        ("mistral", "mistral", "http://localhost:8080", 4),
+    ];
+    for (name, kind, base_url, expected) in cases {
+        let id = api
+            .create(json!({
+                "name": name,
+                "kind": kind,
+                "base_url": base_url,
+                "model": "model-a",
+                "api_key": KEY,
+            }))
+            .await;
+        let (status, body) = api
+            .call(Method::GET, &format!("/api/v1/llm/providers/{id}"), None)
+            .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["data"]["max_concurrency"], expected, "{name}");
+        assert_eq!(body["data"]["in_flight"], 0, "{name}");
+    }
+    let mut chosen = provider("chosen", "http://localhost:11434/v1");
+    chosen["max_concurrency"] = json!(6);
+    let id = api.create(chosen).await;
+    let (_, body) = api
+        .call(Method::GET, &format!("/api/v1/llm/providers/{id}"), None)
+        .await;
+    assert_eq!(body["data"]["max_concurrency"], 6);
+    let (status, body) = api
+        .call(
+            Method::PATCH,
+            &format!("/api/v1/llm/providers/{id}"),
+            Some(json!({ "max_concurrency": 32 })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["data"]["max_concurrency"], 32);
+    let (status, body) = api
+        .call(
+            Method::PATCH,
+            &format!("/api/v1/llm/providers/{id}"),
+            Some(json!({ "name": "renamed" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["data"]["max_concurrency"], 32);
+    let (_, listed) = api.call(Method::GET, "/api/v1/llm/providers", None).await;
+    let listed = listed["data"]
+        .as_array()
+        .expect("list")
+        .iter()
+        .find(|entry| entry["id"] == id.as_str())
+        .cloned()
+        .expect("listed");
+    assert_eq!(listed["max_concurrency"], 32);
+    assert_eq!(listed["in_flight"], 0);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn max_concurrency_outside_one_to_thirty_two_is_rejected_with_its_path(pool: PgPool) {
+    let api = Api::new(pool).await;
+    for value in [json!(0), json!(33), json!(-1), json!("4"), json!(2.5)] {
+        let mut body = provider("bad", "https://x.example");
+        body["max_concurrency"] = value.clone();
+        let (status, details) = api
+            .call(Method::POST, "/api/v1/llm/providers", Some(body))
+            .await;
+        assert_eq!(
+            status,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "{value}: {details}"
+        );
+        assert_eq!(paths(&details), vec!["max_concurrency"]);
+    }
+    let id = api.create(provider("ok", "https://x.example")).await;
+    let (status, details) = api
+        .call(
+            Method::PATCH,
+            &format!("/api/v1/llm/providers/{id}"),
+            Some(json!({ "max_concurrency": 0 })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(paths(&details), vec!["max_concurrency"]);
 }

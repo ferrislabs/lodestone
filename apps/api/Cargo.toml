@@ -14,6 +14,7 @@ dns = { workspace = true }
 fetch = { workspace = true }
 llm = { workspace = true }
 sources = { workspace = true }
+source-providers = { workspace = true }
 axum-server = { workspace = true }
 
 axum = { workspace = true }
@@ -40,11 +41,11 @@ serde_json = { workspace = true }
 reqwest = { workspace = true }
 aws-lc-rs = { workspace = true }
 uuid = { workspace = true }
+url = { workspace = true }
 
 [dev-dependencies]
 auth = { workspace = true }
 rate-limit = { workspace = true }
-url = { workspace = true }
 base64 = { workspace = true }
 jsonwebtoken = { workspace = true }
 httpmock = "0.7.0"

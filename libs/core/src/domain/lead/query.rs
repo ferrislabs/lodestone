@@ -1,10 +1,19 @@
 use std::collections::HashMap;
 
 use crate::domain::{
+    agent_work::ports::AgentStop,
+    calibration::Calibrations,
+    company::{CompanyDossier, CompanyEntity, SiblingLead},
+    ecosystem::DomainEcosystem,
+    enrichment::{EnrichmentState, EvaluationStatus},
     facts::LeadFacts,
     lead::{Assessment, ContactEmail, Lead, LeadId, LeadStatus, Signal},
-    profile::{Profile, ProfileId, ProfileName, RevisionNumber, definition::QualificationAgent},
-    qualification::{QualificationResult, SummaryState, Verdict},
+    profile::{
+        Profile, ProfileId, ProfileName, RevisionNumber,
+        definition::{QualificationAgent, ScoringAgent},
+    },
+    qualification::{AgentFailure, LeadScoring, QualificationResult, SummaryState, Verdict},
+    scoring_agent::ScoringResult,
     values::SignalKind,
 };
 
@@ -15,17 +24,21 @@ pub enum LeadSort {
     ConfidenceAsc,
     ScoreDesc,
     ScoreAsc,
+    LlmScoreDesc,
+    LlmScoreAsc,
     LastSeenDesc,
     FirstSeenDesc,
     DomainAsc,
 }
 
 impl LeadSort {
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 9] = [
         Self::ConfidenceDesc,
         Self::ConfidenceAsc,
         Self::ScoreDesc,
         Self::ScoreAsc,
+        Self::LlmScoreDesc,
+        Self::LlmScoreAsc,
         Self::LastSeenDesc,
         Self::FirstSeenDesc,
         Self::DomainAsc,
@@ -37,6 +50,8 @@ impl LeadSort {
             Self::ConfidenceAsc => "confidence_asc",
             Self::ScoreDesc => "score_desc",
             Self::ScoreAsc => "score_asc",
+            Self::LlmScoreDesc => "llm_score_desc",
+            Self::LlmScoreAsc => "llm_score_asc",
             Self::LastSeenDesc => "last_seen_desc",
             Self::FirstSeenDesc => "first_seen_desc",
             Self::DomainAsc => "domain_asc",
@@ -95,6 +110,7 @@ pub struct LeadQuery {
     pub min_score: Option<f64>,
     pub domain_contains: Option<String>,
     pub signal_kind: Option<SignalKind>,
+    pub group_by_company: bool,
     pub sort: LeadSort,
     pub limit: u32,
     pub offset: u64,
@@ -104,6 +120,7 @@ pub struct LeadQuery {
 pub struct LeadPage {
     pub items: Vec<Lead>,
     pub total: u64,
+    pub members: HashMap<LeadId, Vec<Lead>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -111,11 +128,16 @@ pub struct LeadListing {
     pub profile: Profile,
     pub page: LeadPage,
     pub summaries: HashMap<LeadId, String>,
+    pub scorings: HashMap<LeadId, LeadScoring>,
+    pub evaluations: HashMap<LeadId, EvaluationStatus>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct LeadDetail {
     pub lead: Lead,
+    pub enrichment: EnrichmentState,
+    pub evaluation: EvaluationStatus,
+    pub ecosystem: DomainEcosystem,
     pub profile: Profile,
     pub signals: Vec<Signal>,
     pub facts: LeadFacts,
@@ -123,7 +145,16 @@ pub struct LeadDetail {
     pub assessments: Vec<Assessment>,
     pub qualification_results: Vec<QualificationResult>,
     pub qualification_agents: Vec<QualificationAgent>,
+    pub scoring_results: Vec<ScoringResult>,
+    pub scoring_agents: Vec<ScoringAgent>,
+    pub calibrations: Calibrations,
     pub summary_state: Option<SummaryState>,
+    pub agent_failures: Vec<AgentFailure>,
+    pub agent_stops: Vec<AgentStop>,
+    pub scoring: Option<LeadScoring>,
+    pub company: Option<CompanyDossier>,
+    pub entity: Option<CompanyEntity>,
+    pub siblings: Vec<SiblingLead>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

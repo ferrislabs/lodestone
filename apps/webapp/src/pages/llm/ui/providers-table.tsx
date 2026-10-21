@@ -11,6 +11,7 @@ import {
 } from '#/components/ui/table'
 import { translateApiMessage } from '#/lib/api-errors'
 import {
+	inFlightLabel,
 	providerKindLabel,
 	reasoningLabel,
 	testErrorHint,
@@ -147,6 +148,12 @@ export function ProvidersTable({
 											>
 												{provider.enabled ? 'Activé' : 'Désactivé'}
 											</Badge>
+											<span className="block text-xs text-muted-foreground">
+												{inFlightLabel(
+													provider.in_flight,
+													provider.max_concurrency,
+												)}
+											</span>
 										</TableCell>
 										<TableCell>
 											<Badge

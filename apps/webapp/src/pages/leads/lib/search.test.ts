@@ -3,6 +3,7 @@ import {
 	DEFAULT_SORT,
 	filtersFromForm,
 	filtersFromSearch,
+	groupingFromSearch,
 	leadsSearchSchema,
 	queryFromSearch,
 	searchFromFilters,
@@ -18,6 +19,7 @@ describe('leads search params', () => {
 			domain: '',
 			signal: '',
 			sort: DEFAULT_SORT,
+			grouped: true,
 		})
 	})
 
@@ -30,6 +32,7 @@ describe('leads search params', () => {
 			domain: 'acme',
 			signal: 'hiring',
 			sort: 'domain_asc' as const,
+			grouped: false,
 		}
 		const search = searchFromFilters('p1', filters)
 		expect(search.profile).toBe('p1')
@@ -45,6 +48,7 @@ describe('leads search params', () => {
 			domain: '',
 			signal: '',
 			sort: DEFAULT_SORT,
+			grouped: true,
 		})
 		expect(search).toEqual({
 			profile: 'p1',
@@ -55,8 +59,28 @@ describe('leads search params', () => {
 			domain: undefined,
 			signal: undefined,
 			sort: undefined,
+			group: undefined,
 			page: undefined,
 		})
+	})
+
+	it('groups by company by default and remembers the choice to list every lead', () => {
+		expect(filtersFromSearch({}).grouped).toBe(true)
+		expect(groupingFromSearch({})).toBe('company')
+		const form = new FormData()
+		expect(filtersFromForm(form).grouped).toBe(false)
+		form.append('group', 'on')
+		expect(filtersFromForm(form).grouped).toBe(true)
+		const flat = searchFromFilters('p1', {
+			...filtersFromSearch({}),
+			grouped: false,
+		})
+		expect(flat.group).toBe('none')
+		expect(filtersFromSearch(flat).grouped).toBe(false)
+		expect(groupingFromSearch(flat)).toBe('none')
+		expect(searchFromFilters('p1', filtersFromSearch({})).group).toBeUndefined()
+		expect(leadsSearchSchema.safeParse({ group: 'none' }).success).toBe(true)
+		expect(leadsSearchSchema.safeParse({ group: 'x' }).success).toBe(false)
 	})
 
 	it('drops an invalid min score', () => {
@@ -68,6 +92,7 @@ describe('leads search params', () => {
 			domain: '',
 			signal: '',
 			sort: DEFAULT_SORT,
+			grouped: true,
 		})
 		expect(search.min_score).toBeUndefined()
 		expect(search.min_confidence).toBeUndefined()
@@ -94,6 +119,15 @@ describe('leads search params', () => {
 			min_confidence: 40,
 			sort: 'score_desc',
 		})
+	})
+
+	it('sorts by the score decided by the scoring agents', () => {
+		expect(queryFromSearch({ sort: 'llm_score_desc' }).sort).toBe(
+			'llm_score_desc',
+		)
+		expect(queryFromSearch({ sort: 'llm_score_asc' }).sort).toBe(
+			'llm_score_asc',
+		)
 	})
 
 	it('falls back to the default verdicts when none is ticked', () => {
@@ -156,6 +190,7 @@ describe('leads search params', () => {
 			domain: 'foo',
 			signal: '',
 			sort: DEFAULT_SORT,
+			grouped: false,
 		})
 	})
 

@@ -2,7 +2,7 @@ mod support;
 
 use std::{
     collections::{HashMap, VecDeque},
-    num::NonZeroU32,
+    num::{NonZeroU32, NonZeroUsize},
     sync::{
         Arc, Mutex,
         atomic::{AtomicI64, Ordering},
@@ -10,14 +10,16 @@ use std::{
     time::Duration,
 };
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, SecondsFormat, Utc};
 use common::{EncryptionKey, Secret};
 use lodestone_core::{
-    ActiveProfile, Assessment, Clock, CreateProfileCommand, DraftEdit, DraftStatus, Lead,
-    LeadRepository, LeadStatus, LlmError, LlmProvider, LlmRequest, LlmResponse, LodestoneUseCase,
-    Observation, ProfileId, ProfileName, Provenance, ProviderDefinition, ProviderId, ProviderKind,
-    ReviseProfileCommand, SignalKind, SourceName, SummaryState, Tier, TokenPricing, TokenUsage,
-    UnitInterval, UserId, ValidatedProfile, Verdict, VerdictFilter,
+    ActiveProfile, Assessment, Clock, CreateProfileCommand, DraftEdit, DraftStatus, EventStatus,
+    GenerationParams, Lead, LeadRepository, LeadStatus, LlmError, LlmProvider, LlmRequest,
+    LlmResponse, LodestoneUseCase, Observation, ProfileId, ProfileName, Provenance,
+    ProviderDefinition, ProviderId, ProviderKind, QualityWarning, Rejection, RejectionReason,
+    ReviseProfileCommand, SignalKind, SourceName, Stage, StageReason, StageStatus, SummaryState,
+    Tier, TimelineEvent, TimelineStep, TokenPricing, TokenUsage, UnitInterval, UserId,
+    ValidatedProfile, Verdict, VerdictFilter,
     evaluation::{EvaluationSettings, ProviderBuilder},
     infrastructure::{
         crypto::AesGcmCipher, lead::postgres::PgLeadRepository, llm_cache::postgres::PgLlmCache,
@@ -25,7 +27,7 @@ use lodestone_core::{
     },
     llm::CreateLlmProvider,
     qualification::AggregationReport,
-    summary_retry_delay,
+    summary_retry_delay, timeline_kind,
 };
 use serde_json::{Value, json};
 use sqlx::PgPool;
@@ -61,6 +63,7 @@ struct Seen {
     instruction: String,
     documents: Vec<(String, String)>,
     aggregator: bool,
+    scoring: bool,
 }
 
 struct Shared {
@@ -88,21 +91,37 @@ impl ProviderBuilder for FakeBuilder {
     }
 }
 
-fn answers_from(schema: &Value, last: bool) -> Value {
+fn quote_of(request: &LlmRequest<'_>) -> String {
+    request
+        .documents
+        .first()
+        .and_then(|document| document.content.lines().next())
+        .unwrap_or_default()
+        .to_owned()
+}
+
+fn answers_from(schema: &Value, last: bool, quote: &str) -> Value {
     let mut answers = serde_json::Map::new();
     let questions = schema["properties"]["answers"]["properties"]
         .as_object()
         .unwrap();
     for (id, question) in questions {
-        let values = question["properties"]["choice"]["enum"].as_array().unwrap();
-        let index = if last { values.len() - 1 } else { 0 };
-        let probabilities: serde_json::Map<String, Value> = values
+        let all = question["properties"]["choice"]["enum"].as_array().unwrap();
+        let known: Vec<&Value> = all
             .iter()
-            .enumerate()
-            .map(|(position, value)| {
+            .filter(|value| value.as_str() != Some("inconnu"))
+            .collect();
+        let chosen = if last {
+            known[known.len() - 1]
+        } else {
+            known[0]
+        };
+        let probabilities: serde_json::Map<String, Value> = all
+            .iter()
+            .map(|value| {
                 (
                     value.as_str().unwrap().to_owned(),
-                    json!(if position == index { 1.0 } else { 0.0 }),
+                    json!(if value == chosen { 1.0 } else { 0.0 }),
                 )
             })
             .collect();
@@ -110,7 +129,8 @@ fn answers_from(schema: &Value, last: bool) -> Value {
             id.clone(),
             json!({
                 "type": "choice",
-                "choice": values[index],
+                "choice": chosen,
+                "evidence": quote,
                 "confidence": 0.9,
                 "probabilities": probabilities
             }),
@@ -131,7 +151,8 @@ fn summary_with(quote: &str) -> Value {
 
 impl LlmProvider for Scripted {
     async fn complete(&self, request: &LlmRequest<'_>) -> Result<LlmResponse, LlmError> {
-        let aggregator = request.schema["properties"].get("answers").is_none();
+        let scoring = request.schema["properties"].get("criteria").is_some();
+        let aggregator = !scoring && request.schema["properties"].get("answers").is_none();
         self.shared.seen.lock().unwrap().push(Seen {
             model: self.model.clone(),
             system: request.system.to_owned(),
@@ -142,22 +163,34 @@ impl LlmProvider for Scripted {
                 .map(|document| (document.source.to_owned(), document.content.to_owned()))
                 .collect(),
             aggregator,
+            scoring,
         });
+        let key = if scoring {
+            format!("{}#scoring", self.model)
+        } else {
+            self.model.clone()
+        };
         let reply = self
             .shared
             .replies
             .lock()
             .unwrap()
-            .get_mut(&self.model)
+            .get_mut(&key)
             .and_then(VecDeque::pop_front)
             .unwrap_or(Reply::Good);
         let output = match (reply, aggregator) {
             (Reply::Fail(error), _) => return Err(error),
             (Reply::Raw(value), _) => value,
             (Reply::Quote(quote), _) => summary_with(quote),
-            (Reply::Worst, false) => answers_from(request.schema, true),
+            (Reply::Worst, false) if scoring => {
+                support::scoring_answer(request.schema, &quote_of(request), true)
+            }
+            (Reply::Worst, false) => answers_from(request.schema, true, &quote_of(request)),
             (_, true) => summary_with(GOOD_QUOTE),
-            (_, false) => answers_from(request.schema, false),
+            (_, false) if scoring => {
+                support::scoring_answer(request.schema, &quote_of(request), false)
+            }
+            (_, false) => answers_from(request.schema, false, &quote_of(request)),
         };
         Ok(LlmResponse {
             output,
@@ -184,10 +217,25 @@ fn settings(budget_cents: u32, batch_size: u32) -> EvaluationSettings {
         budget_cents: NonZeroU32::new(budget_cents).unwrap(),
         batch_size,
         base_delay: Duration::ZERO,
+        concurrency: NonZeroUsize::MIN,
     }
 }
 
-fn agent(id: &str, weight: u8, provider: Option<ProviderId>) -> Value {
+fn question(id: &str) -> Value {
+    json!({
+        "id": id,
+        "wording": "Pertinent ?",
+        "weight": 5,
+        "options": [
+            {"value": "forte", "label": "Forte", "score": 1.0},
+            {"value": "moyenne", "label": "Moyenne", "score": 0.5},
+            {"value": "faible", "label": "Faible", "score": 0.0},
+            {"value": "inconnu", "label": "Inconnu", "score": 0.5, "is_unknown": true}
+        ]
+    })
+}
+
+fn agent(id: &str, provider: Option<ProviderId>) -> Value {
     json!({
         "id": id,
         "name": id,
@@ -195,23 +243,22 @@ fn agent(id: &str, weight: u8, provider: Option<ProviderId>) -> Value {
         "enabled": true,
         "provider_id": provider.map(|provider| provider.0.to_string()),
         "system_prompt": format!("PROMPT-OF-{id}"),
-        "weight": weight,
-        "questions": [{
-            "id": "q",
-            "wording": "Pertinent ?",
-            "weight": 5,
-            "options": [
-                {"value": "forte", "label": "Forte", "score": 1.0},
-                {"value": "moyenne", "label": "Moyenne", "score": 0.5},
-                {"value": "faible", "label": "Faible", "score": 0.0}
-            ]
-        }]
+        "samples": 1,
+        "questions": [question("q"), question("q2")]
     })
+}
+
+fn revised(mut agent: Value) -> Value {
+    agent["system_prompt"] = json!("PROMPT-REVISED");
+    agent
 }
 
 fn definition(agents: Vec<Value>, aggregator_provider: Option<ProviderId>) -> Value {
     let mut definition: Value = serde_json::from_str(IAM).unwrap();
     definition["qualification_agents"] = Value::Array(agents);
+    definition["verdict"]["calibration_floor"] = json!(0.0);
+    definition["verdict"]["min_evidence"] = json!(0.0);
+    definition["evidence"]["influence"] = json!(0.0);
     definition["aggregator"]["system_prompt"] = json!("AGGREGATOR-PROMPT");
     definition["aggregator"]["provider_id"] =
         json!(aggregator_provider.map(|provider| provider.0.to_string()));
@@ -247,12 +294,14 @@ impl Harness {
                     model: model.to_owned(),
                     timeout: Duration::from_secs(30),
                     max_retries: 0,
+                    max_concurrency: None,
                     pricing: TokenPricing {
                         input_cents_per_mtok,
                         output_cents_per_mtok: 0,
                     },
                     api_key: None,
                     reasoning_effort: None,
+                    generation: GenerationParams::default(),
                 },
                 &self.cipher,
             )
@@ -386,6 +435,16 @@ impl Harness {
             )
             .await
             .unwrap();
+        self.usecase
+            .score_due_leads(
+                &self.builder(),
+                &self.cipher,
+                &PgLlmCache::new(self.pool.clone()),
+                settings(100, 10),
+                &self.clock,
+            )
+            .await
+            .unwrap();
     }
 
     async fn summarise(&self, settings: EvaluationSettings) -> AggregationReport {
@@ -439,7 +498,7 @@ async fn the_summary_is_written_once_every_agent_has_a_result(pool: PgPool) {
     let harness = Harness::new(pool);
     harness.defaults().await;
     let profile = harness
-        .profile(vec![agent("one", 5, None), agent("two", 5, None)], None)
+        .profile(vec![agent("one", None), agent("two", None)], None)
         .await;
     harness.observe("acme.com", SourceName::HttpProbe, 10).await;
 
@@ -468,8 +527,8 @@ async fn the_summary_is_written_once_every_agent_has_a_result(pool: PgPool) {
         stored.evidence[0].provenance.as_str(),
         "https://acme.com/http_probe"
     );
-    assert_eq!(stored.model, SYNTHESIS);
-    assert!(stored.prompt_version.starts_with("aggregator@"));
+    assert_eq!(stored.provenance.model, SYNTHESIS);
+    assert!(stored.provenance.prompt_version.starts_with("aggregator@"));
     assert_eq!(harness.aggregator_calls().len(), 1);
     assert_eq!(
         harness.lead(profile, "acme.com").await.status,
@@ -482,7 +541,7 @@ async fn a_lead_missing_an_agent_result_is_not_summarised(pool: PgPool) {
     let harness = Harness::new(pool.clone());
     harness.defaults().await;
     let profile = harness
-        .profile(vec![agent("one", 5, None), agent("two", 5, None)], None)
+        .profile(vec![agent("one", None), agent("two", None)], None)
         .await;
     harness.observe("acme.com", SourceName::HttpProbe, 10).await;
     harness.evaluate().await;
@@ -502,7 +561,7 @@ async fn a_lead_missing_an_agent_result_is_not_summarised(pool: PgPool) {
 #[sqlx::test(migrations = "../../migrations")]
 async fn invalid_agent_results_still_complete_the_set(pool: PgPool) {
     let harness = Harness::new(pool);
-    let profile = harness.profile(vec![agent("solo", 5, None)], None).await;
+    let profile = harness.profile(vec![agent("solo", None)], None).await;
     harness.observe("acme.com", SourceName::HttpProbe, 10).await;
     let synthesis = harness.provider(SYNTHESIS, 0).await;
     harness
@@ -521,9 +580,18 @@ async fn invalid_agent_results_still_complete_the_set(pool: PgPool) {
             .instruction
             .contains("confidence not computed; verdict pending")
     );
-    let agent_block = &calls[0].documents.last().unwrap().1;
+    let agent_block = &calls[0]
+        .documents
+        .iter()
+        .find(|document| document.0 == "qualification:solo")
+        .unwrap()
+        .1;
     assert!(agent_block.contains("status: invalid, left out of the confidence"));
     assert!(agent_block.contains("fournisseur indisponible"));
+    let scoring_block = &calls[0].documents.last().unwrap().1;
+    assert!(scoring_block.contains(
+        "status: invalid, left out of the decision (aucun rapport de qualification valide)"
+    ));
     let lead = harness.lead(profile, "acme.com").await;
     assert_eq!(lead.confidence, None);
     assert_eq!(lead.verdict, None);
@@ -535,9 +603,7 @@ async fn the_aggregator_uses_its_provider_else_the_synthesis_default(pool: PgPoo
     let harness = Harness::new(pool);
     harness.defaults().await;
     let own = harness.provider("model-own", 0).await;
-    let profile = harness
-        .profile(vec![agent("solo", 5, None)], Some(own))
-        .await;
+    let profile = harness.profile(vec![agent("solo", None)], Some(own)).await;
     harness.observe("acme.com", SourceName::HttpProbe, 10).await;
     harness.observe("beta.com", SourceName::HttpProbe, 11).await;
     harness.pass().await;
@@ -548,15 +614,19 @@ async fn the_aggregator_uses_its_provider_else_the_synthesis_default(pool: PgPoo
         harness
             .seen()
             .iter()
-            .filter(|call| !call.aggregator)
+            .filter(|call| !call.aggregator && !call.scoring)
             .all(|call| call.model == CLASSIFIER)
     );
     assert_eq!(
-        harness.assessments(profile, "acme.com").await[0].model,
+        harness.assessments(profile, "acme.com").await[0]
+            .provenance
+            .model,
         "model-own"
     );
 
-    harness.revise(profile, vec![agent("solo", 5, None)]).await;
+    harness
+        .revise(profile, vec![revised(agent("solo", None))])
+        .await;
     harness.pass().await;
 
     let latest = harness.aggregator_calls();
@@ -569,7 +639,7 @@ async fn the_prompt_holds_the_aggregator_context_signals_agents_and_computed_fac
     let harness = Harness::new(pool);
     harness.defaults().await;
     harness
-        .profile(vec![agent("one", 5, None), agent("two", 5, None)], None)
+        .profile(vec![agent("one", None), agent("two", None)], None)
         .await;
     harness.observe("acme.com", SourceName::HttpProbe, 10).await;
     harness.observe("acme.com", SourceName::DnsCname, 11).await;
@@ -585,10 +655,10 @@ async fn the_prompt_holds_the_aggregator_context_signals_agents_and_computed_fac
     assert!(call.system.contains("Contract JSON schema:"));
     assert!(
         call.instruction
-            .contains("confidence 100.0 %; verdict reliable")
+            .contains("confidence 80.0 %; verdict reliable; score 85 out of 100")
     );
     assert!(call.instruction.contains("Documents 0 to 1"));
-    assert_eq!(call.documents.len(), 5);
+    assert_eq!(call.documents.len(), 6);
     assert!(call.documents[0].1.starts_with(
         "acme.com expose Keycloak-http_probe (sonde HTTP, version 21.1)\nsource: http_probe"
     ));
@@ -622,14 +692,21 @@ async fn the_prompt_holds_the_aggregator_context_signals_agents_and_computed_fac
             .contains("answer: Forte (forte), confidence 90 %")
     );
     assert_eq!(call.documents[4].0, "qualification:two");
+    assert_eq!(call.documents[5].0, "scoring:score-global");
+    let scoring = &call.documents[5].1;
+    assert!(scoring.starts_with("scoring agent: Score global (weight 5)"));
+    assert!(scoring.contains("status: valid\nscore: 85 out of 100"));
+    assert!(scoring.contains("reason: Le lead correspond à la cible."));
+    assert!(scoring.contains("criterion: Le lead correspond-il à la cible de l'offre ?"));
 }
 
 #[sqlx::test(migrations = "../../migrations")]
 async fn the_aggregator_cannot_change_the_computed_confidence_or_verdict(pool: PgPool) {
     let harness = Harness::new(pool);
     harness.defaults().await;
-    let profile = harness.profile(vec![agent("solo", 5, None)], None).await;
+    let profile = harness.profile(vec![agent("solo", None)], None).await;
     harness.script("model-class", vec![Reply::Worst]);
+    harness.script("model-synth#scoring", vec![Reply::Worst]);
     harness.observe("acme.com", SourceName::HttpProbe, 10).await;
     let mut hostile = summary_with(GOOD_QUOTE);
     hostile["confidence"] = json!(99.0);
@@ -639,8 +716,9 @@ async fn the_aggregator_cannot_change_the_computed_confidence_or_verdict(pool: P
     harness.pass().await;
 
     let lead = harness.lead(profile, "acme.com").await;
-    assert_eq!(lead.confidence, Some(0.0));
+    assert_eq!(lead.confidence, Some(80.0));
     assert_eq!(lead.verdict, Some(Verdict::Discarded));
+    assert_eq!(lead.llm_score, Some(10));
     assert_eq!(harness.assessments(profile, "acme.com").await.len(), 1);
 }
 
@@ -648,7 +726,7 @@ async fn the_aggregator_cannot_change_the_computed_confidence_or_verdict(pool: P
 async fn unverified_evidence_is_retried_once_then_the_summary_is_kept_flagged(pool: PgPool) {
     let harness = Harness::new(pool);
     harness.defaults().await;
-    let profile = harness.profile(vec![agent("solo", 5, None)], None).await;
+    let profile = harness.profile(vec![agent("solo", None)], None).await;
     harness.observe("acme.com", SourceName::HttpProbe, 10).await;
     harness.script(
         SYNTHESIS,
@@ -681,7 +759,7 @@ async fn unverified_evidence_is_retried_once_then_the_summary_is_kept_flagged(po
 async fn a_correct_second_answer_is_stored_as_verified(pool: PgPool) {
     let harness = Harness::new(pool);
     harness.defaults().await;
-    let profile = harness.profile(vec![agent("solo", 5, None)], None).await;
+    let profile = harness.profile(vec![agent("solo", None)], None).await;
     harness.observe("acme.com", SourceName::HttpProbe, 10).await;
     harness.script(SYNTHESIS, vec![Reply::Quote("invented quote"), Reply::Good]);
 
@@ -698,7 +776,7 @@ async fn a_correct_second_answer_is_stored_as_verified(pool: PgPool) {
 async fn a_partly_verified_answer_keeps_only_the_checked_quotes(pool: PgPool) {
     let harness = Harness::new(pool);
     harness.defaults().await;
-    let profile = harness.profile(vec![agent("solo", 5, None)], None).await;
+    let profile = harness.profile(vec![agent("solo", None)], None).await;
     harness.observe("acme.com", SourceName::HttpProbe, 10).await;
     let mut mixed = summary_with(GOOD_QUOTE);
     mixed["evidence"] = json!([
@@ -714,16 +792,235 @@ async fn a_partly_verified_answer_keeps_only_the_checked_quotes(pool: PgPool) {
     harness.pass().await;
 
     let stored = &harness.assessments(profile, "acme.com").await[0];
-    assert!(!stored.evidence_verified);
+    assert!(stored.evidence_verified);
     assert_eq!(stored.evidence.len(), 1);
     assert_eq!(stored.evidence[0].quote, GOOD_QUOTE);
+    assert_eq!(stored.quality_warnings, [QualityWarning::DroppedQuotes]);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_verbatim_signal_sentence_with_its_metadata_lines_is_verified_with_its_provenance(
+    pool: PgPool,
+) {
+    let harness = Harness::new(pool);
+    harness.defaults().await;
+    let profile = harness.profile(vec![agent("solo", None)], None).await;
+    harness.observe("acme.com", SourceName::HttpProbe, 10).await;
+    let observed = at(10).to_rfc3339_opts(SecondsFormat::Secs, true);
+    let spanning = format!("{GOOD_QUOTE}\nsource: http_probe\nobserved: {observed}");
+    harness.script(
+        SYNTHESIS,
+        vec![Reply::Raw({
+            let mut value = summary_with(&spanning);
+            value["evidence"] = json!([
+                {"document_index": 0, "quote": spanning},
+                {"document_index": 0, "quote": format!("source: http_probe observed: {observed}")}
+            ]);
+            value
+        })],
+    );
+
+    let report = harness.pass().await;
+
+    assert_eq!(report.unverified, 0);
+    let stored = &harness.assessments(profile, "acme.com").await[0];
+    assert!(stored.evidence_verified);
+    assert!(stored.quality_warnings.is_empty());
+    assert_eq!(stored.evidence.len(), 2);
+    assert!(
+        stored
+            .evidence
+            .iter()
+            .all(|item| item.provenance.as_str() == "https://acme.com/http_probe")
+    );
+}
+
+fn repeating() -> Reply {
+    let mut value = summary_with(GOOD_QUOTE);
+    value["verdict_narrative"] = json!(
+        "Le verdict est fiable avec une confiance de 100,0 %. Le verdict est fiable avec une confiance de 100,0 %."
+    );
+    Reply::Raw(value)
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_repeating_answer_is_retried_with_its_violations_and_a_clean_second_answer_is_stored_clean(
+    pool: PgPool,
+) {
+    let harness = Harness::new(pool);
+    harness.defaults().await;
+    let profile = harness.profile(vec![agent("solo", None)], None).await;
+    harness.observe("acme.com", SourceName::HttpProbe, 10).await;
+    harness.script(SYNTHESIS, vec![repeating(), Reply::Good]);
+
+    let report = harness.pass().await;
+
+    assert_eq!(report.leads, 1);
+    let calls = harness.aggregator_calls();
+    assert_eq!(calls.len(), 2);
+    assert!(!calls[0].instruction.contains("broke these output rules"));
+    assert!(calls[1].instruction.contains("broke these output rules"));
+    assert!(
+        calls[1]
+            .instruction
+            .contains("- `verdict_narrative` repeats a sentence")
+    );
+    assert!(
+        calls[1]
+            .instruction
+            .contains("- `verdict_narrative` states a percentage")
+    );
+    assert!(!calls[1].instruction.contains("does not appear verbatim"));
+    let stored = &harness.assessments(profile, "acme.com").await[0];
+    assert!(stored.quality_warnings.is_empty());
+    assert_eq!(
+        stored.verdict_narrative,
+        "Les agents jugent le lead pertinent."
+    );
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_still_repeating_answer_is_stored_with_its_warnings_and_never_blocks_the_lead(
+    pool: PgPool,
+) {
+    let harness = Harness::new(pool);
+    harness.defaults().await;
+    let profile = harness.profile(vec![agent("solo", None)], None).await;
+    harness.observe("acme.com", SourceName::HttpProbe, 10).await;
+    harness.script(SYNTHESIS, vec![repeating(), repeating()]);
+
+    let report = harness.pass().await;
+
+    assert_eq!(report.leads, 1);
+    assert_eq!(report.failed, 0);
+    assert_eq!(harness.aggregator_calls().len(), 2);
+    let stored = &harness.assessments(profile, "acme.com").await[0];
+    assert_eq!(
+        stored.quality_warnings,
+        [QualityWarning::Repetition, QualityWarning::RestatedFigures]
+    );
+    assert!(stored.evidence_verified);
+    assert!(stored.draft.is_some());
+    let lead = harness.lead(profile, "acme.com").await;
+    assert_eq!(lead.status, LeadStatus::Qualified);
+    assert_eq!(harness.queue(&[]).await, ["acme.com"]);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn an_answer_with_a_violation_and_bad_evidence_gets_both_corrections(pool: PgPool) {
+    let harness = Harness::new(pool);
+    harness.defaults().await;
+    harness.profile(vec![agent("solo", None)], None).await;
+    harness.observe("acme.com", SourceName::HttpProbe, 10).await;
+    let mut both = repeating();
+    if let Reply::Raw(value) = &mut both {
+        value["evidence"] = json!([{"document_index": 0, "quote": "invented"}]);
+    }
+    harness.script(SYNTHESIS, vec![both, Reply::Good]);
+
+    harness.pass().await;
+
+    let calls = harness.aggregator_calls();
+    assert!(calls[1].instruction.contains("does not appear verbatim"));
+    assert!(calls[1].instruction.contains("broke these output rules"));
+}
+
+async fn force_a_different_stored_verdict(pool: &PgPool) {
+    sqlx::query("UPDATE lead_qualification_state SET scoring_version = 0")
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE leads SET verdict = 'a_verifier'")
+        .execute(pool)
+        .await
+        .unwrap();
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_rescore_that_changes_the_verdict_summarises_the_lead_again(pool: PgPool) {
+    let harness = Harness::new(pool.clone());
+    harness.defaults().await;
+    let profile = harness.profile(vec![agent("solo", None)], None).await;
+    harness.observe("acme.com", SourceName::HttpProbe, 10).await;
+    harness.evaluate().await;
+    force_a_different_stored_verdict(&pool).await;
+    harness.summarise(settings(100, 10)).await;
+    assert_eq!(harness.aggregator_calls().len(), 1);
+    assert!(
+        harness.aggregator_calls()[0]
+            .instruction
+            .contains("verdict to check")
+    );
+
+    harness.evaluate().await;
+
+    assert_eq!(
+        harness.lead(profile, "acme.com").await.verdict,
+        Some(Verdict::Reliable)
+    );
+    let report = harness.summarise(settings(100, 10)).await;
+    assert_eq!(report.leads, 1);
+    assert_eq!(harness.aggregator_calls().len(), 2);
+    assert_eq!(harness.assessments(profile, "acme.com").await.len(), 2);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_rescore_that_keeps_the_verdict_leaves_the_summary_alone(pool: PgPool) {
+    let harness = Harness::new(pool.clone());
+    harness.defaults().await;
+    let profile = harness.profile(vec![agent("solo", None)], None).await;
+    harness.observe("acme.com", SourceName::HttpProbe, 10).await;
+    harness.pass().await;
+    sqlx::query("UPDATE lead_qualification_state SET scoring_version = 0")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    harness.evaluate().await;
+    let report = harness.summarise(settings(100, 10)).await;
+
+    assert_eq!(report.leads, 0);
+    assert_eq!(report.backlog, 0);
+    assert_eq!(harness.assessments(profile, "acme.com").await.len(), 1);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn regenerating_after_a_verdict_change_keeps_an_edited_draft(pool: PgPool) {
+    let harness = Harness::new(pool.clone());
+    harness.defaults().await;
+    let profile = harness.profile(vec![agent("solo", None)], None).await;
+    harness.observe("acme.com", SourceName::HttpProbe, 10).await;
+    harness.evaluate().await;
+    force_a_different_stored_verdict(&pool).await;
+    harness.summarise(settings(100, 10)).await;
+    let first = harness.assessments(profile, "acme.com").await.remove(0);
+    edit_subject(&harness, &first, "Mon objet").await;
+    harness.script(SYNTHESIS, vec![rewritten("Objet suggéré")]);
+    harness.set_time(100);
+
+    harness.pass().await;
+
+    let latest = &harness.assessments(profile, "acme.com").await[0];
+    assert_eq!(latest.summary, "Bilan réécrit.");
+    assert_eq!(latest.draft.as_ref().unwrap().subject, "Mon objet");
+    assert_eq!(
+        latest
+            .draft_review
+            .as_ref()
+            .unwrap()
+            .suggestion
+            .as_ref()
+            .unwrap()
+            .subject,
+        "Objet suggéré"
+    );
 }
 
 #[sqlx::test(migrations = "../../migrations")]
 async fn a_contract_violation_is_retried_then_the_lead_stays_due(pool: PgPool) {
     let harness = Harness::new(pool);
     harness.defaults().await;
-    let profile = harness.profile(vec![agent("solo", 5, None)], None).await;
+    let profile = harness.profile(vec![agent("solo", None)], None).await;
     harness.observe("acme.com", SourceName::HttpProbe, 10).await;
     harness.script(
         SYNTHESIS,
@@ -761,11 +1058,12 @@ async fn every_lead_gets_a_draft_whatever_its_verdict(pool: PgPool) {
     let provider = harness.provider("model-bad", 0).await;
     let profile = harness
         .profile(
-            vec![agent("good", 1, None), agent("bad", 9, Some(provider))],
+            vec![agent("good", None), agent("bad", Some(provider))],
             None,
         )
         .await;
     harness.script("model-bad", vec![Reply::Worst, Reply::Worst]);
+    harness.script("model-synth#scoring", vec![Reply::Worst, Reply::Worst]);
     harness.observe("low.com", SourceName::HttpProbe, 10).await;
     harness.observe("low2.com", SourceName::HttpProbe, 11).await;
     harness.pass().await;
@@ -790,7 +1088,7 @@ async fn every_lead_gets_a_draft_whatever_its_verdict(pool: PgPool) {
 async fn nothing_is_summarised_again_until_the_results_change(pool: PgPool) {
     let harness = Harness::new(pool);
     harness.defaults().await;
-    let profile = harness.profile(vec![agent("solo", 5, None)], None).await;
+    let profile = harness.profile(vec![agent("solo", None)], None).await;
     harness.observe("acme.com", SourceName::HttpProbe, 10).await;
     harness.pass().await;
     assert_eq!(harness.aggregator_calls().len(), 1);
@@ -806,7 +1104,9 @@ async fn nothing_is_summarised_again_until_the_results_change(pool: PgPool) {
     assert_eq!(harness.aggregator_calls().len(), 2);
     assert_eq!(harness.assessments(profile, "acme.com").await.len(), 2);
 
-    harness.revise(profile, vec![agent("solo", 7, None)]).await;
+    harness
+        .revise(profile, vec![revised(agent("solo", None))])
+        .await;
     let revised = harness.pass().await;
     assert_eq!(revised.leads, 1);
     assert_eq!(harness.assessments(profile, "acme.com").await.len(), 3);
@@ -817,7 +1117,7 @@ async fn nothing_is_summarised_again_until_the_results_change(pool: PgPool) {
 async fn decided_leads_are_left_alone(pool: PgPool) {
     let harness = Harness::new(pool.clone());
     harness.defaults().await;
-    let profile = harness.profile(vec![agent("solo", 5, None)], None).await;
+    let profile = harness.profile(vec![agent("solo", None)], None).await;
     harness.observe("acme.com", SourceName::HttpProbe, 10).await;
     harness.evaluate().await;
     sqlx::query("UPDATE leads SET status = 'validated'")
@@ -842,7 +1142,7 @@ async fn without_a_provider_nothing_is_stored_and_the_lead_stays_due(pool: PgPoo
         .assign_llm_tier(Tier::Triage, classifier)
         .await
         .unwrap();
-    let profile = harness.profile(vec![agent("solo", 5, None)], None).await;
+    let profile = harness.profile(vec![agent("solo", None)], None).await;
     harness.observe("acme.com", SourceName::HttpProbe, 10).await;
 
     let report = harness.pass().await;
@@ -852,7 +1152,7 @@ async fn without_a_provider_nothing_is_stored_and_the_lead_stays_due(pool: PgPoo
     assert_eq!(report.backlog, 1);
     assert!(harness.assessments(profile, "acme.com").await.is_empty());
     let lead = harness.lead(profile, "acme.com").await;
-    assert_eq!(lead.verdict, Some(Verdict::Reliable));
+    assert_eq!(lead.verdict, None);
     assert_eq!(lead.status, LeadStatus::New);
 }
 
@@ -860,7 +1160,7 @@ async fn without_a_provider_nothing_is_stored_and_the_lead_stays_due(pool: PgPoo
 async fn a_provider_failure_leaves_the_lead_due_without_blocking_the_next(pool: PgPool) {
     let harness = Harness::new(pool);
     harness.defaults().await;
-    let profile = harness.profile(vec![agent("solo", 5, None)], None).await;
+    let profile = harness.profile(vec![agent("solo", None)], None).await;
     harness.observe("a.com", SourceName::HttpProbe, 10).await;
     harness.observe("b.com", SourceName::HttpProbe, 11).await;
     harness.script(SYNTHESIS, vec![Reply::Fail(LlmError::Refused)]);
@@ -889,7 +1189,7 @@ async fn an_exhausted_budget_stops_the_batch_and_keeps_leads_due(pool: PgPool) {
         .assign_llm_tier(Tier::Qualification, pricey)
         .await
         .unwrap();
-    let profile = harness.profile(vec![agent("solo", 5, None)], None).await;
+    let profile = harness.profile(vec![agent("solo", None)], None).await;
     harness.observe("a.com", SourceName::HttpProbe, 10).await;
     harness.observe("b.com", SourceName::HttpProbe, 11).await;
     harness.evaluate().await;
@@ -907,7 +1207,7 @@ async fn an_exhausted_budget_stops_the_batch_and_keeps_leads_due(pool: PgPool) {
 async fn a_batch_is_bounded_oldest_first(pool: PgPool) {
     let harness = Harness::new(pool);
     harness.defaults().await;
-    let profile = harness.profile(vec![agent("solo", 5, None)], None).await;
+    let profile = harness.profile(vec![agent("solo", None)], None).await;
     for index in 0..4 {
         harness
             .observe(
@@ -940,7 +1240,7 @@ async fn a_batch_is_bounded_oldest_first(pool: PgPool) {
 async fn an_accepted_summary_is_cached_across_a_reset(pool: PgPool) {
     let harness = Harness::new(pool.clone());
     harness.defaults().await;
-    harness.profile(vec![agent("solo", 5, None)], None).await;
+    harness.profile(vec![agent("solo", None)], None).await;
     harness.observe("acme.com", SourceName::HttpProbe, 10).await;
     harness.pass().await;
     assert_eq!(harness.aggregator_calls().len(), 1);
@@ -959,7 +1259,7 @@ async fn an_accepted_summary_is_cached_across_a_reset(pool: PgPool) {
 async fn suppressed_domains_are_never_summarised(pool: PgPool) {
     let harness = Harness::new(pool);
     harness.defaults().await;
-    harness.profile(vec![agent("solo", 5, None)], None).await;
+    harness.profile(vec![agent("solo", None)], None).await;
     harness.observe("acme.com", SourceName::HttpProbe, 10).await;
     harness.evaluate().await;
     harness
@@ -983,7 +1283,7 @@ async fn suppressed_domains_are_never_summarised(pool: PgPool) {
 async fn failures_back_off_then_the_summary_is_marked_failed(pool: PgPool) {
     let harness = Harness::new(pool);
     harness.defaults().await;
-    let profile = harness.profile(vec![agent("solo", 5, None)], None).await;
+    let profile = harness.profile(vec![agent("solo", None)], None).await;
     harness.observe("acme.com", SourceName::HttpProbe, 10).await;
     harness.script(SYNTHESIS, vec![Reply::Fail(LlmError::Refused); 5]);
     harness.evaluate().await;
@@ -1030,7 +1330,7 @@ fn at_time(seconds: i64) -> DateTime<Utc> {
 async fn a_failed_summary_keeps_retrying_every_six_hours_until_it_succeeds(pool: PgPool) {
     let harness = Harness::new(pool);
     harness.defaults().await;
-    let profile = harness.profile(vec![agent("solo", 5, None)], None).await;
+    let profile = harness.profile(vec![agent("solo", None)], None).await;
     harness.observe("acme.com", SourceName::HttpProbe, 10).await;
     harness.script(SYNTHESIS, vec![Reply::Fail(LlmError::Refused); 6]);
     harness.evaluate().await;
@@ -1070,10 +1370,31 @@ async fn a_failed_summary_keeps_retrying_every_six_hours_until_it_succeeds(pool:
 }
 
 #[sqlx::test(migrations = "../../migrations")]
+async fn a_rejected_aggregation_call_stores_the_provider_message(pool: PgPool) {
+    let harness = Harness::new(pool);
+    harness.defaults().await;
+    let profile = harness.profile(vec![agent("solo", None)], None).await;
+    harness.observe("acme.com", SourceName::HttpProbe, 10).await;
+    harness.script(
+        SYNTHESIS,
+        vec![Reply::Fail(LlmError::Status {
+            status: 400,
+            message: Some("Extra inputs are not permitted".to_owned()),
+        })],
+    );
+    harness.pass().await;
+    let state = harness.summary_state(profile, "acme.com").await.unwrap();
+    assert_eq!(
+        state.error.as_deref(),
+        Some("échec de l'appel au modèle : Extra inputs are not permitted")
+    );
+}
+
+#[sqlx::test(migrations = "../../migrations")]
 async fn retrying_resets_the_counter_and_makes_the_lead_due_at_once(pool: PgPool) {
     let harness = Harness::new(pool);
     harness.defaults().await;
-    let profile = harness.profile(vec![agent("solo", 5, None)], None).await;
+    let profile = harness.profile(vec![agent("solo", None)], None).await;
     harness.observe("acme.com", SourceName::HttpProbe, 10).await;
     harness.script(SYNTHESIS, vec![Reply::Fail(LlmError::Refused)]);
     harness.pass().await;
@@ -1105,7 +1426,7 @@ async fn retrying_resets_the_counter_and_makes_the_lead_due_at_once(pool: PgPool
 async fn a_new_agent_pass_resets_the_failure_counter(pool: PgPool) {
     let harness = Harness::new(pool);
     harness.defaults().await;
-    let profile = harness.profile(vec![agent("solo", 5, None)], None).await;
+    let profile = harness.profile(vec![agent("solo", None)], None).await;
     harness.observe("acme.com", SourceName::HttpProbe, 10).await;
     harness.script(SYNTHESIS, vec![Reply::Fail(LlmError::Refused)]);
     harness.pass().await;
@@ -1140,7 +1461,7 @@ async fn a_missing_provider_is_a_failure_with_its_own_reason(pool: PgPool) {
         .assign_llm_tier(Tier::Triage, classifier)
         .await
         .unwrap();
-    let profile = harness.profile(vec![agent("solo", 5, None)], None).await;
+    let profile = harness.profile(vec![agent("solo", None)], None).await;
     harness.observe("acme.com", SourceName::HttpProbe, 10).await;
 
     harness.pass().await;
@@ -1156,6 +1477,7 @@ async fn edit_subject(harness: &Harness, assessment: &Assessment, subject: &str)
         .edit_draft(
             assessment.id,
             DraftEdit::new(Some(subject.to_owned()), None).unwrap(),
+            None,
         )
         .await
         .unwrap();
@@ -1173,7 +1495,7 @@ fn rewritten(subject: &str) -> Reply {
 async fn an_unedited_pending_draft_is_replaced_by_the_new_one(pool: PgPool) {
     let harness = Harness::new(pool);
     harness.defaults().await;
-    let profile = harness.profile(vec![agent("solo", 5, None)], None).await;
+    let profile = harness.profile(vec![agent("solo", None)], None).await;
     harness.observe("acme.com", SourceName::HttpProbe, 10).await;
     harness.pass().await;
     harness.script(SYNTHESIS, vec![rewritten("Objet réécrit")]);
@@ -1195,7 +1517,7 @@ async fn an_unedited_pending_draft_is_replaced_by_the_new_one(pool: PgPool) {
 async fn an_edited_pending_draft_is_kept_with_the_new_one_as_a_suggestion(pool: PgPool) {
     let harness = Harness::new(pool);
     harness.defaults().await;
-    let profile = harness.profile(vec![agent("solo", 5, None)], None).await;
+    let profile = harness.profile(vec![agent("solo", None)], None).await;
     harness.observe("acme.com", SourceName::HttpProbe, 10).await;
     harness.pass().await;
     let first = harness.assessments(profile, "acme.com").await.remove(0);
@@ -1224,7 +1546,7 @@ async fn an_edited_pending_draft_is_kept_with_the_new_one_as_a_suggestion(pool: 
     assert_eq!(harness.queue(&[]).await, ["acme.com"]);
     harness
         .usecase
-        .approve_draft(latest.id, harness.user().await)
+        .approve_draft(latest.id, harness.user().await, None)
         .await
         .unwrap();
 }
@@ -1233,20 +1555,25 @@ async fn an_edited_pending_draft_is_kept_with_the_new_one_as_a_suggestion(pool: 
 async fn a_decided_draft_stays_untouched_when_the_lead_is_summarised_again(pool: PgPool) {
     let harness = Harness::new(pool);
     harness.defaults().await;
-    let profile = harness.profile(vec![agent("solo", 5, None)], None).await;
+    let profile = harness.profile(vec![agent("solo", None)], None).await;
     harness.observe("acme.com", SourceName::HttpProbe, 10).await;
     harness.pass().await;
     let first = harness.assessments(profile, "acme.com").await.remove(0);
     let user = harness.user().await;
     harness
         .usecase
-        .reject_draft(first.id, user, Some("hors sujet".to_owned()))
+        .reject_draft(
+            first.id,
+            user,
+            Rejection::new(RejectionReason::Other, Some("hors sujet")).unwrap(),
+            None,
+        )
         .await
         .unwrap();
     let lead = harness.lead(profile, "acme.com").await;
     harness
         .usecase
-        .change_lead_status(lead.id, LeadStatus::New, user)
+        .change_lead_status(lead.id, LeadStatus::New, user, None)
         .await
         .unwrap();
     harness.script(SYNTHESIS, vec![rewritten("Objet suggéré")]);
@@ -1264,4 +1591,45 @@ async fn a_decided_draft_stays_untouched_when_the_lead_is_summarised_again(pool:
     assert_eq!(review.reviewed_by, Some(user));
     assert_eq!(review.suggestion, None);
     assert!(harness.queue(&[]).await.is_empty());
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_failed_summary_attempt_is_recorded_and_the_pipeline_waits_for_it(pool: PgPool) {
+    let harness = Harness::new(pool);
+    harness.defaults().await;
+    let profile = harness.profile(vec![agent("solo", None)], None).await;
+    harness.observe("acme.com", SourceName::HttpProbe, 10).await;
+    harness.script(SYNTHESIS, vec![Reply::Fail(LlmError::Refused)]);
+    harness.evaluate().await;
+    harness.set_time(0);
+    harness.summarise(settings(100, 10)).await;
+
+    let lead = harness.lead(profile, "acme.com").await;
+    let timeline = harness.usecase.lead_timeline(lead.id).await.unwrap();
+    let events: Vec<&TimelineEvent> = timeline
+        .rounds
+        .iter()
+        .flat_map(|round| round.events.iter())
+        .collect();
+    let attempt = events
+        .iter()
+        .find(|event| event.kind == timeline_kind::SUMMARY)
+        .unwrap();
+    assert_eq!(attempt.step, TimelineStep::Aggregation);
+    assert_eq!(attempt.status, EventStatus::Failed);
+    let failed = events
+        .iter()
+        .find(|event| event.kind == timeline_kind::SUMMARY_FAILED)
+        .unwrap();
+    assert_eq!(failed.status, EventStatus::Waiting);
+    assert_eq!(failed.detail["attempts"], 1);
+    let synthesis = timeline
+        .pipeline
+        .stages
+        .iter()
+        .find(|state| state.stage == Stage::Synthesis)
+        .unwrap();
+    assert_eq!(synthesis.status, StageStatus::Waiting);
+    assert_eq!(synthesis.reason_code, Some(StageReason::SummaryBackoff));
+    assert!(synthesis.next_at.is_some());
 }

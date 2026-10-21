@@ -1,7 +1,4 @@
-use std::{
-    collections::{HashMap, VecDeque},
-    sync::Mutex,
-};
+use std::{collections::VecDeque, sync::Mutex};
 
 use chrono::{TimeZone, Utc};
 use lodestone_core::{
@@ -16,9 +13,6 @@ const SEARCH: &str =
     include_str!("../../tests/fixtures/france_travail/offres-search.synthetic.json");
 const PAGE_TWO: &str =
     include_str!("../../tests/fixtures/france_travail/offres-search-page2.synthetic.json");
-const TOKEN: &str = include_str!("../../tests/fixtures/france_travail/token.synthetic.json");
-const SECRET_ID: &str = "id-very-secret";
-const SECRET_VALUE: &str = "value-very-secret";
 const FIXTURE_TOKEN: &str = "synthetic-access-token-0001";
 
 fn profile(seed: u128, keywords: Option<&[&str]>) -> ActiveProfile {
@@ -69,47 +63,23 @@ fn response(status: u16, headers: &[(&str, &str)], body: &str) -> FetchResponse 
     }
 }
 
-fn token_body(token: &str, expires_in: u64) -> String {
-    json!({"access_token": token, "token_type": "Bearer", "expires_in": expires_in}).to_string()
-}
-
 struct Recorded {
     url: Url,
     bearer: Option<String>,
-    form: Option<Vec<(String, String)>>,
 }
 
 struct Fake<S: Fn(&Url, usize) -> FetchResponse + Send + Sync> {
-    tokens: Mutex<VecDeque<FetchResponse>>,
     search: S,
     recorded: Mutex<Vec<Recorded>>,
 }
 
 impl<S: Fn(&Url, usize) -> FetchResponse + Send + Sync> Fake<S> {
-    fn new(tokens: Vec<FetchResponse>, search: S) -> Self {
-        Self {
-            tokens: Mutex::new(tokens.into()),
-            search,
-            recorded: Mutex::new(Vec::new()),
-        }
-    }
-
     fn searches(&self) -> Vec<(Url, Option<String>)> {
         self.recorded
             .lock()
             .unwrap()
             .iter()
-            .filter(|call| call.form.is_none())
             .map(|call| (call.url.clone(), call.bearer.clone()))
-            .collect()
-    }
-
-    fn token_calls(&self) -> Vec<Vec<(String, String)>> {
-        self.recorded
-            .lock()
-            .unwrap()
-            .iter()
-            .filter_map(|call| call.form.clone())
             .collect()
     }
 
@@ -124,6 +94,7 @@ impl<S: Fn(&Url, usize) -> FetchResponse + Send + Sync> Fake<S> {
 impl<S: Fn(&Url, usize) -> FetchResponse + Send + Sync> ApiFetcher for Fake<S> {
     async fn call(&self, request: &ApiRequest) -> Result<FetchResponse, FetchError> {
         assert_eq!(request.source, SourceName::FranceTravail);
+        assert!(request.form.is_none());
         let index = {
             let mut recorded = self.recorded.lock().unwrap();
             recorded.push(Recorded {
@@ -132,44 +103,82 @@ impl<S: Fn(&Url, usize) -> FetchResponse + Send + Sync> ApiFetcher for Fake<S> {
                     .bearer
                     .as_ref()
                     .map(|token| token.expose().to_owned()),
-                form: request.form.as_ref().map(|fields| {
-                    fields
-                        .iter()
-                        .map(|(name, value)| (name.clone(), value.expose().to_owned()))
-                        .collect()
-                }),
             });
-            recorded.iter().filter(|call| call.form.is_none()).count()
+            recorded.len()
         };
-        if request.form.is_some() {
-            return Ok(self
-                .tokens
-                .lock()
-                .unwrap()
-                .pop_front()
-                .unwrap_or_else(|| response(400, &[], "{}")));
-        }
         Ok((self.search)(&request.url, index))
+    }
+}
+
+#[derive(Default)]
+struct FakeAccess {
+    queue: Mutex<VecDeque<String>>,
+    current: Mutex<Option<String>>,
+    requested: Mutex<usize>,
+    invalidated: Mutex<usize>,
+}
+
+impl FakeAccess {
+    fn with(tokens: &[&str]) -> Self {
+        Self {
+            queue: Mutex::new(tokens.iter().map(|token| (*token).to_owned()).collect()),
+            ..Self::default()
+        }
+    }
+
+    fn requested(&self) -> usize {
+        *self.requested.lock().unwrap()
+    }
+
+    fn invalidated(&self) -> usize {
+        *self.invalidated.lock().unwrap()
+    }
+}
+
+impl AccessProvider for FakeAccess {
+    async fn access(&self) -> Result<FranceTravailAccess, SourceError> {
+        *self.requested.lock().unwrap() += 1;
+        let mut current = self.current.lock().unwrap();
+        if current.is_none() {
+            *current = self.queue.lock().unwrap().pop_front();
+        }
+        let token = current
+            .clone()
+            .ok_or_else(|| SourceError::Upstream("france travail is not ready".to_owned()))?;
+        Ok(FranceTravailAccess {
+            token: Secret::new(token),
+            api_base_url: Url::parse("https://api.example.test/partenaire/offresdemploi/v2")
+                .unwrap(),
+        })
+    }
+
+    fn invalidate(&self) {
+        *self.invalidated.lock().unwrap() += 1;
+        *self.current.lock().unwrap() = None;
     }
 }
 
 fn settings(max_pages: u32) -> FranceTravailSettings {
     FranceTravailSettings {
-        token_url: Url::parse("https://auth.example.test/token?realm=%2Fpartenaire").unwrap(),
-        api_base_url: Url::parse("https://api.example.test/partenaire/offresdemploi/v2").unwrap(),
-        client_id: Secret::new(SECRET_ID),
-        client_secret: Secret::new(SECRET_VALUE),
         published_since_days: 7,
         max_pages,
     }
 }
 
 fn source_with<S: Fn(&Url, usize) -> FetchResponse + Send + Sync>(
-    tokens: Vec<FetchResponse>,
+    tokens: &[&str],
     search: S,
     max_pages: u32,
-) -> FranceTravailSource<Fake<S>> {
-    FranceTravailSource::new(Arc::new(Fake::new(tokens, search)), settings(max_pages))
+) -> FranceTravailSource<Fake<S>, FakeAccess> {
+    let fetcher = Fake {
+        search,
+        recorded: Mutex::new(Vec::new()),
+    };
+    FranceTravailSource::new(
+        Arc::new(fetcher),
+        FakeAccess::with(tokens),
+        settings(max_pages),
+    )
 }
 
 fn query(url: &Url, name: &str) -> String {
@@ -193,8 +202,8 @@ fn offers(count: usize, from: usize) -> String {
     json!({"resultats": list}).to_string()
 }
 
-fn ok_tokens() -> Vec<FetchResponse> {
-    vec![response(200, &[], TOKEN)]
+fn ok_tokens() -> [&'static str; 1] {
+    [FIXTURE_TOKEN]
 }
 
 fn one_profile() -> [ActiveProfile; 1] {
@@ -221,27 +230,8 @@ fn content_range_total_reads_the_total_after_the_slash() {
 }
 
 #[tokio::test]
-async fn token_request_is_a_client_credentials_form_with_the_offers_scope() {
-    let source = source_with(ok_tokens(), |_, _| response(204, &[], ""), 5);
-    source.collect_with_stats(&one_profile()).await.unwrap();
-    let calls = source.fetcher.token_calls();
-    assert_eq!(calls.len(), 1);
-    let form: HashMap<&str, &str> = calls[0]
-        .iter()
-        .map(|(name, value)| (name.as_str(), value.as_str()))
-        .collect();
-    assert_eq!(form["grant_type"], "client_credentials");
-    assert_eq!(form["client_id"], SECRET_ID);
-    assert_eq!(form["client_secret"], SECRET_VALUE);
-    assert_eq!(form["scope"], "api_offresdemploiv2 o2dsoffre");
-    let recorded = source.fetcher.recorded.lock().unwrap();
-    assert_eq!(query(&recorded[0].url, "realm"), "/partenaire");
-    assert!(recorded[0].bearer.is_none());
-}
-
-#[tokio::test]
 async fn search_request_carries_bearer_keyword_range_and_window() {
-    let source = source_with(ok_tokens(), |_, _| response(204, &[], ""), 5);
+    let source = source_with(&ok_tokens(), |_, _| response(204, &[], ""), 5);
     source
         .collect(&[profile(1, Some(&["ing\u{e9}nieur IAM"]))], Utc::now())
         .await
@@ -257,41 +247,21 @@ async fn search_request_carries_bearer_keyword_range_and_window() {
 }
 
 #[tokio::test]
-async fn the_token_is_reused_across_requests_and_queries() {
-    let source = source_with(ok_tokens(), |_, _| response(204, &[], ""), 5);
+async fn the_access_is_asked_for_every_request_and_never_invalidated_on_success() {
+    let source = source_with(&ok_tokens(), |_, _| response(204, &[], ""), 5);
     source
         .collect_with_stats(&[profile(1, Some(&["iam", "sso", "keycloak"]))])
         .await
         .unwrap();
     assert_eq!(source.fetcher.searches().len(), 3);
-    assert_eq!(source.fetcher.token_calls().len(), 1);
-}
-
-#[tokio::test]
-async fn a_token_inside_the_expiry_margin_is_refreshed() {
-    let tokens = vec![
-        response(200, &[], &token_body("short", 30)),
-        response(200, &[], &token_body("fresh", 1499)),
-    ];
-    let source = source_with(tokens, |_, _| response(204, &[], ""), 5);
-    source
-        .collect_with_stats(&[profile(1, Some(&["iam", "sso"]))])
-        .await
-        .unwrap();
-    assert_eq!(
-        source.fetcher.bearers(),
-        [Some("short".to_owned()), Some("fresh".to_owned())]
-    );
+    assert_eq!(source.access.requested(), 3);
+    assert_eq!(source.access.invalidated(), 0);
 }
 
 #[tokio::test]
 async fn a_401_refreshes_the_token_once_and_retries() {
-    let tokens = vec![
-        response(200, &[], &token_body("stale", 1499)),
-        response(200, &[], &token_body("fresh", 1499)),
-    ];
     let source = source_with(
-        tokens,
+        &["stale", "fresh"],
         |_, index| {
             if index == 1 {
                 response(401, &[("www-authenticate", "Bearer")], "")
@@ -307,38 +277,29 @@ async fn a_401_refreshes_the_token_once_and_retries() {
         source.fetcher.bearers(),
         [Some("stale".to_owned()), Some("fresh".to_owned())]
     );
-    assert_eq!(source.fetcher.token_calls().len(), 2);
+    assert_eq!(source.access.invalidated(), 1);
 }
 
 #[tokio::test]
 async fn a_second_401_fails_instead_of_looping() {
-    let tokens = vec![response(200, &[], TOKEN), response(200, &[], TOKEN)];
-    let source = source_with(tokens, |_, _| response(401, &[], ""), 5);
+    let source = source_with(&["one", "two"], |_, _| response(401, &[], ""), 5);
     let error = source.collect_with_stats(&one_profile()).await.unwrap_err();
     assert!(matches!(error, SourceError::Upstream(message) if message.contains("401")));
     assert_eq!(source.fetcher.searches().len(), 2);
 }
 
 #[tokio::test]
-async fn a_rejected_token_request_fails_without_echoing_the_body() {
-    let tokens = vec![response(
-        400,
-        &[],
-        r#"{"error":"invalid_client","error_description":"Client authentication failed"}"#,
-    )];
-    let source = source_with(tokens, |_, _| response(204, &[], ""), 5);
+async fn an_unavailable_access_stops_the_run_before_any_search() {
+    let source = source_with(&[], |_, _| response(204, &[], ""), 5);
     let error = source.collect_with_stats(&one_profile()).await.unwrap_err();
-    let printed = format!("{error}");
-    assert!(printed.contains("400"));
-    assert!(!printed.contains("invalid_client"));
-    assert!(!printed.contains(SECRET_VALUE));
+    assert!(matches!(error, SourceError::Upstream(message) if message.contains("not ready")));
     assert!(source.fetcher.searches().is_empty());
 }
 
 #[tokio::test]
 async fn pagination_follows_206_and_content_range_until_the_total() {
     let source = source_with(
-        ok_tokens(),
+        &ok_tokens(),
         |url, _| match query(url, "range").as_str() {
             "0-149" => response(
                 206,
@@ -374,7 +335,7 @@ async fn pagination_follows_206_and_content_range_until_the_total() {
 
 #[tokio::test]
 async fn a_complete_200_stops_pagination() {
-    let source = source_with(ok_tokens(), |_, _| response(200, &[], &offers(40, 0)), 20);
+    let source = source_with(&ok_tokens(), |_, _| response(200, &[], &offers(40, 0)), 20);
     let (candidates, stats) = source.collect_with_stats(&one_profile()).await.unwrap();
     assert_eq!(candidates.len(), 40);
     assert_eq!(stats.requests, 1);
@@ -391,14 +352,14 @@ fn endless(_: &Url, index: usize) -> FetchResponse {
 
 #[tokio::test]
 async fn pagination_is_bounded_by_max_pages() {
-    let source = source_with(ok_tokens(), endless, 3);
+    let source = source_with(&ok_tokens(), endless, 3);
     source.collect_with_stats(&one_profile()).await.unwrap();
     assert_eq!(source.fetcher.searches().len(), 3);
 }
 
 #[tokio::test]
 async fn pagination_is_bounded_by_the_last_index_cap() {
-    let source = source_with(ok_tokens(), endless, 500);
+    let source = source_with(&ok_tokens(), endless, 500);
     source.collect_with_stats(&one_profile()).await.unwrap();
     let searches = source.fetcher.searches();
     assert_eq!(searches.len(), 21);
@@ -407,7 +368,7 @@ async fn pagination_is_bounded_by_the_last_index_cap() {
 
 #[tokio::test]
 async fn a_204_means_no_offers_and_no_candidates() {
-    let source = source_with(ok_tokens(), |_, _| response(204, &[], ""), 5);
+    let source = source_with(&ok_tokens(), |_, _| response(204, &[], ""), 5);
     let (candidates, stats) = source.collect_with_stats(&one_profile()).await.unwrap();
     assert!(candidates.is_empty());
     assert_eq!(stats.requests, 1);
@@ -417,7 +378,7 @@ async fn a_204_means_no_offers_and_no_candidates() {
 #[tokio::test(start_paused = true)]
 async fn a_429_with_a_short_retry_after_waits_and_retries() {
     let source = source_with(
-        ok_tokens(),
+        &ok_tokens(),
         |_, index| {
             if index == 1 {
                 response(429, &[("retry-after", "2")], "")
@@ -437,7 +398,7 @@ async fn a_429_with_a_short_retry_after_waits_and_retries() {
 #[tokio::test(start_paused = true)]
 async fn a_429_with_a_long_retry_after_is_reported_as_rate_limited() {
     let source = source_with(
-        ok_tokens(),
+        &ok_tokens(),
         |_, _| response(429, &[("retry-after", "600")], ""),
         5,
     );
@@ -454,7 +415,7 @@ async fn a_429_with_a_long_retry_after_is_reported_as_rate_limited() {
 #[tokio::test(start_paused = true)]
 async fn a_persistent_429_gives_up_after_bounded_retries() {
     let source = source_with(
-        ok_tokens(),
+        &ok_tokens(),
         |_, _| response(429, &[("retry-after", "1")], ""),
         5,
     );
@@ -465,7 +426,7 @@ async fn a_persistent_429_gives_up_after_bounded_retries() {
 
 #[tokio::test]
 async fn other_statuses_are_upstream_errors() {
-    let source = source_with(ok_tokens(), |_, _| response(400, &[], "bad"), 5);
+    let source = source_with(&ok_tokens(), |_, _| response(400, &[], "bad"), 5);
     let error = source.collect_with_stats(&one_profile()).await.unwrap_err();
     assert!(matches!(error, SourceError::Upstream(message) if message.contains("400")));
 }
@@ -477,7 +438,7 @@ async fn offers_are_deduplicated_across_profiles_and_keywords() {
         json!({"resultats": page["resultats"].as_array().unwrap()[..2].to_vec()}).to_string()
     };
     let source = source_with(
-        ok_tokens(),
+        &ok_tokens(),
         |url, _| match query(url, "motsCles").as_str() {
             "keycloak" => response(200, &[], SEARCH),
             "sso" => response(200, &[], &first_two),
@@ -503,7 +464,7 @@ async fn offers_are_deduplicated_across_profiles_and_keywords() {
 
 #[tokio::test]
 async fn an_offer_found_by_two_queries_is_one_candidate() {
-    let source = source_with(ok_tokens(), |_, _| response(200, &[], SEARCH), 5);
+    let source = source_with(&ok_tokens(), |_, _| response(200, &[], SEARCH), 5);
     let (candidates, stats) = source
         .collect_with_stats(&[profile(1, Some(&["iam"])), profile(2, Some(&["sso"]))])
         .await
@@ -515,18 +476,19 @@ async fn an_offer_found_by_two_queries_is_one_candidate() {
 
 #[tokio::test]
 async fn no_france_travail_keywords_means_no_request() {
-    let source = source_with(ok_tokens(), |_, _| response(204, &[], ""), 5);
+    let source = source_with(&ok_tokens(), |_, _| response(204, &[], ""), 5);
     let candidates = source
         .collect(&[profile(1, None)], Utc::now())
         .await
         .unwrap();
     assert!(candidates.is_empty());
-    assert!(source.fetcher.recorded.lock().unwrap().is_empty());
+    assert!(source.fetcher.searches().is_empty());
+    assert_eq!(source.access.requested(), 0);
 }
 
 #[tokio::test]
 async fn the_recorded_page_resolves_domains_and_counts_skips() {
-    let source = source_with(ok_tokens(), |_, _| response(200, &[], SEARCH), 5);
+    let source = source_with(&ok_tokens(), |_, _| response(200, &[], SEARCH), 5);
     let (candidates, stats) = source.collect_with_stats(&one_profile()).await.unwrap();
     assert_eq!(stats.records, 6);
     assert_eq!(stats.candidates, 3);
@@ -631,11 +593,4 @@ fn the_text_is_bounded() {
         parse_offer(&offer).unwrap().text.chars().count(),
         TEXT_MAX_CHARS
     );
-}
-
-#[test]
-fn settings_debug_never_prints_the_credentials() {
-    let printed = format!("{:?}", settings(5));
-    assert!(!printed.contains(SECRET_ID));
-    assert!(!printed.contains(SECRET_VALUE));
 }

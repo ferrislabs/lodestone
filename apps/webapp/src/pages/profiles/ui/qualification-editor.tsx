@@ -3,11 +3,19 @@ import { PlusIcon } from 'lucide-react'
 import { FieldErrors } from '#/components/schema-form/field-frame'
 import type { JsonObject, JsonValue, Problem } from '#/lib/schema-form'
 import {
+	type CalibrationStates,
+	calibrationKey,
+} from '#/pages/profiles/lib/agent-calibration'
+import { agentField } from '#/pages/profiles/lib/agents'
+import {
+	escalationOf,
+	evidenceSettingsOf,
 	type ProviderOption,
 	verdictOf,
 } from '#/pages/profiles/lib/qualification'
 import type { QualificationActions } from '#/pages/profiles/lib/qualification-actions'
 import { AggregatorPanel } from '#/pages/profiles/ui/aggregator-panel'
+import { EscalationPanel } from '#/pages/profiles/ui/escalation-panel'
 import { QualificationCard } from '#/pages/profiles/ui/qualification-card'
 import { QualificationPicker } from '#/pages/profiles/ui/qualification-picker'
 import { QualificationSheet } from '#/pages/profiles/ui/qualification-sheet'
@@ -21,6 +29,7 @@ interface QualificationEditorProps {
 	editing: number | null
 	confirmingRemove: number | null
 	picking: boolean
+	calibration: CalibrationStates
 	previewing: boolean
 	actions: QualificationActions
 }
@@ -33,6 +42,7 @@ export function QualificationEditor({
 	editing,
 	confirmingRemove,
 	picking,
+	calibration,
 	previewing,
 	actions,
 }: QualificationEditorProps) {
@@ -100,8 +110,15 @@ export function QualificationEditor({
 				providers={providers}
 				actions={actions}
 			/>
+			<EscalationPanel
+				escalation={escalationOf(value)}
+				problems={problems}
+				providers={providers}
+				actions={actions}
+			/>
 			<VerdictPanel
 				verdict={verdictOf(value)}
+				evidence={evidenceSettingsOf(value)}
 				problems={problems}
 				actions={actions}
 			/>
@@ -112,6 +129,11 @@ export function QualificationEditor({
 					index={editing}
 					problems={problems}
 					providers={providers}
+					calibration={
+						calibration[
+							calibrationKey('qualification', agentField(editingAgent, 'id'))
+						]
+					}
 					previewing={previewing}
 					actions={actions}
 				/>

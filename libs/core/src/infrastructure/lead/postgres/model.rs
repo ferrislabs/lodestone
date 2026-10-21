@@ -14,13 +14,20 @@ pub struct LeadRow {
     pub domain: String,
     pub status: String,
     pub score: f64,
-    pub score_breakdown: serde_json::Value,
     pub confidence: Option<f64>,
     pub verdict: Option<String>,
+    pub llm_score: Option<i16>,
     pub qualified_at: Option<DateTime<Utc>>,
     pub first_seen_at: DateTime<Utc>,
     pub last_seen_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct GroupedLeadRow {
+    #[sqlx(flatten)]
+    pub lead: LeadRow,
+    pub siren: Option<String>,
 }
 
 impl TryFrom<LeadRow> for Lead {
@@ -37,8 +44,6 @@ impl TryFrom<LeadRow> for Lead {
             .map_err(|_| CoreError::Internal("stored lead status is invalid".to_owned()))?;
         let score = Score::new(row.score)
             .map_err(|_| CoreError::Internal("stored lead score is invalid".to_owned()))?;
-        let score_breakdown = serde_json::from_value(row.score_breakdown)
-            .map_err(|_| CoreError::Internal("stored score breakdown is invalid".to_owned()))?;
         let verdict = row
             .verdict
             .as_deref()
@@ -53,9 +58,19 @@ impl TryFrom<LeadRow> for Lead {
             domain,
             status,
             score,
-            score_breakdown,
             confidence: row.confidence,
             verdict,
+            llm_score: row
+                .llm_score
+                .map(|score| {
+                    u8::try_from(score)
+                        .ok()
+                        .filter(|score| *score <= 100)
+                        .ok_or_else(|| {
+                            CoreError::Internal("stored lead llm score is invalid".to_owned())
+                        })
+                })
+                .transpose()?,
             qualified_at: row.qualified_at,
             first_seen_at: row.first_seen_at,
             last_seen_at: row.last_seen_at,

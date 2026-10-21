@@ -28,8 +28,8 @@ impl Seed {
     async fn lead(&self, profile: &str, domain: &str, status: &str, score: f64) -> String {
         let id = common::generate_uuid_v7();
         sqlx::query(
-            "INSERT INTO leads (id, profile_id, domain, status, score, score_breakdown, first_seen_at, last_seen_at, updated_at)
-             VALUES ($1, $2::uuid, $3, $4, $5, '[]'::jsonb, now(), now(), now())",
+            "INSERT INTO leads (id, profile_id, domain, status, score, first_seen_at, last_seen_at, updated_at)
+             VALUES ($1, $2::uuid, $3, $4, $5, now(), now(), now())",
         )
         .bind(id)
         .bind(profile)
@@ -472,7 +472,7 @@ async fn rejecting_records_the_reason_and_rejects_the_lead(pool: PgPool) {
     let (status, body) = api
         .post(
             &format!("/api/v1/drafts/{draft}/reject"),
-            Some(json!({"reason": "  Not a fit  "})),
+            Some(json!({"reason": "autre", "note": "  Not a fit  "})),
         )
         .await;
 
@@ -484,21 +484,42 @@ async fn rejecting_records_the_reason_and_rejects_the_lead(pool: PgPool) {
 }
 
 #[sqlx::test(migrations = "../../migrations")]
-async fn rejecting_without_a_body_is_allowed_and_a_long_reason_is_not(pool: PgPool) {
+async fn rejecting_requires_a_known_reason_and_a_bounded_note(pool: PgPool) {
     let (seed, lead, draft) = single(&pool).await;
-    let api = Api::new(pool).await;
+    let api = Api::new(pool.clone()).await;
     let uri = format!("/api/v1/drafts/{draft}/reject");
 
-    let (status, body) = api
-        .post(&uri, Some(json!({"reason": "r".repeat(1001)})))
-        .await;
-    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
-    assert_eq!(paths(&body), ["reason"]);
+    for (body, path) in [
+        (None, "reason"),
+        (Some(json!({})), "reason"),
+        (Some(json!({"reason": ""})), "reason"),
+        (Some(json!({"reason": "pas_une_raison"})), "reason"),
+        (Some(json!({"reason": "autre"})), "note"),
+        (Some(json!({"reason": "autre", "note": "  "})), "note"),
+        (
+            Some(json!({"reason": "hors_cible", "note": "n".repeat(501)})),
+            "note",
+        ),
+    ] {
+        let (status, response) = api.post(&uri, body.clone()).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body:?}");
+        assert_eq!(paths(&response), [path], "{body:?}");
+    }
     assert_eq!(seed.lead_status(&lead).await, "qualified");
+    assert_eq!(seed.count("decision_labels").await, 0);
 
-    let (status, body) = api.post(&uri, None).await;
+    let (status, body) = api.post(&uri, Some(json!({"reason": "hors_cible"}))).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["data"]["draft"]["rejection_reason"], Value::Null);
+    let reasons: Vec<Option<String>> =
+        sqlx::query_scalar("SELECT rejection_reason FROM decision_labels ORDER BY kind")
+            .fetch_all(&pool)
+            .await
+            .expect("labels");
+    assert_eq!(
+        reasons,
+        [Some("hors_cible".to_owned()), Some("hors_cible".to_owned())]
+    );
 }
 
 #[sqlx::test(migrations = "../../migrations")]
@@ -511,7 +532,12 @@ async fn a_decided_draft_cannot_be_decided_or_edited_again(pool: PgPool) {
     assert_eq!(api.post(&approve, None).await.0, StatusCode::OK);
 
     assert_eq!(api.post(&approve, None).await.0, StatusCode::CONFLICT);
-    assert_eq!(api.post(&reject, None).await.0, StatusCode::CONFLICT);
+    assert_eq!(
+        api.post(&reject, Some(json!({"reason": "hors_cible"})))
+            .await
+            .0,
+        StatusCode::CONFLICT
+    );
     assert_eq!(
         api.patch(&draft, json!({"subject": "late"})).await.0,
         StatusCode::CONFLICT
@@ -525,7 +551,10 @@ async fn concurrent_decisions_let_exactly_one_win(pool: PgPool) {
     let approve = format!("/api/v1/drafts/{draft}/approve");
     let reject = format!("/api/v1/drafts/{draft}/reject");
 
-    let ((first, _), (second, _)) = tokio::join!(api.post(&approve, None), api.post(&reject, None));
+    let ((first, _), (second, _)) = tokio::join!(
+        api.post(&approve, None),
+        api.post(&reject, Some(json!({"reason": "hors_cible"})))
+    );
 
     let mut statuses = [first, second];
     statuses.sort();
@@ -586,9 +615,12 @@ async fn a_suppressed_lead_hides_its_draft_and_blocks_every_action(pool: PgPool)
         StatusCode::NOT_FOUND
     );
     assert_eq!(
-        api.post(&format!("/api/v1/drafts/{draft}/reject"), None)
-            .await
-            .0,
+        api.post(
+            &format!("/api/v1/drafts/{draft}/reject"),
+            Some(json!({"reason": "hors_cible"}))
+        )
+        .await
+        .0,
         StatusCode::NOT_FOUND
     );
     let (_, listed) = api.get("/api/v1/drafts").await;
@@ -649,6 +681,186 @@ async fn service_accounts_read_but_cannot_edit_or_decide(pool: PgPool) {
         assert_eq!(status, StatusCode::FORBIDDEN, "{method} {uri}");
     }
     assert_eq!(seed.lead_status(&lead).await, "qualified");
+}
+
+async fn revision(api: &Api, draft: &str) -> u64 {
+    let (status, body) = api.get(&format!("/api/v1/drafts/{draft}")).await;
+    assert_eq!(status, StatusCode::OK);
+    body["data"]["draft"]["revision"]
+        .as_u64()
+        .expect("revision")
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_draft_exposes_its_revision_and_each_edit_bumps_it(pool: PgPool) {
+    let (_seed, _lead, draft) = single(&pool).await;
+    let api = Api::new(pool).await;
+
+    let (_, listed) = api.get("/api/v1/drafts").await;
+    assert_eq!(listed["data"][0]["draft"]["revision"], 0);
+    assert_eq!(revision(&api, &draft).await, 0);
+
+    let (status, edited) = api.patch(&draft, json!({"subject": "One"})).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(edited["data"]["draft"]["revision"], 1);
+    let (_, edited) = api.patch(&draft, json!({"body": "Two"})).await;
+    assert_eq!(edited["data"]["draft"]["revision"], 2);
+
+    let (_, listed) = api.get("/api/v1/drafts").await;
+    assert_eq!(listed["data"][0]["draft"]["revision"], 2);
+    let lead = listed["data"][0]["lead"]["id"].as_str().expect("lead");
+    let (_, detail) = api.get(&format!("/api/v1/leads/{lead}")).await;
+    assert_eq!(detail["data"]["assessments"][0]["draft"]["revision"], 2);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn an_edit_with_a_stale_revision_answers_conflict(pool: PgPool) {
+    let (_seed, _lead, draft) = single(&pool).await;
+    let api = Api::new(pool).await;
+
+    let (status, body) = api
+        .patch(&draft, json!({"subject": "First", "expected_revision": 0}))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["data"]["draft"]["revision"], 1);
+
+    let (status, body) = api
+        .patch(&draft, json!({"subject": "Second", "expected_revision": 0}))
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert!(body.to_string().contains("draft changed"), "{body}");
+    assert_eq!(revision(&api, &draft).await, 1);
+    let (_, current) = api.get(&format!("/api/v1/drafts/{draft}")).await;
+    assert_eq!(current["data"]["draft"]["subject"], "First");
+
+    let (status, body) = api
+        .patch(&draft, json!({"body": "Third", "expected_revision": 1}))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["data"]["draft"]["revision"], 2);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn approving_with_a_stale_revision_answers_conflict_and_with_the_current_one_succeeds(
+    pool: PgPool,
+) {
+    let (seed, lead, draft) = single(&pool).await;
+    let api = Api::new(pool).await;
+    let approve = format!("/api/v1/drafts/{draft}/approve");
+    api.patch(&draft, json!({"subject": "Edited"})).await;
+    let current = revision(&api, &draft).await;
+    assert_eq!(current, 1);
+
+    let (status, _) = api
+        .post(&approve, Some(json!({"expected_revision": current - 1})))
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(seed.lead_status(&lead).await, "qualified");
+    let (_, still) = api.get(&format!("/api/v1/drafts/{draft}")).await;
+    assert_eq!(still["data"]["draft"]["status"], "pending");
+
+    let (status, body) = api
+        .post(&approve, Some(json!({"expected_revision": current})))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["data"]["draft"]["status"], "approved");
+    assert_eq!(seed.lead_status(&lead).await, "validated");
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn approving_without_a_body_or_with_an_empty_one_still_works(pool: PgPool) {
+    let seed = Seed { pool: pool.clone() };
+    let profile = seed.profile("keycloak-ops").await;
+    let first = seed.lead(&profile, "first.com", "qualified", 2.0).await;
+    let first_draft = seed.draft(&first, 10, true).await;
+    let second = seed.lead(&profile, "second.com", "qualified", 1.0).await;
+    let second_draft = seed.draft(&second, 10, true).await;
+    let api = Api::new(pool).await;
+
+    let (status, _) = api
+        .post(&format!("/api/v1/drafts/{first_draft}/approve"), None)
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = api
+        .post(
+            &format!("/api/v1/drafts/{second_draft}/approve"),
+            Some(json!({})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(seed.lead_status(&first).await, "validated");
+    assert_eq!(seed.lead_status(&second).await, "validated");
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn rejecting_with_a_stale_revision_answers_conflict(pool: PgPool) {
+    let (seed, lead, draft) = single(&pool).await;
+    let api = Api::new(pool).await;
+    let reject = format!("/api/v1/drafts/{draft}/reject");
+    api.patch(&draft, json!({"subject": "Edited"})).await;
+
+    let (status, _) = api
+        .post(
+            &reject,
+            Some(json!({"reason": "hors_cible", "expected_revision": 0})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(seed.lead_status(&lead).await, "qualified");
+
+    let (status, body) = api
+        .post(
+            &reject,
+            Some(json!({"reason": "hors_cible", "expected_revision": 1})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["data"]["draft"]["status"], "rejected");
+    assert_eq!(seed.lead_status(&lead).await, "rejected");
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn editing_a_superseded_draft_answers_conflict(pool: PgPool) {
+    let (seed, lead, draft) = single(&pool).await;
+    seed.draft(&lead, 1, true).await;
+    let api = Api::new(pool).await;
+
+    let (status, body) = api.patch(&draft, json!({"subject": "Late"})).await;
+
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert!(body.to_string().contains("superseded"), "{body}");
+    let (status, _) = api
+        .patch(&draft, json!({"subject": "Late", "expected_revision": 0}))
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_malformed_expected_revision_is_a_bad_request(pool: PgPool) {
+    let (_seed, _lead, draft) = single(&pool).await;
+    let api = Api::new(pool).await;
+
+    for value in [json!(-1), json!("one"), json!(1.5)] {
+        let (status, _) = api
+            .patch(&draft, json!({"subject": "x", "expected_revision": value}))
+            .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{value}");
+    }
+    assert_eq!(revision(&api, &draft).await, 0);
+}
+
+#[test]
+fn openapi_documents_the_revision_guard() {
+    let spec = serde_json::to_value(api::openapi::ApiDoc::openapi()).expect("spec");
+    let schemas = &spec["components"]["schemas"];
+
+    assert!(schemas["ApproveDraftRequest"]["properties"]["expected_revision"].is_object());
+    assert!(schemas["EditDraftRequest"]["properties"]["expected_revision"].is_object());
+    assert!(schemas["RejectDraftRequest"]["properties"]["expected_revision"].is_object());
+    assert!(schemas["DraftDto"]["properties"]["revision"].is_object());
+    assert!(
+        spec["paths"]["/api/v1/drafts/{assessment_id}/approve"]["post"]["requestBody"].is_object()
+    );
 }
 
 #[test]

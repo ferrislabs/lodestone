@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 use auth::{AuthService, FerrisKeyRepository};
 use common::{Config, CoreError};
@@ -6,10 +6,18 @@ use rate_limit::{InMemoryRateLimiter, Quota, RateLimitService};
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 
-use crate::{domain::output::WebhookPolicy, infrastructure::postgres::error::map_sqlx_error};
+use crate::{
+    application::{llm::limits::ProviderGates, timeline::in_flight::InFlightRegistry},
+    domain::{enrichment::RequalifyPolicy, output::WebhookPolicy},
+    infrastructure::{agent_registry::InMemoryAgentRegistry, postgres::error::map_sqlx_error},
+};
 
+pub mod agents;
+pub mod calibration;
+pub mod company;
 pub mod contacts;
 pub mod drafts;
+pub mod ecosystem;
 pub mod evaluation;
 pub mod jobs;
 pub mod leads;
@@ -21,9 +29,15 @@ pub mod policy;
 pub mod probe;
 pub mod profile;
 pub mod qualification;
+pub mod quality;
+pub mod rescoring;
 pub mod schedule;
+pub mod scoring_agent;
+pub mod settings;
+pub mod source_providers;
 pub mod sources;
 pub mod suppression;
+pub mod timeline;
 pub mod triage;
 pub mod user;
 
@@ -35,6 +49,10 @@ pub struct LodestoneUseCase {
     pub(crate) pool: PgPool,
     pub(crate) webhooks: Option<WebhookPolicy>,
     pub(crate) listener_stale_after: Duration,
+    pub(crate) requalify: RequalifyPolicy,
+    pub(crate) agents: Arc<InMemoryAgentRegistry>,
+    pub(crate) gates: Arc<ProviderGates>,
+    pub(crate) in_flight: Arc<InFlightRegistry>,
 }
 
 impl LodestoneUseCase {
@@ -43,7 +61,24 @@ impl LodestoneUseCase {
             pool,
             webhooks: None,
             listener_stale_after: crate::domain::listener::STALE_FLOOR,
+            requalify: RequalifyPolicy::default(),
+            agents: Arc::new(InMemoryAgentRegistry::new()),
+            gates: Arc::new(ProviderGates::default()),
+            in_flight: Arc::new(InFlightRegistry::default()),
         }
+    }
+
+    pub fn agent_registry(&self) -> &InMemoryAgentRegistry {
+        &self.agents
+    }
+
+    pub fn with_requalify_policy(mut self, policy: RequalifyPolicy) -> Self {
+        self.requalify = policy;
+        self
+    }
+
+    pub fn requalify_policy(&self) -> RequalifyPolicy {
+        self.requalify
     }
 
     pub fn with_listener_stale_after(mut self, stale_after: Duration) -> Self {

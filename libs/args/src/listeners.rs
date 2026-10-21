@@ -39,6 +39,24 @@ pub struct ListenerArgs {
         long_help = "Hosts the DNS CNAME listener resolves at the same time"
     )]
     pub dns_concurrency: NonZeroUsize,
+
+    #[arg(
+        long = "evaluation-concurrency",
+        env = "EVALUATION_CONCURRENCY",
+        name = "EVALUATION_CONCURRENCY",
+        default_value = "4",
+        long_help = "Leads the qualification, scoring and aggregation passes evaluate at the same time, and agents or samples of one lead run at the same time; each LLM provider still caps its own simultaneous calls"
+    )]
+    pub evaluation_concurrency: NonZeroUsize,
+
+    #[arg(
+        long = "inspection-concurrency",
+        env = "INSPECTION_CONCURRENCY",
+        name = "INSPECTION_CONCURRENCY",
+        default_value = "8",
+        long_help = "Domains the ecosystem inspection inspects at the same time; per-host rate limits and robots.txt still apply"
+    )]
+    pub inspection_concurrency: NonZeroUsize,
 }
 
 impl ListenerArgs {
@@ -76,6 +94,25 @@ mod tests {
         assert_eq!(cmd.listeners.dns_concurrency.get(), 16);
         assert!(Cmd::try_parse_from(["cmd", "--probe-concurrency", "0"]).is_err());
         assert!(Cmd::try_parse_from(["cmd", "--dns-concurrency", "0"]).is_err());
+    }
+
+    #[test]
+    fn evaluation_and_inspection_concurrency_default_to_four_and_eight() {
+        let cmd = Cmd::try_parse_from(["cmd"]).unwrap();
+        assert_eq!(cmd.listeners.evaluation_concurrency.get(), 4);
+        assert_eq!(cmd.listeners.inspection_concurrency.get(), 8);
+        let tuned = Cmd::try_parse_from([
+            "cmd",
+            "--evaluation-concurrency",
+            "2",
+            "--inspection-concurrency",
+            "3",
+        ])
+        .unwrap();
+        assert_eq!(tuned.listeners.evaluation_concurrency.get(), 2);
+        assert_eq!(tuned.listeners.inspection_concurrency.get(), 3);
+        assert!(Cmd::try_parse_from(["cmd", "--evaluation-concurrency", "0"]).is_err());
+        assert!(Cmd::try_parse_from(["cmd", "--inspection-concurrency", "0"]).is_err());
     }
 
     #[test]

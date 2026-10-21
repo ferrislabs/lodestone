@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { formatRelative } from './format'
+import { formatDay, formatEuros, formatRelative } from './format'
 
 const NOW = Date.parse('2026-10-05T12:00:00Z')
 
@@ -21,5 +21,27 @@ describe('formatRelative', () => {
 
 	it('keeps an unparsable value', () => {
 		expect(formatRelative('soon', NOW)).toBe('soon')
+	})
+})
+
+function spaced(text: string): string {
+	return text.replace(/\s/g, ' ')
+}
+
+describe('formatDay', () => {
+	it('formats a calendar day in french without shifting it', () => {
+		expect(formatDay('2026-09-10')).toBe('10 sept. 2026')
+		expect(formatDay('2004-01-01')).toBe('1 janv. 2004')
+	})
+
+	it('keeps what is not a day', () => {
+		expect(formatDay('bientôt')).toBe('bientôt')
+	})
+})
+
+describe('formatEuros', () => {
+	it('formats an amount in euros', () => {
+		expect(spaced(formatEuros(400000))).toBe('400 000 €')
+		expect(spaced(formatEuros(39348.5))).toBe('39 348,5 €')
 	})
 })

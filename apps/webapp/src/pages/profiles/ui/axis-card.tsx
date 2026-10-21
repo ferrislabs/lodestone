@@ -4,6 +4,7 @@ import { FieldErrors } from '#/components/schema-form/field-frame'
 import { Button } from '#/components/ui/button'
 import { Input } from '#/components/ui/input'
 import { Label } from '#/components/ui/label'
+import { Switch } from '#/components/ui/switch'
 import {
 	Table,
 	TableBody,
@@ -15,14 +16,50 @@ import {
 import type { JsonValue, Problem } from '#/lib/schema-form'
 import { agentField } from '#/pages/profiles/lib/agents'
 import {
+	displayOrder,
+	isExcludingOption,
+	isUnknownOption,
 	MAX_OPTIONS,
 	MIN_OPTIONS,
 	numberField,
 	optionsOf,
 } from '#/pages/profiles/lib/qualification'
-import type { QualificationActions } from '#/pages/profiles/lib/qualification-actions'
+import type { AxisActions } from '#/pages/profiles/lib/qualification-actions'
 import { DEFAULT_WEIGHT } from '#/pages/profiles/lib/qualification-templates'
 import { WeightPicker } from '#/pages/profiles/ui/weight-picker'
+
+export type AxisKind = 'qualification' | 'scoring'
+
+interface AxisWords {
+	title: string
+	of: string
+	the: string
+	to: string
+	listPath: string
+	itemsPath: string
+	keyPrefix: string
+}
+
+const AXIS_WORDS: Record<AxisKind, AxisWords> = {
+	qualification: {
+		title: 'Axe',
+		of: "de l'axe",
+		the: "l'axe",
+		to: "à l'axe",
+		listPath: 'qualification_agents',
+		itemsPath: 'questions',
+		keyPrefix: 'qa',
+	},
+	scoring: {
+		title: 'Critère',
+		of: 'du critère',
+		the: 'le critère',
+		to: 'au critère',
+		listPath: 'scoring_agents',
+		itemsPath: 'criteria',
+		keyPrefix: 'sa',
+	},
+}
 
 interface AxisCardProps {
 	agentIndex: number
@@ -30,7 +67,8 @@ interface AxisCardProps {
 	question: JsonValue
 	problems: readonly Problem[]
 	removable: boolean
-	actions: QualificationActions
+	actions: AxisActions
+	kind?: AxisKind
 }
 
 function at(problems: readonly Problem[], path: string): Problem[] {
@@ -44,9 +82,12 @@ export function AxisCard({
 	problems,
 	removable,
 	actions,
+	kind = 'qualification',
 }: AxisCardProps) {
-	const base = `qualification_agents[${agentIndex}].questions[${index}]`
-	const key = `qa-${agentIndex}-q-${index}`
+	const words = AXIS_WORDS[kind]
+	const excludable = kind === 'qualification'
+	const base = `${words.listPath}[${agentIndex}].${words.itemsPath}[${index}]`
+	const key = `${words.keyPrefix}-${agentIndex}-q-${index}`
 	const options = optionsOf(question)
 	const wordingProblems = at(problems, `${base}.wording`)
 	const idProblems = at(problems, `${base}.id`)
@@ -54,18 +95,20 @@ export function AxisCard({
 	const weightProblems = at(problems, `${base}.weight`)
 	return (
 		<section
-			aria-label={`Axe ${index + 1}`}
+			aria-label={`${words.title} ${index + 1}`}
 			data-question={index}
 			className="flex flex-col gap-3 rounded-md border bg-muted/20 p-3"
 		>
 			<div className="flex items-center justify-between gap-2">
-				<p className="text-sm font-semibold">Axe {index + 1}</p>
+				<p className="text-sm font-semibold">
+					{words.title} {index + 1}
+				</p>
 				<Button
 					type="button"
 					variant="ghost"
 					size="sm"
 					disabled={!removable}
-					aria-label={`Supprimer l'axe ${index + 1}`}
+					aria-label={`Supprimer ${words.the} ${index + 1}`}
 					onClick={() => actions.removeQuestion(agentIndex, index)}
 				>
 					<Trash2Icon />
@@ -74,7 +117,7 @@ export function AxisCard({
 			</div>
 			<div className="grid gap-3 sm:grid-cols-[1fr_13rem]">
 				<div className="flex flex-col gap-1.5">
-					<Label htmlFor={`${key}-wording`}>Intitulé de l'axe</Label>
+					<Label htmlFor={`${key}-wording`}>Intitulé {words.of}</Label>
 					<Input
 						id={`${key}-wording`}
 						value={agentField(question, 'wording')}
@@ -87,7 +130,7 @@ export function AxisCard({
 				</div>
 				<div className="flex flex-col gap-1.5">
 					<Label htmlFor={`${key}-id`} className="text-xs">
-						Identifiant de l'axe
+						Identifiant {words.of}
 					</Label>
 					<Input
 						id={`${key}-id`}
@@ -106,7 +149,7 @@ export function AxisCard({
 				minuscules, chiffres, tirets et tirets bas.
 			</p>
 			<div className="flex flex-col gap-1.5">
-				<Label id={`${key}-weight-label`}>Poids de l'axe</Label>
+				<Label id={`${key}-weight-label`}>Poids {words.of}</Label>
 				<WeightPicker
 					labelledBy={`${key}-weight-label`}
 					value={numberField(question, 'weight') ?? DEFAULT_WEIGHT}
@@ -119,21 +162,35 @@ export function AxisCard({
 			</div>
 			<div className="flex flex-col gap-2">
 				<p className="text-sm font-medium">Options</p>
+				<p className="text-xs text-muted-foreground">
+					Le modèle cite une phrase des documents pour justifier son choix. Sans
+					citation vérifiée, ou quand rien ne permet de répondre, la réponse
+					devient l'option « inconnu », dont le score reste modifiable.
+					{excludable
+						? " Une option qui exclut le lead écarte le lead quand l'agent la choisit avec une probabilité d'au moins le seuil d'exclusion de l'agent."
+						: ' Un critère ne peut pas exclure le lead.'}
+				</p>
 				<Table data-testid={`${key}-options`}>
 					<TableHeader>
 						<TableRow>
 							<TableHead className="h-8 px-1 text-xs">Valeur</TableHead>
 							<TableHead className="h-8 px-1 text-xs">Libellé</TableHead>
 							<TableHead className="h-8 w-24 px-1 text-xs">Score</TableHead>
+							{excludable ? (
+								<TableHead className="h-8 w-28 px-1 text-xs">
+									Exclusion
+								</TableHead>
+							) : null}
 							<TableHead className="h-8 w-10 px-1">
 								<span className="sr-only">Actions</span>
 							</TableHead>
 						</TableRow>
 					</TableHeader>
 					<TableBody>
-						{Object.keys(options).map((slotKey) => {
-							const position = Number(slotKey)
+						{displayOrder(options).map((position) => {
+							const slotKey = String(position)
 							const option = options[position] ?? null
+							const unknown = isUnknownOption(option)
 							const optionBase = `${base}.options[${position}]`
 							const slot = `${key}-o-${position}`
 							const valueProblems = at(problems, `${optionBase}.value`)
@@ -143,24 +200,37 @@ export function AxisCard({
 								<TableRow
 									key={slotKey}
 									data-option={position}
+									data-unknown={unknown ? 'true' : undefined}
 									className="border-0 align-top"
 								>
 									<TableCell className="px-1 py-1">
-										<Input
-											id={`${slot}-value`}
-											className="font-mono text-xs"
-											aria-label={`Valeur de l'option ${position + 1}`}
-											value={agentField(option, 'value')}
-											aria-invalid={valueProblems.length > 0}
-											onChange={(event) =>
-												actions.setOptionValue(
-													agentIndex,
-													index,
-													position,
-													event.target.value,
-												)
-											}
-										/>
+										{unknown ? (
+											<p
+												className="flex h-9 items-center text-xs font-medium"
+												data-part="unknown-option"
+											>
+												Option « inconnu »
+												<code className="ml-1.5 font-mono text-[11px] text-muted-foreground">
+													{agentField(option, 'value')}
+												</code>
+											</p>
+										) : (
+											<Input
+												id={`${slot}-value`}
+												className="font-mono text-xs"
+												aria-label={`Valeur de l'option ${position + 1}`}
+												value={agentField(option, 'value')}
+												aria-invalid={valueProblems.length > 0}
+												onChange={(event) =>
+													actions.setOptionValue(
+														agentIndex,
+														index,
+														position,
+														event.target.value,
+													)
+												}
+											/>
+										)}
 										<FieldErrors
 											id={`${slot}-value`}
 											problems={valueProblems}
@@ -212,13 +282,53 @@ export function AxisCard({
 											problems={scoreProblems}
 										/>
 									</TableCell>
+									{excludable ? (
+										<TableCell className="px-1 py-1">
+											<div className="flex h-9 items-center gap-2">
+												<Switch
+													id={`${slot}-excludes`}
+													aria-label={`Exclut le lead : option ${position + 1}`}
+													checked={isExcludingOption(option)}
+													disabled={unknown}
+													title={
+														unknown
+															? "L'option « inconnu » ne peut pas exclure le lead"
+															: undefined
+													}
+													onCheckedChange={(excludes) =>
+														actions.setOptionExcludes?.(
+															agentIndex,
+															index,
+															position,
+															excludes,
+														)
+													}
+												/>
+												<Label
+													htmlFor={`${slot}-excludes`}
+													className="text-xs font-normal"
+												>
+													Exclut le lead
+												</Label>
+											</div>
+											<FieldErrors
+												id={`${slot}-excludes`}
+												problems={at(problems, `${optionBase}.excludes`)}
+											/>
+										</TableCell>
+									) : null}
 									<TableCell className="px-1 py-1">
 										<Button
 											type="button"
 											variant="ghost"
 											size="icon"
-											disabled={options.length <= MIN_OPTIONS}
-											aria-label={`Supprimer l'option ${position + 1} de l'axe ${index + 1}`}
+											disabled={unknown || options.length <= MIN_OPTIONS}
+											aria-label={`Supprimer l'option ${position + 1} ${words.of} ${index + 1}`}
+											title={
+												unknown
+													? "L'option « inconnu » est obligatoire"
+													: undefined
+											}
 											onClick={() =>
 												actions.removeOption(agentIndex, index, position)
 											}
@@ -238,7 +348,7 @@ export function AxisCard({
 						variant="outline"
 						size="sm"
 						disabled={options.length >= MAX_OPTIONS}
-						aria-label={`Ajouter une option à l'axe ${index + 1}`}
+						aria-label={`Ajouter une option ${words.to} ${index + 1}`}
 						onClick={() => actions.addOption(agentIndex, index)}
 					>
 						<PlusIcon />

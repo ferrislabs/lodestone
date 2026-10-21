@@ -9,6 +9,7 @@ import { invalidateLlm } from '#/pages/llm/feature/invalidate'
 import {
 	buildCreateBody,
 	buildUpdateBody,
+	defaultConcurrency,
 	EMPTY_PROVIDER_VALUES,
 	fieldErrorsFromPaths,
 	numericErrors,
@@ -126,6 +127,7 @@ function ProviderFormFeature({ provider }: ProviderFormFeatureProps) {
 	return (
 		<ProviderForm
 			title={provider ? `Modifier ${provider.name}` : 'Nouveau fournisseur'}
+			defaultConcurrency={defaultConcurrency(values.kind, values.base_url)}
 			editing={editing}
 			hasApiKey={provider?.has_api_key ?? false}
 			values={values}

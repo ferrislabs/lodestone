@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE leads SET excluded_reason = NULL, excluded_at = NULL WHERE id = $1 AND excluded_reason = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "82c804f2a048e28120ad6099297bc4194381287e0de744fef72c7cc83bf80283"
+}

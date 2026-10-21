@@ -1,12 +1,16 @@
 mod support;
 
+use std::fmt::Debug;
+
 use common::CoreError;
 use lodestone_core::{
-    AssessmentId, DraftEdit, DraftStatus, LeadId, LeadStatus, LodestoneUseCase, ProfileId, UserId,
-    VerdictFilter,
+    Assessment, AssessmentId, AssessmentRepository, DraftEdit, DraftEntry, DraftMessage,
+    DraftReview, DraftRevision, DraftStatus, LeadId, LeadStatus, LodestoneUseCase, ProfileId,
+    Rejection, RejectionReason, RevisionNumber, RunProvenance, UserId, VerdictFilter,
+    infrastructure::{assessment::postgres::PgAssessmentRepository, postgres::with_tx},
 };
 use sqlx::PgPool;
-use support::{create_profile, seen_lead};
+use support::{at, create_profile, seen_lead};
 use uuid::Uuid;
 
 async fn user(pool: &PgPool) -> UserId {
@@ -292,13 +296,18 @@ async fn editing_keeps_the_first_original_and_stamps_the_edit(pool: PgPool) {
     let usecase = LodestoneUseCase::new(pool.clone());
 
     let first = usecase
-        .edit_draft(id, DraftEdit::new(Some("Edited".to_owned()), None).unwrap())
+        .edit_draft(
+            id,
+            DraftEdit::new(Some("Edited".to_owned()), None).unwrap(),
+            None,
+        )
         .await
         .unwrap();
     let second = usecase
         .edit_draft(
             id,
             DraftEdit::new(None, Some("New body".to_owned())).unwrap(),
+            None,
         )
         .await
         .unwrap();
@@ -327,7 +336,7 @@ async fn approving_validates_the_lead_and_records_the_reviewer(pool: PgPool) {
     let reviewer = user(&pool).await;
     let usecase = LodestoneUseCase::new(pool.clone());
 
-    let entry = usecase.approve_draft(id, reviewer).await.unwrap();
+    let entry = usecase.approve_draft(id, reviewer, None).await.unwrap();
 
     let review = entry.record.assessment.draft_review.unwrap();
     assert_eq!(review.status, DraftStatus::Approved);
@@ -335,10 +344,14 @@ async fn approving_validates_the_lead_and_records_the_reviewer(pool: PgPool) {
     assert!(review.reviewed_at.is_some());
     assert_eq!(entry.record.lead.status, LeadStatus::Validated);
 
-    let again = usecase.approve_draft(id, reviewer).await;
+    let again = usecase.approve_draft(id, reviewer, None).await;
     assert!(matches!(again, Err(CoreError::Conflict(_))));
     let edit = usecase
-        .edit_draft(id, DraftEdit::new(Some("late".to_owned()), None).unwrap())
+        .edit_draft(
+            id,
+            DraftEdit::new(Some("late".to_owned()), None).unwrap(),
+            None,
+        )
         .await;
     assert!(matches!(edit, Err(CoreError::Conflict(_))));
     assert_eq!(queue(&pool, None, 20, 0).await.1, 0);
@@ -353,7 +366,12 @@ async fn rejecting_rejects_the_lead_and_keeps_the_reason(pool: PgPool) {
     let usecase = LodestoneUseCase::new(pool.clone());
 
     let entry = usecase
-        .reject_draft(id, reviewer, Some("not a fit".to_owned()))
+        .reject_draft(
+            id,
+            reviewer,
+            Rejection::new(RejectionReason::Other, Some("not a fit")).unwrap(),
+            None,
+        )
         .await
         .unwrap();
 
@@ -362,7 +380,14 @@ async fn rejecting_rejects_the_lead_and_keeps_the_reason(pool: PgPool) {
     assert_eq!(review.rejection_reason.as_deref(), Some("not a fit"));
     assert_eq!(entry.record.lead.status, LeadStatus::Rejected);
     assert!(matches!(
-        usecase.reject_draft(id, reviewer, None).await,
+        usecase
+            .reject_draft(
+                id,
+                reviewer,
+                Rejection::new(RejectionReason::OffTarget, None).unwrap(),
+                None
+            )
+            .await,
         Err(CoreError::Conflict(_))
     ));
 }
@@ -385,11 +410,18 @@ async fn a_suppressed_domain_hides_the_draft_and_blocks_decisions(pool: PgPool) 
         Err(CoreError::NotFound)
     ));
     assert!(matches!(
-        usecase.approve_draft(id, reviewer).await,
+        usecase.approve_draft(id, reviewer, None).await,
         Err(CoreError::NotFound)
     ));
     assert!(matches!(
-        usecase.reject_draft(id, reviewer, None).await,
+        usecase
+            .reject_draft(
+                id,
+                reviewer,
+                Rejection::new(RejectionReason::OffTarget, None).unwrap(),
+                None
+            )
+            .await,
         Err(CoreError::NotFound)
     ));
     let status: String = sqlx::query_scalar("SELECT status FROM leads WHERE id = $1")
@@ -436,4 +468,411 @@ async fn the_shown_contact_skips_suppressed_addresses(pool: PgPool) {
         shown(usecase.get_draft(id).await.unwrap()).as_deref(),
         Some("contact@a.com")
     );
+}
+
+async fn stored(pool: &PgPool, id: AssessmentId) -> (String, i32, bool, String) {
+    sqlx::query_as(
+        "SELECT draft_subject, draft_revision, draft_edited_at IS NOT NULL, draft_status FROM assessments WHERE id = $1",
+    )
+    .bind(id.0)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+async fn lead_status(pool: &PgPool, id: LeadId) -> String {
+    sqlx::query_scalar("SELECT status FROM leads WHERE id = $1")
+        .bind(id.0)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+fn subject_edit(subject: &str) -> DraftEdit {
+    DraftEdit::new(Some(subject.to_owned()), None).unwrap()
+}
+
+fn revision_of(entry: &DraftEntry) -> DraftRevision {
+    entry
+        .record
+        .assessment
+        .draft_review
+        .as_ref()
+        .unwrap()
+        .revision
+}
+
+fn assert_conflict<T: Debug>(result: Result<T, CoreError>, fragment: &str) {
+    match result {
+        Err(CoreError::Conflict(message)) => assert!(message.contains(fragment), "{message}"),
+        other => panic!("expected a conflict mentioning {fragment:?}, got {other:?}"),
+    }
+}
+
+fn off_target() -> Rejection {
+    Rejection::new(RejectionReason::OffTarget, None).unwrap()
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn every_successful_edit_bumps_the_revision_from_zero(pool: PgPool) {
+    let profile = create_profile(&pool, "alpha").await;
+    let lead = lead(&pool, profile, "a.com", "qualified", 1.0).await;
+    let id = assessment(&pool, lead, 10, true).await;
+    let usecase = LodestoneUseCase::new(pool.clone());
+
+    assert_eq!(
+        revision_of(&usecase.get_draft(id).await.unwrap()),
+        DraftRevision::new(0)
+    );
+    let first = usecase
+        .edit_draft(id, subject_edit("One"), Some(DraftRevision::new(0)))
+        .await
+        .unwrap();
+    let second = usecase
+        .edit_draft(id, subject_edit("Two"), Some(DraftRevision::new(1)))
+        .await
+        .unwrap();
+    let third = usecase
+        .edit_draft(id, subject_edit("Three"), None)
+        .await
+        .unwrap();
+
+    assert_eq!(revision_of(&first), DraftRevision::new(1));
+    assert_eq!(revision_of(&second), DraftRevision::new(2));
+    assert_eq!(revision_of(&third), DraftRevision::new(3));
+    assert_eq!(
+        revision_of(&usecase.get_draft(id).await.unwrap()),
+        DraftRevision::new(3)
+    );
+    assert_eq!(stored(&pool, id).await.1, 3);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn an_edit_with_a_stale_revision_is_refused_and_leaves_the_draft_unchanged(pool: PgPool) {
+    let profile = create_profile(&pool, "alpha").await;
+    let lead = lead(&pool, profile, "a.com", "qualified", 1.0).await;
+    let id = assessment(&pool, lead, 10, true).await;
+    let usecase = LodestoneUseCase::new(pool.clone());
+    usecase
+        .edit_draft(id, subject_edit("Kept"), None)
+        .await
+        .unwrap();
+    let before = stored(&pool, id).await;
+
+    let stale = usecase
+        .edit_draft(id, subject_edit("Lost"), Some(DraftRevision::new(0)))
+        .await;
+    let ahead = usecase
+        .edit_draft(id, subject_edit("Lost"), Some(DraftRevision::new(2)))
+        .await;
+
+    assert_conflict(stale, "draft changed");
+    assert_conflict(ahead, "draft changed");
+    assert_eq!(stored(&pool, id).await, before);
+    assert_eq!(before.0, "Kept");
+    assert_eq!(before.1, 1);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn two_edits_carrying_the_same_revision_let_the_first_win(pool: PgPool) {
+    let profile = create_profile(&pool, "alpha").await;
+    let lead = lead(&pool, profile, "a.com", "qualified", 1.0).await;
+    let id = assessment(&pool, lead, 10, true).await;
+    let usecase = LodestoneUseCase::new(pool.clone());
+
+    let first = usecase
+        .edit_draft(id, subject_edit("First"), Some(DraftRevision::new(0)))
+        .await;
+    let second = usecase
+        .edit_draft(id, subject_edit("Second"), Some(DraftRevision::new(0)))
+        .await;
+
+    assert_eq!(revision_of(&first.unwrap()), DraftRevision::new(1));
+    assert_conflict(second, "draft changed");
+    let (subject, revision, _, _) = stored(&pool, id).await;
+    assert_eq!((subject.as_str(), revision), ("First", 1));
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn concurrent_edits_carrying_the_same_revision_let_exactly_one_win(pool: PgPool) {
+    let profile = create_profile(&pool, "alpha").await;
+    let lead = lead(&pool, profile, "a.com", "qualified", 1.0).await;
+    let id = assessment(&pool, lead, 10, true).await;
+    let usecase = LodestoneUseCase::new(pool.clone());
+
+    let (left, right) = tokio::join!(
+        usecase.edit_draft(id, subject_edit("Left"), Some(DraftRevision::new(0))),
+        usecase.edit_draft(id, subject_edit("Right"), Some(DraftRevision::new(0)))
+    );
+
+    assert_eq!(
+        [left.is_ok(), right.is_ok()]
+            .iter()
+            .filter(|ok| **ok)
+            .count(),
+        1
+    );
+    let loser = if left.is_ok() { right } else { left };
+    assert_conflict(loser, "draft changed");
+    assert_eq!(stored(&pool, id).await.1, 1);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn editing_a_draft_that_is_not_the_latest_assessment_is_a_conflict(pool: PgPool) {
+    let profile = create_profile(&pool, "alpha").await;
+    let replaced = lead(&pool, profile, "replaced.com", "qualified", 1.0).await;
+    let old = assessment(&pool, replaced, 100, true).await;
+    let newer = assessment(&pool, replaced, 10, true).await;
+    let bare = lead(&pool, profile, "bare.com", "qualified", 1.0).await;
+    let bare_old = assessment(&pool, bare, 100, true).await;
+    assessment(&pool, bare, 10, false).await;
+    let usecase = LodestoneUseCase::new(pool.clone());
+
+    for stale in [old, bare_old] {
+        let before = stored(&pool, stale).await;
+        assert_conflict(
+            usecase.edit_draft(stale, subject_edit("Late"), None).await,
+            "superseded",
+        );
+        assert_conflict(
+            usecase
+                .edit_draft(stale, subject_edit("Late"), Some(DraftRevision::new(0)))
+                .await,
+            "superseded",
+        );
+        assert_eq!(stored(&pool, stale).await, before);
+    }
+
+    let edited = usecase
+        .edit_draft(newer, subject_edit("Current"), None)
+        .await
+        .unwrap();
+    assert_eq!(revision_of(&edited), DraftRevision::new(1));
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_decision_with_a_stale_revision_is_refused_and_changes_nothing(pool: PgPool) {
+    let profile = create_profile(&pool, "alpha").await;
+    let lead_id = lead(&pool, profile, "a.com", "qualified", 1.0).await;
+    let id = assessment(&pool, lead_id, 10, true).await;
+    let reviewer = user(&pool).await;
+    let usecase = LodestoneUseCase::new(pool.clone());
+    usecase
+        .edit_draft(id, subject_edit("Edited"), None)
+        .await
+        .unwrap();
+
+    assert_conflict(
+        usecase
+            .approve_draft(id, reviewer, Some(DraftRevision::new(0)))
+            .await,
+        "draft changed",
+    );
+    assert_conflict(
+        usecase
+            .reject_draft(id, reviewer, off_target(), Some(DraftRevision::new(0)))
+            .await,
+        "draft changed",
+    );
+
+    let (subject, revision, _, status) = stored(&pool, id).await;
+    assert_eq!(
+        (subject.as_str(), revision, status.as_str()),
+        ("Edited", 1, "pending")
+    );
+    assert_eq!(lead_status(&pool, lead_id).await, "qualified");
+    let reviewed: Option<Uuid> =
+        sqlx::query_scalar("SELECT draft_reviewed_by FROM assessments WHERE id = $1")
+            .bind(id.0)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(reviewed, None);
+
+    let approved = usecase
+        .approve_draft(id, reviewer, Some(DraftRevision::new(1)))
+        .await
+        .unwrap();
+    assert_eq!(
+        approved.record.assessment.draft_review.unwrap().status,
+        DraftStatus::Approved
+    );
+    assert_eq!(lead_status(&pool, lead_id).await, "validated");
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_rejection_with_the_current_revision_goes_through(pool: PgPool) {
+    let profile = create_profile(&pool, "alpha").await;
+    let lead_id = lead(&pool, profile, "a.com", "qualified", 1.0).await;
+    let id = assessment(&pool, lead_id, 10, true).await;
+    let reviewer = user(&pool).await;
+    let usecase = LodestoneUseCase::new(pool.clone());
+
+    let entry = usecase
+        .reject_draft(id, reviewer, off_target(), Some(DraftRevision::new(0)))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        entry.record.assessment.draft_review.unwrap().status,
+        DraftStatus::Rejected
+    );
+    assert_eq!(lead_status(&pool, lead_id).await, "rejected");
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_decision_on_a_superseded_draft_is_still_not_found(pool: PgPool) {
+    let profile = create_profile(&pool, "alpha").await;
+    let lead_id = lead(&pool, profile, "a.com", "qualified", 1.0).await;
+    let old = assessment(&pool, lead_id, 100, true).await;
+    assessment(&pool, lead_id, 10, true).await;
+    let reviewer = user(&pool).await;
+    let usecase = LodestoneUseCase::new(pool.clone());
+
+    assert!(matches!(
+        usecase.approve_draft(old, reviewer, None).await,
+        Err(CoreError::NotFound)
+    ));
+    assert!(matches!(
+        usecase
+            .reject_draft(old, reviewer, off_target(), None)
+            .await,
+        Err(CoreError::NotFound)
+    ));
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_adapter_writes_an_edit_only_for_the_expected_revision(pool: PgPool) {
+    let profile = create_profile(&pool, "alpha").await;
+    let lead = lead(&pool, profile, "a.com", "qualified", 1.0).await;
+    let id = assessment(&pool, lead, 10, true).await;
+    let edit = subject_edit("Edited");
+
+    let outcomes = with_tx(&pool, async |shared| {
+        let mut repo = PgAssessmentRepository::new(&shared);
+        Ok([
+            repo.edit_draft(id, &edit, DraftRevision::new(1), at(0))
+                .await?,
+            repo.edit_draft(id, &edit, DraftRevision::new(0), at(0))
+                .await?,
+            repo.edit_draft(id, &edit, DraftRevision::new(0), at(0))
+                .await?,
+            repo.edit_draft(id, &edit, DraftRevision::new(1), at(0))
+                .await?,
+        ])
+    })
+    .await
+    .unwrap();
+
+    assert_eq!(outcomes, [false, true, false, true]);
+    assert_eq!(stored(&pool, id).await.1, 2);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_adapter_decides_only_for_the_expected_revision(pool: PgPool) {
+    let profile = create_profile(&pool, "alpha").await;
+    let lead = lead(&pool, profile, "a.com", "qualified", 1.0).await;
+    let id = assessment(&pool, lead, 10, true).await;
+    let reviewer = user(&pool).await;
+    let edit = subject_edit("Edited");
+    let decided = DraftReview::pending().approve(reviewer, at(5)).unwrap();
+
+    let outcomes = with_tx(&pool, async |shared| {
+        let mut repo = PgAssessmentRepository::new(&shared);
+        repo.edit_draft(id, &edit, DraftRevision::new(0), at(1))
+            .await?;
+        Ok([
+            repo.decide_draft(id, &decided, DraftRevision::new(0))
+                .await?,
+            repo.decide_draft(id, &decided, DraftRevision::new(1))
+                .await?,
+            repo.decide_draft(id, &decided, DraftRevision::new(1))
+                .await?,
+        ])
+    })
+    .await
+    .unwrap();
+
+    assert_eq!(outcomes, [false, true, false]);
+    let (_, revision, _, status) = stored(&pool, id).await;
+    assert_eq!((revision, status.as_str()), (1, "approved"));
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_adapter_stores_and_reads_back_the_carried_revision(pool: PgPool) {
+    let profile = create_profile(&pool, "alpha").await;
+    let lead = lead(&pool, profile, "a.com", "qualified", 1.0).await;
+    let fresh = Assessment {
+        id: AssessmentId(Uuid::now_v7()),
+        lead_id: lead,
+        profile_revision: RevisionNumber::new(1).unwrap(),
+        summary: "summary".to_owned(),
+        verdict_narrative: String::new(),
+        approach_angle: "angle".to_owned(),
+        evidence: Vec::new(),
+        evidence_verified: true,
+        quality_warnings: Vec::new(),
+        provenance: RunProvenance::legacy("model-x".to_owned(), "v1".to_owned()),
+        draft: Some(DraftMessage {
+            subject: "Subject".to_owned(),
+            body: "Body".to_owned(),
+        }),
+        draft_review: Some(DraftReview {
+            revision: DraftRevision::new(7),
+            ..DraftReview::pending()
+        }),
+        created_at: at(0),
+    };
+    let unreviewed = Assessment {
+        id: AssessmentId(Uuid::now_v7()),
+        draft_review: None,
+        created_at: at(1),
+        ..fresh.clone()
+    };
+
+    let listed = with_tx(&pool, async |shared| {
+        let mut repo = PgAssessmentRepository::new(&shared);
+        repo.insert(&fresh).await?;
+        repo.insert(&unreviewed).await?;
+        repo.list_for_lead(lead).await
+    })
+    .await
+    .unwrap();
+
+    assert_eq!(stored(&pool, fresh.id).await.1, 7);
+    assert_eq!(stored(&pool, unreviewed.id).await.1, 0);
+    let by_id = |id: AssessmentId| {
+        listed
+            .iter()
+            .find(|assessment| assessment.id == id)
+            .unwrap()
+    };
+    assert_eq!(
+        by_id(fresh.id).draft_review.as_ref().unwrap().revision,
+        DraftRevision::new(7)
+    );
+    assert_eq!(
+        by_id(unreviewed.id).draft_review.as_ref().unwrap().revision,
+        DraftRevision::default()
+    );
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_stored_revision_that_cannot_be_read_is_an_internal_error(pool: PgPool) {
+    let profile = create_profile(&pool, "alpha").await;
+    let lead = lead(&pool, profile, "a.com", "qualified", 1.0).await;
+    let id = assessment(&pool, lead, 10, true).await;
+    sqlx::query("ALTER TABLE assessments DROP CONSTRAINT assessments_draft_revision_check")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE assessments SET draft_revision = -1 WHERE id = $1")
+        .bind(id.0)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let result = LodestoneUseCase::new(pool).get_draft(id).await;
+
+    assert!(matches!(result, Err(CoreError::Internal(_))), "{result:?}");
 }

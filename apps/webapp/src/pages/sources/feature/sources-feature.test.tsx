@@ -14,6 +14,12 @@ import { SourcesFeature } from './sources-feature'
 
 const FUTURE = '2099-01-01T00:00:00Z'
 
+const router = vi.hoisted(() => ({ navigate: vi.fn() }))
+
+vi.mock('@tanstack/react-router', () => ({
+	useNavigate: () => router.navigate,
+}))
+
 function source(name: string, overrides: Partial<Source> = {}): Source {
 	return {
 		source: name,
@@ -82,6 +88,7 @@ let backend: Backend
 
 beforeEach(() => {
 	Object.assign(window, { apiUrl: 'http://api.test' })
+	router.navigate.mockReset()
 	backend = {
 		sources: [source('boamp'), source('decp', { status: 'running' })],
 		runStatus: 202,
@@ -136,6 +143,33 @@ describe('SourcesFeature', () => {
 			),
 		)
 		expect(row.getByRole('button', { name: 'Lancer maintenant' })).toBeTruthy()
+	})
+
+	it('shows the provider badge and opens the catalog page of the provider', async () => {
+		backend.sources = [
+			source('boamp', {
+				provider: { key: 'boamp', name: 'BOAMP', status: 'failing' },
+			}),
+		]
+		renderFeature()
+		const row = await boampRow()
+
+		expect(row.getByText('Provider non prêt')).toBeTruthy()
+		fireEvent.click(
+			row.getByRole('button', { name: 'Ouvrir BOAMP dans le catalogue' }),
+		)
+
+		expect(router.navigate).toHaveBeenCalledWith({
+			to: '/sources/providers/$key',
+			params: { key: 'boamp' },
+		})
+		expect(
+			(
+				row.getByRole('button', {
+					name: 'Lancer maintenant',
+				}) as HTMLButtonElement
+			).disabled,
+		).toBe(true)
 	})
 
 	it('shows a failure to load', async () => {

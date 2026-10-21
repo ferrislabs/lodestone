@@ -35,6 +35,7 @@ const TEST_ERROR_LABELS: Readonly<Record<string, string>> = {
 	unreachable: 'Injoignable',
 	invalid_response: 'Réponse invalide',
 	reasoning_exhausted: 'Le modèle a consommé tous ses tokens à raisonner',
+	reasoning_unsupported: 'Raisonnement non pris en charge',
 	other: 'Erreur',
 }
 
@@ -56,6 +57,10 @@ export function testErrorLabel(kind: string): string {
 
 export function testErrorHint(kind: string): string | null {
 	return TEST_ERROR_HINTS[kind] ?? null
+}
+
+export function inFlightLabel(inFlight: number, limit: number): string {
+	return `En cours : ${inFlight} / ${limit}`
 }
 
 export function reasoningLabel(effort: string): string {

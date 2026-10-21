@@ -14,6 +14,7 @@ import {
 } from '#/components/ui/table'
 import { pluralize } from '#/lib/labels'
 import type { Lead, PaginationMeta } from '#/pages/leads/lib/types'
+import { GroupedLeads } from './grouped-leads'
 
 export type ExportFormat = 'json' | 'csv'
 
@@ -30,6 +31,7 @@ interface LeadsListProps {
 	exporting: boolean
 	exportError: string | null
 	columnCount: number
+	onOpenLead: (leadId: string) => void
 	noProfile: boolean
 }
 
@@ -44,6 +46,7 @@ export function LeadsList({
 	exporting,
 	exportError,
 	columnCount,
+	onOpenLead,
 	noProfile,
 }: LeadsListProps) {
 	const rows = table.getRowModel().rows
@@ -128,7 +131,7 @@ export function LeadsList({
 							</TableRow>
 						) : null}
 						{state === 'ready'
-							? rows.map((row) => (
+							? rows.flatMap((row) => [
 									<TableRow key={row.id}>
 										{row.getVisibleCells().map((cell) => (
 											<TableCell key={cell.id}>
@@ -138,8 +141,26 @@ export function LeadsList({
 												)}
 											</TableCell>
 										))}
-									</TableRow>
-								))
+									</TableRow>,
+									...(row.getIsExpanded()
+										? [
+												<TableRow
+													key={`${row.id}-group`}
+													data-group={row.original.id}
+												>
+													<TableCell
+														colSpan={columnCount}
+														className="bg-muted/30"
+													>
+														<GroupedLeads
+															leads={row.original.grouped_leads}
+															onOpenLead={onOpenLead}
+														/>
+													</TableCell>
+												</TableRow>,
+											]
+										: []),
+								])
 							: null}
 					</TableBody>
 				</Table>

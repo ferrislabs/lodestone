@@ -12,6 +12,10 @@ import {
 	renameQualificationAgent,
 	setAgentField,
 	setAggregatorField,
+	setEscalationField,
+	setEvidenceField,
+	setEvidenceWeight,
+	setHalfLife,
 	setOptionField,
 	setQuestionField,
 	setQuestionWording,
@@ -19,6 +23,10 @@ import {
 	withQualification,
 } from '#/pages/profiles/lib/qualification'
 import type { QualificationActions } from '#/pages/profiles/lib/qualification-actions'
+
+function toFraction(percent: number | null): number | null {
+	return percent === null ? null : percent / 100
+}
 
 export function useQualificationUi(
 	value: JsonObject,
@@ -64,8 +72,18 @@ export function useQualificationUi(
 					providerId === '' ? null : providerId,
 				),
 			),
-		setWeight: (index, weight) =>
-			onChange(setAgentField(value, index, 'weight', weight)),
+		setLearnedCalibration: (index, learned) =>
+			onChange(setAgentField(value, index, 'learned_calibration', learned)),
+		setExclusionThreshold: (index, percent) =>
+			onChange(
+				setAgentField(value, index, 'exclusion_threshold', toFraction(percent)),
+			),
+		setSamples: (index, samples) =>
+			onChange(setAgentField(value, index, 'samples', samples)),
+		setSamplingTemperature: (index, temperature) =>
+			onChange(
+				setAgentField(value, index, 'sampling_temperature', temperature),
+			),
 		setPrompt: (index, prompt) =>
 			onChange(setAgentField(value, index, 'system_prompt', prompt)),
 		requestRemove: setConfirmingRemove,
@@ -102,6 +120,22 @@ export function useQualificationUi(
 			onChange(setOptionField(value, index, question, option, 'label', text)),
 		setOptionScore: (index, question, option, score) =>
 			onChange(setOptionField(value, index, question, option, 'score', score)),
+		setOptionExcludes: (index, question, option, excludes) =>
+			onChange(
+				setOptionField(value, index, question, option, 'excludes', excludes),
+			),
+		setEscalationProvider: (providerId) =>
+			onChange(
+				setEscalationField(
+					value,
+					'provider',
+					providerId === '' ? null : providerId,
+				),
+			),
+		setBandLow: (percent) =>
+			onChange(setEscalationField(value, 'band_low', percent)),
+		setBandHigh: (percent) =>
+			onChange(setEscalationField(value, 'band_high', percent)),
 		setAggregatorProvider: (providerId) =>
 			onChange(
 				setAggregatorField(
@@ -116,6 +150,17 @@ export function useQualificationUi(
 			onChange(setVerdictField(value, 'reliable_from', percent)),
 		setDiscardBelow: (percent) =>
 			onChange(setVerdictField(value, 'discard_below', percent)),
+		setCalibrationFloor: (percent) =>
+			onChange(
+				setVerdictField(value, 'calibration_floor', toFraction(percent)),
+			),
+		setMinEvidence: (percent) =>
+			onChange(setVerdictField(value, 'min_evidence', toFraction(percent))),
+		setInfluence: (percent) =>
+			onChange(setEvidenceField(value, 'influence', toFraction(percent))),
+		setEvidenceWeight: (key, weight) =>
+			onChange(setEvidenceWeight(value, key, weight)),
+		setHalfLife: (key, days) => onChange(setHalfLife(value, key, days)),
 	}
 
 	return { agents, editing, confirmingRemove, picking, previewing, actions }

@@ -4,11 +4,12 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::{
-    Assessment, AssessmentId, DraftMessage, DraftReview, DraftStatus, Evidence, LeadId, Provenance,
-    RevisionNumber, UserId,
+    Assessment, AssessmentId, DraftMessage, DraftReview, DraftRevision, DraftStatus, Evidence,
+    GenerationSnapshot, LeadId, Provenance, ProviderId, QualityWarning, RevisionNumber,
+    RunProvenance, UserId,
 };
 
-pub const ASSESSMENT_COLUMNS: &str = "assessments.id, assessments.lead_id, assessments.profile_revision, assessments.summary, assessments.verdict_narrative, assessments.approach_angle, assessments.evidence, assessments.evidence_verified, assessments.model, assessments.prompt_version, assessments.draft_subject, assessments.draft_body, assessments.draft_status, assessments.draft_reviewed_by, assessments.draft_reviewed_at, assessments.draft_edited_at, assessments.draft_rejection_reason, assessments.draft_original_subject, assessments.draft_original_body, assessments.draft_suggested_subject, assessments.draft_suggested_body, assessments.draft_outdated_at, assessments.created_at";
+pub const ASSESSMENT_COLUMNS: &str = "assessments.id, assessments.lead_id, assessments.profile_revision, assessments.summary, assessments.verdict_narrative, assessments.approach_angle, assessments.evidence, assessments.evidence_verified, assessments.quality_warnings, assessments.provider_id, assessments.provider_name, assessments.model, assessments.prompt_version, assessments.generation, assessments.samples, assessments.draft_subject, assessments.draft_body, assessments.draft_status, assessments.draft_reviewed_by, assessments.draft_reviewed_at, assessments.draft_edited_at, assessments.draft_rejection_reason, assessments.draft_original_subject, assessments.draft_original_body, assessments.draft_suggested_subject, assessments.draft_suggested_body, assessments.draft_outdated_at, assessments.draft_revision, assessments.created_at";
 
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct AssessmentRow {
@@ -20,8 +21,13 @@ pub struct AssessmentRow {
     pub approach_angle: String,
     pub evidence: serde_json::Value,
     pub evidence_verified: bool,
+    pub quality_warnings: Vec<String>,
+    pub provider_id: Option<Uuid>,
+    pub provider_name: String,
     pub model: String,
     pub prompt_version: String,
+    pub generation: serde_json::Value,
+    pub samples: i32,
     pub draft_subject: Option<String>,
     pub draft_body: Option<String>,
     pub draft_status: Option<String>,
@@ -34,6 +40,7 @@ pub struct AssessmentRow {
     pub draft_suggested_subject: Option<String>,
     pub draft_suggested_body: Option<String>,
     pub draft_outdated_at: Option<DateTime<Utc>>,
+    pub draft_revision: i32,
     pub created_at: DateTime<Utc>,
 }
 
@@ -81,6 +88,9 @@ impl TryFrom<AssessmentRow> for Assessment {
             .ok_or_else(|| {
                 CoreError::Internal("stored assessment revision is invalid".to_owned())
             })?;
+        let draft_revision = u32::try_from(row.draft_revision)
+            .map(DraftRevision::new)
+            .map_err(|_| CoreError::Internal("stored draft revision is invalid".to_owned()))?;
         let draft_review = match (&row.draft_subject, row.draft_status.as_deref()) {
             (Some(_), Some(raw)) => Some(DraftReview {
                 status: DraftStatus::parse(raw).ok_or_else(|| {
@@ -99,12 +109,32 @@ impl TryFrom<AssessmentRow> for Assessment {
                     _ => None,
                 },
                 outdated_at: row.draft_outdated_at,
+                revision: draft_revision,
             }),
             (Some(_), None) => {
                 return Err(CoreError::Internal("stored draft has no status".to_owned()));
             }
             (None, _) => None,
         };
+        let quality_warnings = row
+            .quality_warnings
+            .iter()
+            .map(|raw| {
+                QualityWarning::parse(raw).ok_or_else(|| {
+                    CoreError::Internal("stored assessment quality warning is invalid".to_owned())
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let generation: GenerationSnapshot =
+            serde_json::from_value(row.generation).map_err(|_| {
+                CoreError::Internal("stored assessment generation is invalid".to_owned())
+            })?;
+        let samples = u32::try_from(row.samples)
+            .ok()
+            .filter(|samples| *samples >= 1)
+            .ok_or_else(|| {
+                CoreError::Internal("stored assessment samples is invalid".to_owned())
+            })?;
         Ok(Self {
             id: AssessmentId(row.id),
             lead_id: LeadId(row.lead_id),
@@ -114,8 +144,15 @@ impl TryFrom<AssessmentRow> for Assessment {
             approach_angle: row.approach_angle,
             evidence: evidence_from_json(row.evidence)?,
             evidence_verified: row.evidence_verified,
-            model: row.model,
-            prompt_version: row.prompt_version,
+            quality_warnings,
+            provenance: RunProvenance {
+                provider_id: row.provider_id.map(ProviderId),
+                provider_name: row.provider_name,
+                model: row.model,
+                prompt_version: row.prompt_version,
+                generation,
+                samples,
+            },
             draft: match (row.draft_subject, row.draft_body) {
                 (Some(subject), Some(body)) => Some(DraftMessage { subject, body }),
                 _ => None,

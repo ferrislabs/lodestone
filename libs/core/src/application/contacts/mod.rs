@@ -10,6 +10,7 @@ use crate::{
     application::{
         LodestoneUseCase,
         sources::{SourceRunError, rescore},
+        timeline::record_signal,
     },
     domain::{
         NormalizedDomain,
@@ -209,7 +210,7 @@ impl LodestoneUseCase {
         Ok(())
     }
 
-    #[transactional(lead, contact, signal, suppression)]
+    #[transactional(lead, contact, signal, suppression, timeline)]
     pub(crate) async fn record_contacts(
         &self,
         active: &ActiveProfile,
@@ -222,6 +223,7 @@ impl LodestoneUseCase {
         let mut contacts = contact_repository;
         let mut signals = signal_repository;
         let mut suppressions = suppression_repository;
+        let mut timeline = timeline_repository;
         if suppressions.is_domain_suppressed(domain).await? {
             return Ok(0);
         }
@@ -271,20 +273,21 @@ impl LodestoneUseCase {
                 ContactMethod::PublicPage | ContactMethod::LlmExtraction => CONTACT_SIGNAL,
             })
             .map_err(|_| CoreError::Internal("invalid contact signal kind".to_owned()))?;
-            signals
-                .record(&Signal {
-                    id: SignalId(generate_uuid_v7()),
-                    lead_id: lead.id,
-                    kind,
-                    value: Some(candidate.address.local_part().to_owned()),
-                    source,
-                    raw: json!({ "address": candidate.address.as_str(), "method": candidate.method.as_str() }),
-                    provenance: candidate.provenance.clone(),
-                    strength: candidate.confidence,
-                    observed_at: now,
-                    agent: None,
-                })
-                .await?;
+            let signal = Signal {
+                id: SignalId(generate_uuid_v7()),
+                lead_id: lead.id,
+                kind,
+                value: Some(candidate.address.local_part().to_owned()),
+                source,
+                raw: json!({ "address": candidate.address.as_str(), "method": candidate.method.as_str() }),
+                provenance: candidate.provenance.clone(),
+                strength: candidate.confidence,
+                observed_at: now,
+                agent: None,
+            };
+            if signals.record(&signal).await? {
+                record_signal(&mut timeline, &signal, now).await?;
+            }
             stored += 1;
         }
         if stored > 0 {
@@ -292,7 +295,7 @@ impl LodestoneUseCase {
                 &mut leads,
                 &mut signals,
                 lead.id,
-                &active.revision.definition.definition().scoring,
+                &active.revision.definition.definition().evidence,
                 now,
             )
             .await?;

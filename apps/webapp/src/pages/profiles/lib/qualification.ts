@@ -15,6 +15,7 @@ import {
 	uniqueId,
 } from '#/pages/profiles/lib/agents'
 import {
+	DEFAULT_EXCLUSION_THRESHOLD,
 	DEFAULT_WEIGHT,
 	findTemplate,
 	templateAgent,
@@ -26,12 +27,32 @@ export {
 } from '#/pages/profiles/lib/qualification-templates'
 
 export const MIN_OPTIONS = 2
-export const MAX_OPTIONS = 10
+export const MAX_OPTIONS = 11
+export const MIN_EXCLUSION_PERCENT = 50
+export const MIN_SAMPLES = 1
+export const MAX_SAMPLES = 5
+export const DEFAULT_SAMPLES = 3
+export const MAX_SAMPLING_TEMPERATURE = 1.5
+export const DEFAULT_SAMPLING_TEMPERATURE = 0.7
+export const DEFAULT_BAND_LOW = 40
+export const DEFAULT_BAND_HIGH = 70
+export const MAX_EVIDENCE_CHARS = 300
+export const UNKNOWN_VALUE = 'inconnu'
+export const UNKNOWN_LABEL = 'Inconnu'
+export const UNKNOWN_SCORE = 0.5
 export const MAX_PROMPT_CHARS = 8000
 export const MAX_DESCRIPTION_CHARS = 300
 export const MAX_SUMMARY_CHARS = 600
 export const DEFAULT_RELIABLE_FROM = 70
 export const DEFAULT_DISCARD_BELOW = 30
+export const DEFAULT_CALIBRATION_FLOOR = 0.05
+export const MAX_CALIBRATION_FLOOR_PERCENT = 20
+export const DEFAULT_MIN_EVIDENCE = 0.5
+export const DEFAULT_INFLUENCE = 0.6
+export const DEFAULT_EVIDENCE_WEIGHT = 1
+export const MAX_EVIDENCE_WEIGHT = 10
+export const MIN_HALF_LIFE_DAYS = 1
+export const MAX_HALF_LIFE_DAYS = 3650
 
 const IDENTIFIER = /^[a-z0-9][a-z0-9_-]{0,62}$/
 const SLUG = /^[a-z0-9][a-z0-9-]{0,62}$/
@@ -43,9 +64,39 @@ export interface ProviderOption {
 	enabled: boolean
 }
 
+export interface AgentScope {
+	list: 'qualification_agents' | 'scoring_agents'
+	items: 'questions' | 'criteria'
+}
+
+export const QUALIFICATION_SCOPE: AgentScope = {
+	list: 'qualification_agents',
+	items: 'questions',
+}
+
+export const SCORING_SCOPE: AgentScope = {
+	list: 'scoring_agents',
+	items: 'criteria',
+}
+
 export function qualificationList(value: JsonObject): JsonValue[] {
 	const agents = value.qualification_agents
 	return Array.isArray(agents) ? agents : []
+}
+
+export function scoringList(value: JsonObject): JsonValue[] {
+	const agents = value.scoring_agents
+	return Array.isArray(agents) ? agents : []
+}
+
+function agentsIn(value: JsonObject, scope: AgentScope): JsonValue[] {
+	return scope.list === 'scoring_agents'
+		? scoringList(value)
+		: qualificationList(value)
+}
+
+function itemsIn(agent: JsonValue | undefined, scope: AgentScope): JsonValue[] {
+	return listField(agent, scope.items)
 }
 
 export function withQualification(
@@ -55,15 +106,26 @@ export function withQualification(
 	return { ...value, qualification_agents: [...agents] }
 }
 
+export function withScoring(
+	value: JsonObject,
+	agents: readonly JsonValue[],
+): JsonObject {
+	return { ...value, scoring_agents: [...agents] }
+}
+
 export function allAgentIds(
 	value: JsonObject,
 	except: number | null = null,
+	scope: AgentScope = QUALIFICATION_SCOPE,
 ): Set<string> {
 	const ids = new Set<string>()
 	for (const agent of agentList(value)) ids.add(agentField(agent, 'id'))
-	qualificationList(value).forEach((agent, index) => {
-		if (index !== except) ids.add(agentField(agent, 'id'))
-	})
+	for (const kind of [QUALIFICATION_SCOPE, SCORING_SCOPE]) {
+		agentsIn(value, kind).forEach((agent, index) => {
+			if (kind.list === scope.list && index === except) return
+			ids.add(agentField(agent, 'id'))
+		})
+	}
 	return ids
 }
 
@@ -102,8 +164,126 @@ export function optionsOf(question: JsonValue | undefined): JsonValue[] {
 	return listField(question, 'options')
 }
 
+export function isUnknownOption(option: JsonValue | undefined): boolean {
+	return isJsonObject(option) && option.is_unknown === true
+}
+
+export function isExcludingOption(option: JsonValue | undefined): boolean {
+	return isJsonObject(option) && option.excludes === true
+}
+
+export function exclusionThresholdOf(
+	agent: JsonValue | undefined,
+): number | null {
+	if (!isJsonObject(agent)) return null
+	if (!('exclusion_threshold' in agent)) {
+		return Math.round(DEFAULT_EXCLUSION_THRESHOLD * 100)
+	}
+	const fraction = numberField(agent, 'exclusion_threshold')
+	return fraction === null ? null : Math.round(fraction * 100)
+}
+
+export function samplesOf(agent: JsonValue | undefined): number | null {
+	if (!isJsonObject(agent)) return null
+	if (!('samples' in agent)) return DEFAULT_SAMPLES
+	return numberField(agent, 'samples')
+}
+
+export function samplingTemperatureOf(
+	agent: JsonValue | undefined,
+): number | null {
+	if (!isJsonObject(agent)) return null
+	if (!('sampling_temperature' in agent)) return DEFAULT_SAMPLING_TEMPERATURE
+	return numberField(agent, 'sampling_temperature')
+}
+
+export function displayOrder(options: readonly JsonValue[]): number[] {
+	const positions = options.map((_, position) => position)
+	return [
+		...positions.filter((position) => !isUnknownOption(options[position])),
+		...positions.filter((position) => isUnknownOption(options[position])),
+	]
+}
+
 export function aggregatorOf(value: JsonObject): JsonObject {
 	return isJsonObject(value.aggregator) ? value.aggregator : {}
+}
+
+export interface Escalation {
+	provider: string
+	bandLow: number | null
+	bandHigh: number | null
+}
+
+export function escalationOf(value: JsonObject): Escalation {
+	const escalation = value.escalation
+	if (!isJsonObject(escalation)) {
+		return {
+			provider: '',
+			bandLow: DEFAULT_BAND_LOW,
+			bandHigh: DEFAULT_BAND_HIGH,
+		}
+	}
+	const read = (key: string, fallback: number) =>
+		key in escalation ? numberField(escalation, key) : fallback
+	return {
+		provider:
+			typeof escalation.provider === 'string' ? escalation.provider : '',
+		bandLow: read('band_low', DEFAULT_BAND_LOW),
+		bandHigh: read('band_high', DEFAULT_BAND_HIGH),
+	}
+}
+
+export const BAND_ORDER_ERROR =
+	"« Jusqu'à » doit être supérieur à « À partir de »"
+export const SAMPLES_ERROR = `Doit être un entier de ${MIN_SAMPLES} à ${MAX_SAMPLES}`
+export const SAMPLING_TEMPERATURE_ERROR = `Doit être un nombre de 0 à ${MAX_SAMPLING_TEMPERATURE}`
+
+export function escalationProblems(escalation: Escalation): Problem[] {
+	const problems: Problem[] = []
+	if (!isPercent(escalation.bandLow)) {
+		problems.push({ path: 'escalation.band_low', message: PERCENT_ERROR })
+	}
+	if (!isPercent(escalation.bandHigh)) {
+		problems.push({ path: 'escalation.band_high', message: PERCENT_ERROR })
+	}
+	if (
+		problems.length === 0 &&
+		isPercent(escalation.bandLow) &&
+		isPercent(escalation.bandHigh) &&
+		escalation.bandHigh <= escalation.bandLow
+	) {
+		problems.push({ path: 'escalation.band_high', message: BAND_ORDER_ERROR })
+	}
+	return problems
+}
+
+export function samplingProblems(
+	agent: JsonValue | undefined,
+	base: string,
+): Problem[] {
+	const problems: Problem[] = []
+	const samples = samplesOf(agent)
+	if (
+		samples === null ||
+		!Number.isInteger(samples) ||
+		samples < MIN_SAMPLES ||
+		samples > MAX_SAMPLES
+	) {
+		problems.push({ path: `${base}.samples`, message: SAMPLES_ERROR })
+	}
+	const temperature = samplingTemperatureOf(agent)
+	if (
+		temperature === null ||
+		temperature < 0 ||
+		temperature > MAX_SAMPLING_TEMPERATURE
+	) {
+		problems.push({
+			path: `${base}.sampling_temperature`,
+			message: SAMPLING_TEMPERATURE_ERROR,
+		})
+	}
+	return problems
 }
 
 export interface Verdict {
@@ -127,6 +307,151 @@ export function verdictOf(value: JsonObject): Verdict {
 	}
 }
 
+export const EVIDENCE_WEIGHT_KEYS = [
+	'volume',
+	'diversity',
+	'environment',
+	'strength',
+] as const
+
+export type EvidenceWeightKey = (typeof EVIDENCE_WEIGHT_KEYS)[number]
+
+export const HALF_LIFE_KEYS = [
+	'job_offer',
+	'public_tender',
+	'awarded_contract',
+	'saas_provider',
+	'product_detected',
+	'debt_marker',
+	'role_contact_found',
+	'default',
+] as const
+
+export type HalfLifeKey = (typeof HALF_LIFE_KEYS)[number]
+
+export const DEFAULT_HALF_LIVES: Readonly<Record<HalfLifeKey, number>> = {
+	job_offer: 90,
+	public_tender: 180,
+	awarded_contract: 365,
+	saas_provider: 365,
+	product_detected: 365,
+	debt_marker: 365,
+	role_contact_found: 365,
+	default: 180,
+}
+
+export interface EvidenceSettings {
+	calibrationFloor: number | null
+	minEvidence: number | null
+	influence: number | null
+	weights: Record<EvidenceWeightKey, number | null>
+	halfLives: Record<HalfLifeKey, number | null>
+}
+
+function percentOf(
+	source: JsonObject,
+	key: string,
+	fallback: number,
+): number | null {
+	if (!(key in source)) return Math.round(fallback * 100)
+	const value = numberField(source, key)
+	return value === null ? null : Math.round(value * 100)
+}
+
+export function evidenceSettingsOf(value: JsonObject): EvidenceSettings {
+	const verdict = isJsonObject(value.verdict) ? value.verdict : {}
+	const evidence = isJsonObject(value.evidence) ? value.evidence : {}
+	const weights = isJsonObject(evidence.weights) ? evidence.weights : {}
+	const stored = isJsonObject(evidence.half_life_days)
+		? evidence.half_life_days
+		: {}
+	const weight = (key: EvidenceWeightKey) =>
+		key in weights ? numberField(weights, key) : DEFAULT_EVIDENCE_WEIGHT
+	const halfLife = (key: HalfLifeKey) =>
+		key in stored ? numberField(stored, key) : DEFAULT_HALF_LIVES[key]
+	return {
+		calibrationFloor: percentOf(
+			verdict,
+			'calibration_floor',
+			DEFAULT_CALIBRATION_FLOOR,
+		),
+		minEvidence: percentOf(verdict, 'min_evidence', DEFAULT_MIN_EVIDENCE),
+		influence: percentOf(evidence, 'influence', DEFAULT_INFLUENCE),
+		weights: {
+			volume: weight('volume'),
+			diversity: weight('diversity'),
+			environment: weight('environment'),
+			strength: weight('strength'),
+		},
+		halfLives: Object.fromEntries(
+			HALF_LIFE_KEYS.map((key) => [key, halfLife(key)]),
+		) as Record<HalfLifeKey, number | null>,
+	}
+}
+
+export const FLOOR_ERROR = `Doit être un pourcentage entier de 0 à ${MAX_CALIBRATION_FLOOR_PERCENT}`
+export const WEIGHT_ERROR = `Doit être un entier de 0 à ${MAX_EVIDENCE_WEIGHT}`
+export const NO_WEIGHT_ERROR = 'Au moins un poids doit être supérieur à 0'
+export const HALF_LIFE_ERROR = `Doit être un entier de ${MIN_HALF_LIFE_DAYS} à ${MAX_HALF_LIFE_DAYS} jours`
+
+function isHalfLife(value: number | null): value is number {
+	return (
+		value !== null &&
+		Number.isInteger(value) &&
+		value >= MIN_HALF_LIFE_DAYS &&
+		value <= MAX_HALF_LIFE_DAYS
+	)
+}
+
+function isWeight(value: number | null): value is number {
+	return (
+		value !== null &&
+		Number.isInteger(value) &&
+		value >= 0 &&
+		value <= MAX_EVIDENCE_WEIGHT
+	)
+}
+
+export function evidenceProblems(settings: EvidenceSettings): Problem[] {
+	const problems: Problem[] = []
+	const { calibrationFloor, minEvidence, influence } = settings
+	if (
+		!isPercent(calibrationFloor) ||
+		calibrationFloor > MAX_CALIBRATION_FLOOR_PERCENT
+	) {
+		problems.push({ path: 'verdict.calibration_floor', message: FLOOR_ERROR })
+	}
+	if (!isPercent(minEvidence)) {
+		problems.push({ path: 'verdict.min_evidence', message: PERCENT_ERROR })
+	}
+	if (!isPercent(influence)) {
+		problems.push({ path: 'evidence.influence', message: PERCENT_ERROR })
+	}
+	for (const key of EVIDENCE_WEIGHT_KEYS) {
+		if (!isWeight(settings.weights[key])) {
+			problems.push({
+				path: `evidence.weights.${key}`,
+				message: WEIGHT_ERROR,
+			})
+		}
+	}
+	if (
+		problems.every((item) => !item.path.startsWith('evidence.weights')) &&
+		EVIDENCE_WEIGHT_KEYS.every((key) => settings.weights[key] === 0)
+	) {
+		problems.push({ path: 'evidence.weights', message: NO_WEIGHT_ERROR })
+	}
+	for (const key of HALF_LIFE_KEYS) {
+		if (!isHalfLife(settings.halfLives[key])) {
+			problems.push({
+				path: `evidence.half_life_days.${key}`,
+				message: HALF_LIFE_ERROR,
+			})
+		}
+	}
+	return problems
+}
+
 export function isPercent(value: number | null): value is number {
 	return value !== null && Number.isInteger(value) && value >= 0 && value <= 100
 }
@@ -134,6 +459,10 @@ export function isPercent(value: number | null): value is number {
 export const VERDICT_ORDER_ERROR =
 	'« Fiable à partir de » doit être supérieur à « Écarté sous »'
 export const PERCENT_ERROR = 'Doit être un pourcentage entier de 0 à 100'
+export const EXCLUSION_PERCENT_ERROR =
+	'Doit être un pourcentage entier de 50 à 100'
+export const UNKNOWN_EXCLUDES_ERROR =
+	"L'option « inconnu » ne peut pas exclure le lead"
 
 export function verdictProblems(verdict: Verdict): Problem[] {
 	const problems: Problem[] = []
@@ -174,8 +503,17 @@ export function verdictBands(verdict: Verdict): VerdictBands | null {
 	}
 }
 
-function option(value: string, label: string, score: number): JsonObject {
-	return { value, label, score }
+function option(
+	value: string,
+	label: string,
+	score: number,
+	unknown = false,
+): JsonObject {
+	return { value, label, score, is_unknown: unknown, excludes: false }
+}
+
+function unknownOption(): JsonObject {
+	return option(UNKNOWN_VALUE, UNKNOWN_LABEL, UNKNOWN_SCORE, true)
 }
 
 export function newQualificationAgent(
@@ -218,11 +556,9 @@ export function setAgentField(
 	index: number,
 	key: string,
 	next: JsonValue,
+	scope: AgentScope = QUALIFICATION_SCOPE,
 ): JsonObject {
-	return toObject(
-		setIn(value, ['qualification_agents', index, key], next),
-		value,
-	)
+	return toObject(setIn(value, [scope.list, index, key], next), value)
 }
 
 function toObject(next: JsonValue, fallback: JsonObject): JsonObject {
@@ -236,8 +572,12 @@ function nextQuestionId(questions: readonly JsonValue[]): string {
 	return `question-${counter}`
 }
 
-export function addQuestion(value: JsonObject, agent: number): JsonObject {
-	const questions = questionsOf(qualificationList(value)[agent])
+export function addQuestion(
+	value: JsonObject,
+	agent: number,
+	scope: AgentScope = QUALIFICATION_SCOPE,
+): JsonObject {
+	const questions = itemsIn(agentsIn(value, scope)[agent], scope)
 	const created: JsonObject = {
 		id: nextQuestionId(questions),
 		wording: '',
@@ -245,10 +585,11 @@ export function addQuestion(value: JsonObject, agent: number): JsonObject {
 		options: [
 			option('option-1', 'Option 1', 1),
 			option('option-2', 'Option 2', 0),
+			unknownOption(),
 		],
 	}
 	return toObject(
-		appendIn(value, ['qualification_agents', agent, 'questions'], created),
+		appendIn(value, [scope.list, agent, scope.items], created),
 		value,
 	)
 }
@@ -257,9 +598,10 @@ export function removeQuestion(
 	value: JsonObject,
 	agent: number,
 	question: number,
+	scope: AgentScope = QUALIFICATION_SCOPE,
 ): JsonObject {
 	return toObject(
-		removeIn(value, ['qualification_agents', agent, 'questions', question]),
+		removeIn(value, [scope.list, agent, scope.items, question]),
 		value,
 	)
 }
@@ -270,13 +612,10 @@ export function setQuestionField(
 	question: number,
 	key: string,
 	next: JsonValue,
+	scope: AgentScope = QUALIFICATION_SCOPE,
 ): JsonObject {
 	return toObject(
-		setIn(
-			value,
-			['qualification_agents', agent, 'questions', question, key],
-			next,
-		),
+		setIn(value, [scope.list, agent, scope.items, question, key], next),
 		value,
 	)
 }
@@ -286,8 +625,9 @@ export function setQuestionWording(
 	agent: number,
 	question: number,
 	wording: string,
+	scope: AgentScope = QUALIFICATION_SCOPE,
 ): JsonObject {
-	const questions = questionsOf(qualificationList(value)[agent])
+	const questions = itemsIn(agentsIn(value, scope)[agent], scope)
 	const current = questions[question]
 	const id = agentField(current, 'id')
 	const previous = slugify(agentField(current, 'wording'))
@@ -299,6 +639,7 @@ export function setQuestionWording(
 		question,
 		'wording',
 		wording,
+		scope,
 	)
 	const derived = slugify(wording)
 	if (!untouched || derived === '') return withWording
@@ -313,6 +654,7 @@ export function setQuestionWording(
 		question,
 		'id',
 		uniqueId(derived, taken),
+		scope,
 	)
 }
 
@@ -320,18 +662,22 @@ export function addOption(
 	value: JsonObject,
 	agent: number,
 	question: number,
+	scope: AgentScope = QUALIFICATION_SCOPE,
 ): JsonObject {
 	const options = optionsOf(
-		questionsOf(qualificationList(value)[agent])[question],
+		itemsIn(agentsIn(value, scope)[agent], scope)[question],
 	)
 	const taken = new Set(options.map((item) => agentField(item, 'value')))
 	let counter = options.length + 1
 	while (taken.has(`option-${counter}`)) counter += 1
+	const created = option(`option-${counter}`, `Option ${counter}`, 0)
+	const firstUnknown = options.findIndex((item) => isUnknownOption(item))
+	const at = firstUnknown === -1 ? options.length : firstUnknown
 	return toObject(
-		appendIn(
+		setIn(
 			value,
-			['qualification_agents', agent, 'questions', question, 'options'],
-			option(`option-${counter}`, `Option ${counter}`, 0),
+			[scope.list, agent, scope.items, question, 'options'],
+			[...options.slice(0, at), created, ...options.slice(at)],
 		),
 		value,
 	)
@@ -342,12 +688,17 @@ export function removeOption(
 	agent: number,
 	question: number,
 	position: number,
+	scope: AgentScope = QUALIFICATION_SCOPE,
 ): JsonObject {
+	const options = optionsOf(
+		itemsIn(agentsIn(value, scope)[agent], scope)[question],
+	)
+	if (isUnknownOption(options[position])) return value
 	return toObject(
 		removeIn(value, [
-			'qualification_agents',
+			scope.list,
 			agent,
-			'questions',
+			scope.items,
 			question,
 			'options',
 			position,
@@ -363,19 +714,12 @@ export function setOptionField(
 	position: number,
 	key: string,
 	next: JsonValue,
+	scope: AgentScope = QUALIFICATION_SCOPE,
 ): JsonObject {
 	return toObject(
 		setIn(
 			value,
-			[
-				'qualification_agents',
-				agent,
-				'questions',
-				question,
-				'options',
-				position,
-				key,
-			],
+			[scope.list, agent, scope.items, question, 'options', position, key],
 			next,
 		),
 		value,
@@ -392,11 +736,57 @@ export function setAggregatorField(
 
 export function setVerdictField(
 	value: JsonObject,
-	key: 'reliable_from' | 'discard_below',
+	key: 'reliable_from' | 'discard_below' | 'calibration_floor' | 'min_evidence',
 	next: number | null,
 ): JsonObject {
 	const current = isJsonObject(value.verdict) ? value.verdict : {}
 	return { ...value, verdict: { ...current, [key]: next } }
+}
+
+export function setEscalationField(
+	value: JsonObject,
+	key: 'provider' | 'band_low' | 'band_high',
+	next: string | number | null,
+): JsonObject {
+	const current = isJsonObject(value.escalation) ? value.escalation : {}
+	return { ...value, escalation: { ...current, [key]: next } }
+}
+
+export function setEvidenceField(
+	value: JsonObject,
+	key: 'influence',
+	next: number | null,
+): JsonObject {
+	const current = isJsonObject(value.evidence) ? value.evidence : {}
+	return { ...value, evidence: { ...current, [key]: next } }
+}
+
+export function setEvidenceWeight(
+	value: JsonObject,
+	key: EvidenceWeightKey,
+	next: number | null,
+): JsonObject {
+	const current = isJsonObject(value.evidence) ? value.evidence : {}
+	const weights = isJsonObject(current.weights) ? current.weights : {}
+	return {
+		...value,
+		evidence: { ...current, weights: { ...weights, [key]: next } },
+	}
+}
+
+export function setHalfLife(
+	value: JsonObject,
+	key: HalfLifeKey,
+	next: number | null,
+): JsonObject {
+	const current = isJsonObject(value.evidence) ? value.evidence : {}
+	const days = isJsonObject(current.half_life_days)
+		? current.half_life_days
+		: {}
+	return {
+		...value,
+		evidence: { ...current, half_life_days: { ...days, [key]: next } },
+	}
 }
 
 export function providerName(
@@ -415,7 +805,6 @@ export function qualificationSummary(
 	return [
 		`${count} ${pluralize(count, "axe d'analyse", "axes d'analyse")}`,
 		`fournisseur : ${providerName(agentProvider(agent), providers)}`,
-		`poids ${agentWeight(agent)}`,
 	].join(' · ')
 }
 
@@ -431,6 +820,12 @@ function questionSchema(question: JsonValue): JsonObject {
 		properties: {
 			type: { type: 'string', const: 'choice' },
 			choice: { type: 'string', enum: values },
+			evidence: {
+				type: 'string',
+				maxLength: MAX_EVIDENCE_CHARS,
+				description:
+					'Sentence copied verbatim from the documents that justifies the choice. May be empty only when the choice is the unknown option.',
+			},
 			confidence: probabilitySchema(),
 			probabilities: {
 				type: 'object',
@@ -441,7 +836,7 @@ function questionSchema(question: JsonValue): JsonObject {
 				additionalProperties: false,
 			},
 		},
-		required: ['type', 'choice', 'confidence', 'probabilities'],
+		required: ['type', 'choice', 'evidence', 'confidence', 'probabilities'],
 		additionalProperties: false,
 	}
 }
@@ -478,6 +873,7 @@ export const CONTRACT_EXAMPLE = `{
     "<identifiant de l'axe>": {
       "type": "choice",
       "choice": "<valeur de l'option>",
+      "evidence": "<phrase copiée mot pour mot depuis les documents>",
       "confidence": 0.0,
       "probabilities": { "<valeur de l'option>": 0.0 }
     }
@@ -488,14 +884,17 @@ function problem(path: string, message: string): Problem {
 	return { path, message }
 }
 
-function checkOptions(
+export function checkOptions(
 	options: readonly JsonValue[],
 	base: string,
 	problems: Problem[],
+	noun = "l'axe",
 ) {
 	const path = `${base}.options`
 	if (options.length < MIN_OPTIONS || options.length > MAX_OPTIONS) {
-		problems.push(problem(path, 'Doit avoir de 2 à 10 options'))
+		problems.push(problem(path, 'Doit avoir de 2 à 11 options'))
+	} else if (options.filter((item) => isUnknownOption(item)).length !== 1) {
+		problems.push(problem(path, 'Doit avoir exactement une option « inconnu »'))
 	}
 	const seen = new Set<string>()
 	options.forEach((item, position) => {
@@ -509,9 +908,14 @@ function checkOptions(
 				),
 			)
 		} else if (optionValue !== '' && seen.has(optionValue)) {
-			problems.push(problem(`${itemPath}.value`, "Doit être unique dans l'axe"))
+			problems.push(
+				problem(`${itemPath}.value`, `Doit être unique dans ${noun}`),
+			)
 		}
 		seen.add(optionValue)
+		if (isExcludingOption(item) && isUnknownOption(item)) {
+			problems.push(problem(`${itemPath}.excludes`, UNKNOWN_EXCLUDES_ERROR))
+		}
 		const score = numberField(item, 'score')
 		if (score !== null && (score < 0 || score > 1)) {
 			problems.push(
@@ -602,6 +1006,18 @@ export function validateQualification(value: JsonObject): Problem[] {
 				),
 			)
 		}
+		const threshold = exclusionThresholdOf(agent)
+		if (
+			threshold === null ||
+			!Number.isInteger(threshold) ||
+			threshold < MIN_EXCLUSION_PERCENT ||
+			threshold > 100
+		) {
+			problems.push(
+				problem(`${base}.exclusion_threshold`, EXCLUSION_PERCENT_ERROR),
+			)
+		}
+		problems.push(...samplingProblems(agent, base))
 		checkQuestions(questionsOf(agent), base, problems)
 	})
 	const aggregator = aggregatorOf(value)
@@ -613,6 +1029,8 @@ export function validateQualification(value: JsonObject): Problem[] {
 			),
 		)
 	}
+	problems.push(...escalationProblems(escalationOf(value)))
 	problems.push(...verdictProblems(verdictOf(value)))
+	problems.push(...evidenceProblems(evidenceSettingsOf(value)))
 	return problems
 }

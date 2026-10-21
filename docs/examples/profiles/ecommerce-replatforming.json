@@ -1,55 +1,88 @@
 {
-  "schema_version": 5,
+  "schema_version": 19,
   "identity": {
     "offer": "Migration of Magento 1 and Magento 2 shops to a modern e-commerce platform, by a web agency",
     "target_customer": "Merchants and organizations running an outdated Magento storefront"
   },
+  "language": "fr",
   "agents": [
     {
-      "id": "http-probe",
-      "name": "HTTP probe",
-      "enabled": true,
-      "source": {
-        "kind": "http_probe",
-        "fingerprints": [
-          {
-            "id": "magento-version",
-            "path": "/magento_version",
-            "product": "magento",
-            "matchers": [
-              { "kind": "status", "equals": 200 },
-              { "kind": "body", "pattern": "^Magento/" }
-            ],
-            "version": { "from": "body", "pattern": "^Magento/(\\d+\\.\\d+)" },
-            "debt_markers": [
-              {
-                "id": "outdated_magento",
-                "rule": { "kind": "version_below", "version": "2.4" }
-              }
-            ]
-          }
-        ]
-      }
-    },
-    {
+      "type": "search",
       "id": "boamp",
       "name": "BOAMP",
       "enabled": true,
-      "source": {
-        "kind": "boamp",
-        "keywords": ["site e-commerce", "Magento", "refonte de site marchand", "boutique en ligne", "plateforme de vente en ligne"]
-      }
+      "providers": [
+        "boamp"
+      ],
+      "keywords": [
+        "site e-commerce",
+        "Magento",
+        "refonte de site marchand",
+        "boutique en ligne",
+        "plateforme de vente en ligne"
+      ]
     },
     {
+      "type": "search",
       "id": "france-travail",
       "name": "France Travail",
       "enabled": true,
-      "source": {
-        "kind": "france_travail",
-        "keywords": ["Magento", "développeur Magento", "e-commerce", "refonte de site marchand", "migration Magento"]
-      }
+      "providers": [
+        "france_travail"
+      ],
+      "keywords": [
+        "Magento",
+        "développeur Magento",
+        "e-commerce",
+        "refonte de site marchand",
+        "migration Magento"
+      ]
     }
   ],
+  "inspection": {
+    "enabled": true
+  },
+  "enrichment": {
+    "custom": {
+      "fingerprints": [
+        {
+          "id": "magento-version",
+          "path": "/magento_version",
+          "product": "magento",
+          "matchers": [
+            {
+              "kind": "status",
+              "equals": 200
+            },
+            {
+              "kind": "body",
+              "pattern": "^Magento/"
+            }
+          ],
+          "version": {
+            "from": "body",
+            "pattern": "^Magento/(\\d+\\.\\d+)"
+          },
+          "debt_markers": [
+            {
+              "id": "outdated_magento",
+              "rule": {
+                "kind": "version_below",
+                "version": "2.4"
+              }
+            }
+          ]
+        }
+      ],
+      "excluded_products": [],
+      "extra_subdomains": [
+        "www",
+        "shop",
+        "boutique"
+      ]
+    },
+    "highlight_keywords": []
+  },
   "qualification_agents": [
     {
       "id": "pertinence",
@@ -58,7 +91,9 @@
       "enabled": true,
       "provider_id": null,
       "system_prompt": "You judge whether a company is a relevant prospect for the offer, using the relevance criteria. Base your answers only on what the documents state.\n\nRelevance criteria: The organization runs an online shop on Magento, preferably an outdated version, or is hiring or tendering for a rebuild of its merchant site.",
-      "weight": 5,
+      "exclusion_threshold": 0.6,
+      "samples": 3,
+      "sampling_temperature": 0.7,
       "questions": [
         {
           "id": "pertinence",
@@ -68,47 +103,199 @@
             {
               "value": "forte",
               "label": "Forte",
-              "score": 1.0
+              "score": 1.0,
+              "is_unknown": false,
+              "excludes": false
             },
             {
               "value": "moyenne",
               "label": "Moyenne",
-              "score": 0.5
+              "score": 0.5,
+              "is_unknown": false,
+              "excludes": false
             },
             {
               "value": "faible",
               "label": "Faible",
-              "score": 0.0
+              "score": 0.0,
+              "is_unknown": false,
+              "excludes": false
+            },
+            {
+              "value": "inconnu",
+              "label": "Inconnu",
+              "score": 0.5,
+              "is_unknown": true,
+              "excludes": false
             }
           ]
         }
       ]
     }
   ],
+  "scoring_agents": [
+    {
+      "id": "score-global",
+      "name": "Score global",
+      "description": "Décide du score et du verdict du lead à partir des rapports des agents de qualification.",
+      "enabled": true,
+      "provider_id": null,
+      "weight": 5,
+      "system_prompt": "Tu décides du score et du verdict d'un lead pour un outil de détection de leads B2B. Tu reçois le lead, ses faits, ses signaux, le dossier de l'entreprise, le rapport de chaque agent de qualification (résumé, réponses avec citations, accord entre échantillons, exclusions) et des indicateurs calculés par le système. Pèse l'ensemble comme le ferait un commercial prudent. Réponds à chaque critère en citant mot pour mot une phrase des documents, ou choisis l'option inconnue quand rien ne la soutient. Donne un score de 0 à 100, la probabilité de chaque verdict et quelques raisons courtes. Base-toi uniquement sur ce qui est fourni.",
+      "criteria": [
+        {
+          "id": "adequation_offre",
+          "wording": "Le lead correspond-il à la cible de l'offre ?",
+          "weight": 5,
+          "options": [
+            {
+              "value": "forte",
+              "label": "Forte",
+              "score": 1.0,
+              "is_unknown": false,
+              "excludes": false
+            },
+            {
+              "value": "moyenne",
+              "label": "Moyenne",
+              "score": 0.5,
+              "is_unknown": false,
+              "excludes": false
+            },
+            {
+              "value": "faible",
+              "label": "Faible",
+              "score": 0.0,
+              "is_unknown": false,
+              "excludes": false
+            },
+            {
+              "value": "inconnu",
+              "label": "Inconnu",
+              "score": 0.5,
+              "is_unknown": true,
+              "excludes": false
+            }
+          ]
+        },
+        {
+          "id": "solidite_preuves",
+          "wording": "Les preuves rassemblées sont-elles solides et récentes ?",
+          "weight": 5,
+          "options": [
+            {
+              "value": "solide",
+              "label": "Solide",
+              "score": 1.0,
+              "is_unknown": false,
+              "excludes": false
+            },
+            {
+              "value": "partielle",
+              "label": "Partielle",
+              "score": 0.5,
+              "is_unknown": false,
+              "excludes": false
+            },
+            {
+              "value": "fragile",
+              "label": "Fragile",
+              "score": 0.0,
+              "is_unknown": false,
+              "excludes": false
+            },
+            {
+              "value": "inconnu",
+              "label": "Inconnu",
+              "score": 0.5,
+              "is_unknown": true,
+              "excludes": false
+            }
+          ]
+        },
+        {
+          "id": "priorite_commerciale",
+          "wording": "Ce lead mérite-t-il d'être contacté en priorité ?",
+          "weight": 5,
+          "options": [
+            {
+              "value": "haute",
+              "label": "Haute",
+              "score": 1.0,
+              "is_unknown": false,
+              "excludes": false
+            },
+            {
+              "value": "normale",
+              "label": "Normale",
+              "score": 0.5,
+              "is_unknown": false,
+              "excludes": false
+            },
+            {
+              "value": "basse",
+              "label": "Basse",
+              "score": 0.0,
+              "is_unknown": false,
+              "excludes": false
+            },
+            {
+              "value": "inconnu",
+              "label": "Inconnu",
+              "score": 0.5,
+              "is_unknown": true,
+              "excludes": false
+            }
+          ]
+        }
+      ],
+      "samples": 1,
+      "sampling_temperature": 0.7
+    }
+  ],
   "aggregator": {
     "provider_id": null,
     "system_prompt": "You write the summary of a lead for a B2B lead detection tool. You receive the lead, its signals, and the answers and scores of every qualification agent. Write a short synthesis, the verdict narrative, an approach angle and a message draft for the operator to review. Quote evidence verbatim from the documents. Never change the computed confidence or the verdict. Base your text only on what is provided and do not invent facts."
   },
+  "escalation": {
+    "provider": null,
+    "band_low": 40,
+    "band_high": 70
+  },
   "verdict": {
     "reliable_from": 70,
-    "discard_below": 30
+    "discard_below": 30,
+    "calibration_floor": 0.05,
+    "min_evidence": 0.5
   },
-  "scoring": {
-    "factors": [
-      { "signal": "product_detected", "value": "magento", "weight": 10 },
-      { "signal": "debt_marker", "value": "outdated_magento", "weight": 9 },
-      { "signal": "job_offer", "weight": 6 },
-      { "signal": "public_tender", "weight": 6 },
-      { "signal": "role_contact_found", "weight": 2 }
-    ]
+  "evidence": {
+    "influence": 0.6,
+    "weights": {
+      "volume": 1,
+      "diversity": 1,
+      "environment": 1,
+      "strength": 1
+    },
+    "half_life_days": {
+      "awarded_contract": 365,
+      "contact": 365,
+      "debt_marker": 365,
+      "default": 180,
+      "job_offer": 90,
+      "product_detected": 365,
+      "public_tender": 180,
+      "role_contact_found": 365,
+      "saas_provider": 365
+    }
   },
   "contact_ranking": {
-    "preferred_local_parts": ["contact", "commercial", "info"],
-    "guess_local_parts": ["contact"]
-  },
-  "llm": {
-    "qualification_threshold": 50,
-    "relevance_criteria": "The organization runs an online shop on Magento, preferably an outdated version, or is hiring or tendering for a rebuild of its merchant site.",
-    "language": "fr"
+    "preferred_local_parts": [
+      "contact",
+      "commercial",
+      "info"
+    ],
+    "guess_local_parts": [
+      "contact"
+    ]
   }
 }

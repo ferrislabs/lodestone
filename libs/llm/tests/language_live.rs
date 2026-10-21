@@ -2,10 +2,11 @@ use std::{fs, num::NonZeroU32, path::PathBuf, time::Duration};
 
 use llm::openai::OpenAiCompatibleProvider;
 use lodestone_core::{
-    AggregatorOutput, CacheScope, CachedOutput, Facts, LeadId, LlmCache, ProfileId,
-    ProviderDefinition, ProviderKind, QualificationResult, ReasoningEffort, ResultId, ResultStatus,
-    RevisionNumber, TokenPricing, UntrustedDocument, ValidatedProfile, Verdict,
-    aggregation_instruction, aggregation_prompt, check_evidence,
+    AggregatorOutput, CacheScope, CachedOutput, EVIDENCE_RETRY, Facts, GenerationParams, LeadId,
+    LlmCache, ProfileId, ProviderDefinition, ProviderKind, QualificationResult, ReasoningEffort,
+    ResultId, ResultStatus, RevisionNumber, TokenPricing, UntrustedDocument, ValidatedProfile,
+    Verdict, aggregation_instruction, aggregation_problem, aggregation_prompt,
+    aggregation_retry_message, aggregation_warnings, check_aggregation, check_evidence,
     definition::AgentId,
     llm::gateway::{CallSettings, Prompt, RunBudget, SchemaCall, call_with_schema},
     render_agent,
@@ -48,9 +49,7 @@ fn fake_result(
         profile_id: NIL.parse::<ProfileId>().unwrap(),
         profile_revision: RevisionNumber::FIRST,
         agent_id: AgentId::new(agent),
-        provider_id: None,
-        model: "gemma_laya".to_owned(),
-        prompt_hash: String::new(),
+        provenance: lodestone_core::RunProvenance::legacy("gemma_laya".to_owned(), String::new()),
         status: ResultStatus::Valid,
         summary: Some("Résumé de l'agent.".to_owned()),
         answers: json!({question: {
@@ -61,6 +60,8 @@ fn fake_result(
         }}),
         agent_score: Some(score),
         error: None,
+        escalated: false,
+        raw_samples: json!([]),
         created_at: std::time::SystemTime::now().into(),
     }
 }
@@ -83,6 +84,20 @@ async fn the_aggregator_summarises_an_iam_lead_in_french_live() {
         api_key: None,
         timeout: Duration::from_secs(300),
         reasoning_effort: Some(ReasoningEffort::None),
+        generation: GenerationParams {
+            max_tokens: None,
+            temperature: std::env::var("LODESTONE_LLM_TEMPERATURE")
+                .ok()
+                .and_then(|value| value.parse().ok()),
+            frequency_penalty: None,
+            presence_penalty: None,
+            repeat_penalty: Some(
+                std::env::var("LODESTONE_LLM_REPEAT_PENALTY")
+                    .ok()
+                    .and_then(|value| value.parse().ok())
+                    .unwrap_or(1.3),
+            ),
+        },
     };
     let provider = OpenAiCompatibleProvider::new(&definition).unwrap();
     let case: Value = serde_json::from_str(
@@ -157,6 +172,7 @@ async fn the_aggregator_summarises_an_iam_lead_in_french_live() {
         Facts {
             confidence: Some(94.0),
             verdict: Some(Verdict::Reliable),
+            score: Some(88),
         },
         signals.len(),
     );
@@ -166,16 +182,8 @@ async fn the_aggregator_summarises_an_iam_lead_in_french_live() {
         prompt: built.tag.clone(),
         domain: lodestone_core::NormalizedDomain::from_host("example-retail.fr").unwrap(),
         agent: None,
-    };
-    let call = SchemaCall {
-        scope: &scope,
-        prompt: Prompt {
-            system: &built.system,
-            instruction: &instruction,
-            documents: &documents,
-            max_tokens: 4096,
-        },
-        schema: &schema,
+        sample: 0,
+        fresh: false,
     };
     let settings = CallSettings {
         max_retries: 2,
@@ -185,20 +193,58 @@ async fn the_aggregator_summarises_an_iam_lead_in_french_live() {
         },
         base_delay: Duration::from_secs(2),
     };
-    let mut budget = RunBudget::new(NonZeroU32::new(10).unwrap());
-    let structured = call_with_schema(
-        &provider,
-        &NoCache,
-        call,
-        |value| AggregatorOutput::parse(value).is_ok(),
-        settings,
-        &mut budget,
-    )
-    .await
-    .unwrap();
-    println!("model: {}", structured.model);
-    let output = AggregatorOutput::parse(&structured.value)
-        .unwrap_or_else(|problem| panic!("contract violated: {problem}"));
+    let budget = RunBudget::new(NonZeroU32::new(10).unwrap());
+    let mut current = instruction.clone();
+    let mut last = None;
+    for attempt in 1..=2 {
+        let call = SchemaCall {
+            scope: &scope,
+            prompt: Prompt {
+                system: &built.system,
+                instruction: &current,
+                documents: &documents,
+                max_tokens: 4096,
+                temperature: None,
+            },
+            schema: &schema,
+        };
+        let structured = call_with_schema(
+            &provider,
+            &NoCache,
+            call,
+            |value| AggregatorOutput::parse(value).is_ok(),
+            settings,
+            &budget,
+        )
+        .await
+        .unwrap();
+        let output = AggregatorOutput::parse(&structured.value)
+            .unwrap_or_else(|problem| panic!("contract violated: {problem}"));
+        let violations = check_aggregation(&output);
+        let evidence = check_evidence(&output.evidence, &documents[..signals.len()]);
+        println!(
+            "attempt {attempt}: {} violation(s), evidence sound: {}",
+            violations.len(),
+            evidence.is_sound()
+        );
+        let mut problems: Vec<String> = Vec::new();
+        if !evidence.is_sound() {
+            problems.push(EVIDENCE_RETRY.to_owned());
+        }
+        if !violations.is_empty() {
+            problems.push(aggregation_retry_message(&violations));
+        }
+        let done = problems.is_empty();
+        if !done {
+            current = aggregation_problem(&instruction, &problems.join("\n\n"));
+        }
+        last = Some((structured.model, output));
+        if done {
+            break;
+        }
+    }
+    let (model, output) = last.unwrap();
+    println!("model: {model}");
     println!("summary: {}", output.summary);
     println!("verdict_narrative: {}", output.verdict_narrative);
     println!("approach_angle: {}", output.approach_angle);
@@ -210,5 +256,21 @@ async fn the_aggregator_summarises_an_iam_lead_in_french_live() {
         output.evidence.len(),
         check.verified.len(),
         check.rejected
+    );
+    let violations = check_aggregation(&output);
+    for violation in &violations {
+        println!("violation: `{}` {}", violation.field, violation.detail);
+    }
+    println!(
+        "checks: {} (warnings: {:?})",
+        if violations.is_empty() {
+            "clean"
+        } else {
+            "violations remain"
+        },
+        aggregation_warnings(&violations)
+            .iter()
+            .map(|warning| warning.as_str())
+            .collect::<Vec<_>>()
     );
 }

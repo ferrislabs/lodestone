@@ -66,6 +66,23 @@ impl DraftProblem {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
+pub struct DraftRevision(u32);
+
+impl DraftRevision {
+    pub const fn new(value: u32) -> Self {
+        Self(value)
+    }
+
+    pub const fn get(self) -> u32 {
+        self.0
+    }
+
+    pub const fn next(self) -> Self {
+        Self(self.0.saturating_add(1))
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DraftReview {
     pub status: DraftStatus,
@@ -76,6 +93,7 @@ pub struct DraftReview {
     pub rejection_reason: Option<String>,
     pub suggestion: Option<DraftMessage>,
     pub outdated_at: Option<DateTime<Utc>>,
+    pub revision: DraftRevision,
 }
 
 impl DraftReview {
@@ -89,6 +107,7 @@ impl DraftReview {
             rejection_reason: None,
             suggestion: None,
             outdated_at: None,
+            revision: DraftRevision::default(),
         }
     }
 
@@ -282,8 +301,8 @@ mod tests {
             approach_angle: String::new(),
             evidence: Vec::new(),
             evidence_verified: true,
-            model: String::new(),
-            prompt_version: String::new(),
+            quality_warnings: Vec::new(),
+            provenance: crate::domain::llm::RunProvenance::legacy(String::new(), String::new()),
             draft: Some(DraftMessage {
                 subject: subject.to_owned(),
                 body: format!("body of {subject}"),
@@ -353,6 +372,49 @@ mod tests {
         assert_eq!(merged.summary, "new");
         assert_eq!(merged.draft.unwrap().subject, "approved");
         assert_eq!(merged.draft_review, Some(approved));
+    }
+
+    #[test]
+    fn a_revision_starts_at_zero_and_increments() {
+        assert_eq!(DraftRevision::default().get(), 0);
+        assert_eq!(DraftReview::pending().revision, DraftRevision::default());
+        assert_eq!(DraftRevision::new(4).next(), DraftRevision::new(5));
+        assert!(DraftRevision::new(4) < DraftRevision::new(4).next());
+    }
+
+    #[test]
+    fn a_revision_saturates_instead_of_wrapping() {
+        let last = DraftRevision::new(u32::MAX);
+        assert_eq!(last.next(), last);
+        assert_eq!(DraftRevision::new(u32::MAX - 1).next(), last);
+    }
+
+    #[test]
+    fn a_carried_draft_keeps_its_revision() {
+        let edited = DraftReview {
+            edited_at: Some(at()),
+            revision: DraftRevision::new(3),
+            ..DraftReview::pending()
+        };
+        let merged = carry_draft(
+            Some(&assessment("edited", Some(edited.clone()))),
+            assessment("new", Some(DraftReview::pending())),
+            later(),
+        );
+        assert_eq!(merged.draft_review.unwrap().revision, DraftRevision::new(3));
+
+        let approved = DraftReview {
+            revision: DraftRevision::new(2),
+            ..DraftReview::pending()
+        }
+        .approve(user(), at())
+        .unwrap();
+        let merged = carry_draft(
+            Some(&assessment("approved", Some(approved.clone()))),
+            assessment("new", Some(DraftReview::pending())),
+            later(),
+        );
+        assert_eq!(merged.draft_review.unwrap().revision, DraftRevision::new(2));
     }
 
     #[test]

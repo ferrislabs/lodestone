@@ -20,11 +20,16 @@ export interface ParsedApiError {
 const EXACT_MESSAGES: Readonly<Record<string, string>> = {
 	'must not be empty': 'Ne doit pas être vide',
 	'at least one agent is required': 'Au moins un agent est requis',
+	'at least one provider is required': 'Au moins un fournisseur est requis',
+	'must be an ISO 3166-1 alpha-2 country code in uppercase':
+		'Doit être un code pays ISO à deux lettres en majuscules',
 	'at least one qualification agent is required':
 		'Au moins un agent de qualification est requis',
 	'must be lowercase letters, digits, hyphens and underscores, at most 63 characters':
 		'Doit être composé de minuscules, chiffres, tirets et tirets bas, 63 caractères au maximum',
-	'must have from 2 to 10 options': 'Doit avoir de 2 à 10 options',
+	'must have from 2 to 11 options': 'Doit avoir de 2 à 11 options',
+	'must have exactly one option with `is_unknown` set to true':
+		'Doit avoir exactement une option « inconnu »',
 	'must be a number from 0 to 1': 'Doit être un nombre de 0 à 1',
 	'must be higher than `discard_below`':
 		'Doit être supérieur au seuil « Écarté sous »',
@@ -59,6 +64,7 @@ const EXACT_MESSAGES: Readonly<Record<string, string>> = {
 	'must be a non-negative integer': 'Doit être un entier positif ou nul',
 	'must be a non-negative number': 'Doit être un nombre positif ou nul',
 	'must be a number': 'Doit être un nombre',
+	'must be a number or null': 'Doit être un nombre ou null',
 	'must be an object': 'Doit être un objet',
 	'must be a JSON object': 'Doit être un objet JSON',
 	'must be a UUID': 'Doit être un UUID',
@@ -70,7 +76,21 @@ const EXACT_MESSAGES: Readonly<Record<string, string>> = {
 		'Doit être `triage` ou `qualification`',
 	'unknown field': 'Champ inconnu',
 	'unknown provider': 'Fournisseur inconnu',
+	'is a secret and cannot be set as a setting':
+		'Secret : à saisir dans son champ masqué',
+	'is not a secret field of this provider':
+		"Ce champ n'est pas un secret de cette source",
+	'must be a boolean': 'Doit être vrai ou faux',
+	'must be an https URL': 'Doit être une URL https',
+	'must be provided again when a URL setting changes':
+		'À ressaisir : une URL a changé, les secrets doivent être fournis à nouveau',
+	'the provider is not configured yet': "La source n'est pas encore configurée",
+	'the provider does not use this authentication mode':
+		"Cette source n'utilise pas ce mode d'authentification",
 	'is required': 'Champ obligatoire',
+	'is required to reject': 'Choisissez une raison de rejet',
+	'is required when the reason is autre':
+		'Précisez la raison quand elle est « Autre »',
 	'is required for this provider kind':
 		'Obligatoire pour ce type de fournisseur',
 	'is too long': 'Trop long',
@@ -180,13 +200,22 @@ const RULES: readonly Rule[] = [
 		(m) =>
 			`Version de schéma ${m[1]} non prise en charge, attendu : 1, 2 ou ${m[2]}`,
 	],
+	[
+		/^unknown source provider `(.*)`$/,
+		(m) => `Fournisseur inconnu : \`${m[1]}\``,
+	],
+	[
+		/^provider `(.*)` does not support keyword search$/,
+		(m) =>
+			`Le fournisseur \`${m[1]}\` ne prend pas en charge la recherche par mots-clés`,
+	],
 	[/^duplicate value `(.*)`$/, (m) => `Valeur en double : \`${m[1]}\``],
 	[
 		/^must be at most (\d+) characters$/,
 		(m) => `Doit contenir au maximum ${m[1]} caractères`,
 	],
 	[
-		/^must be between (\d+) and (\d+)$/,
+		/^must be between (-?\d+(?:\.\d+)?) and (-?\d+(?:\.\d+)?)$/,
 		(m) => `Doit être compris entre ${m[1]} et ${m[2]}`,
 	],
 	[/^must be at least (\d+(?:\.\d+)?)$/, (m) => `Doit valoir au moins ${m[1]}`],
@@ -213,8 +242,15 @@ const RULES: readonly Rule[] = [
 			`${m[1]} leads correspondent, plus que les ${m[2]} qu'un export peut contenir : affinez les filtres`,
 	],
 	[
-		/^The provider answered with status (\d+)\.$/,
-		(m) => `Le fournisseur a répondu avec le statut ${m[1]}.`,
+		/^The provider answered with status (\d+)(?:\.|: (.+))$/s,
+		(m) =>
+			m[2] === undefined
+				? `Le fournisseur a répondu avec le statut ${m[1]}.`
+				: `Le fournisseur a répondu avec le statut ${m[1]} : ${m[2]}`,
+	],
+	[
+		/^The provider rejected the credentials: (.+)$/s,
+		(m) => `Le fournisseur a refusé les identifiants : ${m[1]}`,
 	],
 	[
 		/^Insufficient permissions: required scope `(.*)`$/,

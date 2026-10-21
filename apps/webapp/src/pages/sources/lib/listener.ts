@@ -8,11 +8,7 @@ import type {
 
 export const CONTINUOUS_GROUP_TITLE = 'Écoute continue'
 
-export const CONTINUOUS_AGENT_KINDS: readonly string[] = [
-	'certificate_transparency',
-	'dns_cname',
-	'http_probe',
-]
+export const CONTINUOUS_AGENT_KINDS: readonly string[] = ['certificates', 'dns']
 
 export type ListenerTone = 'active' | 'standby' | 'inactive' | 'error' | 'stale'
 
@@ -34,6 +30,20 @@ const LISTENER_BADGES: Readonly<Record<string, ListenerBadge>> = {
 	stale: { label: 'Sans nouvelles', tone: 'stale' },
 }
 
+export interface LatestError {
+	message: string
+	at: string
+}
+
+export function latestError(listener: Listener): LatestError | null {
+	const message = listener.last_error ?? null
+	const at = listener.last_error_at ?? null
+	if (message === null || at === null) return null
+	const activity = listener.last_activity_at ?? null
+	if (activity !== null && Date.parse(activity) > Date.parse(at)) return null
+	return { message, at }
+}
+
 export function isContinuous(source: Source): boolean {
 	return source.mode === 'continuous'
 }
@@ -53,6 +63,10 @@ export function backlogText(source: string, backlog: number): string {
 			return `${amount} ${pluralize(backlog, 'tuile', 'tuiles')} de retard`
 		case 'qualification':
 			return `${amount} ${pluralize(backlog, 'lead à qualifier', 'leads à qualifier')}`
+		case 'company_research':
+			return `${amount} ${pluralize(backlog, 'domaine à rechercher', 'domaines à rechercher')}`
+		case 'ecosystem_inspection':
+			return `${amount} ${pluralize(backlog, 'module à passer', 'modules à passer')}`
 		case 'dns_cname':
 		case 'http_probe':
 			return `${amount} ${pluralize(backlog, 'hôte', 'hôtes')} à sonder`

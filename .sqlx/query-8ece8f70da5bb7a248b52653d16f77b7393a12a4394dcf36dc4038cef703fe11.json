@@ -1,0 +1,64 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT module, finding_key, kind, label, value, source_url, observed_at, details\n            FROM lead_ecosystem\n            WHERE domain = $1\n            ORDER BY module, observed_at DESC, finding_key\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "module",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "finding_key",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "kind",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "label",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "value",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "source_url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "observed_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 7,
+        "name": "details",
+        "type_info": "Jsonb"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "8ece8f70da5bb7a248b52653d16f77b7393a12a4394dcf36dc4038cef703fe11"
+}

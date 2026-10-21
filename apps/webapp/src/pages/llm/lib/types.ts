@@ -30,11 +30,17 @@ export interface ProviderFormValues {
 	base_url: string
 	model: string
 	max_retries: string
+	max_concurrency: string
 	timeout_seconds: string
 	input_cents_per_mtok: string
 	output_cents_per_mtok: string
 	api_key: string
 	reasoning_effort: string
+	max_tokens: string
+	temperature: string
+	frequency_penalty: string
+	presence_penalty: string
+	repeat_penalty: string
 }
 
 export type ProviderFieldName = keyof ProviderFormValues

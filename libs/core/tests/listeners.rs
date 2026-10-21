@@ -14,7 +14,7 @@ use common::CoreError;
 use lodestone_core::{
     ActiveProfile, CandidateHost, CandidateHosts, Clock, HostOrigin, Hostname, ListenerState,
     LodestoneUseCase, Observation, Source, SourceError, SourceName, StepOutcome,
-    definition::Agent,
+    definition::SourceTarget,
     infrastructure::{candidate_host::PgCandidateHosts, listener::postgres::PgListenerLock},
     listeners::{Listener, ListenerSettings, ListenerStep},
     lock_key,
@@ -22,7 +22,7 @@ use lodestone_core::{
 };
 use sqlx::PgPool;
 use support::{at, create_profile};
-use tokio::sync::watch;
+use tokio::{sync::watch, time::sleep};
 
 fn settings(idle: Duration) -> ListenerSettings {
     ListenerSettings {
@@ -38,6 +38,7 @@ fn settings(idle: Duration) -> ListenerSettings {
 struct ScriptedStep {
     name: &'static str,
     active: AtomicBool,
+    blocked_by: Option<&'static str>,
     runs: Arc<AtomicU64>,
     script: Mutex<VecDeque<Result<StepOutcome, String>>>,
 }
@@ -47,6 +48,7 @@ impl ScriptedStep {
         Self {
             name,
             active: AtomicBool::new(true),
+            blocked_by: None,
             runs: Arc::new(AtomicU64::new(0)),
             script: Mutex::new(script.into()),
         }
@@ -60,6 +62,10 @@ impl ListenerStep for ScriptedStep {
 
     async fn is_active(&self) -> Result<bool, CoreError> {
         Ok(self.active.load(Ordering::SeqCst))
+    }
+
+    async fn blocking_provider(&self) -> Result<Option<&'static str>, CoreError> {
+        Ok(self.blocked_by)
     }
 
     async fn run_once(&self) -> Result<StepOutcome, SourceRunError> {
@@ -93,7 +99,7 @@ where
         if check().await {
             return;
         }
-        tokio::time::sleep(Duration::from_millis(25)).await;
+        sleep(Duration::from_millis(25)).await;
     }
     panic!("condition not reached in time");
 }
@@ -213,6 +219,7 @@ async fn a_failing_step_reports_the_error_and_backs_off(pool: PgPool) {
     .await;
     let row = status(&pool, "security_txt").await.unwrap();
     assert!(row.last_error.unwrap().contains("boom"));
+    assert!(row.last_error_at.is_some());
 
     eventually(|| async { runs.load(Ordering::SeqCst) >= 3 }).await;
     eventually(|| async {
@@ -221,13 +228,9 @@ async fn a_failing_step_reports_the_error_and_backs_off(pool: PgPool) {
             .is_some_and(|s| s.state == ListenerState::Idle)
     })
     .await;
-    assert!(
-        status(&pool, "security_txt")
-            .await
-            .unwrap()
-            .last_error
-            .is_some()
-    );
+    let cleared = status(&pool, "security_txt").await.unwrap();
+    assert_eq!(cleared.last_error, None);
+    assert_eq!(cleared.last_error_at, None);
 
     shutdown.send_replace(true);
     handle.await.unwrap();
@@ -276,6 +279,35 @@ async fn a_listener_without_work_to_listen_for_is_idle_no_agent(pool: PgPool) {
 }
 
 #[sqlx::test(migrations = "../../migrations")]
+async fn a_listener_whose_provider_is_not_ready_never_runs_its_step(pool: PgPool) {
+    let mut step = ScriptedStep::new("dns_cname", Vec::new());
+    step.blocked_by = Some("dns_cname");
+    let runs = Arc::clone(&step.runs);
+    let (shutdown, _) = watch::channel(false);
+    let handle = spawn(
+        Listener::new(
+            step,
+            pool.clone(),
+            "node-a".to_owned(),
+            settings(Duration::from_millis(40)),
+        ),
+        &shutdown,
+    );
+
+    eventually(|| async {
+        status(&pool, "dns_cname")
+            .await
+            .is_some_and(|s| s.state == ListenerState::Idle)
+    })
+    .await;
+    sleep(Duration::from_millis(150)).await;
+    assert_eq!(runs.load(Ordering::SeqCst), 0);
+
+    shutdown.send_replace(true);
+    handle.await.unwrap();
+}
+
+#[sqlx::test(migrations = "../../migrations")]
 async fn one_replica_holds_a_listener_and_another_takes_over_when_it_stops(pool: PgPool) {
     let first = ScriptedStep::new("role_guess", Vec::new());
     let second = ScriptedStep::new("role_guess", Vec::new());
@@ -304,7 +336,7 @@ async fn one_replica_holds_a_listener_and_another_takes_over_when_it_stops(pool:
         &second_stop,
     );
 
-    tokio::time::sleep(Duration::from_millis(300)).await;
+    sleep(Duration::from_millis(300)).await;
     assert_eq!(second_runs.load(Ordering::SeqCst), 0);
     assert_eq!(
         status(&pool, "role_guess").await.unwrap().holder.as_deref(),
@@ -397,7 +429,7 @@ async fn newly_discovered_hosts_are_handled_without_waiting_for_an_interval(pool
         ),
         &shutdown,
     );
-    tokio::time::sleep(Duration::from_millis(150)).await;
+    sleep(Duration::from_millis(150)).await;
     assert_eq!(handled.load(Ordering::SeqCst), 0);
 
     let fresh: Vec<CandidateHost> = ["sso.acme.com", "auth.beta.io", "id.gamma.fr"]
@@ -452,7 +484,12 @@ impl Source for BatchSource {
         Ok(std::mem::take(&mut *self.hosts.lock().unwrap()))
     }
 
-    fn evaluate(&self, _: &Self::Item, _: &ActiveProfile, _: &Agent) -> Vec<Observation> {
+    fn evaluate(
+        &self,
+        _: &Self::Item,
+        _: &ActiveProfile,
+        _: &SourceTarget<'_>,
+    ) -> Vec<Observation> {
         Vec::new()
     }
 }

@@ -14,7 +14,59 @@ const SELECT_CLASS =
 	'h-9 w-full rounded-md border bg-transparent px-3 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50'
 
 const REASONING_HELP =
-	"Pour les modèles qui raisonnent avant de répondre (Ollama, OpenAI o-series…). « Désactivé » accélère les réponses et évite les réponses vides. La réflexion du modèle n'est jamais affichée ni enregistrée : seule la réponse finale est utilisée."
+	"Pour les modèles qui raisonnent avant de répondre (Ollama, OpenAI o-series…). « Désactivé » accélère les réponses et évite les réponses vides. La réflexion du modèle n'est jamais affichée ni enregistrée : seule la réponse finale est utilisée. Laissez « Par défaut (non envoyé) » pour un modèle sans raisonnement réglable (ex. Ministral)."
+
+const CONCURRENCY_HELP =
+	"Appels au modèle traités en même temps par ce fournisseur, de 1 à 32, toutes analyses confondues. Laissé vide : 2 pour un serveur compatible OpenAI local (localhost), 4 sinon. Avec Ollama, ne dépassez pas sa variable OLLAMA_NUM_PARALLEL : les requêtes en trop attendent côté serveur et risquent d'expirer."
+
+const GENERATION_INTRO =
+	"Laissés vides, ces paramètres ne sont pas envoyés et le modèle garde ses valeurs par défaut. Anthropic n'utilise que les tokens maximum et la température ; les pénalités concernent les fournisseurs compatibles OpenAI (Ollama, Mistral…)."
+
+interface GenerationField {
+	field: ProviderFieldName
+	label: string
+	placeholder: string
+	inputMode: 'numeric' | 'decimal'
+	help: string
+}
+
+const GENERATION_FIELDS: readonly GenerationField[] = [
+	{
+		field: 'max_tokens',
+		label: 'Tokens maximum',
+		placeholder: 'ex. 4096',
+		inputMode: 'numeric',
+		help: 'Plafond de tokens générés par réponse, de 1 à 200 000. Remplace la valeur par défaut de Lodestone.',
+	},
+	{
+		field: 'temperature',
+		label: 'Température',
+		placeholder: 'ex. 0,2',
+		inputMode: 'decimal',
+		help: 'De 0 à 2. Plus elle est basse, plus les réponses sont stables et reproductibles.',
+	},
+	{
+		field: 'frequency_penalty',
+		label: 'Pénalité de fréquence',
+		placeholder: 'ex. 0,3',
+		inputMode: 'decimal',
+		help: 'De -2 à 2. Une valeur positive décourage la répétition des mêmes mots.',
+	},
+	{
+		field: 'presence_penalty',
+		label: 'Pénalité de présence',
+		placeholder: 'ex. 0,2',
+		inputMode: 'decimal',
+		help: 'De -2 à 2. Une valeur positive pousse le modèle à aborder de nouveaux sujets.',
+	},
+	{
+		field: 'repeat_penalty',
+		label: 'Pénalité de répétition',
+		placeholder: 'ex. 1,3',
+		inputMode: 'decimal',
+		help: "De 1 à 2. 1 n'a aucun effet, 1,1 à 1,3 limite les redites. Ollama l'ignore sur son point d'accès compatible OpenAI : elle est alors envoyée comme pénalité de fréquence (valeur moins 1), sauf si celle-ci est renseignée.",
+	},
+]
 
 const KEY_MODES: { mode: KeyMode; label: string }[] = [
 	{ mode: 'keep', label: 'Conserver la clé actuelle' },
@@ -24,6 +76,7 @@ const KEY_MODES: { mode: KeyMode; label: string }[] = [
 
 interface ProviderFormProps {
 	title: string
+	defaultConcurrency: number
 	editing: boolean
 	hasApiKey: boolean
 	values: ProviderFormValues
@@ -44,7 +97,8 @@ interface TextFieldProps {
 	values: ProviderFormValues
 	errors: Partial<Record<ProviderFieldName, string>>
 	placeholder?: string
-	inputMode?: 'numeric'
+	inputMode?: 'numeric' | 'decimal'
+	help?: string
 	onChange: (field: ProviderFieldName, value: string) => void
 }
 
@@ -55,9 +109,16 @@ function TextField({
 	errors,
 	placeholder,
 	inputMode,
+	help,
 	onChange,
 }: TextFieldProps) {
 	const error = errors[field]
+	const describedBy = [
+		help ? `provider-${field}-help` : null,
+		error ? `provider-${field}-error` : null,
+	]
+		.filter((id) => id !== null)
+		.join(' ')
 	return (
 		<div className="flex flex-col gap-1.5">
 			<Label htmlFor={`provider-${field}`}>{label}</Label>
@@ -67,9 +128,17 @@ function TextField({
 				placeholder={placeholder}
 				inputMode={inputMode}
 				aria-invalid={error !== undefined}
-				aria-describedby={error ? `provider-${field}-error` : undefined}
+				aria-describedby={describedBy === '' ? undefined : describedBy}
 				onChange={(event) => onChange(field, event.target.value)}
 			/>
+			{help ? (
+				<p
+					id={`provider-${field}-help`}
+					className="text-xs text-muted-foreground"
+				>
+					{help}
+				</p>
+			) : null}
 			{error ? (
 				<p
 					id={`provider-${field}-error`}
@@ -85,6 +154,7 @@ function TextField({
 
 export function ProviderForm({
 	title,
+	defaultConcurrency,
 	editing,
 	hasApiKey,
 	values,
@@ -155,6 +225,14 @@ export function ProviderForm({
 						{...common}
 					/>
 					<TextField
+						field="max_concurrency"
+						label="Requêtes simultanées"
+						placeholder={String(defaultConcurrency)}
+						inputMode="numeric"
+						help={CONCURRENCY_HELP}
+						{...common}
+					/>
+					<TextField
 						field="timeout_seconds"
 						label="Délai d'expiration (secondes)"
 						placeholder="30"
@@ -207,6 +285,17 @@ export function ProviderForm({
 						</p>
 					) : null}
 				</div>
+				<fieldset className="flex flex-col gap-3 rounded-md border p-3">
+					<legend className="px-1 text-sm font-medium">
+						Paramètres de génération
+					</legend>
+					<p className="text-xs text-muted-foreground">{GENERATION_INTRO}</p>
+					<div className="grid gap-4 md:grid-cols-2">
+						{GENERATION_FIELDS.map((item) => (
+							<TextField key={item.field} {...item} {...common} />
+						))}
+					</div>
+				</fieldset>
 				<fieldset className="flex flex-col gap-2 rounded-md border p-3">
 					<legend className="px-1 text-sm font-medium">Clé API</legend>
 					{editing ? (

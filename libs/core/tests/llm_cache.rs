@@ -49,6 +49,8 @@ fn scope(profile: ProfileId, revision: u32) -> CacheScope {
         prompt: "verdict@1".to_owned(),
         domain: NormalizedDomain::from_host("acme.com").unwrap(),
         agent: None,
+        sample: 0,
+        fresh: false,
     }
 }
 
@@ -73,9 +75,10 @@ async fn ask(provider: &Counting, cache: &PgLlmCache, scope: &CacheScope, conten
         instruction: "decide",
         documents: &documents,
         max_tokens: 256,
+        temperature: None,
     };
-    let mut budget = RunBudget::new(NonZeroU32::new(10).unwrap());
-    call_structured_cached::<Verdict, _, _>(provider, cache, scope, prompt, settings(), &mut budget)
+    let budget = RunBudget::new(NonZeroU32::new(10).unwrap());
+    call_structured_cached::<Verdict, _, _>(provider, cache, scope, prompt, settings(), &budget)
         .await
         .unwrap()
         .from_cache

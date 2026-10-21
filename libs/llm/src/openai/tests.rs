@@ -10,8 +10,8 @@ use std::{
 use common::Secret;
 use httpmock::prelude::*;
 use lodestone_core::{
-    LlmError, LlmProvider, LlmRequest, ProviderDefinition, ProviderKind, ReasoningEffort,
-    UntrustedDocument,
+    GenerationParams, LlmError, LlmProvider, LlmRequest, ProviderDefinition, ProviderKind,
+    ReasoningEffort, UntrustedDocument,
 };
 use serde_json::json;
 use tracing::{
@@ -38,6 +38,7 @@ fn definition(
         api_key: key.map(Secret::new),
         timeout,
         reasoning_effort: None,
+        generation: GenerationParams::default(),
     }
 }
 
@@ -85,6 +86,7 @@ async fn run_unlocked(
             schema_name: "verdict",
             schema: &schema,
             max_tokens: 256,
+            temperature: None,
         })
         .await
 }
@@ -283,7 +285,34 @@ async fn rate_limit_without_header_has_no_delay() {
 }
 
 #[tokio::test]
-async fn server_error_is_status_without_body() {
+async fn non_success_keeps_the_provider_message() {
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST);
+        then.status(400).json_body(json!({
+            "object": "error",
+            "message": {"detail": [{"loc": ["body", "reasoning_effort"], "msg": "Extra inputs are not permitted"}]},
+            "type": "invalid_request_error"
+        }));
+    });
+    let error = run(&provider(ProviderKind::Mistral, &server, Some(KEY)))
+        .await
+        .unwrap_err();
+    assert_eq!(
+        error,
+        LlmError::Status {
+            status: 400,
+            message: Some("reasoning_effort: Extra inputs are not permitted".to_owned()),
+        }
+    );
+    assert_eq!(
+        error.to_string(),
+        "llm provider answered with status 400: reasoning_effort: Extra inputs are not permitted"
+    );
+}
+
+#[tokio::test]
+async fn plain_text_body_is_the_message() {
     let server = MockServer::start();
     server.mock(|when, then| {
         when.method(POST);
@@ -292,8 +321,74 @@ async fn server_error_is_status_without_body() {
     let error = run(&provider(ProviderKind::Mistral, &server, Some(KEY)))
         .await
         .unwrap_err();
-    assert_eq!(error, LlmError::Status { status: 500 });
-    assert!(!format!("{error}").contains("leak"));
+    assert_eq!(
+        error,
+        LlmError::Status {
+            status: 500,
+            message: Some("internal leak".to_owned()),
+        }
+    );
+}
+
+#[tokio::test]
+async fn empty_body_has_no_message() {
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST);
+        then.status(400);
+    });
+    let error = run(&provider(ProviderKind::Mistral, &server, Some(KEY)))
+        .await
+        .unwrap_err();
+    assert_eq!(
+        error,
+        LlmError::Status {
+            status: 400,
+            message: None,
+        }
+    );
+    assert_eq!(error.to_string(), "llm provider answered with status 400");
+}
+
+#[tokio::test]
+async fn oversize_body_is_bounded() {
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST);
+        then.status(400).body("z".repeat(200_000));
+    });
+    let error = run(&provider(ProviderKind::Mistral, &server, Some(KEY)))
+        .await
+        .unwrap_err();
+    let LlmError::Status {
+        message: Some(message),
+        ..
+    } = error
+    else {
+        panic!("expected a message");
+    };
+    assert_eq!(message.chars().count(), 300);
+}
+
+#[tokio::test]
+async fn body_echoing_the_key_is_redacted() {
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST);
+        then.status(401)
+            .json_body(json!({"error": {"message": format!("Incorrect API key provided: {KEY}")}}));
+    });
+    let error = run(&provider(ProviderKind::Mistral, &server, Some(KEY)))
+        .await
+        .unwrap_err();
+    assert_eq!(
+        error,
+        LlmError::Status {
+            status: 401,
+            message: Some("Incorrect API key provided: [redacted]".to_owned()),
+        }
+    );
+    assert!(!format!("{error:?}").contains(KEY));
 }
 
 #[tokio::test]
@@ -519,6 +614,118 @@ async fn reasoning_effort_is_absent_when_unset() {
     mock.assert();
 }
 
+fn provider_with_generation(
+    server: &MockServer,
+    generation: GenerationParams,
+) -> OpenAiCompatibleProvider {
+    let mut definition = definition(
+        ProviderKind::OpenAiCompatible,
+        &server.base_url(),
+        None,
+        Duration::from_secs(5),
+    );
+    definition.generation = generation;
+    OpenAiCompatibleProvider::new(&definition).unwrap()
+}
+
+#[tokio::test]
+async fn generation_params_are_sent_when_set_and_replace_the_request_max_tokens() {
+    let server = MockServer::start();
+    let mut expected = expected_body();
+    expected["max_tokens"] = json!(900);
+    expected["temperature"] = json!(0.2);
+    expected["frequency_penalty"] = json!(0.4);
+    expected["presence_penalty"] = json!(-0.5);
+    let mock = server.mock(|when, then| {
+        when.method(POST).json_body(expected);
+        then.status(200).json_body(success_body());
+    });
+    let generation = GenerationParams {
+        max_tokens: Some(900),
+        temperature: Some(0.2),
+        frequency_penalty: Some(0.4),
+        presence_penalty: Some(-0.5),
+        repeat_penalty: None,
+    };
+    run(&provider_with_generation(&server, generation))
+        .await
+        .unwrap();
+    mock.assert();
+}
+
+#[tokio::test]
+async fn a_repeat_penalty_is_sent_as_a_frequency_penalty_because_ollama_ignores_it() {
+    let server = MockServer::start();
+    let mock = server.mock(|when, then| {
+        when.method(POST).matches(|request| {
+            request.body.as_ref().is_some_and(|body| {
+                let value: serde_json::Value = serde_json::from_slice(body).unwrap();
+                value["frequency_penalty"]
+                    .as_f64()
+                    .is_some_and(|penalty| (penalty - 0.3).abs() < 1e-9)
+                    && value.get("repeat_penalty").is_none()
+                    && value.get("options").is_none()
+            })
+        });
+        then.status(200).json_body(success_body());
+    });
+    let generation = GenerationParams {
+        repeat_penalty: Some(1.3),
+        ..GenerationParams::default()
+    };
+    run(&provider_with_generation(&server, generation))
+        .await
+        .unwrap();
+    mock.assert();
+}
+
+#[tokio::test]
+async fn an_explicit_frequency_penalty_wins_over_the_repeat_penalty() {
+    let server = MockServer::start();
+    let mut expected = expected_body();
+    expected["frequency_penalty"] = json!(0.5);
+    let mock = server.mock(|when, then| {
+        when.method(POST).json_body(expected);
+        then.status(200).json_body(success_body());
+    });
+    let generation = GenerationParams {
+        frequency_penalty: Some(0.5),
+        repeat_penalty: Some(1.9),
+        ..GenerationParams::default()
+    };
+    run(&provider_with_generation(&server, generation))
+        .await
+        .unwrap();
+    mock.assert();
+}
+
+#[tokio::test]
+async fn absent_generation_params_are_not_sent() {
+    let server = MockServer::start();
+    let mock = server.mock(|when, then| {
+        when.method(POST)
+            .matches(|request| {
+                request.body.as_ref().is_some_and(|body| {
+                    let text = String::from_utf8_lossy(body);
+                    [
+                        "temperature",
+                        "frequency_penalty",
+                        "presence_penalty",
+                        "repeat_penalty",
+                    ]
+                    .iter()
+                    .all(|key| !text.contains(key))
+                })
+            })
+            .json_body(expected_body());
+        then.status(200).json_body(success_body());
+    });
+    run(&provider(ProviderKind::OpenAiCompatible, &server, None))
+        .await
+        .unwrap();
+    mock.assert();
+}
+
 #[tokio::test]
 async fn empty_content_with_reasoning_and_length_is_reasoning_exhausted() {
     let body: serde_json::Value = serde_json::from_str(OLLAMA_EXHAUSTED).unwrap();
@@ -587,4 +794,170 @@ async fn reasoning_text_never_reaches_the_response_or_the_error() {
         .await
         .unwrap();
     assert!(!format!("{response:?}").contains(probe));
+}
+
+fn reasoning_provider(server: &MockServer, model: &str, strict: bool) -> OpenAiCompatibleProvider {
+    let mut definition = definition(
+        ProviderKind::Mistral,
+        &server.base_url(),
+        Some(KEY),
+        Duration::from_secs(5),
+    );
+    definition.model = model.to_owned();
+    definition.reasoning_effort = Some(ReasoningEffort::Medium);
+    let provider = OpenAiCompatibleProvider::new(&definition).unwrap();
+    if strict {
+        provider.without_fallback()
+    } else {
+        provider
+    }
+}
+
+fn body_with_reasoning(request: &HttpMockRequest) -> bool {
+    request.body.as_ref().is_some_and(|body| {
+        serde_json::from_slice::<serde_json::Value>(body)
+            .is_ok_and(|value| value.get("reasoning_effort") == Some(&json!("medium")))
+    })
+}
+
+fn body_without_reasoning(request: &HttpMockRequest) -> bool {
+    request.body.as_ref().is_some_and(|body| {
+        serde_json::from_slice::<serde_json::Value>(body).is_ok_and(|value| {
+            value.get("reasoning_effort").is_none() && value.get("messages").is_some()
+        })
+    })
+}
+
+fn rejecting_mock<'a>(server: &'a MockServer, status: u16, message: &str) -> httpmock::Mock<'a> {
+    server.mock(|when, then| {
+        when.method(POST).matches(body_with_reasoning);
+        then.status(status).json_body(json!({"message": message}));
+    })
+}
+
+fn accepting_mock(server: &MockServer) -> httpmock::Mock<'_> {
+    server.mock(|when, then| {
+        when.method(POST).matches(body_without_reasoning);
+        then.status(200).json_body(success_body());
+    })
+}
+
+#[tokio::test]
+async fn a_reasoning_rejection_is_retried_once_without_the_field() {
+    let server = MockServer::start();
+    let rejected = rejecting_mock(
+        &server,
+        400,
+        "reasoning_effort is not enabled for this model",
+    );
+    let accepted = accepting_mock(&server);
+
+    let response = run(&reasoning_provider(&server, "ministral", false))
+        .await
+        .unwrap();
+
+    assert_eq!(response.output, json!({"ok": true}));
+    rejected.assert_hits(1);
+    accepted.assert_hits(1);
+}
+
+#[tokio::test]
+async fn the_rejection_is_remembered_so_the_next_call_sends_no_field() {
+    let server = MockServer::start();
+    let rejected = rejecting_mock(
+        &server,
+        422,
+        "Extra inputs are not permitted: reasoning_effort",
+    );
+    let accepted = accepting_mock(&server);
+    let provider = reasoning_provider(&server, "ministral", false);
+
+    run(&provider).await.unwrap();
+    run(&provider).await.unwrap();
+    let other = reasoning_provider(&server, "ministral", false);
+    run(&other).await.unwrap();
+
+    rejected.assert_hits(1);
+    accepted.assert_hits(3);
+}
+
+#[tokio::test]
+async fn a_changed_provider_forgets_the_rejection() {
+    let server = MockServer::start();
+    let rejected = rejecting_mock(
+        &server,
+        400,
+        "reasoning_effort is not enabled for this model",
+    );
+    let accepted = accepting_mock(&server);
+
+    run(&reasoning_provider(&server, "ministral-a", false))
+        .await
+        .unwrap();
+    run(&reasoning_provider(&server, "ministral-a", false))
+        .await
+        .unwrap();
+    rejected.assert_hits(1);
+    run(&reasoning_provider(&server, "ministral-b", false))
+        .await
+        .unwrap();
+
+    rejected.assert_hits(2);
+    accepted.assert_hits(3);
+}
+
+#[tokio::test]
+async fn another_bad_request_is_not_retried() {
+    let server = MockServer::start();
+    let mock = server.mock(|when, then| {
+        when.method(POST);
+        then.status(400)
+            .json_body(json!({"message": "response_format is invalid"}));
+    });
+
+    let error = run(&reasoning_provider(&server, "ministral", false))
+        .await
+        .unwrap_err();
+
+    mock.assert_hits(1);
+    assert!(matches!(error, LlmError::Status { status: 400, .. }));
+}
+
+#[tokio::test]
+async fn the_reporting_provider_neither_retries_nor_remembers() {
+    let server = MockServer::start();
+    let rejected = rejecting_mock(
+        &server,
+        400,
+        "reasoning_effort is not enabled for this model",
+    );
+    let accepted = accepting_mock(&server);
+
+    let error = run(&reasoning_provider(&server, "ministral", true))
+        .await
+        .unwrap_err();
+    assert!(error.is_reasoning_rejection());
+    run(&reasoning_provider(&server, "ministral", false))
+        .await
+        .unwrap();
+
+    rejected.assert_hits(2);
+    accepted.assert_hits(1);
+}
+
+#[tokio::test]
+async fn a_rejection_without_a_configured_effort_is_not_retried() {
+    let server = MockServer::start();
+    let mock = server.mock(|when, then| {
+        when.method(POST);
+        then.status(400)
+            .json_body(json!({"message": "reasoning_effort is not enabled for this model"}));
+    });
+
+    let error = run(&provider(ProviderKind::Mistral, &server, Some(KEY)))
+        .await
+        .unwrap_err();
+
+    mock.assert_hits(1);
+    assert!(matches!(error, LlmError::Status { status: 400, .. }));
 }

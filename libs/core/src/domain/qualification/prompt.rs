@@ -3,7 +3,7 @@ use serde_json::Value;
 
 use crate::domain::{
     facts::LeadFacts,
-    profile::definition::{ProfileDefinition, QualificationAgent},
+    profile::definition::{ProfileDefinition, QualificationAgent, Question},
     prompt::neutralize,
     qualification::Violations,
 };
@@ -11,6 +11,8 @@ use crate::domain::{
 const CONTEXT_TAG: &str = "market_context";
 
 pub(crate) const FACTS_NOTE: &str = "The lead document holds facts computed by the system from stored data: the hosts carrying signals with their environment, the subdomains seen, the signals and their sources, the dates and the probable country from the domain extension. They are reliable. Use them to weigh the signals: a signal found only on development, staging, test or demo hosts says little about the company's production stack, and a single signal from a single source is thin evidence.";
+
+pub(crate) const DOSSIER_NOTE: &str = "When present, the documents that start with \"Company dossier\" hold the company dossier the system built without any model: official data from the French company register (legal name, activity, headcount range, head office, creation date) and the text of pages of the company's own site (home, about, legal notice). Official data is reliable; the page text is what the company says about itself. Use them to judge what the company does, its size and what it has at stake. When the dossier is missing, or says the SIREN was not found, treat these points as unknown and never guess them. The documents that start with \"Ecosystem\" hold what the system observed about the company without any model, module by module (official identity, site and technical stack, hiring activity), each with the page or API it was read from. They are facts like the dossier and may be quoted.";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentPrompt {
@@ -31,28 +33,38 @@ pub(crate) fn identity_context(definition: &ProfileDefinition) -> String {
     )
 }
 
-fn language_line(definition: &ProfileDefinition) -> String {
+pub(crate) fn language_line(definition: &ProfileDefinition) -> String {
     format!(
         "Write any free text in {}. Option values stay exactly as listed.",
-        definition.llm.language.name()
+        definition.language.name()
     )
 }
 
 fn contract_rules(definition: &ProfileDefinition, schema: &Value) -> String {
     format!(
-        "Answer only with one JSON object that follows this contract and nothing else. `summary` is 2 to 4 sentences, at most 600 characters, written in {}, on what you observed for the aspect you evaluate, based only on the documents. Every question has an entry under `answers` with `type` set to \"choice\", `choice` set to one option value, `confidence` between 0 and 1, and `probabilities` giving a probability between 0 and 1 for every option value, summing to 1.\n\nContract JSON schema:\n{schema}",
-        definition.llm.language.name()
+        "Answer only with one JSON object that follows this contract and nothing else. `summary` is 2 to 4 sentences, at most 600 characters, written in {}, on what you observed for the aspect you evaluate, based only on the documents. Every question has an entry under `answers` with `type` set to \"choice\", `choice` set to one option value, `evidence` set to the sentence of the documents that justifies the choice, copied verbatim and at most 300 characters, `confidence` between 0 and 1, and `probabilities` giving a probability between 0 and 1 for every option value, summing to 1. Quote exactly, never paraphrase or translate. Every question has one unknown option, marked in the list of options: choose it, with an empty `evidence`, when nothing in the documents supports an answer. Any other choice without a verbatim quote is replaced by the unknown option.\n\nContract JSON schema:\n{schema}",
+        definition.language.name()
     )
 }
 
-fn questions_text(agent: &QualificationAgent) -> String {
-    let mut text =
-        String::from("Answer these questions about the company described by the documents.\n");
-    for question in &agent.questions {
+pub(crate) fn questions_block(questions: &[Question]) -> String {
+    let mut text = String::new();
+    for question in questions {
         let options: Vec<String> = question
             .options
             .iter()
-            .map(|option| format!("{} ({})", option.value, option.label))
+            .map(|option| {
+                if option.is_unknown {
+                    format!("{} ({}, unknown option)", option.value, option.label)
+                } else if option.excludes {
+                    format!(
+                        "{} ({}, exclusion: choose only with explicit evidence)",
+                        option.value, option.label
+                    )
+                } else {
+                    format!("{} ({})", option.value, option.label)
+                }
+            })
             .collect();
         text.push_str(&format!(
             "\nQuestion `{}`: {}\nOptions: {}\n",
@@ -64,13 +76,20 @@ fn questions_text(agent: &QualificationAgent) -> String {
     text
 }
 
+fn questions_text(agent: &QualificationAgent) -> String {
+    format!(
+        "Answer these questions about the company described by the documents.\n{}",
+        questions_block(&agent.questions)
+    )
+}
+
 pub fn build(
     definition: &ProfileDefinition,
     agent: &QualificationAgent,
     schema: &Value,
 ) -> AgentPrompt {
     let system = format!(
-        "{}\n\n{}\n\n{}\n\n{FACTS_NOTE}\n\n{}",
+        "{}\n\n{}\n\n{}\n\n{FACTS_NOTE}\n\n{DOSSIER_NOTE}\n\n{}",
         agent.system_prompt.trim(),
         identity_context(definition),
         language_line(definition),
@@ -92,6 +111,17 @@ pub fn build(
 pub fn with_violations(instruction: &str, violations: &Violations) -> String {
     format!(
         "{instruction}\n\nYour previous answer broke the contract: {violations}. Answer again with only the JSON object that follows the contract."
+    )
+}
+
+pub fn with_ungrounded(instruction: &str, questions: &[&str]) -> String {
+    let listed: Vec<String> = questions
+        .iter()
+        .map(|question| format!("`{question}`"))
+        .collect();
+    format!(
+        "{instruction}\n\nYour previous answer gave no verbatim quote from the documents for: {}. For each of these questions, copy in `evidence` the sentence of the documents that justifies the choice exactly as written, or choose the unknown option when nothing in the documents supports an answer. Answer again with only the JSON object that follows the contract.",
+        listed.join(", ")
     )
 }
 
@@ -194,6 +224,50 @@ mod tests {
     }
 
     #[test]
+    fn the_contract_asks_for_a_verbatim_quote_and_the_unknown_option() {
+        let (_, prompt) = built("fr");
+        assert!(prompt.system.contains("`evidence` set to the sentence"));
+        assert!(prompt.system.contains("copied verbatim"));
+        assert!(
+            prompt
+                .system
+                .contains("nothing in the documents supports an answer")
+        );
+        assert!(prompt.system.contains("\"evidence\""));
+        assert!(
+            prompt
+                .instruction
+                .contains("inconnu (Inconnu, unknown option)")
+        );
+        assert!(!prompt.instruction.contains("forte (Forte, unknown"));
+    }
+
+    #[test]
+    fn an_excluding_option_is_marked_in_the_option_list() {
+        let mut definition = definition("fr");
+        definition.qualification_agents[0].questions[0].options[2].excludes = true;
+        let agent = &definition.qualification_agents[0];
+        let prompt = build(&definition, agent, &contract_schema(agent));
+        assert!(
+            prompt
+                .instruction
+                .contains("faible (Faible, exclusion: choose only with explicit evidence)")
+        );
+        assert!(prompt.instruction.contains("forte (Forte)"));
+        let (_, plain) = built("fr");
+        assert!(!plain.instruction.contains("exclusion"));
+        assert_ne!(prompt.hash, plain.hash);
+    }
+
+    #[test]
+    fn the_ungrounded_retry_names_the_axes() {
+        let retried = with_ungrounded("base", &["q-one", "q-two"]);
+        assert!(retried.starts_with("base"));
+        assert!(retried.contains("`q-one`, `q-two`"));
+        assert!(retried.contains("unknown option"));
+    }
+
+    #[test]
     fn the_system_part_documents_the_facts_block() {
         let (_, prompt) = built("fr");
         assert!(prompt.system.contains(FACTS_NOTE));
@@ -210,6 +284,14 @@ mod tests {
     }
 
     #[test]
+    fn the_system_part_documents_the_company_dossier() {
+        let (_, prompt) = built("fr");
+        assert!(prompt.system.contains(DOSSIER_NOTE));
+        assert!(prompt.system.contains("Company dossier"));
+        assert!(prompt.system.contains("SIREN was not found"));
+    }
+
+    #[test]
     fn the_lead_document_names_the_domain_and_holds_the_facts() {
         let at = DateTime::from_timestamp(1_800_000_000, 0).unwrap();
         let facts = LeadFacts {
@@ -220,10 +302,15 @@ mod tests {
             }],
             distinct_subdomains: 3,
             signal_count: 1,
+            independent: Vec::new(),
+            kinds: Vec::new(),
+            sibling_domains: Vec::new(),
             sources: vec![SourceName::DnsCname],
             first_seen_at: at,
             last_seen_at: at,
             probable_country: None,
+            country_basis: None,
+            company: None,
         };
         let document = lead_document("acme.com", &facts);
         assert!(document.starts_with("lead: acme.com\nFacts computed by the system"));
@@ -243,10 +330,15 @@ mod tests {
             hosts: Vec::new(),
             distinct_subdomains: 0,
             signal_count: 0,
+            independent: Vec::new(),
+            kinds: Vec::new(),
+            sibling_domains: Vec::new(),
             sources: Vec::new(),
             first_seen_at: at,
             last_seen_at: at,
             probable_country: None,
+            country_basis: None,
+            company: None,
         };
         let before = lead_document("acme.com", &facts);
         facts.signal_count = 2;

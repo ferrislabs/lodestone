@@ -15,6 +15,7 @@ describe('labels', () => {
 			'Types de signaux distincts',
 		)
 		expect(signalKindLabel('hiring_page')).toBe('hiring_page')
+		expect(signalKindLabel('certificate_seen')).toBe('Certificat observé')
 	})
 
 	it('translates sources and keeps proper names', () => {
@@ -24,6 +25,10 @@ describe('labels', () => {
 		expect(sourceLabel('http_probe')).toBe('Sonde HTTP')
 		expect(sourceLabel('boamp')).toBe('BOAMP')
 		expect(sourceLabel('france_travail')).toBe('France Travail')
+		expect(sourceLabel('hacker_news_hiring')).toBe(
+			'Hacker News — Who is hiring?',
+		)
+		expect(sourceLabel('welcome_to_the_jungle')).toBe('Welcome to the Jungle')
 		expect(sourceLabel('other')).toBe('other')
 	})
 

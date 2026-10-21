@@ -3,9 +3,9 @@ use std::{fs, num::NonZeroU32, path::PathBuf, time::Duration};
 use common::Secret;
 use llm::{anthropic::AnthropicProvider, openai::OpenAiCompatibleProvider};
 use lodestone_core::{
-    AggregatorOutput, Facts, LlmProvider, ProviderDefinition, ProviderKind, TokenPricing,
-    UntrustedDocument, ValidatedProfile, Verdict, aggregation_instruction, aggregation_prompt,
-    check_evidence,
+    AggregatorOutput, Facts, GenerationParams, LlmProvider, ProviderDefinition, ProviderKind,
+    TokenPricing, UntrustedDocument, ValidatedProfile, Verdict, aggregation_instruction,
+    aggregation_prompt, check_evidence,
     llm::gateway::{CallSettings, Prompt, RunBudget, call_structured},
 };
 use serde_json::Value;
@@ -32,6 +32,7 @@ fn definition_from_env() -> Option<ProviderDefinition> {
         api_key: std::env::var("LODESTONE_LLM_API_KEY").ok().map(Secret::new),
         timeout: Duration::from_secs(180),
         reasoning_effort: None,
+        generation: GenerationParams::default(),
     })
 }
 
@@ -71,6 +72,7 @@ async fn run_case<P: LlmProvider>(provider: &P) -> Result<(), String> {
         Facts {
             confidence: Some(88.0),
             verdict: Some(Verdict::Reliable),
+            score: Some(88),
         },
         docs.len(),
     );
@@ -79,6 +81,7 @@ async fn run_case<P: LlmProvider>(provider: &P) -> Result<(), String> {
         instruction: &instruction,
         documents: &untrusted,
         max_tokens: 4096,
+        temperature: None,
     };
     let settings = CallSettings {
         max_retries: 2,
@@ -88,11 +91,10 @@ async fn run_case<P: LlmProvider>(provider: &P) -> Result<(), String> {
         },
         base_delay: Duration::from_secs(2),
     };
-    let mut budget = RunBudget::new(NonZeroU32::new(100).unwrap());
-    let structured =
-        call_structured::<AggregatorOutput, _>(provider, prompt, settings, &mut budget)
-            .await
-            .map_err(|error| error.to_string())?;
+    let budget = RunBudget::new(NonZeroU32::new(100).unwrap());
+    let structured = call_structured::<AggregatorOutput, _>(provider, prompt, settings, &budget)
+        .await
+        .map_err(|error| error.to_string())?;
     let check = check_evidence(&structured.value.evidence, &untrusted);
     println!(
         "evidence={} verbatim={} rejected={}",

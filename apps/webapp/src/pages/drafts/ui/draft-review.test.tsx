@@ -4,7 +4,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { DraftEntry } from '#/pages/drafts/lib/types'
 import { DraftEditor } from './draft-editor'
 import { DraftReview } from './draft-review'
-import { RejectForm } from './reject-form'
 
 afterEach(cleanup)
 
@@ -18,7 +17,12 @@ const entry: DraftEntry = {
 		verdict: 'a_verifier',
 		profile: { id: 'p1', name: 'Fintech' },
 	},
-	draft: { subject: 'Hello Acme', body: 'Body text', status: 'pending' },
+	draft: {
+		subject: 'Hello Acme',
+		body: 'Body text',
+		status: 'pending',
+		revision: 0,
+	},
 	summary: 'Summary text',
 	verdict_narrative: 'Narrative text',
 	approach_angle: 'Angle text',
@@ -150,13 +154,16 @@ describe('DraftReview', () => {
 		expect(screen.getByRole('alert').textContent).toBe('Draft already decided')
 	})
 
-	it('opens the reject form', () => {
+	it('opens the rejection dialog', () => {
 		const props = renderReview()
 		fireEvent.click(screen.getByText('Rejeter'))
 		expect(props.onStartReject).toHaveBeenCalled()
 		cleanup()
 		renderReview({ rejectOpen: true })
 		expect(screen.getByText('reject-form')).toBeTruthy()
+		expect((screen.getByText('Rejeter') as HTMLButtonElement).disabled).toBe(
+			true,
+		)
 	})
 
 	it('offers no decision for an already decided draft', () => {
@@ -168,6 +175,75 @@ describe('DraftReview', () => {
 	})
 })
 
+describe('DraftReview decided draft', () => {
+	const decidedDraft = {
+		subject: 'Hello Acme',
+		body: 'Line one\nLine two',
+		revision: 0,
+	}
+
+	it.each([
+		['approved', 'approuvé'],
+		['rejected', 'rejeté'],
+	] as const)('shows a %s draft read-only with the actions', (status, label) => {
+		const props = renderReview({
+			entry: { ...entry, draft: { ...decidedDraft, status } },
+		})
+		expect(screen.getByText(`Ce brouillon a déjà été ${label}.`)).toBeTruthy()
+		expect(screen.getByText('Hello Acme')).toBeTruthy()
+		expect(
+			screen.getByText(
+				(_, element) =>
+					element?.tagName === 'P' &&
+					element.textContent === 'Line one\nLine two' &&
+					element.className.includes('whitespace-pre-wrap'),
+			),
+		).toBeTruthy()
+		expect(screen.queryAllByRole('textbox')).toHaveLength(0)
+		expect(screen.queryByText('editor')).toBeNull()
+		expect(screen.queryByText('Rejeter')).toBeNull()
+		fireEvent.click(screen.getByRole('button', { name: 'Copier le brouillon' }))
+		expect(props.onCopy).toHaveBeenLastCalledWith(
+			'Hello Acme\n\nLine one\nLine two',
+		)
+		fireEvent.click(screen.getByRole('button', { name: "Copier l'objet" }))
+		expect(props.onCopy).toHaveBeenLastCalledWith('Hello Acme')
+		fireEvent.click(screen.getByRole('button', { name: 'Copier le corps' }))
+		expect(props.onCopy).toHaveBeenLastCalledWith('Line one\nLine two')
+	})
+
+	it('links a decided draft to the mail client with the best contact', () => {
+		renderReview({
+			entry: { ...entry, draft: { ...decidedDraft, status: 'approved' } },
+		})
+		expect(
+			screen
+				.getByRole('link', { name: 'Ouvrir dans la messagerie' })
+				.getAttribute('href'),
+		).toBe(
+			'mailto:cto@acme.test?subject=Hello%20Acme&body=Line%20one%0D%0ALine%20two',
+		)
+	})
+
+	it('has no mail link for a decided draft without a contact', () => {
+		renderReview({
+			entry: {
+				...entry,
+				contact: null,
+				draft: { ...decidedDraft, status: 'rejected' },
+			},
+		})
+		expect(screen.queryByRole('link', { name: /messagerie/ })).toBeNull()
+		expect(screen.getByRole('button', { name: 'Copier le corps' })).toBeTruthy()
+	})
+
+	it('shows no copy actions of its own for a pending draft but the editor slot', () => {
+		renderReview()
+		expect(screen.getByText('editor')).toBeTruthy()
+		expect(screen.queryByRole('button', { name: 'Copier le corps' })).toBeNull()
+	})
+})
+
 describe('DraftEditor', () => {
 	const values = { subject: 'S', body: 'B' }
 
@@ -175,6 +251,8 @@ describe('DraftEditor', () => {
 		render(
 			<DraftEditor
 				values={values}
+				contactAddress={null}
+				onCopy={() => {}}
 				fieldErrors={{ subject: 'subject too long', body: 'body empty' }}
 				formError={null}
 				dirty
@@ -200,6 +278,8 @@ describe('DraftEditor', () => {
 		render(
 			<DraftEditor
 				values={values}
+				contactAddress={null}
+				onCopy={() => {}}
 				fieldErrors={{ body: 'body empty' }}
 				formError={null}
 				dirty={false}
@@ -222,6 +302,8 @@ describe('DraftEditor', () => {
 		render(
 			<DraftEditor
 				values={values}
+				contactAddress={null}
+				onCopy={() => {}}
 				fieldErrors={{}}
 				formError={null}
 				dirty
@@ -239,10 +321,59 @@ describe('DraftEditor', () => {
 		expect(onSave).toHaveBeenCalled()
 	})
 
+	it('copies the current text of the fields and links the contact', () => {
+		const onCopy = vi.fn()
+		render(
+			<DraftEditor
+				values={{ subject: 'Edited subject', body: 'Edited body' }}
+				fieldErrors={{}}
+				formError={null}
+				dirty
+				saving={false}
+				contactAddress="cto@acme.test"
+				onChange={() => {}}
+				onSave={() => {}}
+				onCopy={onCopy}
+			/>,
+		)
+		fireEvent.click(screen.getByRole('button', { name: "Copier l'objet" }))
+		expect(onCopy).toHaveBeenLastCalledWith('Edited subject')
+		fireEvent.click(screen.getByRole('button', { name: 'Copier le corps' }))
+		expect(onCopy).toHaveBeenLastCalledWith('Edited body')
+		fireEvent.click(screen.getByRole('button', { name: 'Copier le brouillon' }))
+		expect(onCopy).toHaveBeenLastCalledWith('Edited subject\n\nEdited body')
+		expect(
+			screen
+				.getByRole('link', { name: 'Ouvrir dans la messagerie' })
+				.getAttribute('href'),
+		).toBe('mailto:cto@acme.test?subject=Edited%20subject&body=Edited%20body')
+	})
+
+	it('does not submit the form when a copy action is used', () => {
+		const onSave = vi.fn()
+		render(
+			<DraftEditor
+				values={values}
+				fieldErrors={{}}
+				formError={null}
+				dirty
+				saving={false}
+				contactAddress={null}
+				onChange={() => {}}
+				onSave={onSave}
+				onCopy={() => {}}
+			/>,
+		)
+		fireEvent.click(screen.getByRole('button', { name: 'Copier le corps' }))
+		expect(onSave).not.toHaveBeenCalled()
+	})
+
 	it('disables saving when clean', () => {
 		render(
 			<DraftEditor
 				values={values}
+				contactAddress={null}
+				onCopy={() => {}}
 				fieldErrors={{}}
 				formError={null}
 				dirty={false}
@@ -256,48 +387,5 @@ describe('DraftEditor', () => {
 				.disabled,
 		).toBe(true)
 		expect(screen.queryByText('Modifications non enregistrées')).toBeNull()
-	})
-})
-
-describe('RejectForm', () => {
-	it('shows the reason error on the reason field', () => {
-		render(
-			<RejectForm
-				reason="x"
-				reasonError="too long"
-				formError={null}
-				rejecting={false}
-				onReasonChange={() => {}}
-				onConfirm={() => {}}
-				onCancel={() => {}}
-			/>,
-		)
-		const reason = screen.getByLabelText('Motif (facultatif)')
-		expect(reason.getAttribute('aria-invalid')).toBe('true')
-		expect(
-			document.getElementById(reason.getAttribute('aria-describedby') ?? '')
-				?.textContent,
-		).toBe('too long')
-	})
-
-	it('confirms and cancels', () => {
-		const onConfirm = vi.fn()
-		const onCancel = vi.fn()
-		render(
-			<RejectForm
-				reason=""
-				reasonError={null}
-				formError="Draft already decided"
-				rejecting={false}
-				onReasonChange={() => {}}
-				onConfirm={onConfirm}
-				onCancel={onCancel}
-			/>,
-		)
-		expect(screen.getByText('Draft already decided')).toBeTruthy()
-		fireEvent.click(screen.getByText('Confirmer le rejet'))
-		expect(onConfirm).toHaveBeenCalled()
-		fireEvent.click(screen.getByText('Annuler'))
-		expect(onCancel).toHaveBeenCalled()
 	})
 })

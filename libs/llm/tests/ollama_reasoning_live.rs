@@ -1,7 +1,9 @@
 use std::time::Duration;
 
 use llm::openai::OpenAiCompatibleProvider;
-use lodestone_core::{LlmProvider, LlmRequest, ProviderDefinition, ProviderKind, ReasoningEffort};
+use lodestone_core::{
+    GenerationParams, LlmProvider, LlmRequest, ProviderDefinition, ProviderKind, ReasoningEffort,
+};
 use serde_json::json;
 use url::Url;
 
@@ -17,6 +19,7 @@ async fn local_ollama_answers_with_reasoning_disabled() {
         api_key: None,
         timeout: Duration::from_secs(60),
         reasoning_effort: Some(ReasoningEffort::None),
+        generation: GenerationParams::default(),
     })
     .unwrap();
     let schema = json!({
@@ -33,6 +36,7 @@ async fn local_ollama_answers_with_reasoning_disabled() {
             schema_name: "connectivity_check",
             schema: &schema,
             max_tokens: 64,
+            temperature: None,
         })
         .await
         .unwrap();
