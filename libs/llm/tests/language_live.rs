@@ -193,7 +193,7 @@ async fn the_aggregator_summarises_an_iam_lead_in_french_live() {
         },
         base_delay: Duration::from_secs(2),
     };
-    let mut budget = RunBudget::new(NonZeroU32::new(10).unwrap());
+    let budget = RunBudget::new(NonZeroU32::new(10).unwrap());
     let mut current = instruction.clone();
     let mut last = None;
     for attempt in 1..=2 {
@@ -214,7 +214,7 @@ async fn the_aggregator_summarises_an_iam_lead_in_french_live() {
             call,
             |value| AggregatorOutput::parse(value).is_ok(),
             settings,
-            &mut budget,
+            &budget,
         )
         .await
         .unwrap();

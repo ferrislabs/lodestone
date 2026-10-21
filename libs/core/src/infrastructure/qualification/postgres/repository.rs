@@ -681,7 +681,7 @@ impl<'tx> QualificationRepository for PgQualificationRepository<'tx> {
         let result = query(
             r#"
             INSERT INTO lead_requalifications (lead_id, requalify_after, marked_at)
-            SELECT leads.id, $2, $3 FROM leads WHERE leads.domain = $1
+            SELECT leads.id, $2, $3 FROM leads WHERE leads.domain = $1 ORDER BY leads.id
             ON CONFLICT (lead_id) DO UPDATE SET
                 requalify_after = CASE
                     WHEN lead_requalifications.forced THEN lead_requalifications.requalify_after

@@ -1,4 +1,10 @@
-use std::{fs, num::NonZeroU32, path::PathBuf, sync::Arc, time::Duration};
+use std::{
+    fs,
+    num::{NonZeroU32, NonZeroUsize},
+    path::PathBuf,
+    sync::Arc,
+    time::Duration,
+};
 
 use chrono::{DateTime, TimeZone, Utc};
 use fetch::{FetchSettings, PoliteFetcher};
@@ -328,6 +334,7 @@ async fn a_boamp_lead_is_enriched_by_the_http_probe_and_its_job_offers(pool: PgP
             InspectionRunSettings {
                 batch_size: 10,
                 priority_batch_size: 30,
+                concurrency: NonZeroUsize::MIN,
             },
             &FixedClock,
         )
@@ -396,6 +403,7 @@ async fn a_boamp_lead_is_enriched_by_the_http_probe_and_its_job_offers(pool: PgP
             InspectionRunSettings {
                 batch_size: 10,
                 priority_batch_size: 30,
+                concurrency: NonZeroUsize::MIN,
             },
             &FixedClock,
         )

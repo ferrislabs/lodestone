@@ -1,6 +1,6 @@
 use std::{
     fs,
-    num::NonZeroU32,
+    num::{NonZeroU32, NonZeroUsize},
     path::PathBuf,
     sync::{
         Arc,
@@ -259,6 +259,7 @@ async fn the_registry_modules_read_the_siren_found_by_the_identity_module(pool: 
     let settings = InspectionRunSettings {
         batch_size: 10,
         priority_batch_size: 30,
+        concurrency: NonZeroUsize::MIN,
     };
     let registry = [
         EcosystemModule::OfficialIdentity,
@@ -401,6 +402,7 @@ async fn the_hiring_module_compares_its_count_with_the_previous_pass(pool: PgPoo
     let settings = InspectionRunSettings {
         batch_size: 10,
         priority_batch_size: 30,
+        concurrency: NonZeroUsize::MIN,
     };
     let runners: Vec<_> = modules
         .runners()

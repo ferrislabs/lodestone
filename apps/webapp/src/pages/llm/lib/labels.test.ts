@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+	inFlightLabel,
 	providerKindLabel,
 	reasoningLabel,
 	testErrorHint,
@@ -49,5 +50,12 @@ describe('llm labels', () => {
 	it('labels the reasoning levels', () => {
 		expect(reasoningLabel('none')).toBe('Désactivé')
 		expect(reasoningLabel('high')).toBe('Élevé')
+	})
+})
+
+describe('in flight label', () => {
+	it('shows the running calls against the limit', () => {
+		expect(inFlightLabel(0, 4)).toBe('En cours : 0 / 4')
+		expect(inFlightLabel(3, 3)).toBe('En cours : 3 / 3')
 	})
 })

@@ -173,6 +173,10 @@ impl EcosystemModule {
         )
     }
 
+    pub fn waits_for_identity(self) -> bool {
+        self.needs_siren() && self != Self::OfficialIdentity
+    }
+
     pub fn refresh_interval(self) -> Duration {
         match self {
             Self::OfficialIdentity => Duration::days(30),

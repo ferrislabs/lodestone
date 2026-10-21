@@ -1,14 +1,18 @@
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use chrono::{DateTime, Utc};
 use common::{CoreError, generate_uuid_v7};
+use futures_util::{StreamExt, stream};
 use lodestone_macros::transactional;
+use serde_json::json;
 use tracing::{info, warn};
 
 use crate::{
     application::{
         LodestoneUseCase,
         evaluation::{
-            CALL_FAILURE_PREFIX, CallFailure, EvaluationSettings, Loaded, ProviderBuilder,
-            Providers, count, load_cached, render_signal,
+            CALL_FAILURE_PREFIX, CallFailure, EvaluationSettings, LeadStep, Loaded,
+            ProviderBuilder, Providers, count, lead_step, load_cached, render_signal,
         },
         llm::gateway::{
             CallSettings, LlmCallError, Prompt, RunBudget, SchemaCall, Structured,
@@ -17,9 +21,7 @@ use crate::{
         rescoring::stored_opinions,
     },
     domain::{
-        agent_work::{
-            AgentWork, CancelReason, WorkKind, WorkTarget, first_stop, ports::AgentWorkRepository,
-        },
+        agent_work::{AgentWork, CancelReason, WorkKind, WorkTarget, ports::AgentWorkRepository},
         job::ports::Clock,
         lead::{Lead, LeadId},
         llm::{
@@ -88,6 +90,11 @@ enum LeadOutcome {
     Stopped,
 }
 
+enum AgentStep {
+    Unreported(Box<ScoringResult>),
+    Ran(AgentOutcome),
+}
+
 struct Subject<'a> {
     active: &'a ActiveProfile,
     lead: &'a Lead,
@@ -143,7 +150,7 @@ fn failed(
         agent_id: agent.id.clone(),
         provenance,
         status: ResultStatus::Invalid,
-        criteria: serde_json::json!({}),
+        criteria: json!({}),
         score: None,
         verdict: None,
         reasons: Vec::new(),
@@ -193,7 +200,7 @@ where
         run: &AgentRun<'_, B::Provider>,
         instruction: &str,
         sample: u32,
-        budget: &mut RunBudget,
+        budget: &RunBudget,
     ) -> Result<Structured<serde_json::Value>, LlmCallError> {
         let AgentRun {
             loaded,
@@ -243,7 +250,7 @@ where
         &self,
         run: &AgentRun<'_, B::Provider>,
         sample: u32,
-        budget: &mut RunBudget,
+        budget: &RunBudget,
     ) -> SampleOutcome {
         let AgentRun {
             subject,
@@ -319,15 +326,15 @@ where
         subject: &Subject<'_>,
         agent: &ScoringAgent,
         work: &AgentWork,
-        providers: &mut Providers<B::Provider>,
-        budget: &mut RunBudget,
+        providers: &Providers<B::Provider>,
+        budget: &RunBudget,
     ) -> Result<AgentOutcome, CoreError> {
         let definition = subject.active.revision.definition.definition();
         let schema = scoring_contract_schema(agent);
         let prompt = build(definition, agent, &schema);
         let version = scoring_prompt_version(&prompt);
         let wanted = agent.provider_id.map(ProviderId);
-        let Some(index) = load_cached(
+        let Some(loaded) = load_cached(
             usecase,
             self.builder,
             self.cipher,
@@ -343,16 +350,12 @@ where
                 agent,
                 RunProvenance::unresolved(wanted, version),
                 PROVIDER_UNAVAILABLE.to_owned(),
-                serde_json::json!([]),
+                json!([]),
             );
             return Ok(AgentOutcome::Result(Box::new(result)));
         };
-        let Some(loaded) = providers.entries[index].1.as_ref() else {
-            return Err(CoreError::Internal(
-                "provider cache is inconsistent".to_owned(),
-            ));
-        };
-        let run = AgentRun {
+        let loaded = loaded.as_ref();
+        let run = &AgentRun {
             loaded,
             subject,
             agent,
@@ -365,11 +368,17 @@ where
         let mut model: Option<String> = None;
         let mut first_error: Option<String> = None;
         let mut call_errors: Vec<String> = Vec::new();
-        for sample in 0..samples {
-            if let Some(reason) = work.stop_reason() {
-                return Ok(AgentOutcome::Stopped(reason));
-            }
-            match self.run_sample(&run, sample, budget).await {
+        let mut outcomes = stream::iter(0..samples)
+            .map(move |sample| async move {
+                let outcome = match work.stop_reason() {
+                    Some(reason) => SampleOutcome::Stopped(reason),
+                    None => self.run_sample(run, sample, budget).await,
+                };
+                (sample, outcome)
+            })
+            .buffered(self.settings.concurrency.get());
+        while let Some((sample, outcome)) = outcomes.next().await {
+            match outcome {
                 SampleOutcome::BudgetExhausted => return Ok(AgentOutcome::BudgetExhausted),
                 SampleOutcome::Stopped(reason) => return Ok(AgentOutcome::Stopped(reason)),
                 SampleOutcome::CallFailed { error } => {
@@ -408,7 +417,7 @@ where
         let raw_samples = if samples > 1 {
             serde_json::Value::Array(records)
         } else {
-            serde_json::json!([])
+            json!([])
         };
         let valid_samples = u32::try_from(valid.len().max(1)).unwrap_or(samples);
         let Some(output) = vote_scoring(agent, &valid) else {
@@ -453,8 +462,8 @@ where
         usecase: &LodestoneUseCase,
         active: &ActiveProfile,
         lead: &Lead,
-        providers: &mut Providers<B::Provider>,
-        budget: &mut RunBudget,
+        providers: &Providers<B::Provider>,
+        budget: &RunBudget,
         clock: &K,
     ) -> Result<LeadOutcome, CoreError> {
         let definition = active.revision.definition.definition();
@@ -547,26 +556,42 @@ where
             .iter()
             .any(|result| result.status == ResultStatus::Valid);
         let mut results: Vec<ScoringResult> = Vec::new();
-        for agent in definition.enabled_scoring_agents() {
-            let work = usecase.agent_work(active, WorkTarget::new(WorkKind::Scoring, &agent.id));
-            if let Some(reason) = work.stop_reason() {
-                usecase.note_stop(lead.id, &work, reason, at).await?;
-                return Ok(LeadOutcome::Stopped);
-            }
-            if !reported {
-                results.push(failed(
-                    &subject,
-                    agent,
-                    RunProvenance::unresolved(agent.provider_id.map(ProviderId), String::new()),
-                    NO_REPORT.to_owned(),
-                    serde_json::json!([]),
-                ));
-                continue;
-            }
-            match self
-                .score_agent(usecase, &subject, agent, &work, providers, budget)
-                .await?
-            {
+        let subject = &subject;
+        let agents: &Vec<&ScoringAgent> = &definition.enabled_scoring_agents().collect();
+        let mut steps = stream::iter(0..agents.len())
+            .map(move |index| async move {
+                let agent = agents[index];
+                let work =
+                    usecase.agent_work(active, WorkTarget::new(WorkKind::Scoring, &agent.id));
+                let step = if let Some(reason) = work.stop_reason() {
+                    AgentStep::Ran(AgentOutcome::Stopped(reason))
+                } else if !reported {
+                    AgentStep::Unreported(Box::new(failed(
+                        subject,
+                        agent,
+                        RunProvenance::unresolved(agent.provider_id.map(ProviderId), String::new()),
+                        NO_REPORT.to_owned(),
+                        json!([]),
+                    )))
+                } else {
+                    AgentStep::Ran(
+                        self.score_agent(usecase, subject, agent, &work, providers, budget)
+                            .await?,
+                    )
+                };
+                Ok::<_, CoreError>((agent, work, step))
+            })
+            .buffered(self.settings.concurrency.get());
+        while let Some(next) = steps.next().await {
+            let (agent, work, step) = next?;
+            let outcome = match step {
+                AgentStep::Unreported(result) => {
+                    results.push(*result);
+                    continue;
+                }
+                AgentStep::Ran(outcome) => outcome,
+            };
+            match outcome {
                 AgentOutcome::BudgetExhausted => return Ok(LeadOutcome::BudgetExhausted),
                 AgentOutcome::Stopped(reason) => {
                     usecase.note_stop(lead.id, &work, reason, at).await?;
@@ -661,44 +686,60 @@ impl LodestoneUseCase {
             })
             .collect();
         let mut report = ScoringReport::default();
-        let mut budget = RunBudget::new(settings.budget_cents);
-        let mut providers = Providers::new();
+        let budget = &RunBudget::new(settings.budget_cents);
+        let providers = &Providers::new();
+        let scorer = &scorer;
         let mut remaining = settings.batch_size;
-        'profiles: for active in &profiles {
-            if remaining == 0 {
+        for active in &profiles {
+            if remaining == 0 || report.budget_exhausted {
                 break;
             }
             let leads = self
                 .due_scoring_leads(active, remaining, clock.now())
                 .await?;
-            let works = scoring_works(self, active);
-            for lead in &leads {
-                if let Some(reason) = first_stop(&works) {
-                    info!(profile = %active.profile.id, reason = reason.as_str(), "scoring pass stopped for the profile");
-                    continue 'profiles;
-                }
-                match scorer
-                    .score_lead(self, active, lead, &mut providers, &mut budget, clock)
-                    .await?
-                {
-                    LeadOutcome::Stopped => {
-                        report.stopped += 1;
-                        continue 'profiles;
+            let works = &scoring_works(self, active);
+            let halted = &AtomicBool::new(false);
+            let leads = &leads;
+            let mut steps = stream::iter(0..leads.len())
+                .map(move |index| async move {
+                    if let Some(step) = lead_step(halted, works) {
+                        return Ok(step);
                     }
-                    LeadOutcome::Done { valid, invalid } => {
+                    let lead = &leads[index];
+                    scorer
+                        .score_lead(self, active, lead, providers, budget, clock)
+                        .await
+                        .map(LeadStep::Ran)
+                })
+                .buffered(settings.concurrency.get());
+            while let Some(step) = steps.next().await {
+                match step? {
+                    LeadStep::Skipped => {}
+                    LeadStep::Halted(reason) => {
+                        if !halted.swap(true, Ordering::AcqRel) {
+                            info!(profile = %active.profile.id, reason = reason.as_str(), "scoring pass stopped for the profile");
+                        }
+                    }
+                    LeadStep::Ran(LeadOutcome::Stopped) => {
+                        report.stopped += 1;
+                        halted.store(true, Ordering::Release);
+                    }
+                    LeadStep::Ran(LeadOutcome::Done { valid, invalid }) => {
                         report.leads += 1;
                         report.valid += valid;
                         report.invalid += invalid;
                         remaining = remaining.saturating_sub(1);
                     }
-                    LeadOutcome::Deferred => {
+                    LeadStep::Ran(LeadOutcome::Deferred) => {
                         report.deferred += 1;
                         remaining = remaining.saturating_sub(1);
                     }
-                    LeadOutcome::BudgetExhausted => {
+                    LeadStep::Ran(LeadOutcome::BudgetExhausted) => {
+                        if !report.budget_exhausted {
+                            warn!("scoring stopped, the run budget is exhausted");
+                        }
                         report.budget_exhausted = true;
-                        warn!("scoring stopped, the run budget is exhausted");
-                        break 'profiles;
+                        halted.store(true, Ordering::Release);
                     }
                 }
             }

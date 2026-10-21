@@ -2,8 +2,8 @@ use std::time::Duration;
 
 use common::{CoreError, EncryptionKey, Secret};
 use lodestone_core::{
-    CipherError, GenerationParams, LodestoneUseCase, ProviderId, ProviderKind, ReasoningEffort,
-    Tier, TierError, TokenPricing,
+    CipherError, GenerationParams, LodestoneUseCase, MaxConcurrency, ProviderId, ProviderKind,
+    ReasoningEffort, Tier, TierError, TokenPricing,
     infrastructure::crypto::AesGcmCipher,
     llm::{CreateLlmProvider, KeyChange, UpdateLlmProvider},
 };
@@ -27,6 +27,7 @@ fn create(name: &str, key: Option<&str>) -> CreateLlmProvider {
         model: "model-a".to_owned(),
         timeout: Duration::from_secs(30),
         max_retries: 2,
+        max_concurrency: None,
         pricing: TokenPricing {
             input_cents_per_mtok: 100,
             output_cents_per_mtok: 300,
@@ -46,6 +47,7 @@ fn update(id: ProviderId, api_key: KeyChange) -> UpdateLlmProvider {
         model: "model-b".to_owned(),
         timeout: Duration::from_secs(10),
         max_retries: 4,
+        max_concurrency: MaxConcurrency::new(4).unwrap(),
         pricing: TokenPricing {
             input_cents_per_mtok: 1,
             output_cents_per_mtok: 2,

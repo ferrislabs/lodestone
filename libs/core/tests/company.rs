@@ -1,8 +1,8 @@
 mod support;
 
 use std::{
-    collections::VecDeque,
-    num::NonZeroU32,
+    collections::{HashMap, VecDeque},
+    num::{NonZeroU32, NonZeroUsize},
     slice::from_ref,
     sync::{
         Arc, Mutex,
@@ -24,7 +24,7 @@ use lodestone_core::{
     UnconfirmedLinks, UnitInterval, ValidatedProfile,
     company::{CompanyRunReport, CompanyRunSettings, PageRecheckReport},
     definition::AgentId,
-    ecosystem::InspectionRunSettings,
+    ecosystem::{InspectionReport, InspectionRunSettings},
     evaluation::{EvaluationSettings, ProviderBuilder},
     infrastructure::{
         crypto::AesGcmCipher, lead::postgres::PgLeadRepository, llm_cache::postgres::PgLlmCache,
@@ -36,6 +36,7 @@ use lodestone_core::{
 use serde_json::{Value, json};
 use sqlx::{PgPool, query, query_as, query_scalar};
 use support::{at, domain};
+use tokio::time::{Instant, sleep};
 
 const IAM: &str = include_str!("../../../docs/examples/profiles/iam-ferriskey.json");
 const MODEL: &str = "model-a";
@@ -51,6 +52,77 @@ struct TestClock(Arc<AtomicI64>);
 struct FakeModule(EcosystemModule);
 
 struct ChangingModule(EcosystemModule, Arc<AtomicI64>);
+
+#[derive(Default)]
+struct Visits {
+    running: Mutex<HashMap<String, u32>>,
+    peaks: Mutex<(u32, u32)>,
+    spans: Mutex<Vec<(EcosystemModule, String, Instant, Instant)>>,
+}
+
+impl Visits {
+    fn enter(&self, domain: &str) {
+        let mut running = self.running.lock().unwrap();
+        *running.entry(domain.to_owned()).or_default() += 1;
+        let busy = u32::try_from(running.values().filter(|count| **count > 0).count()).unwrap();
+        let mut peaks = self.peaks.lock().unwrap();
+        peaks.0 = peaks.0.max(busy);
+        peaks.1 = peaks.1.max(running[domain]);
+    }
+
+    fn leave(&self, domain: &str) {
+        *self.running.lock().unwrap().get_mut(domain).unwrap() -= 1;
+    }
+
+    fn span(&self, module: EcosystemModule, domain: &str) -> (Instant, Instant) {
+        self.spans
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|(seen, host, _, _)| *seen == module && host == domain)
+            .map(|(_, _, start, end)| (*start, *end))
+            .unwrap()
+    }
+}
+
+struct PacedModule {
+    module: EcosystemModule,
+    visits: Arc<Visits>,
+    limited: bool,
+}
+
+impl ModuleRunner for PacedModule {
+    fn module(&self) -> EcosystemModule {
+        self.module
+    }
+
+    async fn inspect(&self, target: &InspectionTarget<'_>) -> Result<Inspection, SourceError> {
+        let domain = target.domain.as_str();
+        if self.limited {
+            return Err(SourceError::RateLimited {
+                retry_after: Duration::from_secs(60),
+            });
+        }
+        let start = Instant::now();
+        self.visits.enter(domain);
+        sleep(Duration::from_millis(40)).await;
+        self.visits.leave(domain);
+        self.visits.spans.lock().unwrap().push((
+            self.module,
+            domain.to_owned(),
+            start,
+            Instant::now(),
+        ));
+        Ok(Inspection::Found(vec![EcosystemFinding::new(
+            self.module,
+            "fact",
+            "Fait observé",
+            format!("FACT-OF-{}", self.module.as_str()),
+            format!("https://{domain}/{}", self.module.as_str()),
+            target.now,
+        )]))
+    }
+}
 
 struct RecordingModule(Arc<Mutex<Vec<String>>>);
 
@@ -373,6 +445,7 @@ fn evaluation() -> EvaluationSettings {
         budget_cents: NonZeroU32::new(100).unwrap(),
         batch_size: 10,
         base_delay: Duration::ZERO,
+        concurrency: NonZeroUsize::MIN,
     }
 }
 
@@ -499,12 +572,35 @@ impl Harness {
                 InspectionRunSettings {
                     batch_size: 10,
                     priority_batch_size: 30,
+                    concurrency: NonZeroUsize::MIN,
                 },
                 &self.clock,
             )
             .await
             .unwrap()
             .changed
+    }
+
+    async fn inspect_at_once<R: ModuleRunner>(
+        &self,
+        runners: &[R],
+        concurrency: usize,
+    ) -> InspectionReport {
+        for key in [COMPANY_RESEARCH, BODACC, DECP] {
+            self.provider(key, "ready", false).await;
+        }
+        self.usecase
+            .inspect_due_domains(
+                runners,
+                InspectionRunSettings {
+                    batch_size: 10,
+                    priority_batch_size: 30,
+                    concurrency: NonZeroUsize::new(concurrency).unwrap(),
+                },
+                &self.clock,
+            )
+            .await
+            .unwrap()
     }
 
     async fn inspect_batches(&self, runner: &RecordingModule, priority: u32, refresh: u32) {
@@ -514,6 +610,7 @@ impl Harness {
                 InspectionRunSettings {
                     batch_size: refresh,
                     priority_batch_size: priority,
+                    concurrency: NonZeroUsize::MIN,
                 },
                 &self.clock,
             )
@@ -638,6 +735,7 @@ impl Harness {
                         model: MODEL.to_owned(),
                         timeout: Duration::from_secs(30),
                         max_retries: 0,
+                        max_concurrency: None,
                         pricing: TokenPricing {
                             input_cents_per_mtok: 0,
                             output_cents_per_mtok: 0,
@@ -2011,4 +2109,104 @@ async fn existing_dossiers_of_platform_domains_are_settled_once(pool: PgPool) {
             .unwrap(),
         0
     );
+}
+
+fn paced(
+    modules: &[EcosystemModule],
+    visits: &Arc<Visits>,
+    limited: Option<EcosystemModule>,
+) -> Vec<PacedModule> {
+    modules
+        .iter()
+        .map(|module| PacedModule {
+            module: *module,
+            visits: Arc::clone(visits),
+            limited: limited == Some(*module),
+        })
+        .collect()
+}
+
+const INSPECTED: [&str; 3] = ["acme.com", "globex.com", "initech.com"];
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn modules_of_a_domain_and_several_domains_are_inspected_at_once(pool: PgPool) {
+    let harness = Harness::new(pool);
+    harness.profile().await;
+    for host in INSPECTED {
+        harness.observe(host, SourceName::HttpProbe, 10).await;
+    }
+    let visits = Arc::new(Visits::default());
+    let modules = [
+        EcosystemModule::OfficialIdentity,
+        EcosystemModule::LegalLife,
+        EcosystemModule::WebsiteStack,
+        EcosystemModule::DnsEmail,
+    ];
+    let runners = paced(&modules, &visits, None);
+
+    let report = harness.inspect_at_once(&runners, 2).await;
+
+    assert_eq!(
+        (report.domains, report.findings, report.failed),
+        (12, 12, 0)
+    );
+    let (domains_at_once, modules_at_once) = *visits.peaks.lock().unwrap();
+    assert_eq!(domains_at_once, 2);
+    assert!(
+        modules_at_once > 1,
+        "the modules of a domain never overlapped"
+    );
+    for host in INSPECTED {
+        let (_, identified) = visits.span(EcosystemModule::OfficialIdentity, host);
+        let (legal, _) = visits.span(EcosystemModule::LegalLife, host);
+        assert!(
+            identified <= legal,
+            "{host}: legal life read before the identity"
+        );
+    }
+    let stats = harness
+        .usecase
+        .ecosystem_stats(harness.clock.now())
+        .await
+        .unwrap();
+    for module in modules {
+        let stat = stats.iter().find(|stat| stat.module == module).unwrap();
+        assert_eq!(
+            (stat.leads_inspected, stat.findings_count),
+            (3, 3),
+            "{module:?}"
+        );
+        assert!(stat.latest_example.is_some());
+    }
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_rate_limited_module_pauses_alone_for_the_rest_of_the_pass(pool: PgPool) {
+    let harness = Harness::new(pool);
+    harness.profile().await;
+    for host in INSPECTED {
+        harness.observe(host, SourceName::HttpProbe, 10).await;
+    }
+    let visits = Arc::new(Visits::default());
+    let runners = paced(
+        &[EcosystemModule::WebsiteStack, EcosystemModule::DnsEmail],
+        &visits,
+        Some(EcosystemModule::DnsEmail),
+    );
+
+    let report = harness.inspect_at_once(&runners, 1).await;
+
+    assert!(report.rate_limited);
+    assert_eq!(report.domains, 3);
+    assert_eq!(visits.spans.lock().unwrap().len(), 3);
+    let stats = harness
+        .usecase
+        .ecosystem_stats(harness.clock.now())
+        .await
+        .unwrap();
+    let dns = stats
+        .iter()
+        .find(|stat| stat.module == EcosystemModule::DnsEmail)
+        .unwrap();
+    assert_eq!(dns.leads_inspected, 0);
 }

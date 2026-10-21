@@ -68,9 +68,9 @@ impl<'tx> LlmProviderRepository for PgLlmProviderRepository<'tx> {
                 input_cents_per_mtok, output_cents_per_mtok,
                 api_key_nonce, api_key_ciphertext, enabled, created_at, updated_at,
                 reasoning_effort, max_tokens, temperature, frequency_penalty, presence_penalty,
-                repeat_penalty
+                repeat_penalty, max_concurrency
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
             "#,
             record.id.0,
             record.name,
@@ -92,6 +92,7 @@ impl<'tx> LlmProviderRepository for PgLlmProviderRepository<'tx> {
             record.generation.frequency_penalty,
             record.generation.presence_penalty,
             record.generation.repeat_penalty,
+            i16::from(record.max_concurrency.get()),
         )
         .execute(&mut ***tx)
         .await
@@ -111,7 +112,8 @@ impl<'tx> LlmProviderRepository for PgLlmProviderRepository<'tx> {
                 max_retries = $7, input_cents_per_mtok = $8, output_cents_per_mtok = $9,
                 api_key_nonce = $10, api_key_ciphertext = $11, enabled = $12, updated_at = $13,
                 reasoning_effort = $14, max_tokens = $15, temperature = $16,
-                frequency_penalty = $17, presence_penalty = $18, repeat_penalty = $19
+                frequency_penalty = $17, presence_penalty = $18, repeat_penalty = $19,
+                max_concurrency = $20
             WHERE id = $1
             "#,
             record.id.0,
@@ -133,6 +135,7 @@ impl<'tx> LlmProviderRepository for PgLlmProviderRepository<'tx> {
             record.generation.frequency_penalty,
             record.generation.presence_penalty,
             record.generation.repeat_penalty,
+            i16::from(record.max_concurrency.get()),
         )
         .execute(&mut ***tx)
         .await
@@ -151,7 +154,7 @@ impl<'tx> LlmProviderRepository for PgLlmProviderRepository<'tx> {
                    input_cents_per_mtok, output_cents_per_mtok,
                    api_key_nonce, api_key_ciphertext, enabled, created_at, updated_at,
                    reasoning_effort, max_tokens, temperature, frequency_penalty,
-                   presence_penalty, repeat_penalty
+                   presence_penalty, repeat_penalty, max_concurrency
             FROM llm_providers
             WHERE id = $1
             "#,
@@ -174,7 +177,7 @@ impl<'tx> LlmProviderRepository for PgLlmProviderRepository<'tx> {
                    input_cents_per_mtok, output_cents_per_mtok,
                    api_key_nonce, api_key_ciphertext, enabled, created_at, updated_at,
                    reasoning_effort, max_tokens, temperature, frequency_penalty,
-                   presence_penalty, repeat_penalty
+                   presence_penalty, repeat_penalty, max_concurrency
             FROM llm_providers
             ORDER BY name
             "#,
@@ -222,7 +225,7 @@ impl<'tx> LlmProviderRepository for PgLlmProviderRepository<'tx> {
                    p.input_cents_per_mtok, p.output_cents_per_mtok,
                    p.api_key_nonce, p.api_key_ciphertext, p.enabled, p.created_at, p.updated_at,
                    p.reasoning_effort, p.max_tokens, p.temperature, p.frequency_penalty,
-                   p.presence_penalty, p.repeat_penalty
+                   p.presence_penalty, p.repeat_penalty, p.max_concurrency
             FROM llm_tiers t
             JOIN llm_providers p ON p.id = t.provider_id
             WHERE t.tier = $1

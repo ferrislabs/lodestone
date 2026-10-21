@@ -1,5 +1,8 @@
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use chrono::{DateTime, Utc};
 use common::{CoreError, generate_uuid_v7};
+use futures_util::{StreamExt, stream};
 use lodestone_macros::transactional;
 use tracing::{info, warn};
 
@@ -7,8 +10,8 @@ use crate::{
     application::{
         LodestoneUseCase,
         evaluation::{
-            EvaluationSettings, Loaded, ProviderBuilder, load_provider, qualification_works,
-            render_signal,
+            EvaluationSettings, LeadStep, Loaded, ProviderBuilder, lead_step, load_provider,
+            qualification_works, render_signal,
         },
         llm::gateway::{
             CallSettings, LlmCallError, Prompt, RunBudget, SchemaCall, call_with_schema_until,
@@ -155,7 +158,7 @@ where
         usecase: &LodestoneUseCase,
         active: &ActiveProfile,
         lead: &Lead,
-        budget: &mut RunBudget,
+        budget: &RunBudget,
         clock: &K,
     ) -> Result<Outcome, CoreError> {
         let definition = active.revision.definition.definition();
@@ -382,10 +385,10 @@ impl LodestoneUseCase {
             })
             .collect();
         let mut report = AggregationReport::default();
-        let mut budget = RunBudget::new(settings.budget_cents);
+        let budget = &RunBudget::new(settings.budget_cents);
         let mut remaining = settings.batch_size;
-        'profiles: for active in &profiles {
-            if remaining == 0 {
+        for active in &profiles {
+            if remaining == 0 || report.budget_exhausted {
                 break;
             }
             let definition = active.revision.definition.definition();
@@ -412,29 +415,43 @@ impl LodestoneUseCase {
                 }
                 continue;
             };
-            let works = aggregation_works(self, active);
-            let summariser = Summariser {
+            let works = &aggregation_works(self, active);
+            let summariser = &Summariser {
                 loaded: &loaded,
                 cache,
                 settings,
                 work: &works[0],
             };
-            for lead in &leads {
-                if let Some(reason) = first_stop(&works) {
-                    info!(profile = %active.profile.id, reason = reason.as_str(), "aggregation pass stopped for the profile");
-                    continue 'profiles;
-                }
-                match summariser
-                    .summarise(self, active, lead, &mut budget, clock)
-                    .await?
-                {
-                    Outcome::Stopped(reason) => {
+            let halted = &AtomicBool::new(false);
+            let leads = &leads;
+            let mut steps = stream::iter(0..leads.len())
+                .map(move |index| async move {
+                    let lead = &leads[index];
+                    if let Some(step) = lead_step(halted, works) {
+                        return Ok((lead, step));
+                    }
+                    summariser
+                        .summarise(self, active, lead, budget, clock)
+                        .await
+                        .map(|outcome| (lead, LeadStep::Ran(outcome)))
+                })
+                .buffered(settings.concurrency.get());
+            while let Some(step) = steps.next().await {
+                let (lead, step) = step?;
+                match step {
+                    LeadStep::Skipped => {}
+                    LeadStep::Halted(reason) => {
+                        if !halted.swap(true, Ordering::AcqRel) {
+                            info!(profile = %active.profile.id, reason = reason.as_str(), "aggregation pass stopped for the profile");
+                        }
+                    }
+                    LeadStep::Ran(Outcome::Stopped(reason)) => {
                         report.stopped += 1;
+                        halted.store(true, Ordering::Release);
                         self.note_stop(lead.id, &works[0], reason, clock.now())
                             .await?;
-                        continue 'profiles;
                     }
-                    Outcome::Stored { verified } => {
+                    LeadStep::Ran(Outcome::Stored { verified }) => {
                         info!(
                             monotonic_counter.aggregation_summaries = 1u64,
                             verified, "lead summary recorded"
@@ -445,16 +462,18 @@ impl LodestoneUseCase {
                         }
                         remaining = remaining.saturating_sub(1);
                     }
-                    Outcome::Skipped => {}
-                    Outcome::Failed(reason) => {
+                    LeadStep::Ran(Outcome::Skipped) => {}
+                    LeadStep::Ran(Outcome::Failed(reason)) => {
                         report.failed += 1;
                         self.note_summary_failure(lead, &reason, Some(loaded.id), clock.now())
                             .await?;
                     }
-                    Outcome::BudgetExhausted => {
+                    LeadStep::Ran(Outcome::BudgetExhausted) => {
+                        if !report.budget_exhausted {
+                            warn!("aggregation stopped, the run budget is exhausted");
+                        }
                         report.budget_exhausted = true;
-                        warn!("aggregation stopped, the run budget is exhausted");
-                        break 'profiles;
+                        halted.store(true, Ordering::Release);
                     }
                 }
             }

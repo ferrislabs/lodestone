@@ -59,6 +59,10 @@ export function testErrorHint(kind: string): string | null {
 	return TEST_ERROR_HINTS[kind] ?? null
 }
 
+export function inFlightLabel(inFlight: number, limit: number): string {
+	return `En cours : ${inFlight} / ${limit}`
+}
+
 export function reasoningLabel(effort: string): string {
 	return REASONING_LABELS[effort] ?? effort
 }

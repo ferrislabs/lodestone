@@ -176,6 +176,7 @@ export namespace Schemas {
     base_url: string;
     frequency_penalty?: (number | null) | undefined;
     kind: string;
+    max_concurrency?: (number | null) | undefined;
     max_retries?: (number | null) | undefined;
     max_tokens?: (number | null) | undefined;
     model: string;
@@ -577,7 +578,9 @@ export namespace Schemas {
       frequency_penalty?: (number | null) | undefined;
       has_api_key: boolean;
       id: string;
+      in_flight: number;
       kind: string;
+      max_concurrency: number;
       max_retries: number;
       max_tokens?: (number | null) | undefined;
       model: string;
@@ -812,7 +815,9 @@ export namespace Schemas {
       frequency_penalty?: (number | null) | undefined;
       has_api_key: boolean;
       id: string;
+      in_flight: number;
       kind: string;
+      max_concurrency: number;
       max_retries: number;
       max_tokens?: (number | null) | undefined;
       model: string;
@@ -971,7 +976,9 @@ export namespace Schemas {
     frequency_penalty?: (number | null) | undefined;
     has_api_key: boolean;
     id: string;
+    in_flight: number;
     kind: string;
+    max_concurrency: number;
     max_retries: number;
     max_tokens?: (number | null) | undefined;
     model: string;
@@ -1028,6 +1035,7 @@ export namespace Schemas {
     base_url: string | null;
     frequency_penalty: number | null;
     kind: string | null;
+    max_concurrency: number | null;
     max_retries: number | null;
     max_tokens: number | null;
     model: string | null;

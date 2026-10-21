@@ -30,6 +30,7 @@ export interface ProviderFormValues {
 	base_url: string
 	model: string
 	max_retries: string
+	max_concurrency: string
 	timeout_seconds: string
 	input_cents_per_mtok: string
 	output_cents_per_mtok: string

@@ -1,7 +1,13 @@
-use std::time::{Duration as StdDuration, Instant};
+use std::{
+    collections::HashMap,
+    num::NonZeroUsize,
+    sync::atomic::{AtomicBool, Ordering},
+    time::{Duration as StdDuration, Instant},
+};
 
 use chrono::{DateTime, Duration, Utc};
 use common::CoreError;
+use futures_util::{StreamExt, future::join_all, stream};
 use lodestone_macros::transactional;
 use thiserror::Error;
 use tracing::{debug, info};
@@ -35,6 +41,7 @@ const MIN_RATE_LIMIT_PAUSE: Duration = Duration::minutes(1);
 pub struct InspectionRunSettings {
     pub batch_size: u32,
     pub priority_batch_size: u32,
+    pub concurrency: NonZeroUsize,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -101,6 +108,56 @@ fn count(value: usize) -> u64 {
     u64::try_from(value).unwrap_or(u64::MAX)
 }
 
+struct Planned<'a, R> {
+    runner: &'a R,
+    module: EcosystemModule,
+    due: Vec<DueDomain>,
+    paused: AtomicBool,
+}
+
+#[derive(Clone, Copy)]
+struct Visit<'a> {
+    plan: usize,
+    position: usize,
+    item: &'a DueDomain,
+}
+
+enum Inspected {
+    Skipped,
+    RateLimited,
+    Ran {
+        outcome: ModuleOutcome,
+        changed: bool,
+    },
+}
+
+fn by_domain<'a, R>(planned: &'a [Planned<'_, R>]) -> Vec<Vec<Visit<'a>>> {
+    let mut index: HashMap<&NormalizedDomain, usize> = HashMap::new();
+    let mut domains: Vec<Vec<Visit<'a>>> = Vec::new();
+    for (plan, planned) in planned.iter().enumerate() {
+        for (position, item) in planned.due.iter().enumerate() {
+            let visit = Visit {
+                plan,
+                position,
+                item,
+            };
+            match index.get(&item.domain) {
+                Some(&slot) => domains[slot].push(visit),
+                None => {
+                    index.insert(&item.domain, domains.len());
+                    domains.push(vec![visit]);
+                }
+            }
+        }
+    }
+    domains
+}
+
+struct Tally {
+    run: ModuleRun,
+    latest: Option<usize>,
+}
+
 #[derive(Default)]
 struct RegistryContext {
     dossier: Option<CompanyDossier>,
@@ -143,6 +200,7 @@ impl LodestoneUseCase {
         let ids: Vec<ProfileId> = inspected.iter().map(|active| active.profile.id).collect();
         let readiness = self.ecosystem_readiness().await?;
         let mut ready: Vec<EcosystemModule> = Vec::new();
+        let mut planned: Vec<Planned<'_, R>> = Vec::new();
         for runner in runners {
             let module = runner.module();
             if !readiness.is_ready(module) {
@@ -161,77 +219,90 @@ impl LodestoneUseCase {
             let due = self
                 .due_ecosystem_domains(module, &ids, clock.now(), batch)
                 .await?;
-            let mut run = ModuleRun {
+            planned.push(Planned {
+                runner,
                 module,
-                ran_at: clock.now(),
-                leads_inspected: 0,
-                findings_count: 0,
-                latest_example: None,
-            };
-            for item in &due {
-                let now = clock.now();
-                let outcome = if not_applicable(module, &item.domain) {
-                    ModuleOutcome::NotApplicable(None)
-                } else {
-                    let merged = settings_for(&inspected, item);
-                    let registry = self.registry_context(module, &item.domain).await?;
-                    let target = InspectionTarget {
-                        domain: &item.domain,
-                        settings: &merged,
-                        dossier: registry.dossier.as_ref(),
-                        siren: registry.lookup(),
-                        previous: &registry.previous,
-                        now,
-                    };
-                    match runner.inspect(&target).await {
-                        Ok(inspection) => inspection.outcome(),
-                        Err(SourceError::RateLimited { retry_after }) => {
-                            report.rate_limited = true;
-                            self.postpone_ecosystem(
-                                &item.domain,
-                                module,
-                                now + pause_of(retry_after),
-                            )
-                            .await?;
-                            info!(module = module.as_str(), domain = %item.domain, ?retry_after, "ecosystem inspection paused, host rate limited");
-                            break;
-                        }
-                        Err(error) => {
-                            debug!(module = module.as_str(), domain = %item.domain, %error, "ecosystem module failed");
-                            ModuleOutcome::Failed(bounded_error(&error.to_string()))
-                        }
+                due,
+                paused: AtomicBool::new(false),
+            });
+        }
+        let mut tallies: Vec<Tally> = planned
+            .iter()
+            .map(|plan| Tally {
+                run: ModuleRun {
+                    module: plan.module,
+                    ran_at: clock.now(),
+                    leads_inspected: 0,
+                    findings_count: 0,
+                    latest_example: None,
+                },
+                latest: None,
+            })
+            .collect();
+        let plans = planned.as_slice();
+        let inspected = inspected.as_slice();
+        let grouped = &by_domain(plans);
+        let mut domains = stream::iter(0..grouped.len())
+            .map(move |slot| async move {
+                let visits = &grouped[slot];
+                let mut done = Vec::with_capacity(visits.len());
+                for waits in [false, true] {
+                    let stage: Vec<usize> = (0..visits.len())
+                        .filter(|&index| {
+                            plans[visits[index].plan].module.waits_for_identity() == waits
+                        })
+                        .collect();
+                    let results = join_all(stage.into_iter().map(move |index| async move {
+                        let visit = visits[index];
+                        self.inspect_visit(&plans[visit.plan], visit.item, inspected, clock)
+                            .await
+                            .map(|result| (visit, result))
+                    }))
+                    .await;
+                    for result in results {
+                        done.push(result?);
                     }
-                };
-                let next_run = match outcome {
-                    ModuleOutcome::Failed(_) => now + module.failure_retry(),
-                    ModuleOutcome::Done(_) | ModuleOutcome::NotApplicable(_) => {
-                        now + module.refresh_interval()
+                }
+                Ok::<_, CoreError>(done)
+            })
+            .buffered(settings.concurrency.get());
+        while let Some(done) = domains.next().await {
+            for (visit, result) in done? {
+                let (outcome, changed) = match result {
+                    Inspected::Skipped => continue,
+                    Inspected::RateLimited => {
+                        report.rate_limited = true;
+                        continue;
                     }
+                    Inspected::Ran { outcome, changed } => (outcome, changed),
                 };
-                if self
-                    .save_ecosystem_outcome(&item.domain, module, &outcome, now, next_run)
-                    .await?
-                {
+                let tally = &mut tallies[visit.plan];
+                if changed {
                     report.changed += 1;
                 }
                 report.domains += 1;
                 match &outcome {
                     ModuleOutcome::Done(findings) => {
                         report.findings += count(findings.len());
-                        run.findings_count += count(findings.len());
-                        if let Some(first) = findings.first() {
-                            run.latest_example = Some(first.example(&item.domain));
+                        tally.run.findings_count += count(findings.len());
+                        if let Some(first) = findings.first()
+                            && tally.latest.is_none_or(|latest| latest < visit.position)
+                        {
+                            tally.run.latest_example = Some(first.example(&visit.item.domain));
+                            tally.latest = Some(visit.position);
                         }
                     }
                     ModuleOutcome::NotApplicable(_) => report.not_applicable += 1,
                     ModuleOutcome::Failed(_) => report.failed += 1,
                 }
-                run.leads_inspected += item.leads;
+                tally.run.leads_inspected += visit.item.leads;
             }
+        }
+        for Tally { run, .. } in &tallies {
             if run.leads_inspected > 0 {
-                self.record_module_run(&run).await?;
+                self.record_module_run(run).await?;
                 info!(
-                    module = module.as_str(),
+                    module = run.module.as_str(),
                     leads = run.leads_inspected,
                     findings = run.findings_count,
                     "ecosystem module pass finished"
@@ -240,6 +311,62 @@ impl LodestoneUseCase {
         }
         report.backlog = self.count_due_ecosystem(&ready, &ids, clock.now()).await?;
         Ok(report)
+    }
+
+    async fn inspect_visit<R, C>(
+        &self,
+        plan: &Planned<'_, R>,
+        item: &DueDomain,
+        inspected: &[&ActiveProfile],
+        clock: &C,
+    ) -> Result<Inspected, CoreError>
+    where
+        R: ModuleRunner,
+        C: Clock,
+    {
+        if plan.paused.load(Ordering::Acquire) {
+            return Ok(Inspected::Skipped);
+        }
+        let module = plan.module;
+        let now = clock.now();
+        let outcome = if not_applicable(module, &item.domain) {
+            ModuleOutcome::NotApplicable(None)
+        } else {
+            let merged = settings_for(inspected, item);
+            let registry = self.registry_context(module, &item.domain).await?;
+            let target = InspectionTarget {
+                domain: &item.domain,
+                settings: &merged,
+                dossier: registry.dossier.as_ref(),
+                siren: registry.lookup(),
+                previous: &registry.previous,
+                now,
+            };
+            match plan.runner.inspect(&target).await {
+                Ok(inspection) => inspection.outcome(),
+                Err(SourceError::RateLimited { retry_after }) => {
+                    plan.paused.store(true, Ordering::Release);
+                    self.postpone_ecosystem(&item.domain, module, now + pause_of(retry_after))
+                        .await?;
+                    info!(module = module.as_str(), domain = %item.domain, ?retry_after, "ecosystem inspection paused, host rate limited");
+                    return Ok(Inspected::RateLimited);
+                }
+                Err(error) => {
+                    debug!(module = module.as_str(), domain = %item.domain, %error, "ecosystem module failed");
+                    ModuleOutcome::Failed(bounded_error(&error.to_string()))
+                }
+            }
+        };
+        let next_run = match outcome {
+            ModuleOutcome::Failed(_) => now + module.failure_retry(),
+            ModuleOutcome::Done(_) | ModuleOutcome::NotApplicable(_) => {
+                now + module.refresh_interval()
+            }
+        };
+        let changed = self
+            .save_ecosystem_outcome(&item.domain, module, &outcome, now, next_run)
+            .await?;
+        Ok(Inspected::Ran { outcome, changed })
     }
 
     pub async fn dry_run_ecosystem_module<R: ModuleRunner>(
@@ -320,8 +447,7 @@ impl LodestoneUseCase {
         } else {
             None
         };
-        let reads_records = module.keeps_history()
-            || (module.needs_siren() && module != EcosystemModule::OfficialIdentity);
+        let reads_records = module.keeps_history() || module.waits_for_identity();
         if !reads_records {
             return Ok(RegistryContext {
                 dossier,
