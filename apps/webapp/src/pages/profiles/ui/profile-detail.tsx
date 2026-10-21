@@ -4,9 +4,9 @@ import { Badge } from '#/components/ui/badge'
 import { Button } from '#/components/ui/button'
 import { Skeleton } from '#/components/ui/skeleton'
 import { formatDateTime } from '#/pages/leads/lib/format'
+import type { ProfileTab, TabItem } from '#/pages/profiles/lib/tabs'
 import type { ProfileDetail as ProfileDetailData } from '#/pages/profiles/lib/types'
-
-export type ProfileTab = 'definition' | 'history'
+import { TabBar } from '#/pages/profiles/ui/tab-bar'
 
 interface ProfileDetailProps {
 	state: 'loading' | 'error' | 'ready'
@@ -14,6 +14,7 @@ interface ProfileDetailProps {
 	profile: ProfileDetailData | null
 	activation: ReactNode
 	tab: ProfileTab
+	tabs: readonly TabItem[]
 	exporting: boolean
 	exportError: string | null
 	definition: ReactNode
@@ -23,17 +24,13 @@ interface ProfileDetailProps {
 	onBack: () => void
 }
 
-const TABS: { id: ProfileTab; label: string }[] = [
-	{ id: 'definition', label: 'Definition' },
-	{ id: 'history', label: 'Revision history' },
-]
-
 export function ProfileDetail({
 	state,
 	errorMessage,
 	profile,
 	activation,
 	tab,
+	tabs,
 	exporting,
 	exportError,
 	definition,
@@ -88,21 +85,8 @@ export function ProfileDetail({
 							{exportError}
 						</p>
 					) : null}
-					<div className="flex gap-1 border-b" role="tablist">
-						{TABS.map((item) => (
-							<button
-								key={item.id}
-								type="button"
-								role="tab"
-								aria-selected={tab === item.id}
-								className="border-b-2 border-transparent px-3 py-2 text-sm font-medium text-muted-foreground aria-selected:border-primary aria-selected:text-foreground"
-								onClick={() => onTabChange(item.id)}
-							>
-								{item.label}
-							</button>
-						))}
-					</div>
-					{tab === 'definition' ? definition : history}
+					<TabBar tabs={tabs} active={tab} onChange={onTabChange} />
+					{tab !== 'history' ? definition : history}
 				</>
 			) : null}
 		</div>

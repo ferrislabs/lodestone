@@ -1,16 +1,17 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { useNavigate } from '@tanstack/react-router'
+import { useNavigate, useSearch } from '@tanstack/react-router'
 import { useState } from 'react'
 
 import { lodestoneApi } from '#/api/lodestone'
 import { parseApiError } from '#/lib/api-errors'
 import { defaultValue, toJsonObject } from '#/lib/schema-form'
 import {
-	renderDefinitionForm,
+	DefinitionTabContent,
 	unmatchedProblems,
 } from '#/pages/profiles/feature/definition-form'
 import { invalidateProfiles } from '#/pages/profiles/feature/invalidate'
 import { useDefinitionEditor } from '#/pages/profiles/feature/use-definition-editor'
+import { agentList } from '#/pages/profiles/lib/agents'
 import { PROFILE_HINTS } from '#/pages/profiles/lib/form-hints'
 import {
 	problemsFromError,
@@ -18,12 +19,16 @@ import {
 } from '#/pages/profiles/lib/problems'
 import { PROFILE_SCHEMA } from '#/pages/profiles/lib/profile-schema'
 import { prepareSave } from '#/pages/profiles/lib/save'
+import { asEditorTab, editorTabItems } from '#/pages/profiles/lib/tabs'
 import type { Problem } from '#/pages/profiles/lib/types'
 import { ProfileEditor } from '#/pages/profiles/ui/profile-editor'
 import { ProfileNew } from '#/pages/profiles/ui/profile-new'
+import { TabBar } from '#/pages/profiles/ui/tab-bar'
 
 export function ProfileNewFeature() {
 	const navigate = useNavigate()
+	const search = useSearch({ from: '/_app/profiles/new' })
+	const tab = asEditorTab(search.tab)
 	const queryClient = useQueryClient()
 	const [name, setName] = useState('')
 	const [initial] = useState(() =>
@@ -53,6 +58,8 @@ export function ProfileNewFeature() {
 	const nameError = parsed?.fields.name ?? null
 	const formError = parsed && parsed.status !== 422 ? parsed.message : null
 
+	const noAgents = agentList(editor.value).length === 0
+
 	const save = () => {
 		const definition = prepareSave(editor.value)
 		if (!definition.ok) {
@@ -79,13 +86,36 @@ export function ProfileNewFeature() {
 				setName(value)
 			}}
 			onBack={() => void navigate({ to: '/profiles' })}
+			tabs={
+				<TabBar
+					tabs={editorTabItems(problems)}
+					active={tab}
+					onChange={(next) =>
+						void navigate({
+							to: '/profiles/new',
+							search: { tab: next },
+							replace: true,
+						})
+					}
+				/>
+			}
 			editor={
 				<ProfileEditor
-					form={renderDefinitionForm(editor.value, problems, (next) => {
-						if (create.isError) create.reset()
-						setLocalProblems([])
-						editor.set(next)
-					})}
+					form={
+						<DefinitionTabContent
+							tab={tab}
+							value={editor.value}
+							problems={problems}
+							onChange={(next) => {
+								if (create.isError) create.reset()
+								setLocalProblems([])
+								editor.set(next)
+							}}
+						/>
+					}
+					blockedReason={
+						noAgents ? 'Add at least one agent to create the profile.' : null
+					}
 					problems={unmatchedProblems(editor.value, problems)}
 					notice={null}
 					dirty

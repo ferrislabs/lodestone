@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { defaultValue, toJsonObject } from '#/lib/schema-form'
+import { newAgent } from '#/pages/profiles/lib/agents'
 import { PROFILE_HINTS } from '#/pages/profiles/lib/form-hints'
 import { PROFILE_SCHEMA } from '#/pages/profiles/lib/profile-schema'
 import { prepareSave } from '#/pages/profiles/lib/save'
@@ -21,7 +22,7 @@ describe('prepareSave', () => {
 		const filled = {
 			schema_version: 2,
 			identity: { offer: 'o', target_customer: 't' },
-			agents: [],
+			agents: [newAgent('ats', [])],
 			scoring: { factors: [] },
 			contact_ranking: { preferred_local_parts: [] },
 			llm: { qualification_threshold: 50, relevance_criteria: 'r' },

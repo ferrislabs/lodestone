@@ -11,6 +11,7 @@ interface ProfileEditorProps {
 	dirty: boolean
 	saving: boolean
 	saveLabel: string
+	blockedReason?: string | null
 	onSave: () => void
 }
 
@@ -21,6 +22,7 @@ export function ProfileEditor({
 	dirty,
 	saving,
 	saveLabel,
+	blockedReason = null,
 	onSave,
 }: ProfileEditorProps) {
 	return (
@@ -43,10 +45,15 @@ export function ProfileEditor({
 				</output>
 			) : null}
 			<div className="flex items-center gap-3">
-				<Button type="submit" disabled={saving || !dirty}>
+				<Button
+					type="submit"
+					disabled={saving || !dirty || blockedReason !== null}
+				>
 					{saving ? 'Saving...' : saveLabel}
 				</Button>
-				{dirty ? (
+				{blockedReason ? (
+					<span className="text-xs text-muted-foreground">{blockedReason}</span>
+				) : dirty ? (
 					<span className="text-xs text-muted-foreground">Unsaved changes</span>
 				) : null}
 			</div>
