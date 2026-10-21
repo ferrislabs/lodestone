@@ -21,7 +21,6 @@ export const PROFILE_HINTS: UiHints = {
 		schema_version: 6,
 		'aggregator.system_prompt': DEFAULT_AGGREGATOR_PROMPT,
 		'llm.qualification_threshold': 50,
-		'scoring.factors.weight': 5,
 		'agents.source.fingerprints.matchers.equals': 200,
 	},
 	labels: {

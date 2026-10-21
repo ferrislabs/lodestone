@@ -8,7 +8,6 @@ export type HostFact = Schemas.HostFactDto
 export type Signal = Schemas.SignalDto
 export type Contact = Schemas.ContactDto
 export type Assessment = Schemas.AssessmentDto
-export type ScoreContribution = Schemas.ScoreContributionDto
 export type ProfileSummary =
 	Schemas.DataEnvelope_Vec_ProfileSummaryDto['data'][number]
 export type PaginationMeta = Schemas.PaginationMetadata

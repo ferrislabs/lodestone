@@ -6,12 +6,11 @@ use common::CoreError;
 use crate::domain::{
     NormalizedDomain,
     lead::{
-        Assessment, AssessmentId, ContactEmail, Lead, LeadId, LeadStatus, Signal,
+        Assessment, AssessmentId, ContactEmail, Lead, LeadId, LeadStatus, Score, Signal,
         draft::{DraftEdit, DraftPage, DraftRecord, DraftReview},
         query::{LeadPage, LeadQuery, ProfileSummary, VerdictFilter},
     },
     profile::ProfileId,
-    scoring::ScoreBreakdown,
 };
 
 #[cfg_attr(test, mockall::automock)]
@@ -47,7 +46,7 @@ pub trait LeadRepository: Send {
     fn update_score(
         &mut self,
         id: LeadId,
-        breakdown: &ScoreBreakdown,
+        score: Score,
         at: DateTime<Utc>,
     ) -> impl Future<Output = Result<Option<Lead>, CoreError>> + Send;
 

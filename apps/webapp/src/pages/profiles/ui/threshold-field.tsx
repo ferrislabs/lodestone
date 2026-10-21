@@ -1,17 +1,10 @@
 import { Input } from '#/components/ui/input'
 import { Label } from '#/components/ui/label'
-import { pluralize } from '#/lib/labels'
-import {
-	formatPoints,
-	isValidThreshold,
-	qualificationPoints,
-	THRESHOLD_ERROR,
-} from '#/pages/profiles/lib/scoring'
+import { isValidThreshold, THRESHOLD_ERROR } from '#/pages/profiles/lib/scoring'
 import type { Problem } from '#/pages/profiles/lib/types'
 
 interface ThresholdFieldProps {
 	value: number | null
-	maxScore: number
 	problems: readonly Problem[]
 	onChange: (threshold: number | null) => void
 }
@@ -20,7 +13,6 @@ const PATH = 'llm.qualification_threshold'
 
 export function ThresholdField({
 	value,
-	maxScore,
 	problems,
 	onChange,
 }: ThresholdFieldProps) {
@@ -31,9 +23,6 @@ export function ThresholdField({
 		messages.push(THRESHOLD_ERROR)
 	}
 	const invalid = messages.length > 0
-	const points = isValidThreshold(value)
-		? formatPoints(qualificationPoints(value, maxScore))
-		: null
 
 	return (
 		<div className="flex flex-col gap-1">
@@ -50,7 +39,6 @@ export function ThresholdField({
 					inputMode="numeric"
 					className="pr-8"
 					aria-invalid={invalid}
-					aria-describedby="llm-qualification-threshold-help"
 					value={value ?? ''}
 					onChange={(event) => {
 						const parsed = event.currentTarget.valueAsNumber
@@ -64,14 +52,6 @@ export function ThresholdField({
 					%
 				</span>
 			</div>
-			{points !== null && (
-				<p
-					id="llm-qualification-threshold-help"
-					className="text-xs text-muted-foreground"
-				>
-					{`= ${points} ${pluralize(qualificationPoints(value ?? 0, maxScore), 'point', 'points')} avec les facteurs actuels (max ${formatPoints(maxScore)})`}
-				</p>
-			)}
 			{messages.map((message) => (
 				<p key={message} role="alert" className="text-xs text-destructive">
 					{message}

@@ -56,8 +56,24 @@ describe('LeadFiltersForm sort', () => {
 		expect(options).toContainEqual(['llm_score_asc', 'Score croissant'])
 		expect(options).toContainEqual([
 			'score_desc',
-			'Score des signaux décroissant',
+			'Force des signaux décroissante',
 		])
+		expect(options).toContainEqual([
+			'score_asc',
+			'Force des signaux croissante',
+		])
+	})
+
+	it('filters by a minimum signal strength from 0 to 100', () => {
+		const onApply = renderForm(filtersFromSearch({}))
+		const input = screen.getByLabelText(
+			'Force des signaux minimale (0 à 100)',
+		) as HTMLInputElement
+		expect(input.min).toBe('0')
+		expect(input.max).toBe('100')
+		fireEvent.change(input, { target: { value: '40' } })
+		fireEvent.click(screen.getByRole('button', { name: 'Appliquer' }))
+		expect(onApply.mock.calls[0]?.[0]).toMatchObject({ minScore: '40' })
 	})
 
 	it('applies the chosen score sort', () => {

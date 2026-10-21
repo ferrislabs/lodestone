@@ -62,7 +62,6 @@ function base(): JsonObject {
 		],
 		aggregator: { provider_id: null, system_prompt: DEFAULT_AGGREGATOR_PROMPT },
 		verdict: { reliable_from: 70, discard_below: 30 },
-		scoring: { factors: [] },
 		contact_ranking: { preferred_local_parts: [] },
 		llm: { qualification_threshold: 50, relevance_criteria: 'r' },
 	}
@@ -912,10 +911,7 @@ describe('evidence settings panel', () => {
 			'value',
 			'60',
 		)
-		expect(screen.getByLabelText('Score de référence')).toHaveProperty(
-			'value',
-			'50',
-		)
+		expect(screen.queryByLabelText('Score de référence')).toBeNull()
 		for (const label of [
 			'Poids : volume de signaux',
 			'Poids : diversité des sources',
@@ -947,17 +943,13 @@ describe('evidence settings panel', () => {
 		expect(lastValue(seen).evidence).toEqual({ influence: 0.4 })
 	})
 
-	it('edits the reference score and the weights', () => {
+	it('edits the weights of the evidence components', () => {
 		const seen = vi.fn()
 		render(<Harness onValue={seen} />)
-		fireEvent.change(screen.getByLabelText('Score de référence'), {
-			target: { value: '30' },
-		})
 		fireEvent.change(screen.getByLabelText('Poids : environnement'), {
 			target: { value: '3' },
 		})
 		expect(lastValue(seen).evidence).toEqual({
-			reference_score: 30,
 			weights: { environment: 3 },
 		})
 	})

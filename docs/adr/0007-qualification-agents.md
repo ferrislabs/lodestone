@@ -160,3 +160,6 @@ Company research is not an LLM step. It is a **company dossier** built without a
 
 **Lead page.** `GET /api/v1/leads/{id}` returns `company`; `POST /api/v1/leads/{id}/company/refresh` (users only) makes the dossier of the lead domain due now. The "Fiche entreprise" block shows the official data, a link to the Annuaire des entreprises, the pages read, the state, the last update and the "Enrichir" button.
 
+## Amendment: signal strength (#180)
+
+`strength` no longer uses a signal score or `evidence.reference_score` (removed in profile schema 13): it is the mean of the three highest `strength x decay` among the independent signals of the lead and its siblings, the strength being the one the source gave each signal. See ADR 0009, "Amendment: no signal weights", and `docs/profiles.md`, "Signal strength".

@@ -429,7 +429,7 @@ impl Harness {
     async fn observe_value(&self, host: &str, source: SourceName, value: &str, seconds: i64) {
         let active = self.active().await;
         self.usecase
-            .record_observations(
+            .record_observations_at(
                 &active,
                 source,
                 &[Observation {
@@ -442,6 +442,7 @@ impl Harness {
                     observed_at: at(seconds),
                     agent: None,
                 }],
+                at(1_000),
             )
             .await
             .unwrap();
@@ -1345,6 +1346,7 @@ async fn a_scoring_older_than_a_day_is_refreshed_and_the_old_signals_weigh_less(
     harness.step(settings(100, 10)).await;
     let calls = harness.calls();
     let before = harness.scoring(profile, "acme.com").await.unwrap();
+    assert_eq!(harness.lead(profile, "acme.com").await.score.get(), 90.0);
     assert_eq!(harness.step(settings(100, 10)).await.rescored, 0);
     sqlx::query("UPDATE lead_qualification_state SET scored_at = scored_at - interval '25 hours'")
         .execute(&pool)
@@ -1362,6 +1364,8 @@ async fn a_scoring_older_than_a_day_is_refreshed_and_the_old_signals_weigh_less(
     let after = harness.scoring(profile, "acme.com").await.unwrap();
     assert!((before.evidence.decayed_signals - 1.0).abs() < 1e-3);
     assert!((after.evidence.decayed_signals - 0.5).abs() < 1e-3);
+    assert_eq!(harness.lead(profile, "acme.com").await.score.get(), 45.0);
+    assert_eq!(after.evidence.signal_score, 45.0);
     assert!(after.evidence.components.volume < before.evidence.components.volume);
     assert!(after.evidence.components.strength < before.evidence.components.strength);
     assert_eq!(harness.step(settings(100, 10)).await.rescored, 0);

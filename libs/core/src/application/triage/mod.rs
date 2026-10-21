@@ -226,7 +226,9 @@ impl LodestoneUseCase {
                 }
             };
             let signals = count(observations.len());
-            let recorded = self.record_observations(active, name, &observations).await;
+            let recorded = self
+                .record_observations_at(active, name, &observations, clock.now())
+                .await;
             let outcome = match &recorded {
                 Ok(()) => RunOutcome::Succeeded { volume, signals },
                 Err(error) => RunOutcome::Failed {

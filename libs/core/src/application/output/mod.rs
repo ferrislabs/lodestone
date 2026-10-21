@@ -215,7 +215,6 @@ mod tests {
             domain: NormalizedDomain::from_host("acme.com").unwrap(),
             status: LeadStatus::Validated,
             score: Score::new(42.0).unwrap(),
-            score_breakdown: vec![],
             confidence: None,
             verdict: None,
             llm_score: None,

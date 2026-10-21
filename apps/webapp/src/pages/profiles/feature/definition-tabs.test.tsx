@@ -126,7 +126,7 @@ describe('definition tabs', () => {
 		expect(screen.queryByLabelText(/Offre/)).toBeNull()
 		fireEvent.click(screen.getByRole('tab', { name: TAB_LABELS.scoring }))
 		expect(
-			screen.getByRole('button', { name: 'Ajouter un facteur' }),
+			screen.getByRole('button', { name: 'Ajouter un agent de scoring' }),
 		).toBeTruthy()
 		expect(screen.queryByLabelText(/Seuil de qualification/)).toBeNull()
 		fireEvent.click(screen.getByRole('tab', { name: TAB_LABELS.sourcing }))

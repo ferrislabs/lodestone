@@ -62,7 +62,7 @@ impl<'tx> ScoringRepository for PgScoringRepository<'tx> {
     ) -> Result<Vec<Lead>, CoreError> {
         let revision = revision_number(revision)?;
         let query = format!(
-            "SELECT leads.id, leads.profile_id, leads.domain, leads.status, leads.score, leads.score_breakdown, leads.confidence, leads.verdict, leads.llm_score, leads.qualified_at, leads.first_seen_at, leads.last_seen_at, leads.updated_at {SCORING_DUE}{NOT_SUPPRESSED} ORDER BY leads.first_seen_at ASC, leads.id ASC LIMIT $3"
+            "SELECT leads.id, leads.profile_id, leads.domain, leads.status, leads.score, leads.confidence, leads.verdict, leads.llm_score, leads.qualified_at, leads.first_seen_at, leads.last_seen_at, leads.updated_at {SCORING_DUE}{NOT_SUPPRESSED} ORDER BY leads.first_seen_at ASC, leads.id ASC LIMIT $3"
         );
         let mut tx = self.tx.lock().await;
         let rows = sqlx::query_as::<_, LeadRow>(&query)

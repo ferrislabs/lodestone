@@ -7,7 +7,7 @@ use crate::{
     application::LodestoneUseCase,
     domain::{
         calibration::{Calibrations, opinion_score},
-        lead::Lead,
+        lead::{Lead, Score, ports::LeadRepository},
         profile::ActiveProfile,
         profile::definition::ProfileDefinition,
         qualification::{
@@ -15,6 +15,7 @@ use crate::{
             ResultStatus, SCORING_VERSION, VerdictSource, exclusions, judge,
             ports::QualificationRepository, stored_answers,
         },
+        scoring::strength_score,
         scoring_agent::{Decision, decide, ports::ScoringRepository},
     },
 };
@@ -106,8 +107,8 @@ impl LodestoneUseCase {
         let (_, facts, _) = self.signals_with_facts(lead).await?;
         let calibrations = self.profile_calibrations(active).await?;
         let (opinions, agent_scores) = stored_opinions(definition, &results, &calibrations);
-        let evidence =
-            EvidenceStrength::compute(&facts, lead.score.get(), &definition.evidence, now);
+        let evidence = EvidenceStrength::compute(&facts, &definition.evidence, now);
+        let score = strength_score(evidence.components.strength);
         let found = exclusions(&results, &definition.qualification_agents);
         let rescoring = Rescoring {
             lead_id: lead.id,
@@ -131,7 +132,8 @@ impl LodestoneUseCase {
                 found,
             )
         });
-        self.store_rescoring(&rescoring, decision.as_ref()).await
+        self.store_rescoring(&rescoring, score, decision.as_ref())
+            .await
     }
 
     async fn has_scoring_verdict(&self, lead: &Lead) -> Result<bool, CoreError> {
@@ -170,14 +172,19 @@ impl LodestoneUseCase {
             .await
     }
 
-    #[transactional(qualification, scoring_agent)]
+    #[transactional(lead, qualification, scoring_agent)]
     async fn store_rescoring(
         &self,
         rescoring: &Rescoring,
+        score: Score,
         decision: Option<&Decision>,
     ) -> Result<(), CoreError> {
+        let mut leads = lead_repository;
         let mut qualification = qualification_repository;
         let mut scoring = scoring_agent_repository;
+        leads
+            .update_score(rescoring.lead_id, score, rescoring.scored_at)
+            .await?;
         qualification.rescore(rescoring).await?;
         if let Some(decision) = decision {
             scoring.apply_decision(rescoring.lead_id, decision).await?;

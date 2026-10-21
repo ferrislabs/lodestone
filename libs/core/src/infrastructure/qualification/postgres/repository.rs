@@ -92,7 +92,6 @@ const STALE: &str = r#"
           OR state.scored_at IS NULL
           OR state.scored_at < $4 - make_interval(hours => $5)
           OR state.evidence IS NULL
-          OR abs((state.evidence->>'signal_score')::float8 - leads.score) > 1e-9
           OR (state.evidence->>'signal_count')::bigint
               <> (
                   SELECT COUNT(*) FROM signals
@@ -118,7 +117,7 @@ impl<'tx> QualificationRepository for PgQualificationRepository<'tx> {
     ) -> Result<Vec<Lead>, CoreError> {
         let revision = revision_number(revision)?;
         let query = format!(
-            "SELECT leads.id, leads.profile_id, leads.domain, leads.status, leads.score, leads.score_breakdown, leads.confidence, leads.verdict, leads.llm_score, leads.qualified_at, leads.first_seen_at, leads.last_seen_at, leads.updated_at {DUE}{NOT_SUPPRESSED} ORDER BY leads.first_seen_at ASC, leads.id ASC LIMIT $4"
+            "SELECT leads.id, leads.profile_id, leads.domain, leads.status, leads.score, leads.confidence, leads.verdict, leads.llm_score, leads.qualified_at, leads.first_seen_at, leads.last_seen_at, leads.updated_at {DUE}{NOT_SUPPRESSED} ORDER BY leads.first_seen_at ASC, leads.id ASC LIMIT $4"
         );
         let mut tx = self.tx.lock().await;
         let rows = sqlx::query_as::<_, LeadRow>(&query)
@@ -162,7 +161,7 @@ impl<'tx> QualificationRepository for PgQualificationRepository<'tx> {
     ) -> Result<Vec<Lead>, CoreError> {
         let revision = revision_number(revision)?;
         let query = format!(
-            "SELECT leads.id, leads.profile_id, leads.domain, leads.status, leads.score, leads.score_breakdown, leads.confidence, leads.verdict, leads.llm_score, leads.qualified_at, leads.first_seen_at, leads.last_seen_at, leads.updated_at {SUMMARY_DUE}{SUMMARY_READY}{NOT_SUPPRESSED} ORDER BY leads.first_seen_at ASC, leads.id ASC LIMIT $3"
+            "SELECT leads.id, leads.profile_id, leads.domain, leads.status, leads.score, leads.confidence, leads.verdict, leads.llm_score, leads.qualified_at, leads.first_seen_at, leads.last_seen_at, leads.updated_at {SUMMARY_DUE}{SUMMARY_READY}{NOT_SUPPRESSED} ORDER BY leads.first_seen_at ASC, leads.id ASC LIMIT $3"
         );
         let mut tx = self.tx.lock().await;
         let rows = sqlx::query_as::<_, LeadRow>(&query)
@@ -433,7 +432,7 @@ impl<'tx> QualificationRepository for PgQualificationRepository<'tx> {
     ) -> Result<Vec<Lead>, CoreError> {
         let revision = revision_number(revision)?;
         let query = format!(
-            "SELECT leads.id, leads.profile_id, leads.domain, leads.status, leads.score, leads.score_breakdown, leads.confidence, leads.verdict, leads.llm_score, leads.qualified_at, leads.first_seen_at, leads.last_seen_at, leads.updated_at {STALE}{NOT_SUPPRESSED} ORDER BY state.scored_at ASC NULLS FIRST, leads.first_seen_at ASC, leads.id ASC LIMIT $6"
+            "SELECT leads.id, leads.profile_id, leads.domain, leads.status, leads.score, leads.confidence, leads.verdict, leads.llm_score, leads.qualified_at, leads.first_seen_at, leads.last_seen_at, leads.updated_at {STALE}{NOT_SUPPRESSED} ORDER BY state.scored_at ASC NULLS FIRST, leads.first_seen_at ASC, leads.id ASC LIMIT $6"
         );
         let mut tx = self.tx.lock().await;
         let rows = sqlx::query_as::<_, LeadRow>(&query)

@@ -6,6 +6,12 @@ export function formatScore(score: number): string {
 	return formatNumber(score)
 }
 
+export const MAX_SIGNAL_STRENGTH = 100
+
+export function formatSignalStrength(score: number): string {
+	return `${formatNumber(score)} / ${MAX_SIGNAL_STRENGTH}`
+}
+
 export function formatRatio(value: number): string {
 	return formatPercent(value)
 }

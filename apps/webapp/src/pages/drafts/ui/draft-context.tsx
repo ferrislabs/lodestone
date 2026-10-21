@@ -1,7 +1,11 @@
 import { Card, CardContent, CardHeader, CardTitle } from '#/components/ui/card'
 import { contactMethodLabel } from '#/lib/labels'
 import type { DraftEntry } from '#/pages/drafts/lib/types'
-import { formatDateTime, formatRatio } from '#/pages/leads/lib/format'
+import {
+	formatDateTime,
+	formatRatio,
+	MAX_SIGNAL_STRENGTH,
+} from '#/pages/leads/lib/format'
 import { ConfidenceBar } from '#/pages/leads/ui/confidence-bar'
 import { ProvenanceLink } from '#/pages/leads/ui/provenance-link'
 import { ScoreBar } from '#/pages/leads/ui/score-bar'
@@ -33,10 +37,7 @@ export function DraftContext({ entry, onOpenLead }: DraftContextProps) {
 				<div className="flex flex-wrap items-center gap-4">
 					<VerdictBadge verdict={entry.lead.verdict} />
 					<ConfidenceBar confidence={entry.lead.confidence} />
-					<ScoreBar
-						score={entry.lead.score}
-						max={Math.max(entry.lead.score, 1)}
-					/>
+					<ScoreBar score={entry.lead.score} max={MAX_SIGNAL_STRENGTH} />
 				</div>
 				<p>{entry.summary}</p>
 				{entry.verdict_narrative ? (

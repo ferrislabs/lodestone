@@ -473,11 +473,6 @@ export const FIELD_COPY: Readonly<Record<string, FieldCopy>> = {
 		description:
 			"Confiance = avis des agents × ((1 − influence) + influence × solidité des preuves). 0 % ignore les preuves, 100 % multiplie l'avis par elles.",
 	},
-	'evidence.reference_score': {
-		label: 'Score de référence',
-		description:
-			'Score des signaux à partir duquel la force des signaux vaut 100 %. Au moins 1.',
-	},
 	'evidence.weights': {
 		label: 'Poids des composantes',
 		description:
@@ -500,38 +495,13 @@ export const FIELD_COPY: Readonly<Record<string, FieldCopy>> = {
 	},
 	'evidence.weights.strength': {
 		label: 'Force des signaux',
-		description: 'Poids du score des signaux du lead, de 0 à 10.',
+		description:
+			'Poids de la force des signaux : moyenne des trois signaux indépendants les plus forts, chacun avec la force donnée par sa source et diminué selon son âge, de 0 à 10.',
 	},
 	'evidence.half_life_days': {
 		label: 'Demi-vie des signaux (jours)',
 		description:
 			"Âge en jours auquel un signal ne compte plus que pour moitié dans le volume et la force des preuves, par type de signal. « default » s'applique aux types non listés.",
-	},
-	scoring: {
-		label: 'Scoring',
-		description:
-			"Facteurs pondérés. Le score d'un lead est la somme du poids multiplié par la mesure de chaque facteur.",
-	},
-	'scoring.factors': {
-		label: 'Facteurs',
-		description: 'Facteurs pondérés.',
-	},
-	'scoring.factors[]': {
-		label: 'Facteur',
-		description: 'Un type de signal pondéré.',
-	},
-	'scoring.factors[].signal': {
-		label: 'Signal',
-		description:
-			"Type de signal. Le type réservé distinct_signals mesure le nombre de types de signaux distincts d'un lead.",
-	},
-	'scoring.factors[].value': {
-		label: 'Valeur',
-		description: 'Valeur du signal à retenir. Toute valeur si absente.',
-	},
-	'scoring.factors[].weight': {
-		label: 'Poids',
-		description: 'Poids entier de 1 à 10 appliqué à la mesure du signal.',
 	},
 	contact_ranking: {
 		label: 'Classement des contacts',

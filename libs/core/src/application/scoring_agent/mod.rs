@@ -404,7 +404,7 @@ where
         let (opinions, _) = stored_opinions(definition, &qualification, &calibrations);
         let judgement = judge(
             &opinions,
-            EvidenceStrength::compute(&facts, lead.score.get(), &definition.evidence, at),
+            EvidenceStrength::compute(&facts, &definition.evidence, at),
             definition.verdict,
             &definition.evidence,
         );

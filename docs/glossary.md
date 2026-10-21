@@ -19,7 +19,7 @@
 | provenance | The URL and method that produced a piece of data. Stored with every signal and contact. | origin |
 | contact email | An address attached to a lead, with provenance, method, confidence and kind (role or nominative). | email |
 | suppression list | Domains and addresses never to contact, across all profiles. | blacklist, blocklist |
-| score | Weighted sum of a lead's signals using its profile's factors and weights. | rating |
+| signal strength | The "Force des signaux" of a lead, stored in `leads.score` (exports and webhook: `score`): the mean of the three strongest independent signals, each strength given by its source and decayed by its age, from 0 to 100. No profile setting. | score, rating |
 | triage | Cheap LLM tier that decides relevance of ambiguous items. | pre-filter |
 | qualification | Strong LLM tier that writes an assessment for leads above the profile threshold. | enrichment |
 | assessment | LLM output for a lead: summary, approach angle, quoted evidence, draft, model, prompt version, profile revision. | analysis, review |

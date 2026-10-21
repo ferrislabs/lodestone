@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            UPDATE leads\n            SET score = $2, score_breakdown = $4, updated_at = $3\n            WHERE id = $1\n            RETURNING id, profile_id, domain, status, score, score_breakdown, confidence, verdict, llm_score, qualified_at, first_seen_at, last_seen_at, updated_at\n            ",
+  "query": "\n            SELECT id, profile_id, domain, status, score, confidence, verdict, llm_score, qualified_at, first_seen_at, last_seen_at, updated_at\n            FROM leads\n            WHERE profile_id = $1 AND domain = $2\n            ",
   "describe": {
     "columns": [
       {
@@ -30,41 +30,36 @@
       },
       {
         "ordinal": 5,
-        "name": "score_breakdown",
-        "type_info": "Jsonb"
-      },
-      {
-        "ordinal": 6,
         "name": "confidence",
         "type_info": "Float8"
       },
       {
-        "ordinal": 7,
+        "ordinal": 6,
         "name": "verdict",
         "type_info": "Text"
       },
       {
-        "ordinal": 8,
+        "ordinal": 7,
         "name": "llm_score",
         "type_info": "Int2"
       },
       {
-        "ordinal": 9,
+        "ordinal": 8,
         "name": "qualified_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 10,
+        "ordinal": 9,
         "name": "first_seen_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 11,
+        "ordinal": 10,
         "name": "last_seen_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 12,
+        "ordinal": 11,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
@@ -72,13 +67,10 @@
     "parameters": {
       "Left": [
         "Uuid",
-        "Float8",
-        "Timestamptz",
-        "Jsonb"
+        "Text"
       ]
     },
     "nullable": [
-      false,
       false,
       false,
       false,
@@ -93,5 +85,5 @@
       false
     ]
   },
-  "hash": "745b01949403a31643006114ff9f69d32a4178604fd4ad3ed76b2fafefc1fbc1"
+  "hash": "b3622a09c77a703b42f91c690029c598159cacae0967d656675260ae97c709b2"
 }

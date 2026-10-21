@@ -1,25 +1,27 @@
-use serde::Deserialize;
+use std::collections::{BTreeMap, BTreeSet};
+
+use serde::{Deserialize, de::IgnoredAny};
 use uuid::Uuid;
 
 use super::definition::{
     Agent, AgentId, AgentSource, Aggregator, CalibrationSettings, CertificateTransparency,
     ContactRanking, DEFAULT_EXCLUSION_THRESHOLD, DEFAULT_SAMPLES, DEFAULT_SAMPLING_TEMPERATURE,
-    DEFAULT_SCORING_SAMPLES, DnsCname, Escalation, EvidenceSettings, HttpProbe, Identity,
-    KeywordSource, Language, LlmSettings, MAX_DESCRIPTION_CHARS, MAX_PROMPT_CHARS,
+    DEFAULT_SCORING_SAMPLES, DnsCname, Escalation, EvidenceSettings, EvidenceWeights, HttpProbe,
+    Identity, KeywordSource, Language, LlmSettings, MAX_DESCRIPTION_CHARS, MAX_PROMPT_CHARS,
     PROFILE_SCHEMA_VERSION, ProfileDefinition, QualificationAgent, Question, QuestionOption,
-    Scoring, ScoringAgent, ScoringFactor, VerdictThresholds, default_exclusion_threshold,
+    ScoringAgent, VerdictThresholds, default_exclusion_threshold, default_half_life_days,
+    default_influence,
 };
-use crate::domain::scoring::max_possible;
 
 const FALLBACK_THRESHOLD_PERCENT: u8 = 50;
-const TOP_WEIGHT: f64 = 10.0;
+const DISTINCT_SIGNALS_FACTOR: &str = "distinct_signals";
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct FactorV2 {
     signal: String,
-    #[serde(default)]
-    value: Option<String>,
+    #[serde(default, rename = "value")]
+    _value: IgnoredAny,
     weight: f64,
 }
 
@@ -48,50 +50,61 @@ pub(super) struct ProfileDefinitionV2 {
     llm: LlmV2,
 }
 
-fn keeps_weights(factors: &[FactorV2]) -> bool {
+fn max_possible(factors: &[FactorV2]) -> f64 {
+    let kinds: BTreeSet<&str> = factors
+        .iter()
+        .map(|factor| factor.signal.as_str())
+        .filter(|signal| *signal != DISTINCT_SIGNALS_FACTOR)
+        .collect();
+    let cap = f64::from(u32::try_from(kinds.len()).unwrap_or(u32::MAX));
     factors
         .iter()
-        .all(|factor| factor.weight.fract() == 0.0 && (1.0..=TOP_WEIGHT).contains(&factor.weight))
-}
-
-fn rescale(weight: f64, largest: f64) -> u8 {
-    let scaled = if largest > 0.0 {
-        (weight * TOP_WEIGHT / largest).round()
-    } else {
-        1.0
-    };
-    let bounded = scaled.clamp(1.0, TOP_WEIGHT);
-    (1..=10u8)
-        .find(|candidate| f64::from(*candidate) >= bounded)
-        .unwrap_or(10)
-}
-
-fn upgrade_factors(factors: &[FactorV2]) -> Vec<ScoringFactor> {
-    let keep = keeps_weights(factors);
-    let largest = factors
-        .iter()
-        .map(|factor| factor.weight)
-        .fold(f64::MIN, f64::max);
-    factors
-        .iter()
-        .map(|factor| ScoringFactor {
-            signal: factor.signal.clone(),
-            value: factor.value.clone(),
-            weight: if keep {
-                rescale(factor.weight, TOP_WEIGHT)
+        .map(|factor| {
+            if factor.signal == DISTINCT_SIGNALS_FACTOR {
+                factor.weight * cap
             } else {
-                rescale(factor.weight, largest)
-            },
+                factor.weight
+            }
         })
-        .collect()
+        .sum()
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EvidenceLegacy {
+    #[serde(default = "default_influence")]
+    influence: f64,
+    #[serde(default, rename = "reference_score")]
+    _reference_score: IgnoredAny,
+    #[serde(default)]
+    weights: EvidenceWeights,
+    #[serde(default = "default_half_life_days")]
+    half_life_days: BTreeMap<String, u32>,
+}
+
+impl Default for EvidenceLegacy {
+    fn default() -> Self {
+        Self {
+            influence: default_influence(),
+            _reference_score: IgnoredAny,
+            weights: EvidenceWeights::default(),
+            half_life_days: default_half_life_days(),
+        }
+    }
+}
+
+impl From<EvidenceLegacy> for EvidenceSettings {
+    fn from(legacy: EvidenceLegacy) -> Self {
+        Self {
+            influence: legacy.influence,
+            weights: legacy.weights,
+            half_life_days: legacy.half_life_days,
+        }
+    }
 }
 
 fn upgrade_threshold(points: f64, factors: &[FactorV2]) -> u8 {
-    let old_max = max_possible(
-        factors
-            .iter()
-            .map(|factor| (factor.signal.as_str(), factor.weight)),
-    );
+    let old_max = max_possible(factors);
     if old_max <= 0.0 {
         return FALLBACK_THRESHOLD_PERCENT;
     }
@@ -101,17 +114,12 @@ fn upgrade_threshold(points: f64, factors: &[FactorV2]) -> u8 {
         .unwrap_or(100)
 }
 
-fn upgrade_scoring_and_llm(scoring: ScoringV2, llm: LlmV2) -> (Scoring, LlmSettings) {
-    let threshold = upgrade_threshold(llm.qualification_threshold, &scoring.factors);
-    let factors = upgrade_factors(&scoring.factors);
-    (
-        Scoring { factors },
-        LlmSettings {
-            qualification_threshold: threshold,
-            relevance_criteria: llm.relevance_criteria,
-            language: Language::default(),
-        },
-    )
+fn upgrade_llm(scoring: &ScoringV2, llm: LlmV2) -> LlmSettings {
+    LlmSettings {
+        qualification_threshold: upgrade_threshold(llm.qualification_threshold, &scoring.factors),
+        relevance_criteria: llm.relevance_criteria,
+        language: Language::default(),
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -121,7 +129,8 @@ pub(super) struct ProfileDefinitionV3 {
     _schema_version: u32,
     identity: Identity,
     agents: Vec<Agent>,
-    scoring: Scoring,
+    #[serde(rename = "scoring")]
+    _scoring: IgnoredAny,
     contact_ranking: ContactRanking,
     llm: LlmSettings,
 }
@@ -383,7 +392,8 @@ pub(super) struct ProfileDefinitionV4 {
     aggregator: Aggregator,
     #[serde(default)]
     verdict: VerdictThresholds,
-    scoring: Scoring,
+    #[serde(rename = "scoring")]
+    _scoring: IgnoredAny,
     contact_ranking: ContactRanking,
     llm: LlmSettings,
 }
@@ -405,7 +415,6 @@ impl ProfileDefinitionV4 {
             escalation: Escalation::default(),
             verdict: self.verdict,
             evidence: EvidenceSettings::default(),
-            scoring: self.scoring,
             contact_ranking: self.contact_ranking,
             llm: self.llm,
         }
@@ -423,7 +432,8 @@ pub(super) struct ProfileDefinitionV5 {
     aggregator: Aggregator,
     #[serde(default)]
     verdict: VerdictThresholds,
-    scoring: Scoring,
+    #[serde(rename = "scoring")]
+    _scoring: IgnoredAny,
     contact_ranking: ContactRanking,
     llm: LlmSettings,
 }
@@ -445,7 +455,6 @@ impl ProfileDefinitionV5 {
             escalation: Escalation::default(),
             verdict: self.verdict,
             evidence: EvidenceSettings::default(),
-            scoring: self.scoring,
             contact_ranking: self.contact_ranking,
             llm: self.llm,
         }
@@ -464,8 +473,9 @@ pub(super) struct ProfileDefinitionV6 {
     #[serde(default)]
     verdict: VerdictThresholds,
     #[serde(default)]
-    evidence: EvidenceSettings,
-    scoring: Scoring,
+    evidence: EvidenceLegacy,
+    #[serde(rename = "scoring")]
+    _scoring: IgnoredAny,
     contact_ranking: ContactRanking,
     llm: LlmSettings,
 }
@@ -486,8 +496,7 @@ impl ProfileDefinitionV6 {
             aggregator: self.aggregator,
             escalation: Escalation::default(),
             verdict: self.verdict,
-            evidence: self.evidence,
-            scoring: self.scoring,
+            evidence: self.evidence.into(),
             contact_ranking: self.contact_ranking,
             llm: self.llm,
         }
@@ -585,8 +594,9 @@ pub(super) struct ProfileDefinitionV7 {
     #[serde(default)]
     verdict: VerdictThresholds,
     #[serde(default)]
-    evidence: EvidenceSettings,
-    scoring: Scoring,
+    evidence: EvidenceLegacy,
+    #[serde(rename = "scoring")]
+    _scoring: IgnoredAny,
     contact_ranking: ContactRanking,
     llm: LlmSettings,
 }
@@ -607,8 +617,7 @@ impl ProfileDefinitionV7 {
             aggregator: self.aggregator,
             escalation: Escalation::default(),
             verdict: self.verdict,
-            evidence: self.evidence,
-            scoring: self.scoring,
+            evidence: self.evidence.into(),
             contact_ranking: self.contact_ranking,
             llm: self.llm,
         }
@@ -663,8 +672,9 @@ pub(super) struct ProfileDefinitionV8 {
     #[serde(default)]
     verdict: VerdictThresholds,
     #[serde(default)]
-    evidence: EvidenceSettings,
-    scoring: Scoring,
+    evidence: EvidenceLegacy,
+    #[serde(rename = "scoring")]
+    _scoring: IgnoredAny,
     contact_ranking: ContactRanking,
     llm: LlmSettings,
 }
@@ -685,8 +695,7 @@ impl ProfileDefinitionV8 {
             aggregator: self.aggregator,
             escalation: Escalation::default(),
             verdict: self.verdict,
-            evidence: self.evidence,
-            scoring: self.scoring,
+            evidence: self.evidence.into(),
             contact_ranking: self.contact_ranking,
             llm: self.llm,
         }
@@ -710,7 +719,6 @@ impl ProfileDefinitionV3 {
             escalation: Escalation::default(),
             verdict: VerdictThresholds::default(),
             evidence: EvidenceSettings::default(),
-            scoring: self.scoring,
             contact_ranking: self.contact_ranking,
             llm: self.llm,
         }
@@ -719,12 +727,12 @@ impl ProfileDefinitionV3 {
 
 impl ProfileDefinitionV2 {
     pub(super) fn upgrade(self) -> ProfileDefinition {
-        let (scoring, llm) = upgrade_scoring_and_llm(self.scoring, self.llm);
+        let llm = upgrade_llm(&self.scoring, self.llm);
         ProfileDefinitionV3 {
             _schema_version: 3,
             identity: self.identity,
             agents: self.agents,
-            scoring,
+            _scoring: IgnoredAny,
             contact_ranking: self.contact_ranking,
             llm,
         }
@@ -824,12 +832,12 @@ impl SourcesV1 {
 
 impl ProfileDefinitionV1 {
     pub(super) fn upgrade(self) -> ProfileDefinition {
-        let (scoring, llm) = upgrade_scoring_and_llm(self.scoring, self.llm);
+        let llm = upgrade_llm(&self.scoring, self.llm);
         ProfileDefinitionV3 {
             _schema_version: 3,
             identity: self.identity,
             agents: self.sources.into_agents(),
-            scoring,
+            _scoring: IgnoredAny,
             contact_ranking: self.contact_ranking,
             llm,
         }
@@ -851,8 +859,9 @@ pub(super) struct ProfileDefinitionV10 {
     #[serde(default)]
     verdict: VerdictThresholds,
     #[serde(default)]
-    evidence: EvidenceSettings,
-    scoring: Scoring,
+    evidence: EvidenceLegacy,
+    #[serde(rename = "scoring")]
+    _scoring: IgnoredAny,
     contact_ranking: ContactRanking,
     llm: LlmSettings,
 }
@@ -869,8 +878,7 @@ impl ProfileDefinitionV10 {
             aggregator: self.aggregator,
             escalation: self.escalation,
             verdict: self.verdict,
-            evidence: self.evidence,
-            scoring: self.scoring,
+            evidence: self.evidence.into(),
             contact_ranking: self.contact_ranking,
             llm: self.llm,
         }
@@ -893,8 +901,9 @@ pub(super) struct ProfileDefinitionV11 {
     #[serde(default)]
     verdict: VerdictThresholds,
     #[serde(default)]
-    evidence: EvidenceSettings,
-    scoring: Scoring,
+    evidence: EvidenceLegacy,
+    #[serde(rename = "scoring")]
+    _scoring: IgnoredAny,
     contact_ranking: ContactRanking,
     llm: LlmSettings,
 }
@@ -911,8 +920,51 @@ impl ProfileDefinitionV11 {
             aggregator: self.aggregator,
             escalation: self.escalation,
             verdict: self.verdict,
-            evidence: self.evidence,
-            scoring: self.scoring,
+            evidence: self.evidence.into(),
+            contact_ranking: self.contact_ranking,
+            llm: self.llm,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct ProfileDefinitionV12 {
+    #[serde(rename = "schema_version")]
+    _schema_version: u32,
+    identity: Identity,
+    agents: Vec<Agent>,
+    qualification_agents: Vec<QualificationAgent>,
+    #[serde(default)]
+    scoring_agents: Vec<ScoringAgent>,
+    aggregator: Aggregator,
+    #[serde(default)]
+    escalation: Escalation,
+    #[serde(default)]
+    verdict: VerdictThresholds,
+    #[serde(default)]
+    evidence: EvidenceLegacy,
+    #[serde(default)]
+    calibration: CalibrationSettings,
+    #[serde(rename = "scoring")]
+    _scoring: IgnoredAny,
+    contact_ranking: ContactRanking,
+    llm: LlmSettings,
+}
+
+impl ProfileDefinitionV12 {
+    pub(super) fn upgrade(self) -> ProfileDefinition {
+        ProfileDefinition {
+            schema_version: PROFILE_SCHEMA_VERSION,
+            identity: self.identity,
+            agents: self.agents,
+            qualification_agents: self.qualification_agents,
+            scoring_agents: self.scoring_agents,
+            calibration: self.calibration,
+            aggregator: self.aggregator,
+            escalation: self.escalation,
+            verdict: self.verdict,
+            evidence: self.evidence.into(),
             contact_ranking: self.contact_ranking,
             llm: self.llm,
         }

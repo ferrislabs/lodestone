@@ -11,7 +11,6 @@ use crate::domain::{
     job::{JobKind, NewJob},
     lead::{Assessment, ContactEmail, Lead, LeadId, Signal},
     profile::ProfileId,
-    scoring::ScoreContribution,
 };
 
 pub mod ports;
@@ -121,9 +120,8 @@ pub struct LeadRecord {
     pub profile: ProfileRecord,
     pub domain: String,
     pub status: String,
+    /// Signal strength in percent from 0 to 100: mean of the three strongest independent signals, each given by its source and decayed by its age.
     pub score: f64,
-    #[schema(value_type = Vec<Object>)]
-    pub score_breakdown: Vec<ScoreContribution>,
     pub first_seen_at: DateTime<Utc>,
     pub last_seen_at: DateTime<Utc>,
     pub contact: Option<ContactRecord>,
@@ -145,7 +143,6 @@ impl LeadRecord {
             domain: lead.domain.as_str().to_owned(),
             status: lead.status.as_str().to_owned(),
             score: lead.score.get(),
-            score_breakdown: lead.score_breakdown.clone(),
             first_seen_at: lead.first_seen_at,
             last_seen_at: lead.last_seen_at,
             contact: contact.map(ContactRecord::from),

@@ -136,7 +136,6 @@ export function ProfileDetailFeature() {
 						tab={tab}
 						value={editor.value}
 						problems={problems}
-						onNavigate={setTab}
 						sourceTrigger={sourceTrigger}
 						listeners={listeners}
 						providers={providers}

@@ -67,7 +67,6 @@ describe('agents', () => {
 			schema_version: 6,
 			identity: { offer: 'o', target_customer: 't' },
 			agents: [],
-			scoring: { factors: [] },
 			contact_ranking: { preferred_local_parts: [] },
 			llm: { qualification_threshold: 50, relevance_criteria: 'c' },
 		})

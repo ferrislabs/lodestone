@@ -183,15 +183,6 @@ const detail: LeadDetailData = {
 		last_seen_at: '2026-02-01T00:00:00Z',
 		probable_country: { code: 'FR', name: 'France' },
 	},
-	score_breakdown: [
-		{
-			signal: 'hiring_page',
-			value: 'careers',
-			weight: 3,
-			measure: 1,
-			contribution: 3,
-		},
-	],
 	signals: [
 		{
 			id: 's1',
@@ -358,11 +349,11 @@ describe('LeadDetail', () => {
 		).toBeTruthy()
 	})
 
-	it('renders header, breakdown, signals, contacts and assessments', () => {
+	it('renders header, signals, contacts and assessments without a score breakdown', () => {
 		renderDetail()
 		expect(screen.getByRole('heading', { name: 'acme.test' })).toBeTruthy()
 		expect(screen.getByText('Fintech')).toBeTruthy()
-		expect(screen.getByText('Détail du score')).toBeTruthy()
+		expect(screen.queryByText('Détail du score')).toBeNull()
 		expect(screen.getByText('Source : crawler')).toBeTruthy()
 		expect(screen.getByText('ats-fr')).toBeTruthy()
 		expect(screen.getByText('jane@acme.test')).toBeTruthy()
@@ -390,12 +381,16 @@ describe('LeadDetail', () => {
 		).toBe('68 / 100')
 	})
 
-	it('names the signal score apart from the score of the scoring agents', () => {
+	it('names the signal strength apart from the score of the scoring agents', () => {
 		renderDetail()
-		expect(screen.getByText('Score des signaux')).toBeTruthy()
-		expect(screen.getByText('Score des signaux').nextSibling?.textContent).toBe(
-			'42,5',
-		)
+		expect(screen.queryByText('Score des signaux')).toBeNull()
+		expect(
+			screen.getByText('Force des signaux', { selector: 'dt' }),
+		).toBeTruthy()
+		expect(
+			screen.getByText('Force des signaux', { selector: 'dt' }).nextSibling
+				?.textContent,
+		).toBe('42,5 / 100')
 	})
 
 	it('puts the indicators, opinion by evidence, in the calculation', () => {

@@ -72,8 +72,8 @@ impl Api {
     }
 }
 
-fn with_weight(mut definition: Value, weight: u8) -> Value {
-    definition["scoring"]["factors"][0]["weight"] = json!(weight);
+fn with_threshold(mut definition: Value, threshold: u8) -> Value {
+    definition["llm"]["qualification_threshold"] = json!(threshold);
     definition
 }
 
@@ -125,8 +125,8 @@ async fn create_without_a_name_uses_the_offer(pool: PgPool) {
 async fn invalid_definitions_are_rejected_with_the_faulty_field_path(pool: PgPool) {
     let api = Api::new(pool).await;
 
-    let mut bad_weight = iam();
-    bad_weight["scoring"]["factors"][2]["weight"] = json!("heavy");
+    let mut bad_influence = iam();
+    bad_influence["evidence"]["influence"] = json!("high");
     let mut bad_version = iam();
     bad_version["schema_version"] = json!(99);
     let mut unknown_field = iam();
@@ -134,17 +134,17 @@ async fn invalid_definitions_are_rejected_with_the_faulty_field_path(pool: PgPoo
     let mut empty_offer = iam();
     empty_offer["identity"]["offer"] = json!("");
 
-    let mut heavy_weight = iam();
-    heavy_weight["scoring"]["factors"][0]["weight"] = json!(11);
-    let mut zero_weight = iam();
-    zero_weight["scoring"]["factors"][3]["weight"] = json!(0);
+    let mut removed_weights = iam();
+    removed_weights["scoring"] = json!({"factors": []});
+    let mut removed_reference = iam();
+    removed_reference["evidence"]["reference_score"] = json!(50);
     let mut bad_threshold = iam();
     bad_threshold["llm"]["qualification_threshold"] = json!(101);
 
     let cases = [
-        (bad_weight, "scoring.factors[2].weight"),
-        (heavy_weight, "scoring.factors[0].weight"),
-        (zero_weight, "scoring.factors[3].weight"),
+        (bad_influence, "evidence.influence"),
+        (removed_weights, "scoring"),
+        (removed_reference, "evidence.reference_score"),
         (bad_threshold, "llm.qualification_threshold"),
         (bad_version, "schema_version"),
         (unknown_field, "identity.colour"),
@@ -218,7 +218,7 @@ async fn malformed_json_and_envelopes_are_rejected_with_a_path(pool: PgPool) {
 async fn update_appends_a_revision_and_leaves_the_past_one_intact(pool: PgPool) {
     let api = Api::new(pool).await;
     let id = api.create("iam", iam()).await;
-    let changed = with_weight(iam(), 9);
+    let changed = with_threshold(iam(), 9);
 
     let (status, body) = api.update(&id, changed.clone()).await;
 
@@ -254,7 +254,7 @@ async fn invalid_update_creates_no_revision(pool: PgPool) {
     let api = Api::new(pool).await;
     let id = api.create("iam", iam()).await;
     let mut bad = iam();
-    bad["schema_version"] = json!(13);
+    bad["schema_version"] = json!(14);
 
     let (status, body) = api.update(&id, bad).await;
 
@@ -282,8 +282,8 @@ async fn deactivation_stops_scheduling_but_keeps_the_leads(pool: PgPool) {
     let api = Api::new(pool.clone()).await;
     let id = api.create("iam", iam()).await;
     sqlx::query(
-        "INSERT INTO leads (id, profile_id, domain, status, score, score_breakdown, first_seen_at, last_seen_at, updated_at)
-         VALUES ($1, $2::uuid, 'alpha.com', 'new', 10, '[]'::jsonb, now(), now(), now())",
+        "INSERT INTO leads (id, profile_id, domain, status, score, first_seen_at, last_seen_at, updated_at)
+         VALUES ($1, $2::uuid, 'alpha.com', 'new', 10, now(), now(), now())",
     )
     .bind(common::generate_uuid_v7())
     .bind(&id)
@@ -408,7 +408,7 @@ async fn both_example_profiles_import(pool: PgPool) {
 async fn import_reports_the_faulty_path_and_rejects_duplicate_names(pool: PgPool) {
     let api = Api::new(pool).await;
     let mut bad = iam();
-    bad["scoring"]["factors"][1]["weight"] = json!(null);
+    bad["evidence"]["influence"] = json!(null);
     let (status, _, body) = send_raw(
         api.app(),
         Method::POST,
@@ -419,7 +419,7 @@ async fn import_reports_the_faulty_path_and_rejects_duplicate_names(pool: PgPool
     .await;
     let parsed: Value = serde_json::from_str(&body).expect("json");
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
-    assert_eq!(parsed["details"][0]["path"], "scoring.factors[1].weight");
+    assert_eq!(parsed["details"][0]["path"], "evidence.influence");
 
     for expected in [StatusCode::CREATED, StatusCode::CONFLICT] {
         let (status, _, _) = send_raw(

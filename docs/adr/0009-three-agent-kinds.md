@@ -64,3 +64,12 @@ The indicators are computed in code without any model call and must be reliable 
 - A company with several domains is one entity in evidence and in the list (grouped rows), while each domain keeps its own lead, status and decisions.
 - Decay is computed when a lead is scored; between two rescorings the stored evidence ages. A lead that nothing touches keeps the strength it had at its last scoring.
 - The decision is taken by the scoring agents; the ADR 0007 formula, fed by the corrected indicators, is kept as the indicators they are given.
+
+## Amendment: no signal weights (#180)
+
+With the scoring agents deciding the score and the verdict, the weighted `scoring.factors` of the profile only computed `leads.score`. Profile schema 13 removes `scoring` and `evidence.reference_score`; the upgrade from 12 discards them. The strength of the signals comes only from the sources, which already give each signal a `strength` from 0 to 1.
+
+- **Signal strength.** The mean of the three highest `strength x decay` among the independent signals of the lead and its siblings of the same profile (fewer when there are fewer, 0 when none). It is the `strength` component of the evidence (replacing `signal score x freshness / reference score`), and `leads.score` = round(strength x 100, 1).
+- **Where it is written.** At each recording of signals (sources, contact finder), with the clock of the run, and by the rescoring loop for every lead it rescores, since decay changes it with the days.
+- **Staleness.** A lead is stale when its scoring version is older, its stored evidence is older than a day or missing, or the number of signals it aggregates changed. The comparison of the stored signal score with `leads.score` is gone: the score is a function of the signals and of the date, refreshed with them.
+- **Public meaning.** `min_score`, the score sorts, the `score` field of exports and webhooks and the lead page show the signal strength from 0 to 100, labelled "Force des signaux" in the webapp. `score_breakdown` is removed.

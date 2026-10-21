@@ -292,7 +292,7 @@ impl LodestoneUseCase {
                 &mut leads,
                 &mut signals,
                 lead.id,
-                &active.revision.definition.definition().scoring,
+                &active.revision.definition.definition().evidence,
                 now,
             )
             .await?;

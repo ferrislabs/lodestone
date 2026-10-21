@@ -271,27 +271,6 @@ async fn replaying_a_run_creates_no_duplicate_and_keeps_profiles_apart(pool: PgP
     assert_eq!(leads(&pool, beta).await, vec!["beta.io"]);
 }
 
-async fn active_profile_weighted(pool: &PgPool, name: &str, weight: u8) -> ProfileId {
-    let mut value: serde_json::Value = serde_json::from_str(support::MINIMAL_PROFILE).unwrap();
-    value["scoring"]["factors"] = json!([
-        {"signal": "product_detected", "value": "keycloak", "weight": weight},
-        {"signal": "distinct_signals", "weight": 1}
-    ]);
-    let usecase = LodestoneUseCase::new(pool.clone());
-    let id = usecase
-        .create_profile(lodestone_core::CreateProfileCommand {
-            name: lodestone_core::ProfileName::parse(name).unwrap(),
-            definition: lodestone_core::ValidatedProfile::parse(value).unwrap(),
-            created_by: None,
-        })
-        .await
-        .unwrap()
-        .profile
-        .id;
-    usecase.set_profile_active(id, true).await.unwrap();
-    id
-}
-
 async fn lead_score(pool: &PgPool, profile: ProfileId, host: &str) -> lodestone_core::Lead {
     let domain = NormalizedDomain::from_host(host).unwrap();
     with_tx(pool, async |shared| {
@@ -305,9 +284,9 @@ async fn lead_score(pool: &PgPool, profile: ProfileId, host: &str) -> lodestone_
 }
 
 #[sqlx::test(migrations = "../../migrations")]
-async fn same_input_gets_separate_leads_and_scores_per_profile(pool: PgPool) {
-    let alpha = active_profile_weighted(&pool, "alpha", 4).await;
-    let beta = active_profile_weighted(&pool, "beta", 9).await;
+async fn same_input_gets_separate_leads_and_the_strength_of_its_signals_per_profile(pool: PgPool) {
+    let alpha = active_profile(&pool, "alpha").await;
+    let beta = active_profile(&pool, "beta").await;
     let source = FakeSource::new(vec!["auth.beta.io"]);
 
     LodestoneUseCase::new(pool.clone())
@@ -318,8 +297,67 @@ async fn same_input_gets_separate_leads_and_scores_per_profile(pool: PgPool) {
     let in_alpha = lead_score(&pool, alpha, "beta.io").await;
     let in_beta = lead_score(&pool, beta, "beta.io").await;
     assert_ne!(in_alpha.id, in_beta.id);
-    assert!((in_alpha.score.get() - (4.0 * 0.8 + 1.0)).abs() < 1e-9);
-    assert!((in_beta.score.get() - (9.0 * 0.8 + 1.0)).abs() < 1e-9);
-    assert_eq!(in_beta.score_breakdown.len(), 2);
-    assert_eq!(in_beta.score_breakdown[0].signal, "product_detected");
+    assert_eq!(in_alpha.score.get(), 80.0);
+    assert_eq!(in_beta.score.get(), 80.0);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_lead_score_is_the_mean_of_its_three_strongest_decayed_signals(pool: PgPool) {
+    let alpha = active_profile(&pool, "alpha").await;
+    let usecase = LodestoneUseCase::new(pool.clone());
+    let active = usecase
+        .list_active_profiles()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|active| active.profile.id == alpha)
+        .unwrap();
+    let observation = |value: &str, strength: f64| Observation {
+        domain: domain("sso.acme.com"),
+        kind: SignalKind::parse("product_detected").unwrap(),
+        value: Some(value.to_owned()),
+        raw: json!({ "host": "sso.acme.com" }),
+        provenance: Provenance::parse("https://sso.acme.com/").unwrap(),
+        strength: UnitInterval::new(strength).unwrap(),
+        observed_at: at(100),
+        agent: None,
+    };
+
+    usecase
+        .record_observations_at(
+            &active,
+            SourceName::HttpProbe,
+            &[observation("a", 0.9)],
+            at(100),
+        )
+        .await
+        .unwrap();
+    assert_eq!(lead_score(&pool, alpha, "acme.com").await.score.get(), 90.0);
+
+    usecase
+        .record_observations_at(
+            &active,
+            SourceName::HttpProbe,
+            &[
+                observation("b", 0.6),
+                observation("c", 0.3),
+                observation("d", 0.1),
+            ],
+            at(100),
+        )
+        .await
+        .unwrap();
+    assert_eq!(lead_score(&pool, alpha, "acme.com").await.score.get(), 60.0);
+
+    let later = at(100) + chrono::Duration::days(365);
+    usecase
+        .record_observations_at(
+            &active,
+            SourceName::HttpProbe,
+            &[observation("a", 0.9)],
+            later,
+        )
+        .await
+        .unwrap();
+    assert_eq!(lead_score(&pool, alpha, "acme.com").await.score.get(), 30.0);
 }
