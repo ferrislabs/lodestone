@@ -10,8 +10,8 @@ use dns::HickoryResolver;
 use fetch::PoliteFetcher;
 use llm::any::AnyProvider;
 use lodestone_core::{
-    Clock, Job, JobKind, JobQueue, LodestoneUseCase, NewJob, SourceName, Tier, TierError,
-    TokenPricing, WEBHOOK_JOB_KIND,
+    Clock, Job, JobKind, JobQueue, LodestoneUseCase, NewJob, PartnerAward, SourceName, Tier,
+    TierError, TokenPricing, WEBHOOK_JOB_KIND,
     contacts::ContactRunSettings,
     infrastructure::{
         candidate_host::postgres::PgCandidateHosts,
@@ -323,14 +323,21 @@ impl JobRouter {
         let mut partners = 0;
         if !contracts.is_empty() {
             for active in self.usecase.list_active_profiles().await? {
-                let Some(rules) = self
-                    .sources
-                    .decp
-                    .rules(active.revision.definition.definition())
-                else {
-                    continue;
-                };
-                let awards = partner_awards(rules, &contracts);
+                let mut awards: Vec<PartnerAward> = Vec::new();
+                for rules in active
+                    .revision
+                    .definition
+                    .definition()
+                    .enabled_keyword_rules(SourceName::Decp)
+                {
+                    for award in partner_awards(rules, &contracts) {
+                        if !awards.iter().any(|known| {
+                            known.holder == award.holder && known.contract_id == award.contract_id
+                        }) {
+                            awards.push(award);
+                        }
+                    }
+                }
                 if awards.is_empty() {
                     continue;
                 }

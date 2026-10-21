@@ -3,9 +3,7 @@ use std::{collections::HashSet, sync::Arc};
 use chrono::{DateTime, Duration, NaiveDate, Utc};
 use lodestone_core::{
     ActiveProfile, Candidate, FetchPurpose, FetchRequest, Fetcher, NormalizedDomain, Provenance,
-    SignalKind, SourceError, SourceName,
-    definition::{KeywordSource, ProfileDefinition},
-    triage::CandidateSource,
+    SignalKind, SourceError, SourceName, triage::CandidateSource,
 };
 use serde_json::{Value, json};
 use tracing::{debug, info};
@@ -43,10 +41,13 @@ pub struct BoampSource<F: Fetcher> {
 pub fn keyword_union(profiles: &[ActiveProfile]) -> Vec<String> {
     let mut seen: HashSet<String> = HashSet::new();
     let mut union = Vec::new();
-    for rules in profiles
-        .iter()
-        .filter_map(|active| active.revision.definition.definition().boamp())
-    {
+    for rules in profiles.iter().flat_map(|active| {
+        active
+            .revision
+            .definition
+            .definition()
+            .enabled_keyword_rules(SourceName::Boamp)
+    }) {
         for keyword in &rules.keywords {
             let keyword = keyword.trim();
             if !keyword.is_empty() && seen.insert(keyword.to_lowercase()) {
@@ -426,10 +427,6 @@ impl<F: Fetcher> BoampSource<F> {
 impl<F: Fetcher> CandidateSource for BoampSource<F> {
     fn name(&self) -> SourceName {
         SourceName::Boamp
-    }
-
-    fn rules<'a>(&self, profile: &'a ProfileDefinition) -> Option<&'a KeywordSource> {
-        profile.boamp()
     }
 
     async fn collect(

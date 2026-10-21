@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT id, profile_id, source, status, started_at, finished_at, volume, signals, error\n            FROM runs\n            ORDER BY started_at DESC, id DESC\n            LIMIT $1\n            ",
+  "query": "\n            UPDATE runs\n            SET status = $2, volume = $3, signals = $4, error = $5, finished_at = $6\n            WHERE id = $1 AND status = 'running'\n            RETURNING id, profile_id, source, status, started_at, finished_at, volume, signals, error, agent_id\n            ",
   "describe": {
     "columns": [
       {
@@ -47,11 +47,21 @@
         "ordinal": 8,
         "name": "error",
         "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "agent_id",
+        "type_info": "Text"
       }
     ],
     "parameters": {
       "Left": [
-        "Int8"
+        "Uuid",
+        "Text",
+        "Int8",
+        "Int8",
+        "Text",
+        "Timestamptz"
       ]
     },
     "nullable": [
@@ -63,8 +73,9 @@
       true,
       false,
       false,
+      true,
       true
     ]
   },
-  "hash": "54f4ef983678783997a558eb94ce88ebcf1f92154bcbe87af9958efc7891eb3f"
+  "hash": "276864dcd4995bdf156fe9bbf461085db85089fa1b6ee0a50efa6a1b43355755"
 }

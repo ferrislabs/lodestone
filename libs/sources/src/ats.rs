@@ -3,9 +3,7 @@ use std::{sync::Arc, time::Duration};
 use chrono::{DateTime, Utc};
 use lodestone_core::{
     ActiveProfile, AtsTargets, Candidate, FetchError, FetchPurpose, FetchRequest, FetchResponse,
-    Fetcher, NormalizedDomain, SourceError, SourceName,
-    definition::{KeywordSource, ProfileDefinition},
-    triage::CandidateSource,
+    Fetcher, NormalizedDomain, SourceError, SourceName, triage::CandidateSource,
 };
 use serde_json::Value;
 use tracing::{debug, info};
@@ -213,10 +211,6 @@ fn store_error(error: impl std::fmt::Display) -> SourceError {
 impl<F: Fetcher, T: AtsTargets> CandidateSource for AtsSource<F, T> {
     fn name(&self) -> SourceName {
         SourceName::Ats
-    }
-
-    fn rules<'a>(&self, profile: &'a ProfileDefinition) -> Option<&'a KeywordSource> {
-        profile.ats()
     }
 
     async fn collect(

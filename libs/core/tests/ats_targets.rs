@@ -61,6 +61,7 @@ async fn signal(pool: &PgPool, lead: lodestone_core::LeadId, source: SourceName,
                 provenance: Provenance::parse("https://example.com/x").unwrap(),
                 strength: UnitInterval::new(0.5).unwrap(),
                 observed_at: at(1),
+                agent: None,
             })
             .await
     })

@@ -152,7 +152,13 @@ async fn run_job(pool: &PgPool, source: &DecpSource<FixtureFetcher>) {
         .unwrap();
     let contracts = source.take_awards();
     for active in usecase.list_active_profiles().await.unwrap() {
-        let Some(rules) = active.revision.definition.definition().decp() else {
+        let Some(rules) = active
+            .revision
+            .definition
+            .definition()
+            .enabled_keyword_rules(lodestone_core::SourceName::Decp)
+            .next()
+        else {
             continue;
         };
         let awards = partner_awards(rules, &contracts);

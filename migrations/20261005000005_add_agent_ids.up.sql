@@ -1,0 +1,2 @@
+ALTER TABLE signals ADD COLUMN agent_id TEXT;
+ALTER TABLE runs ADD COLUMN agent_id TEXT;

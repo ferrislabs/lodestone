@@ -39,11 +39,19 @@ fn neutralize(text: &str) -> String {
 }
 
 pub fn market_context(definition: &ProfileDefinition) -> String {
+    market_context_with(definition, None)
+}
+
+pub fn market_context_with(definition: &ProfileDefinition, criteria: Option<&str>) -> String {
     format!(
         "Offer: {}\nTarget customer: {}\nRelevance criteria: {}",
         neutralize(definition.identity.offer.trim()),
         neutralize(definition.identity.target_customer.trim()),
-        neutralize(definition.llm.relevance_criteria.trim()),
+        neutralize(
+            criteria
+                .unwrap_or(&definition.llm.relevance_criteria)
+                .trim()
+        ),
     )
 }
 
@@ -53,8 +61,15 @@ impl PromptTemplate {
     }
 
     pub fn system(&self, definition: &ProfileDefinition) -> String {
-        self.system
-            .replacen(CONTEXT_PLACEHOLDER, &market_context(definition), 1)
+        self.system_with(definition, None)
+    }
+
+    pub fn system_with(&self, definition: &ProfileDefinition, criteria: Option<&str>) -> String {
+        self.system.replacen(
+            CONTEXT_PLACEHOLDER,
+            &market_context_with(definition, criteria),
+            1,
+        )
     }
 
     pub fn instruction(&self) -> &'static str {
@@ -143,6 +158,24 @@ mod tests {
             assert_eq!(system.matches("\n<market_context>\n").count(), 1);
             assert_eq!(system.matches("</market_context>").count(), 1);
         }
+    }
+
+    #[test]
+    fn agent_criteria_replace_the_profile_criteria() {
+        let definition = profile("Profile criteria");
+        let with_agent = TRIAGE_V1.system_with(&definition, Some("Agent criteria"));
+        assert!(with_agent.contains("Relevance criteria: Agent criteria"));
+        assert!(!with_agent.contains("Profile criteria"));
+        assert_eq!(
+            TRIAGE_V1.system_with(&definition, None),
+            TRIAGE_V1.system(&definition)
+        );
+        assert!(
+            TRIAGE_V1
+                .system(&definition)
+                .contains("Relevance criteria: Profile criteria")
+        );
+        assert_eq!(TRIAGE_V1.tag(), "triage@1");
     }
 
     #[test]

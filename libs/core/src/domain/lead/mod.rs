@@ -5,7 +5,7 @@ use thiserror::Error;
 
 use crate::domain::{
     NormalizedDomain,
-    profile::{ProfileId, RevisionNumber},
+    profile::{ProfileId, RevisionNumber, definition::AgentId},
     prompt::DraftMessage,
     values::{EmailAddress, Provenance, SignalKind, SourceName, UnitInterval},
 };
@@ -167,6 +167,7 @@ pub struct Signal {
     pub provenance: Provenance,
     pub strength: UnitInterval,
     pub observed_at: DateTime<Utc>,
+    pub agent: Option<AgentId>,
 }
 
 const FINGERPRINT_SEPARATOR: char = '\u{1f}';

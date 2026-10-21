@@ -69,7 +69,8 @@ async fn iam_profile_against_the_real_ted_api() {
         .revision
         .definition
         .definition()
-        .ted()
+        .enabled_keyword_rules(lodestone_core::SourceName::Ted)
+        .next()
         .cloned()
         .unwrap();
     let (candidates, stats) = source

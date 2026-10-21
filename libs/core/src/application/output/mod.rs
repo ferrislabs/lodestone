@@ -254,6 +254,7 @@ mod tests {
             provenance: Provenance::parse("https://acme.com/realms/master").unwrap(),
             strength: UnitInterval::new(1.0).unwrap(),
             observed_at: at(),
+            agent: None,
         }
     }
 

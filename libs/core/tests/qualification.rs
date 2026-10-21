@@ -167,6 +167,7 @@ async fn lead_with_score(pool: &PgPool, profile: ProfileId, host: &str, score: f
         provenance: Provenance::parse(&format!("https://{host}/realms/master")).unwrap(),
         strength: UnitInterval::new(0.9).unwrap(),
         observed_at: at(10),
+        agent: None,
     };
     sqlx::query("UPDATE leads SET score = $2 WHERE id = $1")
         .bind(lead.id.0)

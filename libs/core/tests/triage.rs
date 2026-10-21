@@ -2,7 +2,10 @@ mod support;
 
 use std::{
     num::NonZeroU32,
-    sync::atomic::{AtomicU64, Ordering},
+    sync::{
+        Mutex,
+        atomic::{AtomicU64, Ordering},
+    },
     time::Duration,
 };
 
@@ -13,7 +16,7 @@ use lodestone_core::{
     NormalizedDomain, ProfileId, ProfileName, Provenance, RunRepository, RunStatus, SignalKind,
     SignalRepository, SourceError, SourceName, SuppressionTarget, TokenPricing, TokenUsage,
     ValidatedProfile,
-    definition::{KeywordSource, ProfileDefinition},
+    definition::AgentId,
     infrastructure::{
         contact::postgres::PgContactRepository, lead::postgres::PgLeadRepository,
         llm_cache::postgres::PgLlmCache, postgres::with_tx, run::postgres::PgRunRepository,
@@ -43,10 +46,6 @@ struct FakeSource {
 impl CandidateSource for FakeSource {
     fn name(&self) -> SourceName {
         SourceName::Boamp
-    }
-
-    fn rules<'a>(&self, profile: &'a ProfileDefinition) -> Option<&'a KeywordSource> {
-        profile.boamp()
     }
 
     async fn collect(
@@ -450,4 +449,210 @@ async fn without_a_provider_ambiguous_candidates_are_deferred(pool: PgPool) {
     let recorded = runs(&pool).await;
     assert_eq!(recorded[0].status, RunStatus::Succeeded);
     assert_eq!(recorded[0].signals, 1);
+}
+
+struct RecordingProvider {
+    systems: Mutex<Vec<String>>,
+}
+
+impl RecordingProvider {
+    fn new() -> Self {
+        Self {
+            systems: Mutex::new(Vec::new()),
+        }
+    }
+
+    fn systems(&self) -> Vec<String> {
+        self.systems.lock().unwrap().clone()
+    }
+}
+
+impl LlmProvider for RecordingProvider {
+    async fn complete(&self, request: &LlmRequest<'_>) -> Result<LlmResponse, LlmError> {
+        self.systems.lock().unwrap().push(request.system.to_owned());
+        Ok(LlmResponse {
+            output: irrelevant(),
+            model: "recording".to_owned(),
+            usage: TokenUsage {
+                input_tokens: 1,
+                output_tokens: 1,
+            },
+        })
+    }
+}
+
+fn boamp_agent(
+    id: &str,
+    enabled: bool,
+    keywords: &[&str],
+    min: u8,
+    criteria: Option<&str>,
+) -> Value {
+    let mut agent = json!({
+        "id": id,
+        "name": id,
+        "enabled": enabled,
+        "source": {"kind": "boamp", "keywords": keywords, "accept_min_keywords": min},
+    });
+    if let Some(criteria) = criteria {
+        agent["llm"] = json!({"relevance_criteria": criteria});
+    }
+    agent
+}
+
+async fn boamp_profile(pool: &PgPool, agents: Vec<Value>) -> ProfileId {
+    let mut definition: Value = serde_json::from_str(IAM).unwrap();
+    definition["agents"] = Value::Array(agents);
+    activate(pool, "boamp-agents", definition).await
+}
+
+fn agent_ids(runs: &[lodestone_core::Run]) -> Vec<String> {
+    let mut ids: Vec<String> = runs
+        .iter()
+        .filter_map(|run| run.agent.as_ref().map(|agent| agent.as_str().to_owned()))
+        .collect();
+    ids.sort();
+    ids
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn agents_of_the_same_kind_route_the_same_candidate_differently(pool: PgPool) {
+    let profile = boamp_profile(
+        &pool,
+        vec![
+            boamp_agent("boamp-fr", true, &["SSO"], 1, None),
+            boamp_agent("boamp-en", true, &["single sign-on"], 1, None),
+        ],
+    )
+    .await;
+    let source = FakeSource {
+        candidates: vec![candidate("ville.fr", "Projet SSO pour la ville")],
+    };
+    let provider = ScriptedProvider::new(Vec::new());
+
+    let report = run_triage(&pool, &source, &provider, settings(100, 0)).await;
+
+    assert_eq!(report.candidates, 1);
+    assert_eq!(report.accepted_by_rules, 1);
+    assert_eq!(report.rejected_by_rules, 1);
+    assert_eq!(provider.calls(), 0);
+    let recorded = signals(&pool, profile, "ville.fr").await;
+    assert_eq!(recorded.len(), 1);
+    assert_eq!(recorded[0].agent, Some(AgentId::new("boamp-fr")));
+    let runs = runs(&pool).await;
+    assert_eq!(agent_ids(&runs), ["boamp-en", "boamp-fr"]);
+    for run in &runs {
+        let accepted = run.agent == Some(AgentId::new("boamp-fr"));
+        assert_eq!(run.signals, u64::from(accepted));
+        assert_eq!(run.volume, 1);
+    }
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_disabled_agent_is_neither_run_nor_recorded(pool: PgPool) {
+    let profile = boamp_profile(
+        &pool,
+        vec![
+            boamp_agent("boamp-fr", false, &["SSO"], 1, None),
+            boamp_agent("boamp-en", true, &["single sign-on"], 1, None),
+        ],
+    )
+    .await;
+    let source = FakeSource {
+        candidates: vec![candidate("ville.fr", "Projet SSO pour la ville")],
+    };
+    let provider = ScriptedProvider::new(Vec::new());
+
+    run_triage(&pool, &source, &provider, settings(100, 0)).await;
+
+    assert!(signals(&pool, profile, "ville.fr").await.is_empty());
+    assert_eq!(agent_ids(&runs(&pool).await), ["boamp-en"]);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_profile_without_an_enabled_agent_of_the_kind_gets_no_run(pool: PgPool) {
+    boamp_profile(
+        &pool,
+        vec![boamp_agent("boamp-fr", false, &["SSO"], 1, None)],
+    )
+    .await;
+    let source = FakeSource {
+        candidates: vec![candidate("ville.fr", "Projet SSO pour la ville")],
+    };
+    let provider = ScriptedProvider::new(Vec::new());
+
+    let report = run_triage(&pool, &source, &provider, settings(100, 0)).await;
+
+    assert_eq!(report.candidates, 0);
+    assert!(runs(&pool).await.is_empty());
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_agent_criteria_replace_the_profile_criteria_in_the_triage_prompt(pool: PgPool) {
+    boamp_profile(
+        &pool,
+        vec![
+            boamp_agent(
+                "boamp-fr",
+                true,
+                &["SSO", "MFA"],
+                2,
+                Some("AGENT-ONLY-CRITERIA"),
+            ),
+            boamp_agent("boamp-en", true, &["SSO", "MFA"], 2, None),
+        ],
+    )
+    .await;
+    let source = FakeSource {
+        candidates: vec![candidate("ville.fr", "Projet SSO pour la ville")],
+    };
+    let provider = RecordingProvider::new();
+
+    LodestoneUseCase::new(pool.clone())
+        .run_triage(
+            &source,
+            Some(&provider),
+            &PgLlmCache::new(pool.clone()),
+            settings(100, 0),
+            &FixedClock,
+        )
+        .await
+        .unwrap();
+
+    let systems = provider.systems();
+    assert_eq!(systems.len(), 2);
+    let profile_criteria = "The organization operates its own identity infrastructure";
+    let with_agent: Vec<_> = systems
+        .iter()
+        .filter(|system| system.contains("AGENT-ONLY-CRITERIA"))
+        .collect();
+    assert_eq!(with_agent.len(), 1);
+    assert!(!with_agent[0].contains(profile_criteria));
+    let without_agent: Vec<_> = systems
+        .iter()
+        .filter(|system| !system.contains("AGENT-ONLY-CRITERIA"))
+        .collect();
+    assert_eq!(without_agent.len(), 1);
+    assert!(without_agent[0].contains(profile_criteria));
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn llm_answers_are_cached_per_agent(pool: PgPool) {
+    boamp_profile(
+        &pool,
+        vec![
+            boamp_agent("boamp-fr", true, &["SSO", "MFA"], 2, None),
+            boamp_agent("boamp-en", true, &["SSO", "MFA"], 2, None),
+        ],
+    )
+    .await;
+    let source = FakeSource {
+        candidates: vec![candidate("ville.fr", "Projet SSO pour la ville")],
+    };
+    let provider = ScriptedProvider::new(Vec::new());
+
+    run_triage(&pool, &source, &provider, settings(100, 0)).await;
+    assert_eq!(provider.calls(), 2);
+    run_triage(&pool, &source, &provider, settings(100, 0)).await;
+    assert_eq!(provider.calls(), 2);
 }

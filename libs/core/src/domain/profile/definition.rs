@@ -89,6 +89,16 @@ pub struct Agent {
     pub llm: Option<AgentLlm>,
 }
 
+impl Agent {
+    pub fn relevance_criteria(&self) -> Option<&str> {
+        self.llm
+            .as_ref()
+            .and_then(|llm| llm.relevance_criteria.as_deref())
+            .map(str::trim)
+            .filter(|criteria| !criteria.is_empty())
+    }
+}
+
 fn default_enabled() -> bool {
     true
 }
@@ -119,6 +129,38 @@ pub enum AgentSource {
 }
 
 impl AgentSource {
+    pub fn keyword_rules(&self) -> Option<&KeywordSource> {
+        match self {
+            Self::Boamp(rules)
+            | Self::Decp(rules)
+            | Self::Ted(rules)
+            | Self::FranceTravail(rules)
+            | Self::Ats(rules) => Some(rules),
+            _ => None,
+        }
+    }
+
+    pub fn certificate_transparency(&self) -> Option<&CertificateTransparency> {
+        match self {
+            Self::CertificateTransparency(rules) => Some(rules),
+            _ => None,
+        }
+    }
+
+    pub fn dns_cname(&self) -> Option<&DnsCname> {
+        match self {
+            Self::DnsCname(rules) => Some(rules),
+            _ => None,
+        }
+    }
+
+    pub fn http_probe(&self) -> Option<&HttpProbe> {
+        match self {
+            Self::HttpProbe(rules) => Some(rules),
+            _ => None,
+        }
+    }
+
     pub fn source_name(&self) -> SourceName {
         match self {
             Self::CertificateTransparency(_) => SourceName::CertificateTransparency,
@@ -369,65 +411,17 @@ pub struct LlmSettings {
 }
 
 impl ProfileDefinition {
-    pub fn first_enabled(&self, source: SourceName) -> Option<&AgentSource> {
+    pub fn enabled_agents(&self, source: SourceName) -> impl Iterator<Item = &Agent> {
         self.agents
             .iter()
-            .filter(|agent| agent.enabled)
-            .map(|agent| &agent.source)
-            .find(|agent_source| agent_source.source_name() == source)
+            .filter(move |agent| agent.enabled && agent.source.source_name() == source)
     }
 
-    pub fn certificate_transparency(&self) -> Option<&CertificateTransparency> {
-        match self.first_enabled(SourceName::CertificateTransparency) {
-            Some(AgentSource::CertificateTransparency(rules)) => Some(rules),
-            _ => None,
-        }
-    }
-
-    pub fn dns_cname(&self) -> Option<&DnsCname> {
-        match self.first_enabled(SourceName::DnsCname) {
-            Some(AgentSource::DnsCname(rules)) => Some(rules),
-            _ => None,
-        }
-    }
-
-    pub fn http_probe(&self) -> Option<&HttpProbe> {
-        match self.first_enabled(SourceName::HttpProbe) {
-            Some(AgentSource::HttpProbe(rules)) => Some(rules),
-            _ => None,
-        }
-    }
-
-    pub fn keyword_rules(&self, source: SourceName) -> Option<&KeywordSource> {
-        match self.first_enabled(source) {
-            Some(
-                AgentSource::Boamp(rules)
-                | AgentSource::Decp(rules)
-                | AgentSource::Ted(rules)
-                | AgentSource::FranceTravail(rules)
-                | AgentSource::Ats(rules),
-            ) => Some(rules),
-            _ => None,
-        }
-    }
-
-    pub fn boamp(&self) -> Option<&KeywordSource> {
-        self.keyword_rules(SourceName::Boamp)
-    }
-
-    pub fn decp(&self) -> Option<&KeywordSource> {
-        self.keyword_rules(SourceName::Decp)
-    }
-
-    pub fn ted(&self) -> Option<&KeywordSource> {
-        self.keyword_rules(SourceName::Ted)
-    }
-
-    pub fn france_travail(&self) -> Option<&KeywordSource> {
-        self.keyword_rules(SourceName::FranceTravail)
-    }
-
-    pub fn ats(&self) -> Option<&KeywordSource> {
-        self.keyword_rules(SourceName::Ats)
+    pub fn enabled_keyword_rules(
+        &self,
+        source: SourceName,
+    ) -> impl Iterator<Item = &KeywordSource> {
+        self.enabled_agents(source)
+            .filter_map(|agent| agent.source.keyword_rules())
     }
 }

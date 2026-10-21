@@ -3,6 +3,7 @@ use lodestone_macros::repository;
 
 use crate::{
     LeadId, Signal,
+    definition::AgentId,
     domain::lead::ports::SignalRepository,
     infrastructure::{
         postgres::{SharedTx, error::map_sqlx_error},
@@ -27,8 +28,8 @@ impl<'tx> SignalRepository for PgSignalRepository<'tx> {
         let mut tx = self.tx.lock().await;
         let inserted = sqlx::query_scalar!(
             r#"
-            INSERT INTO signals (id, lead_id, kind, value, source, raw, provenance, strength, observed_at, fingerprint)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            INSERT INTO signals (id, lead_id, kind, value, source, raw, provenance, strength, observed_at, fingerprint, agent_id)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
             ON CONFLICT (lead_id, fingerprint) DO UPDATE SET
                 raw = CASE WHEN EXCLUDED.observed_at >= signals.observed_at
                            THEN EXCLUDED.raw ELSE signals.raw END,
@@ -46,6 +47,7 @@ impl<'tx> SignalRepository for PgSignalRepository<'tx> {
             signal.strength.get(),
             signal.observed_at,
             signal.fingerprint(),
+            signal.agent.as_ref().map(AgentId::as_str),
         )
         .fetch_one(&mut ***tx)
         .await
@@ -60,7 +62,7 @@ impl<'tx> SignalRepository for PgSignalRepository<'tx> {
         let rows = sqlx::query_as!(
             SignalRow,
             r#"
-            SELECT id, lead_id, kind, value, source, raw, provenance, strength, observed_at
+            SELECT id, lead_id, kind, value, source, raw, provenance, strength, observed_at, agent_id
             FROM signals
             WHERE lead_id = $1
             ORDER BY observed_at ASC, id ASC

@@ -75,7 +75,15 @@ impl LodestoneUseCase {
 
         let runs: Vec<Run> = profiles
             .iter()
-            .map(|active| Run::start(RunId(generate_uuid_v7()), active.profile.id, name, now))
+            .map(|active| {
+                Run::start(
+                    RunId(generate_uuid_v7()),
+                    active.profile.id,
+                    name,
+                    None,
+                    now,
+                )
+            })
             .collect();
         for run in &runs {
             self.start_contact_run(run).await?;
@@ -216,6 +224,7 @@ impl LodestoneUseCase {
                     provenance: candidate.provenance.clone(),
                     strength: candidate.confidence,
                     observed_at: now,
+                    agent: None,
                 })
                 .await?;
             stored += 1;
