@@ -2,7 +2,7 @@ import type { JsonObject } from '#/lib/schema-form'
 
 export const DEFAULT_WEIGHT = 5
 
-export type TemplateOption = readonly [string, string, number]
+export type TemplateOption = readonly [string, string, number, boolean?]
 
 export interface QualificationAxis {
 	id: string
@@ -24,7 +24,8 @@ export interface QualificationTemplate {
 const BLANK_TEMPLATE: QualificationTemplate = {
 	id: 'vide',
 	label: 'Vide',
-	description: "Un agent à compléter : un axe d'analyse, deux options.",
+	description:
+		"Un agent à compléter : un axe d'analyse, deux options et l'option « inconnu ».",
 	name: 'Nouvel agent',
 	evaluates: '',
 	prompt: '',
@@ -35,6 +36,7 @@ const BLANK_TEMPLATE: QualificationTemplate = {
 			options: [
 				['option-1', 'Option 1', 1],
 				['option-2', 'Option 2', 0],
+				['inconnu', 'Inconnu', 0.5, true],
 			],
 		},
 	],
@@ -57,6 +59,7 @@ export const QUALIFICATION_TEMPLATES: readonly QualificationTemplate[] = [
 					['forte', 'Forte', 1],
 					['moyenne', 'Moyenne', 0.5],
 					['faible', 'Faible', 0],
+					['inconnu', 'Inconnu', 0.5, true],
 				],
 			},
 		],
@@ -79,7 +82,7 @@ export const QUALIFICATION_TEMPLATES: readonly QualificationTemplate[] = [
 				options: [
 					['legacy_auto_heberge', 'Ancien, auto-hébergé', 1],
 					['saas', 'SaaS', 0.7],
-					['inconnu', 'Inconnue', 0.3],
+					['inconnu', 'Inconnue', 0.3, true],
 				],
 			},
 		],
@@ -103,7 +106,7 @@ export const QUALIFICATION_TEMPLATES: readonly QualificationTemplate[] = [
 					['production', 'Production', 1],
 					['mixte', 'Mixte', 0.6],
 					['hors_production', 'Hors production', 0],
-					['inconnu', 'Inconnu', 0.3],
+					['inconnu', 'Inconnu', 0.3, true],
 				],
 			},
 			{
@@ -112,7 +115,7 @@ export const QUALIFICATION_TEMPLATES: readonly QualificationTemplate[] = [
 				options: [
 					['usage_reel', 'Usage réel', 1],
 					['experimentation', 'Expérimentation', 0.4],
-					['inconnu', 'Inconnu', 0.3],
+					['inconnu', 'Inconnu', 0.3, true],
 				],
 			},
 		],
@@ -137,7 +140,7 @@ export const QUALIFICATION_TEMPLATES: readonly QualificationTemplate[] = [
 					['eti', 'ETI', 0.8],
 					['pme', 'PME', 0.5],
 					['startup', 'Startup', 0.4],
-					['inconnu', 'Inconnu', 0.3],
+					['inconnu', 'Inconnu', 0.3, true],
 				],
 			},
 			{
@@ -147,7 +150,7 @@ export const QUALIFICATION_TEMPLATES: readonly QualificationTemplate[] = [
 					['grande', 'Grande', 1],
 					['moyenne', 'Moyenne', 0.6],
 					['petite', 'Petite', 0.3],
-					['inconnue', 'Inconnue', 0.3],
+					['inconnue', 'Inconnue', 0.3, true],
 				],
 			},
 		],
@@ -170,7 +173,7 @@ export const QUALIFICATION_TEMPLATES: readonly QualificationTemplate[] = [
 					['dans_la_zone', 'Dans la zone', 1],
 					['proche', 'Proche de la zone', 0.5],
 					['hors_zone', 'Hors zone', 0],
-					['inconnu', 'Inconnu', 0.3],
+					['inconnu', 'Inconnu', 0.3, true],
 				],
 			},
 			{
@@ -179,7 +182,7 @@ export const QUALIFICATION_TEMPLATES: readonly QualificationTemplate[] = [
 				options: [
 					['francais', 'Français', 1],
 					['autre', 'Autre langue', 0.3],
-					['inconnu', 'Inconnue', 0.3],
+					['inconnu', 'Inconnue', 0.3, true],
 				],
 			},
 		],
@@ -202,7 +205,7 @@ export const QUALIFICATION_TEMPLATES: readonly QualificationTemplate[] = [
 					['en_cours', 'En cours', 1],
 					['probable', 'Probable', 0.7],
 					['improbable', 'Improbable', 0],
-					['inconnu', 'Inconnue', 0.3],
+					['inconnu', 'Inconnue', 0.3, true],
 				],
 			},
 			{
@@ -212,6 +215,7 @@ export const QUALIFICATION_TEMPLATES: readonly QualificationTemplate[] = [
 					['fort', 'Fort', 1],
 					['moyen', 'Moyen', 0.5],
 					['aucun', 'Aucun', 0],
+					['inconnu', 'Inconnu', 0.5, true],
 				],
 			},
 		],
@@ -235,7 +239,7 @@ export const QUALIFICATION_TEMPLATES: readonly QualificationTemplate[] = [
 					['oui', 'Oui', 1],
 					['partiellement', 'Partiellement', 0.5],
 					['non', 'Non', 0],
-					['inconnu', 'Inconnue', 0.3],
+					['inconnu', 'Inconnue', 0.3, true],
 				],
 			},
 			{
@@ -245,7 +249,7 @@ export const QUALIFICATION_TEMPLATES: readonly QualificationTemplate[] = [
 				options: [
 					['dans_la_cible', 'Dans la cible', 1],
 					['hors_cible', 'Hors cible', 0],
-					['inconnu', 'Inconnue', 0.3],
+					['inconnu', 'Inconnue', 0.3, true],
 				],
 			},
 			{
@@ -255,7 +259,7 @@ export const QUALIFICATION_TEMPLATES: readonly QualificationTemplate[] = [
 					['forts', 'Forts', 1],
 					['moyens', 'Moyens', 0.5],
 					['faibles', 'Faibles', 0],
-					['inconnu', 'Inconnus', 0.3],
+					['inconnu', 'Inconnus', 0.3, true],
 				],
 			},
 		],
@@ -289,10 +293,11 @@ export function templateAgent(
 			id: axis.id,
 			wording: axis.wording,
 			weight: axis.weight ?? DEFAULT_WEIGHT,
-			options: axis.options.map(([value, label, score]) => ({
+			options: axis.options.map(([value, label, score, unknown]) => ({
 				value,
 				label,
 				score,
+				is_unknown: unknown === true,
 			})),
 		})),
 	}

@@ -195,6 +195,27 @@ pub fn render_agent(agent: &QualificationAgent, result: Option<&QualificationRes
             "\nquestion: {}\nanswer: {label} ({choice}), confidence {confidence}",
             question.wording
         ));
+        let grounded = answer
+            .get("grounded")
+            .and_then(Value::as_bool)
+            .unwrap_or(true);
+        if grounded {
+            if let Some(quote) = answer
+                .get("evidence")
+                .and_then(Value::as_str)
+                .filter(|quote| !quote.is_empty())
+            {
+                text.push_str(&format!("\nquote: \"{quote}\""));
+            }
+        } else {
+            let original = answer
+                .get("original_choice")
+                .and_then(Value::as_str)
+                .unwrap_or("-");
+            text.push_str(&format!(
+                "\nungrounded: the agent first chose `{original}` without a verifiable quote, so the answer was set to the unknown option"
+            ));
+        }
     }
     text
 }
@@ -364,6 +385,46 @@ mod tests {
         assert!(text.contains("agent score: 95 %"));
         assert!(text.contains(&agent.questions[0].wording));
         assert!(text.contains("answer: Forte (forte), confidence 90 %"));
+    }
+
+    fn with_answer(agent: &QualificationAgent, answer: Value) -> QualificationResult {
+        let mut result = result(agent, ResultStatus::Valid);
+        result.answers = json!({agent.questions[0].id.clone(): answer});
+        result
+    }
+
+    #[test]
+    fn a_grounded_answer_is_rendered_with_its_quote() {
+        let definition = definition();
+        let agent = &definition.qualification_agents[0];
+        let answer = json!({
+            "type": "choice", "choice": "forte", "evidence": "Keycloak 18 en production",
+            "grounded": true, "confidence": 0.9,
+            "probabilities": {"forte": 0.9, "moyenne": 0.1, "faible": 0.0, "inconnu": 0.0}
+        });
+        let text = render_agent(agent, Some(&with_answer(agent, answer)));
+        assert!(text.contains(
+            "answer: Forte (forte), confidence 90 %\nquote: \"Keycloak 18 en production\""
+        ));
+        assert!(!text.contains("ungrounded"));
+    }
+
+    #[test]
+    fn an_ungrounded_answer_is_marked_and_its_unverified_quote_is_left_out() {
+        let definition = definition();
+        let agent = &definition.qualification_agents[0];
+        let answer = json!({
+            "type": "choice", "choice": "inconnu", "evidence": "invented", "grounded": false,
+            "original_choice": "forte", "confidence": 0.9,
+            "probabilities": {"forte": 0.0, "moyenne": 0.0, "faible": 0.0, "inconnu": 1.0}
+        });
+        let text = render_agent(agent, Some(&with_answer(agent, answer)));
+        assert!(text.contains("answer: Inconnu (inconnu), confidence 90 %"));
+        assert!(
+            text.contains("ungrounded: the agent first chose `forte` without a verifiable quote")
+        );
+        assert!(!text.contains("invented"));
+        assert!(!text.contains("quote:"));
     }
 
     #[test]

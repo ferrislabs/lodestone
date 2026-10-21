@@ -13,6 +13,7 @@ import { DefinitionTabContent } from '#/pages/profiles/feature/definition-form'
 import { newAgent } from '#/pages/profiles/lib/agents'
 import {
 	DEFAULT_AGGREGATOR_PROMPT,
+	isUnknownOption,
 	newQualificationAgent,
 	optionsOf,
 	type ProviderOption,
@@ -228,7 +229,7 @@ describe('qualification tab', () => {
 		fireEvent.click(screen.getByText('Vide'))
 		const agent = qualificationList(lastValue(seen))[1]
 		expect(questionsOf(agent)).toHaveLength(1)
-		expect(optionsOf(questionsOf(agent)[0])).toHaveLength(2)
+		expect(optionsOf(questionsOf(agent)[0])).toHaveLength(3)
 	})
 
 	it('edits name, enabled, weight and prompt', () => {
@@ -381,11 +382,54 @@ describe('qualification tab', () => {
 		expect(axis.getAllByText('Valeur')).toHaveLength(1)
 		expect(axis.getAllByText('Score')).toHaveLength(1)
 		const rows = within(table).getAllByRole('row')
-		expect(rows).toHaveLength(4)
+		expect(rows).toHaveLength(5)
 		expect(within(rows[1] as HTMLElement).getAllByRole('textbox')).toHaveLength(
 			2,
 		)
 		expect(within(rows[1] as HTMLElement).getByRole('spinbutton')).toBeTruthy()
+	})
+
+	it('pins the unknown option last, labelled and impossible to delete', () => {
+		const seen = vi.fn()
+		render(<Harness onValue={seen} />)
+		fireEvent.click(screen.getByRole('button', { name: 'Modifier Pertinence' }))
+		const axis = within(sheet().getByLabelText('Axe 1'))
+		const rows = within(axis.getByRole('table')).getAllByRole('row')
+		const last = rows[rows.length - 1] as HTMLElement
+		expect(last.getAttribute('data-unknown')).toBe('true')
+		expect(within(last).getByText('Option « inconnu »')).toBeTruthy()
+		expect(within(last).queryByLabelText(/^Valeur de l'option/)).toBeNull()
+		const remove = within(last).getByRole('button', {
+			name: /^Supprimer l'option 4/,
+		}) as HTMLButtonElement
+		expect(remove.disabled).toBe(true)
+		fireEvent.click(remove)
+		expect(seen).not.toHaveBeenCalled()
+		expect(within(axis.getByRole('table')).getAllByRole('row')).toHaveLength(5)
+		expect(
+			rows.filter((row) => row.getAttribute('data-unknown') === 'true'),
+		).toHaveLength(1)
+	})
+
+	it('keeps the unknown option last when an option is added and edits its score', () => {
+		const seen = vi.fn()
+		render(<Harness onValue={seen} />)
+		fireEvent.click(screen.getByRole('button', { name: 'Modifier Pertinence' }))
+		fireEvent.click(
+			sheet().getByRole('button', { name: "Ajouter une option à l'axe 1" }),
+		)
+		const axis = within(sheet().getByLabelText('Axe 1'))
+		const rows = within(axis.getByRole('table')).getAllByRole('row')
+		const last = rows[rows.length - 1] as HTMLElement
+		expect(last.getAttribute('data-unknown')).toBe('true')
+		expect(rows).toHaveLength(6)
+		const score = within(last).getByRole('spinbutton') as HTMLInputElement
+		expect(score.value).toBe('0.5')
+		fireEvent.change(score, { target: { value: '0.2' } })
+		const unknown = optionsOf(
+			questionsOf(qualificationList(lastValue(seen))[0])[0],
+		).find((item) => isUnknownOption(item))
+		expect(unknown).toMatchObject({ value: 'inconnu', score: 0.2 })
 	})
 
 	it('adds a second axis with its own table', () => {
@@ -443,7 +487,7 @@ describe('qualification tab', () => {
 		question = within(sheet().getByLabelText('Axe 2'))
 		expect(
 			optionsOf(questionsOf(qualificationList(lastValue(seen))[0])[1]),
-		).toHaveLength(3)
+		).toHaveLength(4)
 		const scores = question.getAllByLabelText(/^Score de l'option/)
 		fireEvent.change(scores[0] as HTMLElement, { target: { value: '0.7' } })
 		fireEvent.change(
@@ -459,7 +503,12 @@ describe('qualification tab', () => {
 		const options = optionsOf(
 			questionsOf(qualificationList(lastValue(seen))[0])[1],
 		)
-		expect(options[0]).toEqual({ value: 'eleve', label: 'Élevé', score: 0.7 })
+		expect(options[0]).toEqual({
+			value: 'eleve',
+			label: 'Élevé',
+			score: 0.7,
+			is_unknown: false,
+		})
 		fireEvent.click(
 			question.getByRole('button', {
 				name: "Supprimer l'option 3 de l'axe 2",
@@ -467,7 +516,7 @@ describe('qualification tab', () => {
 		)
 		expect(
 			optionsOf(questionsOf(qualificationList(lastValue(seen))[0])[1]),
-		).toHaveLength(2)
+		).toHaveLength(3)
 		fireEvent.click(sheet().getByRole('button', { name: "Supprimer l'axe 2" }))
 		expect(questionsOf(qualificationList(lastValue(seen))[0])).toHaveLength(1)
 	})
@@ -531,7 +580,14 @@ describe('qualification tab', () => {
 		expect(parsed.properties.answers.required).toEqual(['pertinence'])
 		expect(
 			parsed.properties.answers.properties.pertinence.properties.choice.enum,
-		).toEqual(['forte', 'moyenne', 'faible'])
+		).toEqual(['forte', 'moyenne', 'faible', 'inconnu'])
+		const evidence =
+			parsed.properties.answers.properties.pertinence.properties.evidence
+		expect(evidence.type).toBe('string')
+		expect(evidence.maxLength).toBe(300)
+		expect(parsed.properties.answers.properties.pertinence.required).toContain(
+			'evidence',
+		)
 		fireEvent.click(
 			sheet().getByRole('button', {
 				name: "Ajouter une option à l'axe 1",
@@ -541,7 +597,7 @@ describe('qualification tab', () => {
 			JSON.parse(screen.getByTestId('contract-preview').textContent ?? '')
 				.properties.answers.properties.pertinence.properties.probabilities
 				.required,
-		).toEqual(['forte', 'moyenne', 'faible', 'option-4'])
+		).toEqual(['forte', 'moyenne', 'faible', 'option-5', 'inconnu'])
 		fireEvent.click(
 			sheet().getByRole('button', { name: 'Aperçu du JSON contractuel' }),
 		)

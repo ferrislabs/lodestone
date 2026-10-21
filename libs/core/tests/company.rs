@@ -77,7 +77,7 @@ impl ProviderBuilder for FakeBuilder {
     }
 }
 
-fn answers_from(schema: &Value) -> Value {
+fn answers_from(schema: &Value, quote: &str) -> Value {
     let mut answers = serde_json::Map::new();
     let questions = schema["properties"]["answers"]["properties"]
         .as_object()
@@ -96,7 +96,7 @@ fn answers_from(schema: &Value) -> Value {
             .collect();
         answers.insert(
             id.clone(),
-            json!({"type": "choice", "choice": values[0], "confidence": 0.9, "probabilities": probabilities}),
+            json!({"type": "choice", "choice": values[0], "evidence": quote, "confidence": 0.9, "probabilities": probabilities}),
         );
     }
     json!({"summary": "Observations de l'agent sur le lead.", "answers": answers})
@@ -133,7 +133,14 @@ impl LlmProvider for Scripted {
                 .clone()
                 .unwrap_or_else(|| summary_quoting(0, "Keycloak-http_probe"))
         } else {
-            answers_from(request.schema)
+            answers_from(
+                request.schema,
+                request
+                    .documents
+                    .first()
+                    .and_then(|document| document.content.lines().next())
+                    .unwrap_or_default(),
+            )
         };
         Ok(LlmResponse {
             output,
@@ -261,7 +268,8 @@ fn question(id: &str) -> Value {
         "weight": 5,
         "options": [
             {"value": "forte", "label": "Forte", "score": 1.0},
-            {"value": "faible", "label": "Faible", "score": 0.0}
+            {"value": "faible", "label": "Faible", "score": 0.0},
+            {"value": "inconnu", "label": "Inconnu", "score": 0.5, "is_unknown": true}
         ]
     })
 }

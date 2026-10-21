@@ -89,21 +89,37 @@ impl ProviderBuilder for FakeBuilder {
     }
 }
 
-fn answers_from(schema: &Value, last: bool) -> Value {
+fn quote_of(request: &LlmRequest<'_>) -> String {
+    request
+        .documents
+        .first()
+        .and_then(|document| document.content.lines().next())
+        .unwrap_or_default()
+        .to_owned()
+}
+
+fn answers_from(schema: &Value, last: bool, quote: &str) -> Value {
     let mut answers = serde_json::Map::new();
     let questions = schema["properties"]["answers"]["properties"]
         .as_object()
         .unwrap();
     for (id, question) in questions {
-        let values = question["properties"]["choice"]["enum"].as_array().unwrap();
-        let index = if last { values.len() - 1 } else { 0 };
-        let probabilities: serde_json::Map<String, Value> = values
+        let all = question["properties"]["choice"]["enum"].as_array().unwrap();
+        let known: Vec<&Value> = all
             .iter()
-            .enumerate()
-            .map(|(position, value)| {
+            .filter(|value| value.as_str() != Some("inconnu"))
+            .collect();
+        let chosen = if last {
+            known[known.len() - 1]
+        } else {
+            known[0]
+        };
+        let probabilities: serde_json::Map<String, Value> = all
+            .iter()
+            .map(|value| {
                 (
                     value.as_str().unwrap().to_owned(),
-                    json!(if position == index { 1.0 } else { 0.0 }),
+                    json!(if value == chosen { 1.0 } else { 0.0 }),
                 )
             })
             .collect();
@@ -111,7 +127,8 @@ fn answers_from(schema: &Value, last: bool) -> Value {
             id.clone(),
             json!({
                 "type": "choice",
-                "choice": values[index],
+                "choice": chosen,
+                "evidence": quote,
                 "confidence": 0.9,
                 "probabilities": probabilities
             }),
@@ -156,9 +173,9 @@ impl LlmProvider for Scripted {
             (Reply::Fail(error), _) => return Err(error),
             (Reply::Raw(value), _) => value,
             (Reply::Quote(quote), _) => summary_with(quote),
-            (Reply::Worst, false) => answers_from(request.schema, true),
+            (Reply::Worst, false) => answers_from(request.schema, true, &quote_of(request)),
             (_, true) => summary_with(GOOD_QUOTE),
-            (_, false) => answers_from(request.schema, false),
+            (_, false) => answers_from(request.schema, false, &quote_of(request)),
         };
         Ok(LlmResponse {
             output,
@@ -196,7 +213,8 @@ fn question(id: &str) -> Value {
         "options": [
             {"value": "forte", "label": "Forte", "score": 1.0},
             {"value": "moyenne", "label": "Moyenne", "score": 0.5},
-            {"value": "faible", "label": "Faible", "score": 0.0}
+            {"value": "faible", "label": "Faible", "score": 0.0},
+            {"value": "inconnu", "label": "Inconnu", "score": 0.5, "is_unknown": true}
         ]
     })
 }

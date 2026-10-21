@@ -10,6 +10,7 @@ import {
 	formatProbability,
 	probabilityWidth,
 } from '#/pages/leads/lib/verdict'
+import { ProvenanceLink } from '#/pages/leads/ui/provenance-link'
 
 interface QualificationResultsProps {
 	results: readonly QualificationResult[]
@@ -19,6 +20,45 @@ function providerText(result: QualificationResult): string {
 	const name = result.provider_name
 	if (name && result.model) return `${name} (${result.model})`
 	return name ?? (result.model || 'Fournisseur inconnu')
+}
+
+function EvidenceSource({ source }: { source: string }) {
+	if (source === 'lead') {
+		return <span>Faits calculés par le système</span>
+	}
+	return <ProvenanceLink provenance={source} />
+}
+
+function Grounding({ answer }: { answer: QualificationAnswer }) {
+	if (!answer.grounded) {
+		return (
+			<p
+				className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs"
+				data-part="ungrounded"
+			>
+				<Badge variant="outline">Non étayé — ramené à « Inconnu »</Badge>
+				{answer.original_choice_label ? (
+					<span className="text-muted-foreground">
+						Choix initial du modèle : {answer.original_choice_label}
+					</span>
+				) : null}
+			</p>
+		)
+	}
+	if (!answer.evidence) return null
+	return (
+		<div
+			className="flex flex-col gap-0.5 border-l-2 pl-2 text-xs"
+			data-part="evidence"
+		>
+			<p className="italic">« {answer.evidence} »</p>
+			{answer.evidence_source ? (
+				<p className="text-muted-foreground" data-part="evidence-source">
+					Source : <EvidenceSource source={answer.evidence_source} />
+				</p>
+			) : null}
+		</div>
+	)
 }
 
 function Measure({ answer }: { answer: QualificationAnswer }) {
@@ -41,6 +81,7 @@ function Measure({ answer }: { answer: QualificationAnswer }) {
 					· confiance {formatProbability(answer.confidence)}
 				</span>
 			</p>
+			<Grounding answer={answer} />
 			<ul className="flex flex-col gap-1">
 				{answer.probabilities.map((item) => (
 					<li key={item.value} className="flex items-center gap-2 text-xs">

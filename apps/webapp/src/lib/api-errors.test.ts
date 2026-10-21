@@ -120,9 +120,14 @@ describe('translateApiMessage', () => {
 		expect(
 			translateApiMessage('at least one qualification agent is required'),
 		).toBe('Au moins un agent de qualification est requis')
-		expect(translateApiMessage('must have from 2 to 10 options')).toBe(
-			'Doit avoir de 2 à 10 options',
+		expect(translateApiMessage('must have from 2 to 11 options')).toBe(
+			'Doit avoir de 2 à 11 options',
 		)
+		expect(
+			translateApiMessage(
+				'must have exactly one option with `is_unknown` set to true',
+			),
+		).toBe('Doit avoir exactement une option « inconnu »')
 		expect(translateApiMessage('must be a number from 0 to 1')).toBe(
 			'Doit être un nombre de 0 à 1',
 		)

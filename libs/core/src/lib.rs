@@ -95,7 +95,9 @@ pub use domain::{
         SummaryState, ValidAnswers, ValidOutput, Verdict, VerdictCap, Violation, Violations,
         agent_score, calibrate, judge,
         ports::QualificationRepository,
-        prompt::{AgentPrompt, build as agent_prompt, lead_document, with_violations},
+        prompt::{
+            AgentPrompt, build as agent_prompt, lead_document, with_ungrounded, with_violations,
+        },
         question_score, summary_retry_delay, validate_answers, verdict_for,
     },
     quality::{

@@ -24,6 +24,8 @@
 | qualification | Strong LLM tier that writes an assessment for leads above the profile threshold. | enrichment |
 | assessment | LLM output for a lead: summary, approach angle, quoted evidence, draft, model, prompt version, profile revision. | analysis, review |
 | evidence | A verbatim excerpt of stored source content that an assessment cites. | proof |
+| unknown option | The option of a question marked `is_unknown`, exactly one per question. A qualification agent picks it when nothing in the documents supports an answer; an answer without a verified quote is downgraded to it. | other, n/a |
+| grounded answer | A qualification answer whose `evidence` quote is found verbatim in the documents given to the agent. | sourced answer |
 | draft | A message proposed by qualification, waiting for human approval. Never sent by Lodestone. | email, message |
 | draft status | One of pending, approved, rejected. Only pending drafts can be edited or decided. Approving marks the draft ready and validates its lead; it never sends anything. | sent, published |
 | LLM provider | A named endpoint with kind, base URL, model and encrypted API key, stored in Postgres. | model, backend |

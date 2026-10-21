@@ -244,7 +244,8 @@ export const FIELD_COPY: Readonly<Record<string, FieldCopy>> = {
 	},
 	'qualification_agents[].questions[].options': {
 		label: 'Options',
-		description: 'Réponses possibles, de 2 à 10, de valeurs uniques.',
+		description:
+			'Réponses possibles, de 2 à 11, de valeurs uniques, dont exactement une option « inconnu ».',
 	},
 	'qualification_agents[].questions[].options[]': {
 		label: 'Option',
@@ -262,6 +263,11 @@ export const FIELD_COPY: Readonly<Record<string, FieldCopy>> = {
 	'qualification_agents[].questions[].options[].score': {
 		label: 'Score',
 		description: 'Score de 0 à 1 de cette réponse.',
+	},
+	'qualification_agents[].questions[].options[].is_unknown': {
+		label: 'Option « inconnu »',
+		description:
+			"Marque l'option choisie quand rien dans les documents n'étaye une réponse. Chaque axe en a exactement une.",
 	},
 	aggregator: {
 		label: 'Agrégateur',

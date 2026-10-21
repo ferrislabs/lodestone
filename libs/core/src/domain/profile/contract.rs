@@ -1,6 +1,6 @@
 use serde_json::{Map, Value, json};
 
-use super::definition::{QualificationAgent, Question};
+use super::definition::{EVIDENCE_MAX_CHARS, QualificationAgent, Question};
 
 const DIALECT: &str = "https://json-schema.org/draft/2020-12/schema";
 
@@ -57,6 +57,11 @@ fn question_schema(question: &Question) -> Value {
         "properties": {
             "type": {"type": "string", "const": "choice"},
             "choice": {"type": "string", "enum": values},
+            "evidence": {
+                "type": "string",
+                "maxLength": EVIDENCE_MAX_CHARS,
+                "description": "Sentence copied verbatim from the documents that justifies the choice. May be empty only when the choice is the unknown option."
+            },
             "confidence": probability(),
             "probabilities": {
                 "type": "object",
@@ -65,7 +70,7 @@ fn question_schema(question: &Question) -> Value {
                 "additionalProperties": false
             }
         },
-        "required": ["type", "choice", "confidence", "probabilities"],
+        "required": ["type", "choice", "evidence", "confidence", "probabilities"],
         "additionalProperties": false
     })
 }
@@ -102,11 +107,11 @@ mod tests {
         assert_eq!(question["properties"]["type"]["const"], "choice");
         assert_eq!(
             question["properties"]["choice"]["enum"],
-            json!(["forte", "moyenne", "faible"])
+            json!(["forte", "moyenne", "faible", "inconnu"])
         );
         assert_eq!(
             question["required"],
-            json!(["type", "choice", "confidence", "probabilities"])
+            json!(["type", "choice", "evidence", "confidence", "probabilities"])
         );
         assert_eq!(question["additionalProperties"], json!(false));
         assert_eq!(
@@ -134,13 +139,13 @@ mod tests {
         let probabilities = &question["properties"]["probabilities"];
         assert_eq!(
             probabilities["required"],
-            json!(["forte", "moyenne", "faible"])
+            json!(["forte", "moyenne", "faible", "inconnu"])
         );
         assert_eq!(probabilities["additionalProperties"], json!(false));
-        for key in ["forte", "moyenne", "faible"] {
+        for key in ["forte", "moyenne", "faible", "inconnu"] {
             assert_eq!(probabilities["properties"][key], bounded);
         }
-        assert_eq!(probabilities["properties"].as_object().unwrap().len(), 3);
+        assert_eq!(probabilities["properties"].as_object().unwrap().len(), 4);
     }
 
     #[test]
@@ -162,7 +167,28 @@ mod tests {
                 .as_array()
                 .unwrap()
                 .len(),
-            3
+            4
+        );
+    }
+
+    #[test]
+    fn every_answer_carries_a_required_bounded_evidence_string() {
+        let schema = contract_schema(&agent());
+        let question = &schema["properties"]["answers"]["properties"]["q-one"];
+        let evidence = &question["properties"]["evidence"];
+        assert_eq!(evidence["type"], "string");
+        assert_eq!(evidence["maxLength"], 300);
+        assert!(
+            evidence["description"]
+                .as_str()
+                .unwrap()
+                .contains("verbatim")
+        );
+        assert!(
+            question["required"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("evidence"))
         );
     }
 }

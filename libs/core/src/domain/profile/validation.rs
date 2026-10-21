@@ -14,7 +14,7 @@ use super::{
     },
     legacy::{
         ProfileDefinitionV1, ProfileDefinitionV2, ProfileDefinitionV3, ProfileDefinitionV4,
-        ProfileDefinitionV5,
+        ProfileDefinitionV5, ProfileDefinitionV6,
     },
 };
 
@@ -26,7 +26,7 @@ pub enum ProfileProblem {
     #[error("malformed: {0}")]
     Malformed(String),
     #[error(
-        "unsupported schema version {found}, expected 1, 2, 3, 4, 5 or {PROFILE_SCHEMA_VERSION}"
+        "unsupported schema version {found}, expected 1, 2, 3, 4, 5, 6 or {PROFILE_SCHEMA_VERSION}"
     )]
     UnsupportedSchemaVersion { found: u32 },
     #[error("must not be empty")]
@@ -43,6 +43,8 @@ pub enum ProfileProblem {
     InvalidIdentifier,
     #[error("must have from {MIN_OPTIONS} to {MAX_OPTIONS} options")]
     InvalidOptionCount,
+    #[error("must have exactly one option with `is_unknown` set to true")]
+    UnknownOptionCount,
     #[error("must be a number from 0 to 1")]
     InvalidScore,
     #[error("must be at most {MAX_PROMPT_CHARS} characters")]
@@ -118,6 +120,7 @@ impl ValidatedProfile {
             Some(3) => decode::<ProfileDefinitionV3>(value)?.upgrade(),
             Some(4) => decode::<ProfileDefinitionV4>(value)?.upgrade(),
             Some(5) => decode::<ProfileDefinitionV5>(value)?.upgrade(),
+            Some(6) => decode::<ProfileDefinitionV6>(value)?.upgrade(),
             Some(PROFILE_SCHEMA_VERSION) | None => decode::<ProfileDefinition>(value)?,
             Some(found) => {
                 return Err(Path::root()
@@ -391,7 +394,17 @@ fn validate_question(question: &Question, path: &Path) -> Check {
             .map(|option| option.value.as_str())
             .enumerate(),
         |index| options.index(index).field("value"),
-    )
+    )?;
+    if question
+        .options
+        .iter()
+        .filter(|option| option.is_unknown)
+        .count()
+        != 1
+    {
+        return Err(options.fail(ProfileProblem::UnknownOptionCount));
+    }
+    Ok(())
 }
 
 fn validate_aggregator(aggregator: &Aggregator, path: &Path) -> Check {
@@ -811,10 +824,10 @@ mod tests {
             v["scoring"] = iam_scoring_v2();
             v["llm"]["qualification_threshold"] = json!(50);
         });
-        assert_eq!(profile.definition().schema_version, 6);
+        assert_eq!(profile.definition().schema_version, 7);
         assert_eq!(weights(&profile), [10, 5, 3, 8, 7, 2, 2]);
         assert_eq!(profile.definition().llm.qualification_threshold, 37);
-        assert_eq!(profile.to_json()["schema_version"], 6);
+        assert_eq!(profile.to_json()["schema_version"], 7);
     }
 
     #[test]
@@ -913,11 +926,11 @@ mod tests {
 
     #[test]
     fn unsupported_schema_version_is_rejected() {
-        let error = error_for(|v| v["schema_version"] = json!(7));
+        let error = error_for(|v| v["schema_version"] = json!(8));
         assert_eq!(error.path, "schema_version");
         assert_eq!(
             error.problem,
-            ProfileProblem::UnsupportedSchemaVersion { found: 7 }
+            ProfileProblem::UnsupportedSchemaVersion { found: 8 }
         );
         let error = error_for(|v| v["schema_version"] = json!(0));
         assert_eq!(
@@ -1243,7 +1256,7 @@ mod tests {
         value["sources"] = json!({"http_probe": source, "ats": {"keywords": ["sso"]}});
         let profile = ValidatedProfile::parse(value).unwrap();
         let definition = profile.definition();
-        assert_eq!(definition.schema_version, 6);
+        assert_eq!(definition.schema_version, 7);
         let summary: Vec<_> = definition
             .agents
             .iter()
@@ -1253,7 +1266,7 @@ mod tests {
             summary,
             [("http-probe", "HTTP probe", true), ("ats", "ATS", true)]
         );
-        assert_eq!(profile.to_json()["schema_version"], 6);
+        assert_eq!(profile.to_json()["schema_version"], 7);
         assert_eq!(profile.to_json()["agents"][0]["source"], agent);
     }
 
@@ -1319,13 +1332,28 @@ mod tests {
         ValidatedProfile::parse(value).unwrap()
     }
 
+    fn v6() -> Value {
+        let mut value = v4();
+        value["schema_version"] = json!(6);
+        for agent in value["qualification_agents"].as_array_mut().unwrap() {
+            for question in agent["questions"].as_array_mut().unwrap() {
+                let options = question["options"].as_array_mut().unwrap();
+                options.pop();
+                for option in options {
+                    option.as_object_mut().unwrap().remove("is_unknown");
+                }
+            }
+        }
+        value
+    }
+
     const OPTION0: &str = "qualification_agents[0].questions[0].options[0]";
 
     #[test]
     fn version_three_is_upgraded_with_a_default_qualification_agent() {
         let profile = ValidatedProfile::parse(minimal()).unwrap();
         let definition = profile.definition();
-        assert_eq!(definition.schema_version, 6);
+        assert_eq!(definition.schema_version, 7);
         assert_eq!(definition.qualification_agents.len(), 1);
         let agent = &definition.qualification_agents[0];
         assert_eq!(agent.id.as_str(), "pertinence");
@@ -1348,7 +1376,21 @@ mod tests {
             .iter()
             .map(|option| (option.value.as_str(), option.score))
             .collect();
-        assert_eq!(options, [("forte", 1.0), ("moyenne", 0.5), ("faible", 0.0)]);
+        assert_eq!(
+            options,
+            [
+                ("forte", 1.0),
+                ("moyenne", 0.5),
+                ("faible", 0.0),
+                ("inconnu", 0.5)
+            ]
+        );
+        assert!(question.options[3].is_unknown);
+        assert!(
+            question.options[..3]
+                .iter()
+                .all(|option| !option.is_unknown)
+        );
         assert_eq!(definition.aggregator.provider_id, None);
         assert!(!definition.aggregator.system_prompt.is_empty());
         assert_eq!(definition.verdict.reliable_from, 70);
@@ -1401,7 +1443,7 @@ mod tests {
     }
 
     fn v5() -> Value {
-        let mut value = v4();
+        let mut value = v6();
         value["schema_version"] = json!(5);
         let object = value.as_object_mut().unwrap();
         object.remove("evidence");
@@ -1413,7 +1455,7 @@ mod tests {
     fn version_five_is_upgraded_with_default_evidence_settings() {
         let profile = ValidatedProfile::parse(v5()).unwrap();
         let definition = profile.definition();
-        assert_eq!(definition.schema_version, 6);
+        assert_eq!(definition.schema_version, 7);
         assert_eq!(definition.verdict.reliable_from, 80);
         assert_eq!(definition.verdict.discard_below, 20);
         assert_eq!(definition.verdict.calibration_floor, 0.05);
@@ -1421,7 +1463,7 @@ mod tests {
         assert_eq!(definition.evidence, EvidenceSettings::default());
         assert_eq!(definition.evidence.influence, 0.6);
         assert_eq!(definition.evidence.reference_score, 50.0);
-        assert_eq!(profile.to_json()["schema_version"], 6);
+        assert_eq!(profile.to_json()["schema_version"], 7);
     }
 
     #[test]
@@ -1545,7 +1587,7 @@ mod tests {
 
     #[test]
     fn version_four_documents_get_a_description_derived_from_the_name() {
-        let mut value = v4();
+        let mut value = v6();
         value["schema_version"] = json!(4);
         value.as_object_mut().unwrap().remove("evidence");
         let agent = value["qualification_agents"][0].as_object_mut().unwrap();
@@ -1553,15 +1595,15 @@ mod tests {
         agent.insert("name".to_owned(), json!("Maturité technique"));
         let profile = ValidatedProfile::parse(value).unwrap();
         let agent = &profile.definition().qualification_agents[0];
-        assert_eq!(profile.definition().schema_version, 6);
+        assert_eq!(profile.definition().schema_version, 7);
         assert_eq!(agent.description, "Évalue : Maturité technique");
         assert_eq!(agent.name, "Maturité technique");
-        assert_eq!(profile.to_json()["schema_version"], 6);
+        assert_eq!(profile.to_json()["schema_version"], 7);
     }
 
     #[test]
     fn version_four_upgrade_keeps_the_description_within_the_limit() {
-        let mut value = v4();
+        let mut value = v6();
         value["schema_version"] = json!(4);
         value.as_object_mut().unwrap().remove("evidence");
         let agent = value["qualification_agents"][0].as_object_mut().unwrap();
@@ -1664,20 +1706,22 @@ mod tests {
     }
 
     #[test]
-    fn options_count_is_between_two_and_ten() {
+    fn options_count_is_between_two_and_eleven() {
         let options = |count: usize| {
             (0..count)
-                .map(|i| json!({"value": format!("o{i}"), "label": "L", "score": 0.5}))
+                .map(|i| {
+                    json!({"value": format!("o{i}"), "label": "L", "score": 0.5, "is_unknown": i == 0})
+                })
                 .collect::<Vec<_>>()
         };
-        for count in [0, 1, 11] {
+        for count in [0, 1, 12] {
             let error = v4_error(|v| {
                 v["qualification_agents"][0]["questions"][0]["options"] = json!(options(count))
             });
             assert_eq!(error.path, "qualification_agents[0].questions[0].options");
             assert_eq!(error.problem, ProfileProblem::InvalidOptionCount);
         }
-        for count in [2, 10] {
+        for count in [2, 11] {
             let _ = v4_ok(|v| {
                 v["qualification_agents"][0]["questions"][0]["options"] = json!(options(count))
             });
@@ -1759,6 +1803,134 @@ mod tests {
         assert_eq!(error.path, "aggregator.extra");
         let error = v4_error(|v| v["qualification_agents"][0]["questions"][0]["x"] = json!(1));
         assert_eq!(error.path, "qualification_agents[0].questions[0].x");
+    }
+
+    fn options_of(profile: &ValidatedProfile) -> Vec<(String, f64, bool)> {
+        profile.definition().qualification_agents[0].questions[0]
+            .options
+            .iter()
+            .map(|option| (option.value.clone(), option.score, option.is_unknown))
+            .collect()
+    }
+
+    #[test]
+    fn version_six_reuses_an_existing_unknown_option() {
+        for value in ["inconnu", "inconnue", "unknown"] {
+            let mut document = v6();
+            document["qualification_agents"][0]["questions"][0]["options"]
+                .as_array_mut()
+                .unwrap()
+                .insert(
+                    1,
+                    json!({"value": value, "label": "Je ne sais pas", "score": 0.4}),
+                );
+            let profile = ValidatedProfile::parse(document).unwrap();
+            assert_eq!(profile.definition().schema_version, 7);
+            assert_eq!(
+                options_of(&profile),
+                [
+                    ("forte".to_owned(), 1.0, false),
+                    (value.to_owned(), 0.4, true),
+                    ("moyenne".to_owned(), 0.5, false),
+                    ("faible".to_owned(), 0.0, false),
+                ]
+            );
+            let kept = &profile.definition().qualification_agents[0].questions[0].options[1];
+            assert_eq!(kept.label, "Je ne sais pas");
+        }
+    }
+
+    #[test]
+    fn version_six_appends_an_unknown_option_when_missing() {
+        let profile = ValidatedProfile::parse(v6()).unwrap();
+        assert_eq!(
+            options_of(&profile),
+            [
+                ("forte".to_owned(), 1.0, false),
+                ("moyenne".to_owned(), 0.5, false),
+                ("faible".to_owned(), 0.0, false),
+                ("inconnu".to_owned(), 0.5, true),
+            ]
+        );
+        let appended = &profile.definition().qualification_agents[0].questions[0].options[3];
+        assert_eq!(appended.label, "Inconnu");
+        assert_eq!(profile.to_json()["schema_version"], 7);
+    }
+
+    #[test]
+    fn version_six_with_ten_options_still_validates_after_the_append() {
+        let mut document = v6();
+        document["qualification_agents"][0]["questions"][0]["options"] = json!(
+            (0..10)
+                .map(|i| json!({"value": format!("o{i}"), "label": "L", "score": 0.5}))
+                .collect::<Vec<_>>()
+        );
+        let profile = ValidatedProfile::parse(document).unwrap();
+        assert_eq!(options_of(&profile).len(), 11);
+        assert!(options_of(&profile)[10].2);
+    }
+
+    #[test]
+    fn older_versions_get_an_unknown_option_on_every_axis() {
+        for version in [4, 5] {
+            let mut document = v5();
+            document["schema_version"] = json!(version);
+            if version == 4 {
+                document.as_object_mut().unwrap().remove("evidence");
+                document["qualification_agents"][0]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("description");
+            }
+            let profile = ValidatedProfile::parse(document).unwrap();
+            assert!(options_of(&profile)[3].2);
+        }
+    }
+
+    #[test]
+    fn an_upgraded_profile_is_stable_when_parsed_again() {
+        let profile = ValidatedProfile::parse(v6()).unwrap();
+        let again = ValidatedProfile::parse(profile.to_json()).unwrap();
+        assert_eq!(profile, again);
+    }
+
+    #[test]
+    fn version_six_rejects_the_unknown_flag() {
+        let mut document = v6();
+        document["qualification_agents"][0]["questions"][0]["options"][0]["is_unknown"] =
+            json!(true);
+        let error = ValidatedProfile::parse(document).unwrap_err();
+        assert_eq!(error.path, format!("{OPTION0}.is_unknown"));
+    }
+
+    #[test]
+    fn exactly_one_option_per_axis_is_unknown() {
+        let options = "qualification_agents[0].questions[0].options";
+        let error = v4_error(|v| {
+            v["qualification_agents"][0]["questions"][0]["options"][3]["is_unknown"] = json!(false)
+        });
+        assert_eq!(error.path, options);
+        assert_eq!(error.problem, ProfileProblem::UnknownOptionCount);
+        let error = v4_error(|v| {
+            v["qualification_agents"][0]["questions"][0]["options"][0]["is_unknown"] = json!(true)
+        });
+        assert_eq!(error.path, options);
+        assert_eq!(error.problem, ProfileProblem::UnknownOptionCount);
+        let error = v4_error(|v| {
+            v["qualification_agents"][0]["questions"][0]["options"][3]
+                .as_object_mut()
+                .unwrap()
+                .remove("is_unknown");
+        });
+        assert_eq!(error.problem, ProfileProblem::UnknownOptionCount);
+    }
+
+    #[test]
+    fn the_unknown_option_score_is_editable() {
+        let profile = v4_ok(|v| {
+            v["qualification_agents"][0]["questions"][0]["options"][3]["score"] = json!(0.2)
+        });
+        assert_eq!(options_of(&profile)[3], ("inconnu".to_owned(), 0.2, true));
     }
 
     #[test]

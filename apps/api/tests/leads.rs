@@ -931,7 +931,9 @@ async fn detail_lists_the_qualification_results_with_labels_and_providers(pool: 
             status: "valid",
             summary: Some("Le lead exploite un Keycloak ancien."),
             answers: json!({"pertinence": {"type": "choice", "choice": "moyenne", "confidence": 0.8,
-                "probabilities": {"forte": 0.25, "moyenne": 0.5, "faible": 0.25}}}),
+                "evidence": "expose Keycloak 18", "evidence_source": "https://detail.com/realms/master",
+                "grounded": true,
+                "probabilities": {"forte": 0.25, "moyenne": 0.5, "faible": 0.25, "inconnu": 0.0}}}),
             score: Some(0.5),
             error: None,
         },
@@ -964,6 +966,13 @@ async fn detail_lists_the_qualification_results_with_labels_and_providers(pool: 
     assert_eq!(answer["choice"], "moyenne");
     assert_eq!(answer["choice_label"], "Moyenne");
     assert_eq!(answer["confidence"], 0.8);
+    assert_eq!(answer["evidence"], "expose Keycloak 18");
+    assert_eq!(
+        answer["evidence_source"],
+        "https://detail.com/realms/master"
+    );
+    assert_eq!(answer["grounded"], true);
+    assert!(answer["original_choice"].is_null());
     assert_eq!(answer["probabilities"][0]["value"], "forte");
     assert_eq!(answer["probabilities"][0]["label"], "Forte");
     assert_eq!(answer["probabilities"][0]["probability"], 0.25);
@@ -977,6 +986,59 @@ async fn detail_lists_the_qualification_results_with_labels_and_providers(pool: 
     assert!(invalid["agent_score"].is_null());
     assert_eq!(invalid["answers"].as_array().unwrap().len(), 0);
     assert!(invalid["error"].as_str().unwrap().contains("maturite"));
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn detail_flags_a_downgraded_answer_and_keeps_old_answers_readable(pool: PgPool) {
+    let seed = Seed { pool: pool.clone() };
+    let profile = seed.qualified_profile("keycloak-ops").await;
+    let lead = seed.lead(&profile, "downgraded.com", "new", 8.0, 1).await;
+    seed.result(
+        &lead,
+        SeededResult {
+            agent: "pertinence",
+            provider: None,
+            status: "valid",
+            summary: Some("Résumé."),
+            answers: json!({"pertinence": {"type": "choice", "choice": "inconnu", "confidence": 0.8,
+                "evidence": "phrase inventée", "grounded": false, "original_choice": "forte",
+                "probabilities": {"forte": 0.0, "moyenne": 0.0, "faible": 0.0, "inconnu": 1.0}}}),
+            score: Some(0.5),
+            error: None,
+        },
+    )
+    .await;
+    seed.result(
+        &lead,
+        SeededResult {
+            agent: "maturite",
+            provider: None,
+            status: "valid",
+            summary: Some("Résumé."),
+            answers: json!({"maturite": {"type": "choice", "choice": "oui", "confidence": 0.8,
+                "probabilities": {"oui": 1.0, "non": 0.0, "inconnu": 0.0}}}),
+            score: Some(1.0),
+            error: None,
+        },
+    )
+    .await;
+    let api = Api::new(pool).await;
+
+    let (status, body) = api.get(&format!("/api/v1/leads/{lead}")).await;
+
+    assert_eq!(status, StatusCode::OK);
+    let results = body["data"]["qualification_results"].as_array().unwrap();
+    let downgraded = &results[0]["answers"][0];
+    assert_eq!(downgraded["choice"], "inconnu");
+    assert_eq!(downgraded["choice_label"], "Inconnu");
+    assert_eq!(downgraded["grounded"], false);
+    assert_eq!(downgraded["original_choice"], "forte");
+    assert_eq!(downgraded["original_choice_label"], "Forte");
+    let old = &results[1]["answers"][0];
+    assert_eq!(old["grounded"], true);
+    assert_eq!(old["evidence"], "");
+    assert!(old["evidence_source"].is_null());
+    assert!(old["original_choice"].is_null());
 }
 
 #[sqlx::test(migrations = "../../migrations")]
