@@ -22,6 +22,7 @@ const SOURCE_LABELS: Readonly<Record<string, string>> = {
 	france_travail: 'France Travail',
 	ats: 'ATS',
 	llm_qualification: 'Qualification LLM',
+	qualification: 'Qualification des leads',
 }
 
 const CONTACT_METHOD_LABELS: Readonly<Record<string, string>> = {

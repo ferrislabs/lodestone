@@ -212,7 +212,7 @@ async fn list_shows_every_source_with_states_and_last_runs(pool: PgPool) {
 
     let listed = api.list().await;
 
-    assert_eq!(listed.len(), SourceName::ALL.len());
+    assert_eq!(listed.len(), SourceName::ALL.len() + 1);
     let boamp = entry(&listed, "boamp");
     assert_eq!(boamp["status"], "pending");
     assert_eq!(boamp["kind"], "source.run");
@@ -284,6 +284,7 @@ async fn continuous_sources_report_their_listener_and_refuse_run_now(pool: PgPoo
     assert_eq!(boamp["mode"], "scheduled");
     assert!(boamp["listener"].is_null());
     assert_eq!(entry(&listed, "llm_qualification")["mode"], "scheduled");
+    assert_eq!(entry(&listed, "qualification")["mode"], "continuous");
 
     for name in ["dns_cname", "certificate_transparency", "role_guess"] {
         let (status, body) = api
@@ -292,6 +293,33 @@ async fn continuous_sources_report_their_listener_and_refuse_run_now(pool: PgPoo
         assert_eq!(status, StatusCode::CONFLICT, "{body}");
         assert_eq!(body["message"], "Conflict: source listens continuously");
     }
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_qualification_listener_is_listed_with_its_backlog(pool: PgPool) {
+    let api = Api::new(pool.clone()).await;
+    sqlx::query(
+        "INSERT INTO listeners (name, holder, state, last_activity_at, items_total, signals_total, backlog, updated_at)
+         VALUES ('qualification', 'node-a-1', 'listening', now(), 30, 28, 7, now())",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let listed = api.list().await;
+
+    let qualification = entry(&listed, "qualification");
+    assert_eq!(qualification["mode"], "continuous");
+    assert_eq!(qualification["kind"], "listener.qualification");
+    assert_eq!(qualification["label_key"], "source.qualification");
+    assert_eq!(qualification["status"], "listening");
+    assert_eq!(qualification["listener"]["backlog"], 7);
+    assert_eq!(qualification["listener"]["items_total"], 30);
+    assert!(qualification["next_run_at"].is_null());
+    let (status, _) = api
+        .call(Method::POST, "/api/v1/sources/qualification/run")
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
 }
 
 #[sqlx::test(migrations = "../../migrations")]

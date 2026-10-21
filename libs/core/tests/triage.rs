@@ -1,29 +1,16 @@
 mod support;
 
-use std::{
-    num::NonZeroU32,
-    sync::{
-        Mutex,
-        atomic::{AtomicU64, Ordering},
-    },
-    time::Duration,
-};
-
 use chrono::{DateTime, Utc};
 use lodestone_core::{
-    ActiveProfile, Candidate, Clock, ContactMethod, ContactRepository, CreateProfileCommand,
-    EmailAddress, LeadRepository, LlmError, LlmProvider, LlmRequest, LlmResponse, LodestoneUseCase,
+    ActiveProfile, Candidate, Clock, CreateProfileCommand, LeadRepository, LodestoneUseCase,
     NormalizedDomain, ProfileId, ProfileName, Provenance, RunRepository, RunStatus, SignalKind,
-    SignalRepository, SourceError, SourceName, SuppressionTarget, TokenPricing, TokenUsage,
-    ValidatedProfile,
+    SignalRepository, SourceError, SourceName, SuppressionTarget, ValidatedProfile,
     definition::AgentId,
     infrastructure::{
-        contact::postgres::PgContactRepository, lead::postgres::PgLeadRepository,
-        llm_cache::postgres::PgLlmCache, postgres::with_tx, run::postgres::PgRunRepository,
+        lead::postgres::PgLeadRepository, postgres::with_tx, run::postgres::PgRunRepository,
         signal::postgres::PgSignalRepository,
     },
-    llm::gateway::CallSettings,
-    triage::{CandidateSource, TriageSettings},
+    triage::CandidateSource,
 };
 use serde_json::{Value, json};
 use sqlx::PgPool;
@@ -57,59 +44,6 @@ impl CandidateSource for FakeSource {
     }
 }
 
-struct ScriptedProvider {
-    verdicts: Vec<(&'static str, Value)>,
-    input_tokens: u64,
-    calls: AtomicU64,
-}
-
-impl ScriptedProvider {
-    fn new(verdicts: Vec<(&'static str, Value)>) -> Self {
-        Self {
-            verdicts,
-            input_tokens: 10,
-            calls: AtomicU64::new(0),
-        }
-    }
-
-    fn calls(&self) -> u64 {
-        self.calls.load(Ordering::SeqCst)
-    }
-}
-
-impl LlmProvider for ScriptedProvider {
-    async fn complete(&self, request: &LlmRequest<'_>) -> Result<LlmResponse, LlmError> {
-        self.calls.fetch_add(1, Ordering::SeqCst);
-        let content = request.documents.first().map_or("", |d| d.content);
-        let output = self
-            .verdicts
-            .iter()
-            .find(|(marker, _)| content.contains(marker))
-            .map_or_else(irrelevant, |(_, verdict)| verdict.clone());
-        Ok(LlmResponse {
-            output,
-            model: "scripted".to_owned(),
-            usage: TokenUsage {
-                input_tokens: self.input_tokens,
-                output_tokens: 1,
-            },
-        })
-    }
-}
-
-fn irrelevant() -> Value {
-    json!({"relevant": false, "reason": "off topic", "evidence": [], "contact_email": null})
-}
-
-fn relevant(quote: &str, contact: Option<&str>) -> Value {
-    json!({
-        "relevant": true,
-        "reason": "identity project",
-        "evidence": [{"document_index": 0, "quote": quote}],
-        "contact_email": contact,
-    })
-}
-
 fn candidate(host: &str, title: &str) -> Candidate {
     Candidate {
         domain: domain(host),
@@ -120,21 +54,6 @@ fn candidate(host: &str, title: &str) -> Candidate {
         provenance: Provenance::parse(&format!("https://marches.example/avis/{host}")).unwrap(),
         observed_at: at(50),
         details: json!({"idweb": host}),
-    }
-}
-
-fn settings(budget_cents: u32, cents_per_mtok: u32) -> TriageSettings {
-    TriageSettings {
-        call: CallSettings {
-            max_retries: 0,
-            pricing: TokenPricing {
-                input_cents_per_mtok: cents_per_mtok,
-                output_cents_per_mtok: 0,
-            },
-            base_delay: Duration::ZERO,
-        },
-        max_tokens: 512,
-        budget_cents: NonZeroU32::new(budget_cents).unwrap(),
     }
 }
 
@@ -158,29 +77,9 @@ async fn iam_profile(pool: &PgPool) -> ProfileId {
     activate(pool, "iam", serde_json::from_str(IAM).unwrap()).await
 }
 
-async fn run_triage(
-    pool: &PgPool,
-    source: &FakeSource,
-    provider: &ScriptedProvider,
-    settings: TriageSettings,
-) -> lodestone_core::triage::TriageReport {
-    run_triage_with(pool, source, Some(provider), settings).await
-}
-
-async fn run_triage_with(
-    pool: &PgPool,
-    source: &FakeSource,
-    provider: Option<&ScriptedProvider>,
-    settings: TriageSettings,
-) -> lodestone_core::triage::TriageReport {
+async fn run_triage(pool: &PgPool, source: &FakeSource) -> lodestone_core::triage::TriageReport {
     LodestoneUseCase::new(pool.clone())
-        .run_triage(
-            source,
-            provider,
-            &PgLlmCache::new(pool.clone()),
-            settings,
-            &FixedClock,
-        )
+        .run_triage(source, &FixedClock)
         .await
         .unwrap()
 }
@@ -201,26 +100,6 @@ async fn signals(pool: &PgPool, profile: ProfileId, host: &str) -> Vec<lodestone
     .unwrap()
 }
 
-async fn contacts(
-    pool: &PgPool,
-    profile: ProfileId,
-    host: &str,
-) -> Vec<lodestone_core::ContactEmail> {
-    with_tx(pool, async |shared| {
-        let Some(lead) = PgLeadRepository::new(&shared)
-            .find_by_domain(profile, &NormalizedDomain::from_host(host).unwrap())
-            .await?
-        else {
-            return Ok(Vec::new());
-        };
-        PgContactRepository::new(&shared)
-            .list_for_lead(lead.id)
-            .await
-    })
-    .await
-    .unwrap()
-}
-
 async fn runs(pool: &PgPool) -> Vec<lodestone_core::Run> {
     with_tx(pool, async |shared| {
         PgRunRepository::new(&shared).list_recent(10).await
@@ -230,7 +109,7 @@ async fn runs(pool: &PgPool) -> Vec<lodestone_core::Run> {
 }
 
 #[sqlx::test(migrations = "../../migrations")]
-async fn only_ambiguous_candidates_reach_the_llm(pool: PgPool) {
+async fn ambiguous_candidates_become_leads_without_any_llm_call(pool: PgPool) {
     let profile = iam_profile(&pool).await;
     let source = FakeSource {
         candidates: vec![
@@ -240,17 +119,14 @@ async fn only_ambiguous_candidates_reach_the_llm(pool: PgPool) {
             candidate("region.fr", "Projet IAM pour la region"),
         ],
     };
-    let provider = ScriptedProvider::new(vec![("Badge", relevant("Badge d'acces et SSO", None))]);
 
-    let report = run_triage(&pool, &source, &provider, settings(100, 0)).await;
+    let report = run_triage(&pool, &source).await;
 
-    assert_eq!(provider.calls(), 2);
     assert_eq!(report.candidates, 4);
     assert_eq!(report.accepted_by_rules, 1);
+    assert_eq!(report.accepted_ambiguous, 2);
     assert_eq!(report.rejected_by_rules, 1);
-    assert_eq!(report.sent_to_llm, 2);
-    assert_eq!(report.accepted_by_llm, 1);
-    assert!(!report.budget_exhausted);
+    assert_eq!(report.accepted(), 3);
 
     let accepted = signals(&pool, profile, "mairie.fr").await;
     assert_eq!(accepted.len(), 1);
@@ -259,143 +135,61 @@ async fn only_ambiguous_candidates_reach_the_llm(pool: PgPool) {
     assert_eq!(accepted[0].raw["details"]["idweb"], "mairie.fr");
     assert_eq!(accepted[0].strength.get(), 0.7);
     assert!(signals(&pool, profile, "meubles.fr").await.is_empty());
-    let by_llm = signals(&pool, profile, "acme.com").await;
-    assert_eq!(by_llm.len(), 1);
-    assert_eq!(by_llm[0].raw["route"], "llm");
-    assert_eq!(by_llm[0].raw["details"]["idweb"], "acme.com");
-    assert_eq!(by_llm[0].raw["model"], "scripted");
-    assert_eq!(by_llm[0].raw["prompt"], "triage@1");
-    assert_eq!(by_llm[0].raw["from_cache"], false);
-    assert!(signals(&pool, profile, "region.fr").await.is_empty());
+
+    let ambiguous = signals(&pool, profile, "acme.com").await;
+    assert_eq!(ambiguous.len(), 1);
+    assert_eq!(ambiguous[0].raw["route"], "keywords_ambiguous");
+    assert_eq!(ambiguous[0].raw["matched"], json!(["SSO"]));
+    assert_eq!(ambiguous[0].raw["excluded"], json!(["badge"]));
+    assert_eq!(ambiguous[0].raw["details"]["idweb"], "acme.com");
+    assert_eq!(ambiguous[0].strength.get(), 0.5);
+    assert!(ambiguous[0].strength.get() < accepted[0].strength.get());
+
+    let below_threshold = signals(&pool, profile, "region.fr").await;
+    assert_eq!(below_threshold.len(), 1);
+    assert_eq!(below_threshold[0].raw["route"], "keywords_ambiguous");
+    assert_eq!(below_threshold[0].raw["excluded"], json!([]));
 
     let recorded = runs(&pool).await;
     assert_eq!(recorded.len(), 1);
     assert_eq!(recorded[0].status, RunStatus::Succeeded);
     assert_eq!(recorded[0].volume, 4);
-    assert_eq!(recorded[0].signals, 2);
+    assert_eq!(recorded[0].signals, 3);
 }
 
 #[sqlx::test(migrations = "../../migrations")]
-async fn relevance_without_a_verbatim_quote_records_nothing(pool: PgPool) {
+async fn a_second_run_does_not_duplicate_signals(pool: PgPool) {
     let profile = iam_profile(&pool).await;
     let source = FakeSource {
-        candidates: vec![
-            candidate("acme.com", "Badge d'acces et SSO"),
-            candidate("region.fr", "Projet IAM pour la region"),
-        ],
+        candidates: vec![candidate("acme.com", "Badge d'acces et SSO")],
     };
-    let provider = ScriptedProvider::new(vec![
-        ("Badge", relevant("Badge d'acces et SSO", None)),
-        (
-            "IAM",
-            relevant("a sentence the document never contains", None),
-        ),
-    ]);
 
-    let report = run_triage(&pool, &source, &provider, settings(100, 0)).await;
+    run_triage(&pool, &source).await;
+    run_triage(&pool, &source).await;
 
-    assert_eq!(report.sent_to_llm, 2);
-    assert_eq!(report.accepted_by_llm, 1);
     assert_eq!(signals(&pool, profile, "acme.com").await.len(), 1);
-    assert!(signals(&pool, profile, "region.fr").await.is_empty());
-}
-
-#[sqlx::test(migrations = "../../migrations")]
-async fn second_run_is_served_from_the_cache(pool: PgPool) {
-    let profile = iam_profile(&pool).await;
-    let source = FakeSource {
-        candidates: vec![
-            candidate("acme.com", "Badge d'acces et SSO"),
-            candidate("region.fr", "Projet IAM pour la region"),
-        ],
-    };
-    let provider = ScriptedProvider::new(vec![("Badge", relevant("Badge d'acces et SSO", None))]);
-
-    run_triage(&pool, &source, &provider, settings(100, 0)).await;
-    assert_eq!(provider.calls(), 2);
-    let second = run_triage(&pool, &source, &provider, settings(100, 0)).await;
-
-    assert_eq!(provider.calls(), 2);
-    assert_eq!(second.accepted_by_llm, 1);
-    let kept = signals(&pool, profile, "acme.com").await;
-    assert_eq!(kept.len(), 1);
     assert_eq!(runs(&pool).await.len(), 2);
 }
 
 #[sqlx::test(migrations = "../../migrations")]
-async fn suppression_guards_the_llm_and_the_contacts(pool: PgPool) {
+async fn suppressed_domains_record_nothing(pool: PgPool) {
     let profile = iam_profile(&pool).await;
     let usecase = LodestoneUseCase::new(pool.clone());
     usecase
         .add_suppression(SuppressionTarget::Domain(domain("bad.fr")), None, None)
         .await
         .unwrap();
-    usecase
-        .add_suppression(
-            SuppressionTarget::Email(EmailAddress::parse("dsi@corp.fr").unwrap()),
-            None,
-            None,
-        )
-        .await
-        .unwrap();
     let source = FakeSource {
         candidates: vec![
             candidate("bad.fr", "Badge et SSO pour bad"),
-            candidate("acme.com", "Badge d'acces et SSO"),
-            candidate("corp.fr", "Annuaire corp et badge"),
+            candidate("good.fr", "Badge et SSO pour good"),
         ],
     };
-    let provider = ScriptedProvider::new(vec![
-        (
-            "Badge d'acces",
-            relevant("Badge d'acces et SSO", Some("security@acme.com")),
-        ),
-        (
-            "Annuaire corp",
-            relevant("Annuaire corp et badge", Some("dsi@corp.fr")),
-        ),
-    ]);
 
-    run_triage(&pool, &source, &provider, settings(100, 0)).await;
+    run_triage(&pool, &source).await;
 
-    assert_eq!(provider.calls(), 2);
     assert!(signals(&pool, profile, "bad.fr").await.is_empty());
-    assert_eq!(signals(&pool, profile, "corp.fr").await.len(), 1);
-    assert!(contacts(&pool, profile, "corp.fr").await.is_empty());
-    let stored = contacts(&pool, profile, "acme.com").await;
-    assert_eq!(stored.len(), 1);
-    assert_eq!(stored[0].address.as_str(), "security@acme.com");
-    assert_eq!(stored[0].method, ContactMethod::LlmExtraction);
-}
-
-#[sqlx::test(migrations = "../../migrations")]
-async fn exhausted_budget_stops_llm_calls_and_fails_the_run(pool: PgPool) {
-    let profile = iam_profile(&pool).await;
-    let source = FakeSource {
-        candidates: vec![
-            candidate("mairie.fr", "Mise en place d'un SSO avec MFA"),
-            candidate("acme.com", "Badge d'acces et SSO"),
-            candidate("region.fr", "Projet IAM pour la region"),
-            candidate("ville.fr", "Projet SSO pour la ville"),
-        ],
-    };
-    let mut provider =
-        ScriptedProvider::new(vec![("Badge", relevant("Badge d'acces et SSO", None))]);
-    provider.input_tokens = 1_000_000;
-
-    let report = run_triage(&pool, &source, &provider, settings(1, 1)).await;
-
-    assert_eq!(provider.calls(), 1);
-    assert!(report.budget_exhausted);
-    assert_eq!(report.sent_to_llm, 1);
-    assert_eq!(signals(&pool, profile, "mairie.fr").await.len(), 1);
-    assert_eq!(signals(&pool, profile, "acme.com").await.len(), 1);
-    assert!(signals(&pool, profile, "region.fr").await.is_empty());
-    let recorded = runs(&pool).await;
-    assert_eq!(recorded.len(), 1);
-    assert_eq!(recorded[0].status, RunStatus::Failed);
-    assert_eq!(recorded[0].error.as_deref(), Some("llm budget exhausted"));
-    assert_eq!(recorded[0].signals, 2);
+    assert_eq!(signals(&pool, profile, "good.fr").await.len(), 1);
 }
 
 #[sqlx::test(migrations = "../../migrations")]
@@ -413,91 +207,27 @@ async fn profiles_route_the_same_candidate_with_their_own_rules(pool: PgPool) {
     let source = FakeSource {
         candidates: vec![candidate("ville.fr", "Projet SSO pour la ville")],
     };
-    let provider = ScriptedProvider::new(Vec::new());
 
-    let report = run_triage(&pool, &source, &provider, settings(100, 0)).await;
+    let report = run_triage(&pool, &source).await;
 
-    assert_eq!(provider.calls(), 1);
     assert_eq!(report.accepted_by_rules, 1);
-    assert_eq!(report.sent_to_llm, 1);
-    assert!(signals(&pool, strict, "ville.fr").await.is_empty());
+    assert_eq!(report.accepted_ambiguous, 1);
+    let ambiguous = signals(&pool, strict, "ville.fr").await;
+    assert_eq!(ambiguous.len(), 1);
+    assert_eq!(ambiguous[0].raw["route"], "keywords_ambiguous");
     let accepted = signals(&pool, lenient, "ville.fr").await;
     assert_eq!(accepted.len(), 1);
     assert_eq!(accepted[0].raw["route"], "keywords");
     assert_eq!(runs(&pool).await.len(), 2);
 }
 
-#[sqlx::test(migrations = "../../migrations")]
-async fn without_a_provider_ambiguous_candidates_are_deferred(pool: PgPool) {
-    let profile = iam_profile(&pool).await;
-    let source = FakeSource {
-        candidates: vec![
-            candidate("mairie.fr", "Mise en place d'un SSO avec MFA"),
-            candidate("meubles.fr", "Fourniture de mobilier de bureau"),
-            candidate("acme.com", "Badge d'acces et SSO"),
-        ],
-    };
-
-    let report = run_triage_with(&pool, &source, None, settings(100, 0)).await;
-
-    assert_eq!(report.accepted_by_rules, 1);
-    assert_eq!(report.rejected_by_rules, 1);
-    assert_eq!(report.deferred, 1);
-    assert_eq!(report.sent_to_llm, 0);
-    assert_eq!(signals(&pool, profile, "mairie.fr").await.len(), 1);
-    assert!(signals(&pool, profile, "acme.com").await.is_empty());
-    let recorded = runs(&pool).await;
-    assert_eq!(recorded[0].status, RunStatus::Succeeded);
-    assert_eq!(recorded[0].signals, 1);
-}
-
-struct RecordingProvider {
-    systems: Mutex<Vec<String>>,
-}
-
-impl RecordingProvider {
-    fn new() -> Self {
-        Self {
-            systems: Mutex::new(Vec::new()),
-        }
-    }
-
-    fn systems(&self) -> Vec<String> {
-        self.systems.lock().unwrap().clone()
-    }
-}
-
-impl LlmProvider for RecordingProvider {
-    async fn complete(&self, request: &LlmRequest<'_>) -> Result<LlmResponse, LlmError> {
-        self.systems.lock().unwrap().push(request.system.to_owned());
-        Ok(LlmResponse {
-            output: irrelevant(),
-            model: "recording".to_owned(),
-            usage: TokenUsage {
-                input_tokens: 1,
-                output_tokens: 1,
-            },
-        })
-    }
-}
-
-fn boamp_agent(
-    id: &str,
-    enabled: bool,
-    keywords: &[&str],
-    min: u8,
-    criteria: Option<&str>,
-) -> Value {
-    let mut agent = json!({
+fn boamp_agent(id: &str, enabled: bool, keywords: &[&str], min: u8) -> Value {
+    json!({
         "id": id,
         "name": id,
         "enabled": enabled,
         "source": {"kind": "boamp", "keywords": keywords, "accept_min_keywords": min},
-    });
-    if let Some(criteria) = criteria {
-        agent["llm"] = json!({"relevance_criteria": criteria});
-    }
-    agent
+    })
 }
 
 async fn boamp_profile(pool: &PgPool, agents: Vec<Value>) -> ProfileId {
@@ -520,22 +250,20 @@ async fn agents_of_the_same_kind_route_the_same_candidate_differently(pool: PgPo
     let profile = boamp_profile(
         &pool,
         vec![
-            boamp_agent("boamp-fr", true, &["SSO"], 1, None),
-            boamp_agent("boamp-en", true, &["single sign-on"], 1, None),
+            boamp_agent("boamp-fr", true, &["SSO"], 1),
+            boamp_agent("boamp-en", true, &["single sign-on"], 1),
         ],
     )
     .await;
     let source = FakeSource {
         candidates: vec![candidate("ville.fr", "Projet SSO pour la ville")],
     };
-    let provider = ScriptedProvider::new(Vec::new());
 
-    let report = run_triage(&pool, &source, &provider, settings(100, 0)).await;
+    let report = run_triage(&pool, &source).await;
 
     assert_eq!(report.candidates, 1);
     assert_eq!(report.accepted_by_rules, 1);
     assert_eq!(report.rejected_by_rules, 1);
-    assert_eq!(provider.calls(), 0);
     let recorded = signals(&pool, profile, "ville.fr").await;
     assert_eq!(recorded.len(), 1);
     assert_eq!(recorded[0].agent, Some(AgentId::new("boamp-fr")));
@@ -553,17 +281,16 @@ async fn a_disabled_agent_is_neither_run_nor_recorded(pool: PgPool) {
     let profile = boamp_profile(
         &pool,
         vec![
-            boamp_agent("boamp-fr", false, &["SSO"], 1, None),
-            boamp_agent("boamp-en", true, &["single sign-on"], 1, None),
+            boamp_agent("boamp-fr", false, &["SSO"], 1),
+            boamp_agent("boamp-en", true, &["single sign-on"], 1),
         ],
     )
     .await;
     let source = FakeSource {
         candidates: vec![candidate("ville.fr", "Projet SSO pour la ville")],
     };
-    let provider = ScriptedProvider::new(Vec::new());
 
-    run_triage(&pool, &source, &provider, settings(100, 0)).await;
+    run_triage(&pool, &source).await;
 
     assert!(signals(&pool, profile, "ville.fr").await.is_empty());
     assert_eq!(agent_ids(&runs(&pool).await), ["boamp-en"]);
@@ -571,88 +298,13 @@ async fn a_disabled_agent_is_neither_run_nor_recorded(pool: PgPool) {
 
 #[sqlx::test(migrations = "../../migrations")]
 async fn a_profile_without_an_enabled_agent_of_the_kind_gets_no_run(pool: PgPool) {
-    boamp_profile(
-        &pool,
-        vec![boamp_agent("boamp-fr", false, &["SSO"], 1, None)],
-    )
-    .await;
+    boamp_profile(&pool, vec![boamp_agent("boamp-fr", false, &["SSO"], 1)]).await;
     let source = FakeSource {
         candidates: vec![candidate("ville.fr", "Projet SSO pour la ville")],
     };
-    let provider = ScriptedProvider::new(Vec::new());
 
-    let report = run_triage(&pool, &source, &provider, settings(100, 0)).await;
+    let report = run_triage(&pool, &source).await;
 
     assert_eq!(report.candidates, 0);
     assert!(runs(&pool).await.is_empty());
-}
-
-#[sqlx::test(migrations = "../../migrations")]
-async fn the_agent_criteria_replace_the_profile_criteria_in_the_triage_prompt(pool: PgPool) {
-    boamp_profile(
-        &pool,
-        vec![
-            boamp_agent(
-                "boamp-fr",
-                true,
-                &["SSO", "MFA"],
-                2,
-                Some("AGENT-ONLY-CRITERIA"),
-            ),
-            boamp_agent("boamp-en", true, &["SSO", "MFA"], 2, None),
-        ],
-    )
-    .await;
-    let source = FakeSource {
-        candidates: vec![candidate("ville.fr", "Projet SSO pour la ville")],
-    };
-    let provider = RecordingProvider::new();
-
-    LodestoneUseCase::new(pool.clone())
-        .run_triage(
-            &source,
-            Some(&provider),
-            &PgLlmCache::new(pool.clone()),
-            settings(100, 0),
-            &FixedClock,
-        )
-        .await
-        .unwrap();
-
-    let systems = provider.systems();
-    assert_eq!(systems.len(), 2);
-    let profile_criteria = "The organization operates its own identity infrastructure";
-    let with_agent: Vec<_> = systems
-        .iter()
-        .filter(|system| system.contains("AGENT-ONLY-CRITERIA"))
-        .collect();
-    assert_eq!(with_agent.len(), 1);
-    assert!(!with_agent[0].contains(profile_criteria));
-    let without_agent: Vec<_> = systems
-        .iter()
-        .filter(|system| !system.contains("AGENT-ONLY-CRITERIA"))
-        .collect();
-    assert_eq!(without_agent.len(), 1);
-    assert!(without_agent[0].contains(profile_criteria));
-}
-
-#[sqlx::test(migrations = "../../migrations")]
-async fn llm_answers_are_cached_per_agent(pool: PgPool) {
-    boamp_profile(
-        &pool,
-        vec![
-            boamp_agent("boamp-fr", true, &["SSO", "MFA"], 2, None),
-            boamp_agent("boamp-en", true, &["SSO", "MFA"], 2, None),
-        ],
-    )
-    .await;
-    let source = FakeSource {
-        candidates: vec![candidate("ville.fr", "Projet SSO pour la ville")],
-    };
-    let provider = ScriptedProvider::new(Vec::new());
-
-    run_triage(&pool, &source, &provider, settings(100, 0)).await;
-    assert_eq!(provider.calls(), 2);
-    run_triage(&pool, &source, &provider, settings(100, 0)).await;
-    assert_eq!(provider.calls(), 2);
 }

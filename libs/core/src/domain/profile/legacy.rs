@@ -123,13 +123,13 @@ pub(super) struct ProfileDefinitionV3 {
     llm: LlmSettings,
 }
 
-const TRIAGE_INTENT: &str = "You review public documents about a company for a B2B lead detection tool. Decide whether the documents show that this company is a relevant prospect for the offer below, using the relevance criteria. Base your answers only on what the documents state. Do not assume facts that are not written.";
+const TRIAGE_INTENT: &str = "Tu examines des documents publics sur une entreprise pour un outil de détection de leads B2B. Détermine si ces documents montrent que cette entreprise est un prospect pertinent pour l'offre ci-dessous, en t'appuyant sur les critères de pertinence. Base tes réponses uniquement sur ce que disent les documents. Ne suppose aucun fait qui n'est pas écrit.";
 
-const AGGREGATOR_PROMPT: &str = "You summarise the evaluation of a lead for a B2B lead detection tool. You receive the lead, its signals and the answers and scores of every qualification agent. Write a short synthesis, the verdict narrative, an approach angle and a message draft. Quote evidence verbatim from the documents. Never change the computed confidence or verdict. Base your text only on what is provided.";
+const AGGREGATOR_PROMPT: &str = "Tu résumes l'évaluation d'un lead pour un outil de détection de leads B2B. Tu reçois le lead, ses signaux ainsi que les réponses et les scores de chaque agent de qualification. Rédige une courte synthèse, le récit du verdict, un angle d'approche et un brouillon de message. Cite les preuves mot pour mot depuis les documents. Ne modifie jamais la confiance ni le verdict calculés. Base ton texte uniquement sur ce qui est fourni.";
 
 fn pertinence_prompt(identity: &Identity, llm: &LlmSettings) -> String {
     let full = format!(
-        "{TRIAGE_INTENT}\n\nOffer: {}\nTarget customer: {}\nRelevance criteria: {}",
+        "{TRIAGE_INTENT}\n\nOffre : {}\nClient cible : {}\nCritères de pertinence : {}",
         identity.offer.trim(),
         identity.target_customer.trim(),
         llm.relevance_criteria.trim()

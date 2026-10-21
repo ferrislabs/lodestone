@@ -10,6 +10,7 @@ use crate::{domain::output::WebhookPolicy, infrastructure::postgres::error::map_
 
 pub mod contacts;
 pub mod drafts;
+pub mod evaluation;
 pub mod jobs;
 pub mod leads;
 pub mod listeners;

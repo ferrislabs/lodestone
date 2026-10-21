@@ -398,6 +398,237 @@ async fn detail_carries_profile_signals_contacts_assessments_and_breakdown(pool:
     assert_eq!(assessment["draft"]["body"], "Body text");
 }
 
+const QUALIFIED_PROFILE: &str = r#"{
+    "schema_version": 4,
+    "identity": {"offer": "Managed IAM", "target_customer": "Companies running Keycloak"},
+    "agents": [{"id": "ats-a", "name": "ATS", "source": {"kind": "ats", "keywords": ["sso"]}}],
+    "qualification_agents": [
+        {"id": "pertinence", "name": "Pertinence", "system_prompt": "p", "weight": 5,
+         "questions": [{"id": "pertinence", "wording": "Pertinent ?", "weight": 5,
+            "options": [
+                {"value": "forte", "label": "Forte", "score": 1.0},
+                {"value": "moyenne", "label": "Moyenne", "score": 0.5},
+                {"value": "faible", "label": "Faible", "score": 0.0}]}]},
+        {"id": "maturite", "name": "Maturité", "system_prompt": "m", "weight": 5,
+         "questions": [{"id": "maturite", "wording": "Mature ?", "weight": 5,
+            "options": [
+                {"value": "oui", "label": "Oui", "score": 1.0},
+                {"value": "non", "label": "Non", "score": 0.0}]}]}
+    ],
+    "aggregator": {"system_prompt": "a"},
+    "scoring": {"factors": [{"signal": "product_detected", "weight": 10}]},
+    "contact_ranking": {"preferred_local_parts": ["security"]},
+    "llm": {"qualification_threshold": 50, "relevance_criteria": "c"}
+}"#;
+
+struct SeededResult<'a> {
+    agent: &'a str,
+    provider: Option<&'a str>,
+    status: &'a str,
+    answers: Value,
+    score: Option<f64>,
+    error: Option<&'a str>,
+}
+
+impl Seed {
+    async fn qualified_profile(&self, name: &str) -> String {
+        let id = common::generate_uuid_v7();
+        sqlx::query(
+            "INSERT INTO profiles (id, name, active, created_at, updated_at) VALUES ($1, $2, true, now(), now())",
+        )
+        .bind(id)
+        .bind(name)
+        .execute(&self.pool)
+        .await
+        .expect("profile");
+        sqlx::query(
+            "INSERT INTO profile_revisions (profile_id, revision, definition, created_at) VALUES ($1, 1, $2, now()), ($1, 2, $2, now())",
+        )
+        .bind(id)
+        .bind(serde_json::from_str::<Value>(QUALIFIED_PROFILE).expect("definition"))
+        .execute(&self.pool)
+        .await
+        .expect("revisions");
+        id.to_string()
+    }
+
+    async fn provider(&self, name: &str, model: &str) -> String {
+        let id = common::generate_uuid_v7();
+        sqlx::query(
+            "INSERT INTO llm_providers (id, name, kind, base_url, model, timeout_ms, max_retries, input_cents_per_mtok, output_cents_per_mtok, enabled, created_at, updated_at)
+             VALUES ($1, $2, 'openai_compatible', 'http://localhost:11434/v1', $3, 30000, 1, 0, 0, true, now(), now())",
+        )
+        .bind(id)
+        .bind(name)
+        .bind(model)
+        .execute(&self.pool)
+        .await
+        .expect("provider");
+        id.to_string()
+    }
+
+    async fn result(&self, lead: &str, seeded: SeededResult<'_>) {
+        let SeededResult {
+            agent,
+            provider,
+            status,
+            answers,
+            score,
+            error,
+        } = seeded;
+        sqlx::query(
+            "INSERT INTO qualification_results (id, lead_id, profile_id, profile_revision, agent_id, provider_id, model, prompt_hash, status, answers, agent_score, error, created_at)
+             SELECT $1, l.id, l.profile_id, 2, $3, $4::uuid, 'gemma_laya', 'hash', $5, $6, $7, $8, now()
+             FROM leads l WHERE l.id = $2::uuid",
+        )
+        .bind(common::generate_uuid_v7())
+        .bind(lead)
+        .bind(agent)
+        .bind(provider)
+        .bind(status)
+        .bind(answers)
+        .bind(score)
+        .bind(error)
+        .execute(&self.pool)
+        .await
+        .expect("result");
+        sqlx::query(
+            "INSERT INTO lead_qualification_state (lead_id, profile_revision, sources, completed_at)
+             VALUES ($1::uuid, 2, ARRAY['http_probe'], now()) ON CONFLICT (lead_id) DO NOTHING",
+        )
+        .bind(lead)
+        .execute(&self.pool)
+        .await
+        .expect("state");
+    }
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_lead_carries_its_confidence_and_verdict(pool: PgPool) {
+    let seed = Seed { pool: pool.clone() };
+    let profile = seed.profile("keycloak-ops").await;
+    let judged = seed.lead(&profile, "judged.com", "new", 10.0, 1).await;
+    seed.lead(&profile, "pending.com", "new", 5.0, 2).await;
+    sqlx::query("UPDATE leads SET confidence = 72.5, verdict = 'fiable', qualified_at = now() WHERE id = $1::uuid")
+        .bind(&judged)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let api = Api::new(pool).await;
+
+    let (status, body) = api.get(&format!("/api/v1/profiles/{profile}/leads")).await;
+
+    assert_eq!(status, StatusCode::OK);
+    let leads = body["data"].as_array().unwrap();
+    let find = |domain: &str| leads.iter().find(|lead| lead["domain"] == domain).unwrap();
+    assert_eq!(find("judged.com")["confidence"], 72.5);
+    assert_eq!(find("judged.com")["verdict"], "fiable");
+    assert!(find("judged.com")["qualified_at"].is_string());
+    assert!(find("pending.com")["confidence"].is_null());
+    assert!(find("pending.com")["verdict"].is_null());
+    assert!(find("pending.com")["qualified_at"].is_null());
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn each_verdict_is_served_with_its_wire_name(pool: PgPool) {
+    let seed = Seed { pool: pool.clone() };
+    let profile = seed.profile("keycloak-ops").await;
+    for (domain, verdict) in [
+        ("a.com", "fiable"),
+        ("b.com", "a_verifier"),
+        ("c.com", "ecarte"),
+    ] {
+        let id = seed.lead(&profile, domain, "new", 1.0, 1).await;
+        sqlx::query("UPDATE leads SET confidence = 50, verdict = $2 WHERE id = $1::uuid")
+            .bind(&id)
+            .bind(verdict)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let api = Api::new(pool.clone()).await;
+        let (_, body) = api.get(&format!("/api/v1/leads/{id}")).await;
+        assert_eq!(body["data"]["lead"]["verdict"], verdict);
+    }
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn detail_lists_the_qualification_results_with_labels_and_providers(pool: PgPool) {
+    let seed = Seed { pool: pool.clone() };
+    let profile = seed.qualified_profile("keycloak-ops").await;
+    let lead = seed.lead(&profile, "detail.com", "new", 8.0, 1).await;
+    let provider = seed.provider("Laya", "gemma_laya").await;
+    seed.result(
+        &lead,
+        SeededResult {
+            agent: "maturite",
+            provider: Some(&provider),
+            status: "invalid",
+            answers: json!({}),
+            score: None,
+            error: Some("Réponse non conforme au contrat : question `maturite` : pas de réponse"),
+        },
+    )
+    .await;
+    seed.result(
+        &lead,
+        SeededResult {
+            agent: "pertinence",
+            provider: Some(&provider),
+            status: "valid",
+            answers: json!({"pertinence": {"type": "choice", "choice": "moyenne", "confidence": 0.8,
+                "probabilities": {"forte": 0.25, "moyenne": 0.5, "faible": 0.25}}}),
+            score: Some(0.5),
+            error: None,
+        },
+    )
+    .await;
+    let api = Api::new(pool).await;
+
+    let (status, body) = api.get(&format!("/api/v1/leads/{lead}")).await;
+
+    assert_eq!(status, StatusCode::OK);
+    let results = body["data"]["qualification_results"].as_array().unwrap();
+    assert_eq!(results.len(), 2);
+    let first = &results[0];
+    assert_eq!(first["agent_id"], "pertinence");
+    assert_eq!(first["agent_name"], "Pertinence");
+    assert_eq!(first["provider_name"], "Laya");
+    assert_eq!(first["provider_id"], provider);
+    assert_eq!(first["model"], "gemma_laya");
+    assert_eq!(first["status"], "valid");
+    assert_eq!(first["agent_score"], 0.5);
+    assert!(first["error"].is_null());
+    let answer = &first["answers"][0];
+    assert_eq!(answer["question_id"], "pertinence");
+    assert_eq!(answer["wording"], "Pertinent ?");
+    assert_eq!(answer["choice"], "moyenne");
+    assert_eq!(answer["choice_label"], "Moyenne");
+    assert_eq!(answer["confidence"], 0.8);
+    assert_eq!(answer["probabilities"][0]["value"], "forte");
+    assert_eq!(answer["probabilities"][0]["label"], "Forte");
+    assert_eq!(answer["probabilities"][0]["probability"], 0.25);
+    assert_eq!(answer["probabilities"][1]["probability"], 0.5);
+    let invalid = &results[1];
+    assert_eq!(invalid["agent_id"], "maturite");
+    assert_eq!(invalid["agent_name"], "Maturité");
+    assert_eq!(invalid["status"], "invalid");
+    assert!(invalid["agent_score"].is_null());
+    assert_eq!(invalid["answers"].as_array().unwrap().len(), 0);
+    assert!(invalid["error"].as_str().unwrap().contains("maturite"));
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_lead_without_results_has_an_empty_qualification_list(pool: PgPool) {
+    let (seed, profile) = listing_fixture(&pool).await;
+    let lead = seed.lead(&profile, "bare.com", "new", 1.0, 1).await;
+    let api = Api::new(pool).await;
+
+    let (status, body) = api.get(&format!("/api/v1/leads/{lead}")).await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["data"]["qualification_results"], json!([]));
+}
+
 #[sqlx::test(migrations = "../../migrations")]
 async fn unknown_or_malformed_lead_ids_are_not_served(pool: PgPool) {
     let api = Api::new(pool).await;

@@ -4,7 +4,7 @@ use uuid::Uuid;
 
 use crate::{
     Lead, LeadId, LeadStatus, NormalizedDomain, ProfileId, ProfileName, ProfileSummary,
-    RevisionNumber, Score,
+    RevisionNumber, Score, domain::qualification::Verdict,
 };
 
 #[derive(Debug, Clone, sqlx::FromRow)]
@@ -15,6 +15,9 @@ pub struct LeadRow {
     pub status: String,
     pub score: f64,
     pub score_breakdown: serde_json::Value,
+    pub confidence: Option<f64>,
+    pub verdict: Option<String>,
+    pub qualified_at: Option<DateTime<Utc>>,
     pub first_seen_at: DateTime<Utc>,
     pub last_seen_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
@@ -36,6 +39,14 @@ impl TryFrom<LeadRow> for Lead {
             .map_err(|_| CoreError::Internal("stored lead score is invalid".to_owned()))?;
         let score_breakdown = serde_json::from_value(row.score_breakdown)
             .map_err(|_| CoreError::Internal("stored score breakdown is invalid".to_owned()))?;
+        let verdict = row
+            .verdict
+            .as_deref()
+            .map(|raw| {
+                Verdict::parse(raw)
+                    .ok_or_else(|| CoreError::Internal("stored lead verdict is invalid".to_owned()))
+            })
+            .transpose()?;
         Ok(Self {
             id: LeadId(row.id),
             profile_id: ProfileId(row.profile_id),
@@ -43,6 +54,9 @@ impl TryFrom<LeadRow> for Lead {
             status,
             score,
             score_breakdown,
+            confidence: row.confidence,
+            verdict,
+            qualified_at: row.qualified_at,
             first_seen_at: row.first_seen_at,
             last_seen_at: row.last_seen_at,
             updated_at: row.updated_at,

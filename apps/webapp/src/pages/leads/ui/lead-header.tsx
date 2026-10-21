@@ -2,7 +2,9 @@ import { Button } from '#/components/ui/button'
 import { formatDateTime, formatScore } from '#/pages/leads/lib/format'
 import { leadStatusLabel } from '#/pages/leads/lib/labels'
 import type { Lead, LeadStatus } from '#/pages/leads/lib/types'
+import { formatConfidence } from '#/pages/leads/lib/verdict'
 import { LeadStatusBadge } from './lead-status-badge'
+import { VerdictBadge } from './verdict-badge'
 
 interface LeadHeaderProps {
 	lead: Lead
@@ -24,6 +26,7 @@ export function LeadHeader({
 			<div className="flex flex-wrap items-center gap-3">
 				<h1 className="text-2xl font-bold tracking-tight">{lead.domain}</h1>
 				<LeadStatusBadge status={lead.status} />
+				<VerdictBadge verdict={lead.verdict} />
 			</div>
 			<dl className="grid gap-x-8 gap-y-1 text-sm sm:grid-cols-2 lg:grid-cols-4">
 				<div>
@@ -33,6 +36,10 @@ export function LeadHeader({
 				<div>
 					<dt className="text-muted-foreground">Score</dt>
 					<dd className="font-mono">{formatScore(lead.score)}</dd>
+				</div>
+				<div>
+					<dt className="text-muted-foreground">Confiance</dt>
+					<dd className="font-mono">{formatConfidence(lead.confidence)}</dd>
 				</div>
 				<div>
 					<dt className="text-muted-foreground">Première détection</dt>

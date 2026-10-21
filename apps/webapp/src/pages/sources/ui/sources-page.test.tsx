@@ -105,6 +105,7 @@ const LISTENERS: Source[] = [
 		backlog: 3,
 	}),
 	listening('role_guess', { state: 'idle', backlog: 5 }),
+	listening('qualification', { backlog: 7 }),
 ]
 
 const STALE_LISTENER = listening('dns_cname', {
@@ -281,6 +282,11 @@ describe('SourcesPage', () => {
 				row('Page publique').getByText('En attente : 3 cibles de contact'),
 			).toBeTruthy()
 			expect(row('Sonde HTTP').getByText('—')).toBeTruthy()
+			expect(
+				row('Qualification des leads').getByText(
+					'En attente : 7 leads à qualifier',
+				),
+			).toBeTruthy()
 		})
 
 		it('flags a silent listener with its last update and an explanation', () => {

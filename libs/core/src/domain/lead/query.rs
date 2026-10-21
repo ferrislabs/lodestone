@@ -1,6 +1,7 @@
 use crate::domain::{
     lead::{Assessment, ContactEmail, Lead, LeadStatus, Signal},
-    profile::{Profile, ProfileId, ProfileName, RevisionNumber},
+    profile::{Profile, ProfileId, ProfileName, RevisionNumber, definition::QualificationAgent},
+    qualification::QualificationResult,
     values::SignalKind,
 };
 
@@ -68,6 +69,8 @@ pub struct LeadDetail {
     pub signals: Vec<Signal>,
     pub contacts: Vec<ContactEmail>,
     pub assessments: Vec<Assessment>,
+    pub qualification_results: Vec<QualificationResult>,
+    pub qualification_agents: Vec<QualificationAgent>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

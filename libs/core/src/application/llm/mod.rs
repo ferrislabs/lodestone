@@ -12,8 +12,8 @@ use crate::{
     domain::llm::{
         ProviderDefinition, ProviderKind, ReasoningEffort,
         provider::{
-            LlmProviderRecord, LlmProviderRepository, ProviderId, ResolvedProvider, SecretCipher,
-            Tier, TierError, TokenPricing,
+            CipherError, LlmProviderRecord, LlmProviderRepository, ProviderId, ResolvedProvider,
+            SecretCipher, Tier, TierError, TokenPricing,
         },
     },
 };
@@ -225,6 +225,15 @@ impl LodestoneUseCase {
         repo.tier_provider(tier).await
     }
 
+    #[transactional(llm_provider)]
+    async fn load_provider_record(
+        &self,
+        id: ProviderId,
+    ) -> Result<Option<LlmProviderRecord>, CoreError> {
+        let mut repo = llm_provider_repository;
+        repo.find(id).await
+    }
+
     pub async fn resolve_llm_tier<C: SecretCipher>(
         &self,
         tier: Tier,
@@ -237,23 +246,50 @@ impl LodestoneUseCase {
         if !record.enabled {
             return Err(TierError::Disabled(tier));
         }
-        let api_key = record
-            .api_key
-            .as_ref()
-            .map(|sealed| cipher.open(sealed, record.id.0.as_bytes()))
-            .transpose()?;
-        Ok(ResolvedProvider {
-            id: record.id,
-            definition: ProviderDefinition {
-                kind: record.kind,
-                base_url: record.base_url,
-                model: record.model,
-                api_key,
-                timeout: record.timeout,
-                reasoning_effort: record.reasoning_effort,
-            },
-            max_retries: record.max_retries,
-            pricing: record.pricing,
-        })
+        Ok(resolve_record(record, cipher)?)
     }
+
+    pub async fn resolve_llm_provider<C: SecretCipher>(
+        &self,
+        id: ProviderId,
+        cipher: &C,
+    ) -> Result<Option<ResolvedProvider>, CoreError> {
+        let Some(record) = self.load_provider_record(id).await? else {
+            return Ok(None);
+        };
+        if !record.enabled {
+            return Ok(None);
+        }
+        match resolve_record(record, cipher) {
+            Ok(resolved) => Ok(Some(resolved)),
+            Err(error) => {
+                tracing::warn!(provider = %id, %error, "llm provider key could not be opened");
+                Ok(None)
+            }
+        }
+    }
+}
+
+fn resolve_record<C: SecretCipher>(
+    record: LlmProviderRecord,
+    cipher: &C,
+) -> Result<ResolvedProvider, CipherError> {
+    let api_key = record
+        .api_key
+        .as_ref()
+        .map(|sealed| cipher.open(sealed, record.id.0.as_bytes()))
+        .transpose()?;
+    Ok(ResolvedProvider {
+        id: record.id,
+        definition: ProviderDefinition {
+            kind: record.kind,
+            base_url: record.base_url,
+            model: record.model,
+            api_key,
+            timeout: record.timeout,
+            reasoning_effort: record.reasoning_effort,
+        },
+        max_retries: record.max_retries,
+        pricing: record.pricing,
+    })
 }

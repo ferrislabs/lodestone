@@ -6,6 +6,7 @@ import type { LeadDetailData, LeadStatus } from '#/pages/leads/lib/types'
 import { AssessmentsList } from './assessments-list'
 import { ContactsList } from './contacts-list'
 import { LeadHeader } from './lead-header'
+import { QualificationResults } from './qualification-results'
 import { ScoreBreakdown } from './score-breakdown'
 import { SignalsList } from './signals-list'
 
@@ -59,6 +60,7 @@ export function LeadDetail({
 						changing={changing}
 						changeError={changeError}
 					/>
+					<QualificationResults results={detail.qualification_results} />
 					<ScoreBreakdown contributions={detail.score_breakdown} />
 					<SignalsList signals={detail.signals} />
 					<ContactsList contacts={detail.contacts} />

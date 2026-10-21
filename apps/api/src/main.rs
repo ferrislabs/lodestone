@@ -4,7 +4,7 @@ use api::{
     fetchers::ct_fetch_settings,
     internal_router::internal_router,
     jobs::{Intervals, JobRouter, LlmRuntime, WiredSources, schedule_wired_sources},
-    listeners::{ContactStep, CtStep, HostStep},
+    listeners::{ContactStep, CtStep, HostStep, QualificationStep},
     logger::init_tracing_and_logging,
     router::router,
     webhook::WebhookSink,
@@ -343,10 +343,21 @@ async fn main() -> Result<(), Box<dyn Error>> {
     );
     let role_guess_listener = Listener::new(
         ContactStep {
-            usecase,
+            usecase: usecase.clone(),
             finder: role_guess,
             targets: PgContactTargets::new(pool.clone()),
             settings: contact_settings,
+        },
+        pool.clone(),
+        instance.clone(),
+        listener_settings,
+    );
+    let qualification_listener = Listener::new(
+        QualificationStep {
+            usecase,
+            cipher: AesGcmCipher::new(&llm_config.encryption_key)?,
+            cache: PgLlmCache::new(pool.clone()),
+            budget_cents: llm_config.run_budget_cents,
         },
         pool,
         instance,
@@ -376,7 +387,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
         probe_listener.run(shutdown_rx.clone()),
         security_txt_listener.run(shutdown_rx.clone()),
         public_page_listener.run(shutdown_rx.clone()),
-        role_guess_listener.run(shutdown_rx),
+        role_guess_listener.run(shutdown_rx.clone()),
+        qualification_listener.run(shutdown_rx),
     );
 
     observability.shutdown();

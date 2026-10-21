@@ -130,12 +130,30 @@ where
     P: LlmProvider,
 {
     let schema = output_schema::<T>()?;
+    call_parsed(provider, prompt, &schema, settings, budget, |output| {
+        serde_json::from_value::<T>(output).map_err(|error| error.to_string())
+    })
+    .await
+}
+
+async fn call_parsed<T, P, F>(
+    provider: &P,
+    prompt: Prompt<'_>,
+    schema: &serde_json::Value,
+    settings: CallSettings,
+    budget: &mut RunBudget,
+    parse: F,
+) -> Result<Structured<T>, LlmCallError>
+where
+    P: LlmProvider,
+    F: Fn(serde_json::Value) -> Result<T, String>,
+{
     let request = LlmRequest {
         system: prompt.system,
         instruction: prompt.instruction,
         documents: prompt.documents,
         schema_name: "output",
-        schema: &schema,
+        schema,
         max_tokens: prompt.max_tokens,
     };
     let mut attempt: u32 = 0;
@@ -146,7 +164,7 @@ where
         let failure = match provider.complete(&request).await {
             Ok(response) => {
                 budget.charge(response.usage, settings.pricing);
-                match serde_json::from_value::<T>(response.output) {
+                match parse(response.output) {
                     Ok(value) => {
                         return Ok(Structured {
                             value,
@@ -155,7 +173,7 @@ where
                             from_cache: false,
                         });
                     }
-                    Err(error) => LlmError::InvalidOutput(error.to_string()),
+                    Err(message) => LlmError::InvalidOutput(message),
                 }
             }
             Err(error) => error,
@@ -170,6 +188,58 @@ where
         tokio::time::sleep(backoff(&settings, attempt, &failure)).await;
         attempt += 1;
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct SchemaCall<'a> {
+    pub scope: &'a CacheScope,
+    pub prompt: Prompt<'a>,
+    pub schema: &'a serde_json::Value,
+}
+
+pub async fn call_with_schema<P, C, A>(
+    provider: &P,
+    cache: &C,
+    call: SchemaCall<'_>,
+    accept: A,
+    settings: CallSettings,
+    budget: &mut RunBudget,
+) -> Result<Structured<serde_json::Value>, LlmCallError>
+where
+    P: LlmProvider,
+    C: LlmCache,
+    A: Fn(&serde_json::Value) -> bool,
+{
+    let SchemaCall {
+        scope,
+        prompt,
+        schema,
+    } = call;
+    let key = cache_key(scope, &prompt, schema);
+    match cache.get(&key).await {
+        Ok(Some(hit)) if accept(&hit.output) => {
+            return Ok(Structured {
+                value: hit.output,
+                model: hit.model,
+                usage: TokenUsage::default(),
+                from_cache: true,
+            });
+        }
+        Ok(_) => {}
+        Err(error) => warn!(%error, "llm cache read failed"),
+    }
+    let fresh = call_parsed(provider, prompt, schema, settings, budget, Ok).await?;
+    if accept(&fresh.value) {
+        let entry = CachedOutput {
+            output: fresh.value.clone(),
+            model: fresh.model.clone(),
+            created_at: Utc::now(),
+        };
+        if let Err(error) = cache.put(&key, scope, &entry).await {
+            warn!(%error, "llm cache write failed");
+        }
+    }
+    Ok(fresh)
 }
 
 fn hash_field(context: &mut Context, field: &[u8]) {
@@ -495,5 +565,162 @@ mod tests {
         );
         assert!((budget.spent_cents() - 2_100.0).abs() < 1e-9);
         assert!(budget.is_exhausted());
+    }
+
+    #[derive(Default)]
+    struct MemoryCache {
+        entries: Mutex<Vec<(Vec<u8>, CachedOutput)>>,
+    }
+
+    impl LlmCache for MemoryCache {
+        async fn get(&self, key: &[u8]) -> Result<Option<CachedOutput>, common::CoreError> {
+            Ok(self
+                .entries
+                .lock()
+                .unwrap()
+                .iter()
+                .find(|(stored, _)| stored == key)
+                .map(|(_, entry)| entry.clone()))
+        }
+
+        async fn put(
+            &self,
+            key: &[u8],
+            _scope: &CacheScope,
+            entry: &CachedOutput,
+        ) -> Result<(), common::CoreError> {
+            self.entries
+                .lock()
+                .unwrap()
+                .push((key.to_vec(), entry.clone()));
+            Ok(())
+        }
+    }
+
+    fn dynamic_schema() -> serde_json::Value {
+        serde_json::json!({"type": "object", "properties": {"free": {"type": "string"}}})
+    }
+
+    fn with_schema<'a>(scope: &'a CacheScope, schema: &'a serde_json::Value) -> SchemaCall<'a> {
+        SchemaCall {
+            scope,
+            prompt: prompt(),
+            schema,
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_dynamic_schema_is_sent_to_the_provider_and_the_raw_value_returned() {
+        let provider = Scripted::new(vec![Ok(serde_json::json!({"free": "text"}))]);
+        let cache = MemoryCache::default();
+        let schema = dynamic_schema();
+        let scope = scope_of(Some("agent"));
+        let mut budget = budget(10);
+        let result = call_with_schema(
+            &provider,
+            &cache,
+            with_schema(&scope, &schema),
+            |_| true,
+            settings(0),
+            &mut budget,
+        )
+        .await
+        .unwrap();
+        assert_eq!(result.value, serde_json::json!({"free": "text"}));
+        assert!(!result.from_cache);
+        assert_eq!(provider.schemas.lock().unwrap()[0], schema);
+        assert!((budget.spent_cents() - 0.45).abs() < 1e-9);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_accepted_answer_is_cached_and_served_without_a_call() {
+        let provider = Scripted::new(vec![Ok(serde_json::json!({"free": "text"}))]);
+        let cache = MemoryCache::default();
+        let schema = dynamic_schema();
+        let scope = scope_of(Some("agent"));
+        let mut budget = budget(10);
+        for expected_cache in [false, true] {
+            let result = call_with_schema(
+                &provider,
+                &cache,
+                with_schema(&scope, &schema),
+                |_| true,
+                settings(0),
+                &mut budget,
+            )
+            .await
+            .unwrap();
+            assert_eq!(result.from_cache, expected_cache);
+        }
+        assert_eq!(provider.calls(), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_rejected_answer_is_never_cached() {
+        let provider = Scripted::new(vec![
+            Ok(serde_json::json!({"free": "bad"})),
+            Ok(serde_json::json!({"free": "bad"})),
+        ]);
+        let cache = MemoryCache::default();
+        let schema = dynamic_schema();
+        let scope = scope_of(Some("agent"));
+        let mut budget = budget(10);
+        for _ in 0..2 {
+            let result = call_with_schema(
+                &provider,
+                &cache,
+                with_schema(&scope, &schema),
+                |_| false,
+                settings(0),
+                &mut budget,
+            )
+            .await
+            .unwrap();
+            assert!(!result.from_cache);
+        }
+        assert_eq!(provider.calls(), 2);
+        assert!(cache.entries.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_dynamic_schema_call_respects_budget_and_retries() {
+        let provider = Scripted::new(vec![Err(LlmError::Timeout), Ok(serde_json::json!({}))]);
+        let cache = MemoryCache::default();
+        let schema = dynamic_schema();
+        let scope = scope_of(None);
+        let mut small = budget(1);
+        let retried = call_with_schema(
+            &provider,
+            &cache,
+            with_schema(&scope, &schema),
+            |_| true,
+            settings(1),
+            &mut small,
+        )
+        .await;
+        assert!(retried.is_ok());
+        assert_eq!(provider.calls(), 2);
+        let mut spent = budget(1);
+        spent.charge(
+            TokenUsage {
+                input_tokens: 10_000_000,
+                output_tokens: 0,
+            },
+            TokenPricing {
+                input_cents_per_mtok: 100,
+                output_cents_per_mtok: 0,
+            },
+        );
+        let other = scope_of(Some("other"));
+        let exhausted = call_with_schema(
+            &provider,
+            &cache,
+            with_schema(&other, &schema),
+            |_| true,
+            settings(0),
+            &mut spent,
+        )
+        .await;
+        assert_eq!(exhausted, Err(LlmCallError::BudgetExhausted));
     }
 }

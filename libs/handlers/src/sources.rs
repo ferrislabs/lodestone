@@ -3,7 +3,8 @@ use axum::{
     extract::{Path, State},
 };
 use lodestone_core::{
-    JobStatus, ListenerStatus, ScheduledJob, SourceName, SourceRunRecord, is_continuous,
+    JobStatus, ListenerStatus, QUALIFICATION_LISTENER, ScheduledJob, SourceName, SourceRunRecord,
+    is_continuous,
     schedule::{schedule_key, source_of_schedule_key},
 };
 use serde::Serialize;
@@ -19,6 +20,7 @@ use crate::{
 const MAX_SOURCE_NAME_LEN: usize = 64;
 const SOURCE_JOB_KIND: &str = "source.run";
 const QUALIFICATION_JOB_KIND: &str = "llm.qualify";
+const QUALIFICATION_LISTENER_KIND: &str = "listener.qualification";
 
 #[derive(Debug, Serialize, PartialEq, Eq, ToSchema)]
 pub struct SourceRunDto {
@@ -63,7 +65,7 @@ pub struct ListenerDto {
     pub last_error: Option<String>,
     pub items_total: u64,
     pub signals_total: u64,
-    /// Work waiting: lag in tiles (certificate transparency), due hosts or due contact targets.
+    /// Work waiting: lag in tiles (certificate transparency), due hosts, due contact targets or leads to qualify.
     pub backlog: Option<u64>,
     /// Last time the holder reported in; a listener silent for too long is `stale`.
     #[schema(format = DateTime)]
@@ -104,7 +106,7 @@ pub struct SourceDto {
     pub mode: String,
     /// Listener state of a continuous source; absent for scheduled sources.
     pub listener: Option<ListenerDto>,
-    /// Job kind: `source.run` or `llm.qualify`.
+    /// Job kind: `source.run`, `llm.qualify` or `listener.qualification`.
     pub kind: String,
     /// Translation key of the source label.
     pub label_key: String,
@@ -158,16 +160,17 @@ impl SourceDto {
     }
 
     fn continuous(
-        source: SourceName,
+        name: &str,
+        kind: &str,
         status: Option<&ListenerStatus>,
         runs: &[&SourceRunRecord],
     ) -> Self {
         let listener = ListenerDto::from_status(status);
         Self {
-            source: source.as_str().to_owned(),
+            source: name.to_owned(),
             mode: "continuous".to_owned(),
-            kind: kind_of(source).to_owned(),
-            label_key: label_key(source),
+            kind: kind.to_owned(),
+            label_key: format!("source.{name}"),
             status: listener.state.clone(),
             unavailable_reason: None,
             next_run_at: None,
@@ -245,7 +248,7 @@ pub async fn list_sources(
                 let status = listeners
                     .iter()
                     .find(|listener| listener.name == source.as_str());
-                return SourceDto::continuous(source, status, &runs);
+                return SourceDto::continuous(source.as_str(), kind_of(source), status, &runs);
             }
             match schedule
                 .jobs
@@ -256,6 +259,14 @@ pub async fn list_sources(
                 None => SourceDto::unavailable(source, &runs),
             }
         })
+        .chain(std::iter::once(SourceDto::continuous(
+            QUALIFICATION_LISTENER,
+            QUALIFICATION_LISTENER_KIND,
+            listeners
+                .iter()
+                .find(|listener| listener.name == QUALIFICATION_LISTENER),
+            &[],
+        )))
         .collect();
     Ok(Response::OK(sources))
 }

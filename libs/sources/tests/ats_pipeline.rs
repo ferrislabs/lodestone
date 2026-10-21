@@ -1,6 +1,5 @@
 use std::{
     collections::HashMap,
-    num::NonZeroU32,
     sync::{Arc, Mutex},
     time::Duration,
 };
@@ -8,15 +7,12 @@ use std::{
 use chrono::{DateTime, TimeZone, Utc};
 use lodestone_core::{
     Clock, CreateProfileCommand, FetchError, FetchRequest, FetchResponse, Fetcher, LeadRepository,
-    LlmError, LlmProvider, LlmRequest, LlmResponse, LodestoneUseCase, NormalizedDomain,
-    Observation, ProfileId, ProfileName, Provenance, SignalKind, SignalRepository, SourceName,
-    SuppressionTarget, TokenPricing, UnitInterval, ValidatedProfile,
+    LodestoneUseCase, NormalizedDomain, Observation, ProfileId, ProfileName, Provenance,
+    SignalKind, SignalRepository, SourceName, SuppressionTarget, UnitInterval, ValidatedProfile,
     infrastructure::{
         contact_target::postgres::PgAtsTargets, lead::postgres::PgLeadRepository,
-        llm_cache::postgres::PgLlmCache, postgres::with_tx, signal::postgres::PgSignalRepository,
+        postgres::with_tx, signal::postgres::PgSignalRepository,
     },
-    llm::gateway::CallSettings,
-    triage::TriageSettings,
 };
 use serde_json::json;
 use sources::ats::{AtsSettings, AtsSource};
@@ -110,29 +106,6 @@ fn site() -> Arc<SiteFetcher> {
     ])
 }
 
-struct NoProvider;
-
-impl LlmProvider for NoProvider {
-    async fn complete(&self, _request: &LlmRequest<'_>) -> Result<LlmResponse, LlmError> {
-        Err(LlmError::Refused)
-    }
-}
-
-fn triage_settings() -> TriageSettings {
-    TriageSettings {
-        call: CallSettings {
-            max_retries: 0,
-            pricing: TokenPricing {
-                input_cents_per_mtok: 0,
-                output_cents_per_mtok: 0,
-            },
-            base_delay: Duration::ZERO,
-        },
-        max_tokens: 512,
-        budget_cents: NonZeroU32::new(10).unwrap(),
-    }
-}
-
 fn ats_settings() -> AtsSettings {
     AtsSettings {
         batch_size: 20,
@@ -220,13 +193,7 @@ async fn run(
         ats_settings(),
     );
     LodestoneUseCase::new(pool.clone())
-        .run_triage(
-            &source,
-            None::<&NoProvider>,
-            &PgLlmCache::new(pool.clone()),
-            triage_settings(),
-            clock,
-        )
+        .run_triage(&source, clock)
         .await
         .unwrap()
 }

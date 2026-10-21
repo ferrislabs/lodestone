@@ -4,6 +4,7 @@ pub mod application;
 pub(crate) mod domain;
 pub mod infrastructure;
 
+pub use application::evaluation::QUALIFICATION_LISTENER;
 pub use application::*;
 pub use domain::{
     NormalizedDomain, NormalizedDomainError, User, UserId,
@@ -72,6 +73,13 @@ pub use domain::{
         DraftMessage, EvidenceProblem, EvidenceQuote, PromptTemplate, QUALIFICATION_V1,
         QualificationOutput, TRIAGE_V1, TriageVerdict, market_context, market_context_with,
         verified_evidence,
+    },
+    qualification::{
+        Answer, Completion, Judgement, QualificationResult, ResultId, ResultStatus, ValidAnswers,
+        Verdict, Violation, Violations, agent_score, judge, lead_confidence,
+        ports::QualificationRepository,
+        prompt::{AgentPrompt, build as agent_prompt, lead_document, with_violations},
+        question_score, validate_answers, verdict_for,
     },
     run::{Run, RunId, RunOutcome, RunStatus, ports::RunRepository},
     scoring::{DISTINCT_SIGNALS_FACTOR, ScoreBreakdown, ScoreContribution, score},

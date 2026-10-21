@@ -6,7 +6,8 @@ use axum::{
 };
 use lodestone_core::{
     Assessment, ContactEmail, DraftMessage, DraftReview, DraftStatus, Lead, LeadDetail, LeadId,
-    LeadQuery, LeadSort, LeadStatus, Profile, ProfileId, ScoreContribution, Signal, SignalKind,
+    LeadQuery, LeadSort, LeadStatus, LlmProviderRecord, Profile, ProfileId, QualificationResult,
+    ResultStatus, ScoreContribution, Signal, SignalKind, Verdict, definition::QualificationAgent,
 };
 use pagination::{MAX_PAGE, MAX_PER_PAGE, Page, PaginationMetadata, PaginationParams};
 use serde::{Deserialize, Serialize};
@@ -56,6 +57,26 @@ impl From<LeadStatusDto> for LeadStatus {
     }
 }
 
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq, ToSchema)]
+pub enum VerdictDto {
+    #[serde(rename = "fiable")]
+    Reliable,
+    #[serde(rename = "a_verifier")]
+    ToCheck,
+    #[serde(rename = "ecarte")]
+    Discarded,
+}
+
+impl From<Verdict> for VerdictDto {
+    fn from(verdict: Verdict) -> Self {
+        match verdict {
+            Verdict::Reliable => Self::Reliable,
+            Verdict::ToCheck => Self::ToCheck,
+            Verdict::Discarded => Self::Discarded,
+        }
+    }
+}
+
 #[derive(Debug, Serialize, PartialEq, ToSchema)]
 pub struct LeadDto {
     pub id: String,
@@ -63,6 +84,12 @@ pub struct LeadDto {
     pub domain: String,
     pub status: LeadStatusDto,
     pub score: f64,
+    /// Weighted confidence in percent from 0 to 100; absent until a qualification agent answered validly.
+    pub confidence: Option<f64>,
+    /// One of `fiable`, `a_verifier`, `ecarte`; absent while the verdict is pending.
+    pub verdict: Option<VerdictDto>,
+    #[schema(format = DateTime)]
+    pub qualified_at: Option<String>,
     #[schema(format = DateTime)]
     pub first_seen_at: String,
     #[schema(format = DateTime)]
@@ -79,6 +106,9 @@ impl LeadDto {
             domain: lead.domain.as_str().to_owned(),
             status: lead.status.into(),
             score: lead.score.get(),
+            confidence: lead.confidence,
+            verdict: lead.verdict.map(VerdictDto::from),
+            qualified_at: lead.qualified_at.map(|at| at.to_rfc3339()),
             first_seen_at: lead.first_seen_at.to_rfc3339(),
             last_seen_at: lead.last_seen_at.to_rfc3339(),
             updated_at: lead.updated_at.to_rfc3339(),
@@ -269,17 +299,148 @@ impl From<&ScoreContribution> for ScoreContributionDto {
 }
 
 #[derive(Debug, Serialize, PartialEq, ToSchema)]
+pub struct ProbabilityDto {
+    pub value: String,
+    pub label: String,
+    pub probability: f64,
+}
+
+#[derive(Debug, Serialize, PartialEq, ToSchema)]
+pub struct QualificationAnswerDto {
+    pub question_id: String,
+    pub wording: String,
+    pub choice: String,
+    pub choice_label: String,
+    pub confidence: f64,
+    pub probabilities: Vec<ProbabilityDto>,
+}
+
+#[derive(Debug, Serialize, PartialEq, ToSchema)]
+pub struct QualificationResultDto {
+    pub agent_id: String,
+    pub agent_name: String,
+    pub provider_id: Option<String>,
+    pub provider_name: Option<String>,
+    pub model: String,
+    /// One of `valid`, `invalid`.
+    pub status: String,
+    /// Agent score from 0 to 1, absent when the result is invalid.
+    pub agent_score: Option<f64>,
+    pub answers: Vec<QualificationAnswerDto>,
+    pub error: Option<String>,
+    #[schema(format = DateTime)]
+    pub created_at: String,
+}
+
+fn answers_of(
+    result: &QualificationResult,
+    agent: Option<&QualificationAgent>,
+) -> Vec<QualificationAnswerDto> {
+    let Some(agent) = agent else {
+        return Vec::new();
+    };
+    agent
+        .questions
+        .iter()
+        .filter_map(|question| {
+            let answer = result.answers.get(&question.id)?;
+            let choice = answer.get("choice")?.as_str()?;
+            let probabilities = answer.get("probabilities")?.as_object()?;
+            Some(QualificationAnswerDto {
+                question_id: question.id.clone(),
+                wording: question.wording.clone(),
+                choice: choice.to_owned(),
+                choice_label: question
+                    .options
+                    .iter()
+                    .find(|option| option.value == choice)
+                    .map_or_else(|| choice.to_owned(), |option| option.label.clone()),
+                confidence: answer
+                    .get("confidence")
+                    .and_then(serde_json::Value::as_f64)
+                    .unwrap_or_default(),
+                probabilities: question
+                    .options
+                    .iter()
+                    .map(|option| ProbabilityDto {
+                        value: option.value.clone(),
+                        label: option.label.clone(),
+                        probability: probabilities
+                            .get(&option.value)
+                            .and_then(serde_json::Value::as_f64)
+                            .unwrap_or_default(),
+                    })
+                    .collect(),
+            })
+        })
+        .collect()
+}
+
+impl QualificationResultDto {
+    fn new(
+        result: &QualificationResult,
+        agents: &[QualificationAgent],
+        providers: &[LlmProviderRecord],
+    ) -> Self {
+        let agent = agents.iter().find(|agent| agent.id == result.agent_id);
+        let provider = result
+            .provider_id
+            .and_then(|id| providers.iter().find(|record| record.id == id));
+        Self {
+            agent_id: result.agent_id.as_str().to_owned(),
+            agent_name: agent.map_or_else(
+                || result.agent_id.as_str().to_owned(),
+                |agent| agent.name.clone(),
+            ),
+            provider_id: result.provider_id.map(|id| id.to_string()),
+            provider_name: provider.map(|record| record.name.clone()),
+            model: result.model.clone(),
+            status: result.status.as_str().to_owned(),
+            agent_score: match result.status {
+                ResultStatus::Valid => result.agent_score,
+                ResultStatus::Invalid => None,
+            },
+            answers: answers_of(result, agent),
+            error: result.error.clone(),
+            created_at: result.created_at.to_rfc3339(),
+        }
+    }
+}
+
+#[derive(Debug, Serialize, PartialEq, ToSchema)]
 pub struct LeadDetailDto {
     pub lead: LeadDto,
     pub score_breakdown: Vec<ScoreContributionDto>,
     pub signals: Vec<SignalDto>,
     pub contacts: Vec<ContactDto>,
     pub assessments: Vec<AssessmentDto>,
+    /// Latest result of every qualification agent of the revision last used, in profile order.
+    pub qualification_results: Vec<QualificationResultDto>,
 }
 
-impl From<&LeadDetail> for LeadDetailDto {
-    fn from(detail: &LeadDetail) -> Self {
+fn ordered_results(
+    detail: &LeadDetail,
+    providers: &[LlmProviderRecord],
+) -> Vec<QualificationResultDto> {
+    let position = |result: &QualificationResult| {
+        detail
+            .qualification_agents
+            .iter()
+            .position(|agent| agent.id == result.agent_id)
+            .unwrap_or(usize::MAX)
+    };
+    let mut results: Vec<&QualificationResult> = detail.qualification_results.iter().collect();
+    results.sort_by_key(|result| position(result));
+    results
+        .into_iter()
+        .map(|result| QualificationResultDto::new(result, &detail.qualification_agents, providers))
+        .collect()
+}
+
+impl LeadDetailDto {
+    pub fn new(detail: &LeadDetail, providers: &[LlmProviderRecord]) -> Self {
         Self {
+            qualification_results: ordered_results(detail, providers),
             lead: LeadDto::new(&detail.lead, &detail.profile),
             score_breakdown: detail
                 .lead
@@ -487,7 +648,12 @@ pub async fn lead_detail(
     Path(lead_id_raw): Path<String>,
 ) -> Result<Response<LeadDetailDto>, ApiError> {
     let detail = state.usecase.lead_detail(lead_id(&lead_id_raw)?).await?;
-    Ok(Response::OK(LeadDetailDto::from(&detail)))
+    let providers = if detail.qualification_results.is_empty() {
+        Vec::new()
+    } else {
+        state.usecase.list_llm_providers().await?
+    };
+    Ok(Response::OK(LeadDetailDto::new(&detail, &providers)))
 }
 
 #[utoipa::path(
