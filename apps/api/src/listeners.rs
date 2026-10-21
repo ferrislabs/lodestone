@@ -9,6 +9,7 @@ use chrono::{DateTime, Utc};
 use common::CoreError;
 use dns::HickoryResolver;
 use fetch::PoliteFetcher;
+use handlers::state::Ecosystem;
 use llm::any::AnyProvider;
 use lodestone_core::{
     CompanyBuilder, ContactFinder, LlmError, LodestoneUseCase, ProviderDefinition, Source,
@@ -28,8 +29,7 @@ use lodestone_core::{
 };
 use sources::{
     contact_pages::PublicPageFinder, ct::CtSource, dns_cname::DnsCnameSource,
-    ecosystem::EcosystemModules, http_probe::HttpProbeSource, role_guess::RoleGuessFinder,
-    security_txt::SecurityTxtFinder,
+    http_probe::HttpProbeSource, role_guess::RoleGuessFinder, security_txt::SecurityTxtFinder,
 };
 use tracing::info;
 
@@ -207,7 +207,7 @@ impl<B: CompanyBuilder> ListenerStep for CompanyStep<B> {
 
 pub struct InspectionStep {
     pub usecase: LodestoneUseCase,
-    pub modules: Arc<EcosystemModules<PoliteFetcher>>,
+    pub modules: Arc<Ecosystem>,
     pub settings: InspectionRunSettings,
 }
 

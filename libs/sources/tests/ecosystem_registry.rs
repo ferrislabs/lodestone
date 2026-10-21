@@ -13,9 +13,10 @@ use chrono::{DateTime, Duration as ChronoDuration, TimeZone, Utc};
 use fetch::{FetchSettings, PoliteFetcher};
 use httpmock::{Method::GET, MockServer};
 use lodestone_core::{
-    Clock, CreateProfileCommand, EcosystemModule, FetchError, FetchRequest, FetchResponse, Fetcher,
-    LeadRepository, LodestoneUseCase, ModuleRunner, ModuleStatus, NormalizedDomain, Observation,
-    ProfileId, ProfileName, Provenance, SignalKind, SourceName, UnitInterval, ValidatedProfile,
+    Clock, CreateProfileCommand, DnsError, DnsRecords, DnsResolver, EcosystemModule, FetchError,
+    FetchRequest, FetchResponse, Fetcher, Hostname, LeadRepository, LodestoneUseCase, ModuleRunner,
+    ModuleStatus, NormalizedDomain, Observation, ProfileId, ProfileName, Provenance, SignalKind,
+    SourceName, UnitInterval, ValidatedProfile,
     ecosystem::InspectionRunSettings,
     infrastructure::{lead::postgres::PgLeadRepository, postgres::with_tx},
 };
@@ -59,6 +60,25 @@ fn polite() -> PoliteFetcher {
     .unwrap()
 }
 
+#[derive(Default)]
+struct NoRecords;
+
+impl DnsRecords for NoRecords {
+    async fn mx_hosts(&self, _domain: &NormalizedDomain) -> Result<Vec<Hostname>, DnsError> {
+        Ok(Vec::new())
+    }
+
+    async fn txt_records(&self, _name: &str) -> Result<Vec<String>, DnsError> {
+        Ok(Vec::new())
+    }
+}
+
+impl DnsResolver for NoRecords {
+    async fn cname_chain(&self, _host: &Hostname) -> Result<Vec<Hostname>, DnsError> {
+        Ok(Vec::new())
+    }
+}
+
 struct MockedWeb {
     inner: PoliteFetcher,
     base: String,
@@ -83,13 +103,14 @@ impl Fetcher for MockedWeb {
     }
 }
 
-fn modules(server: &MockServer) -> EcosystemModules<MockedWeb> {
+fn modules(server: &MockServer) -> EcosystemModules<MockedWeb, NoRecords> {
     let wait = Duration::from_secs(1);
     EcosystemModules::new(
         Arc::new(MockedWeb {
             inner: polite(),
             base: server.base_url(),
         }),
+        Arc::new(NoRecords),
         EcosystemConfig {
             company: CompanySettings {
                 entreprises_url: Endpoint::from(
@@ -333,5 +354,99 @@ async fn the_registry_modules_read_the_siren_found_by_the_identity_module(pool: 
     assert_eq!(
         detail.ecosystem.state_of(EcosystemModule::LegalLife).status,
         ModuleStatus::Done
+    );
+}
+
+fn greenhouse_board(count: usize) -> Value {
+    let jobs: Vec<Value> = (0..count)
+        .map(|index| {
+            json!({
+                "id": index,
+                "title": format!("Backend Engineer {index}"),
+                "absolute_url": format!("https://boards.greenhouse.io/acme/jobs/{index}"),
+                "content": "Rust",
+                "location": {"name": "Lyon"}
+            })
+        })
+        .collect();
+    json!({ "jobs": jobs })
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_hiring_module_compares_its_count_with_the_previous_pass(pool: PgPool) {
+    let profile = active_profile(&pool).await;
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(GET).path(format!("/{DOMAIN}/"));
+        then.status(200)
+            .header("content-type", "text/html")
+            .body(format!(
+                "{HOME}<a href=\"https://boards.greenhouse.io/acme\">Carrières</a>"
+            ));
+    });
+    let mut board = server.mock(|when, then| {
+        when.method(GET)
+            .path("/boards-api.greenhouse.io/v1/boards/acme/jobs")
+            .query_param("content", "true");
+        then.status(200)
+            .header("content-type", "application/json")
+            .json_body(greenhouse_board(3));
+    });
+    let usecase = LodestoneUseCase::new(pool.clone());
+    let modules = modules(&server);
+    let clock = StepClock(AtomicI64::new(0));
+    let settings = InspectionRunSettings { batch_size: 10 };
+    let runners: Vec<_> = modules
+        .runners()
+        .into_iter()
+        .filter(|runner| runner.module() == EcosystemModule::HiringActivity)
+        .collect();
+
+    let first = usecase
+        .inspect_due_domains(&runners, settings, &clock)
+        .await
+        .unwrap();
+    assert_eq!(first.domains, 1);
+    board.delete();
+    server.mock(|when, then| {
+        when.method(GET)
+            .path("/boards-api.greenhouse.io/v1/boards/acme/jobs")
+            .query_param("content", "true");
+        then.status(200)
+            .header("content-type", "application/json")
+            .json_body(greenhouse_board(5));
+    });
+    clock.0.store(24 * 4, Ordering::SeqCst);
+    let second = usecase
+        .inspect_due_domains(&runners, settings, &clock)
+        .await
+        .unwrap();
+    assert_eq!(second.domains, 1);
+
+    let lead = with_tx(&pool, async |shared| {
+        PgLeadRepository::new(&shared)
+            .find_by_domain(profile, &NormalizedDomain::from_host(DOMAIN).unwrap())
+            .await
+    })
+    .await
+    .unwrap()
+    .unwrap();
+    let detail = usecase.lead_detail(lead.id).await.unwrap();
+    let summary = detail
+        .ecosystem
+        .findings_of(EcosystemModule::HiringActivity)
+        .find(|found| found.kind == "hiring_summary")
+        .unwrap();
+    assert_eq!(
+        summary.value,
+        "5 offres ouvertes : 5 engineering (+2 depuis le dernier passage)"
+    );
+    assert_eq!(summary.details["previous_count"], 3);
+    assert_eq!(
+        summary.details["history"],
+        json!([
+            {"at": "2026-10-08", "count": 3},
+            {"at": "2026-10-12", "count": 5}
+        ])
     );
 }

@@ -164,7 +164,10 @@ describe('dry run view', () => {
 			}),
 		)
 		expect(view.summary).toBe('acme.fr · Fait en 1,3 s · 1 élément trouvé')
-		expect(view.rows[0]).toMatchObject({ label: 'Serveur web', value: 'nginx' })
+		expect(view.view.rows[0]).toMatchObject({
+			label: 'Serveur web',
+			value: 'nginx',
+		})
 		expect(view.notice).toBeNull()
 	})
 
@@ -209,8 +212,34 @@ describe('dry run view', () => {
 				],
 			}),
 		)
-		expect(view.rows[0].date).toBe('10 août 2026')
-		expect(view.rows[0].amount?.replace(/\s/g, ' ')).toBe('1 200 €')
+		expect(view.view.rows[0].date).toBe('10 août 2026')
+		expect(view.view.rows[0].amount?.replace(/\s/g, ' ')).toBe('1 200 €')
+	})
+
+	it('renders a dry run of the new modules with their own view', () => {
+		const dns = dryRunView(
+			result({
+				module: 'dns_email',
+				findings: [
+					{
+						module: 'dns_email',
+						key: 'mail_provider:Google Workspace',
+						kind: 'mail_provider',
+						label: 'Messagerie',
+						value: 'Google Workspace (MX)',
+						source_url: 'dns:acme.fr?type=MX',
+						observed_at: '2026-10-08T09:00:00Z',
+						details: {},
+					},
+				],
+			}),
+		)
+		expect(dns.view.kind).toBe('dns')
+		expect(dns.view.kind === 'dns' ? dns.view.lines[0].values : []).toEqual([
+			'Google Workspace (MX)',
+		])
+		const recent = dryRunView(result({ module: 'recent_activity' }))
+		expect(recent.view).toEqual({ kind: 'recent', recent: null, rows: [] })
 	})
 
 	it('lets the official modules be tested once available', () => {

@@ -20,6 +20,7 @@ pub mod ports;
 pub use platform::{HOSTING_PLATFORMS, hosting_platform};
 
 pub const MAX_DOCUMENT_FINDINGS: usize = 12;
+pub const MAX_WEBSITE_DOCUMENT_FINDINGS: usize = 24;
 pub const STATS_WINDOW_DAYS: i64 = 7;
 pub const STATS_RETENTION_DAYS: i64 = 30;
 pub const SIREN_UNKNOWN: &str = "SIREN inconnu";
@@ -59,13 +60,7 @@ impl EcosystemModule {
         Self::RecentActivity,
     ];
 
-    pub const AVAILABLE: [Self; 5] = [
-        Self::OfficialIdentity,
-        Self::LegalLife,
-        Self::PublicContracts,
-        Self::WebsiteStack,
-        Self::HiringActivity,
-    ];
+    pub const AVAILABLE: [Self; 7] = Self::ALL;
 
     pub fn is_available(self) -> bool {
         Self::AVAILABLE.contains(&self)
@@ -107,16 +102,16 @@ impl EcosystemModule {
                 "Marchés publics dont l'entreprise est titulaire, d'après les données essentielles de la commande publique (DECP)."
             }
             Self::WebsiteStack => {
-                "Serveur, technologies et produits visibles sur le site et ses sous-domaines, avec les empreintes propres au profil."
+                "CMS, frameworks, hébergement et CDN, mesure d'audience, chat, outils marketing, e-commerce, authentification et paiement visibles sur le site, avec les empreintes propres au profil."
             }
             Self::DnsEmail => {
-                "Fournisseurs de messagerie, d'hébergement et de services déclarés dans les enregistrements DNS du domaine."
+                "Fournisseur de messagerie (MX), services d'envoi (SPF), outils vérifiés (TXT), politique DMARC et services SaaS des sous-domaines courants."
             }
             Self::HiringActivity => {
-                "Page carrières, outil de recrutement et offres d'emploi publiées par l'entreprise."
+                "Toutes les offres publiées (page carrières et outils de recrutement) : nombre, métiers, lieux, télétravail, contrats et évolution depuis le passage précédent."
             }
             Self::RecentActivity => {
-                "Actualités, articles et annonces publiés récemment sur le site de l'entreprise."
+                "Pages mises à jour ces 90 derniers jours (sitemap), dernières actualités du blog et fraîcheur du site."
             }
         }
     }
@@ -134,7 +129,21 @@ impl EcosystemModule {
     }
 
     pub fn reads_site(self) -> bool {
-        !matches!(self, Self::LegalLife | Self::PublicContracts)
+        !matches!(
+            self,
+            Self::LegalLife | Self::PublicContracts | Self::DnsEmail
+        )
+    }
+
+    pub fn keeps_history(self) -> bool {
+        self == Self::HiringActivity
+    }
+
+    pub fn document_limit(self) -> usize {
+        match self {
+            Self::WebsiteStack => MAX_WEBSITE_DOCUMENT_FINDINGS,
+            _ => MAX_DOCUMENT_FINDINGS,
+        }
     }
 
     pub fn provider(self) -> Option<&'static str> {
@@ -482,6 +491,7 @@ pub struct InspectionTarget<'a> {
     pub settings: &'a InspectionSettings,
     pub dossier: Option<&'a CompanyDossier>,
     pub siren: SirenLookup<'a>,
+    pub previous: &'a [EcosystemFinding],
     pub now: DateTime<Utc>,
 }
 
@@ -580,7 +590,7 @@ pub fn ecosystem_documents(findings: &[EcosystemFinding]) -> Vec<DossierDocument
         for finding in findings
             .iter()
             .filter(|finding| finding.module == module)
-            .take(MAX_DOCUMENT_FINDINGS)
+            .take(module.document_limit())
         {
             match groups.iter_mut().find(|(known, source, _)| {
                 *known == module && *source == finding.source_url.as_str()

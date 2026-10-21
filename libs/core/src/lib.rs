@@ -61,7 +61,10 @@ pub use domain::{
     },
     host::{
         CandidateHost, HostOrigin, Hostname, InvalidHostname, TRANSIENT_RETRY,
-        ports::{CandidateHosts, CtCursors, DnsError, DnsResolver, KnownHostRepository, MxLookup},
+        ports::{
+            CandidateHosts, CtCursors, DnsError, DnsRecords, DnsResolver, KnownHostRepository,
+            MxLookup,
+        },
         transient_checked_at,
     },
     job::{

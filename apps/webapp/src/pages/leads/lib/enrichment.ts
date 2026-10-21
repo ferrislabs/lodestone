@@ -1,12 +1,11 @@
 import {
-	type FindingRow,
-	findingRows,
 	moduleNote,
 	moduleStatusLabel,
 	providerLink,
 	type StatusTone,
 	statusTone,
 } from '#/lib/ecosystem'
+import { type ModuleView, moduleView } from '#/lib/ecosystem-views'
 import { formatDateTime } from '#/pages/leads/lib/format'
 import type {
 	Ecosystem,
@@ -38,7 +37,7 @@ export interface ModuleSection {
 	note: string | null
 	failed: boolean
 	providerLink: string | null
-	rows: FindingRow[]
+	view: ModuleView
 }
 
 export function moduleSections(ecosystem: Ecosystem): ModuleSection[] {
@@ -51,7 +50,7 @@ export function moduleSections(ecosystem: Ecosystem): ModuleSection[] {
 		note: moduleNote(report.status, report.error),
 		failed: report.status === 'failed',
 		providerLink: providerLink(report.provider, report.provider_ready),
-		rows: findingRows(report.findings),
+		view: moduleView(report.module, report.findings),
 	}))
 }
 

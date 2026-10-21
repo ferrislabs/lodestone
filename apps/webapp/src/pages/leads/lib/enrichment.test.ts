@@ -75,21 +75,24 @@ describe('moduleSections', () => {
 				note: null,
 				failed: false,
 				providerLink: null,
-				rows: [
-					{
-						key: 'legal_name',
-						label: 'Raison sociale',
-						value: 'ACME SAS',
-						sourceUrl:
-							'https://recherche-entreprises.api.gouv.fr/search?q=552100554',
-						highlighted: false,
-						date: null,
-						amount: null,
-						badge: null,
-						facts: [],
-						link: null,
-					},
-				],
+				view: {
+					kind: 'list',
+					rows: [
+						{
+							key: 'legal_name',
+							label: 'Raison sociale',
+							value: 'ACME SAS',
+							sourceUrl:
+								'https://recherche-entreprises.api.gouv.fr/search?q=552100554',
+							highlighted: false,
+							date: null,
+							amount: null,
+							badge: null,
+							facts: [],
+							link: null,
+						},
+					],
+				},
 			},
 			{
 				module: 'legal_life',
@@ -100,7 +103,7 @@ describe('moduleSections', () => {
 				note: 'SIREN inconnu',
 				failed: false,
 				providerLink: '/sources/providers/bodacc',
-				rows: [],
+				view: { kind: 'list', rows: [] },
 			},
 			{
 				module: 'hiring_activity',
@@ -111,7 +114,7 @@ describe('moduleSections', () => {
 				note: 'home page not confirmed',
 				failed: true,
 				providerLink: null,
-				rows: [],
+				view: { kind: 'hiring', summary: null, rows: [] },
 			},
 		])
 	})

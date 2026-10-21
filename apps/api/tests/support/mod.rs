@@ -13,6 +13,7 @@ use axum::{
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use clap::Parser;
 use common::{EncryptionKey, Secret};
+use dns::{DnsSettings, HickoryResolver};
 use fetch::{FetchSettings, PoliteFetcher};
 use handlers::AppState;
 use http::{
@@ -147,6 +148,7 @@ impl Harness {
         let usecase = LodestoneUseCase::new(pool).with_enrichment_wait(enrichment_wait);
         let ecosystem = EcosystemModules::new(
             Arc::new(test_fetcher()),
+            Arc::new(HickoryResolver::from_system(DnsSettings::default()).expect("resolver")),
             EcosystemConfig {
                 company: CompanySettings {
                     entreprises_url: Endpoint::from(

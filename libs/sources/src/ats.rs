@@ -10,7 +10,10 @@ use serde_json::Value;
 use tracing::{debug, info};
 use url::Url;
 
-use self::discover::{Board, careers_links, extract_boards};
+use self::{
+    discover::{Board, careers_links, extract_boards},
+    jobs::{PagePosting, page_postings},
+};
 use crate::link_check::{LinkChecker, LinkOrigin, LinkVerdict, fetch_waiting, rejection_of};
 
 pub mod discover;
@@ -44,6 +47,7 @@ pub struct BoardJobs {
 pub struct DomainScan {
     pub pages: Vec<Url>,
     pub boards: Vec<BoardJobs>,
+    pub postings: Vec<PagePosting>,
     pub unconfirmed: UnconfirmedLinks,
 }
 
@@ -156,6 +160,11 @@ impl<F: Fetcher> AtsScanner<F> {
     ) -> Result<Option<FetchResponse>, SourceError> {
         Ok(match self.visit(checker, &url, origin).await? {
             Visit::Confirmed(response) => {
+                for posting in page_postings(&response.text(), &url) {
+                    if !scan.postings.contains(&posting) {
+                        scan.postings.push(posting);
+                    }
+                }
                 scan.pages.push(url);
                 Some(response)
             }

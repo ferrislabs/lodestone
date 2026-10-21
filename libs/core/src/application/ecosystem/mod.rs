@@ -103,6 +103,7 @@ struct RegistryContext {
     dossier: Option<CompanyDossier>,
     recorded: Option<Siren>,
     identity_settled: bool,
+    previous: Vec<EcosystemFinding>,
 }
 
 impl RegistryContext {
@@ -172,6 +173,7 @@ impl LodestoneUseCase {
                         settings: &merged,
                         dossier: registry.dossier.as_ref(),
                         siren: registry.lookup(),
+                        previous: &registry.previous,
                         now,
                     };
                     match runner.inspect(&target).await {
@@ -271,6 +273,7 @@ impl LodestoneUseCase {
             settings: &settings,
             dossier: registry.dossier.as_ref(),
             siren: registry.lookup(),
+            previous: &registry.previous,
             now,
         };
         match runner.inspect(&target).await {
@@ -301,21 +304,32 @@ impl LodestoneUseCase {
         module: EcosystemModule,
         domain: &NormalizedDomain,
     ) -> Result<RegistryContext, CoreError> {
-        if !module.needs_siren() {
-            return Ok(RegistryContext::default());
-        }
-        let dossier = self.company_dossier(domain).await?;
-        if module == EcosystemModule::OfficialIdentity {
+        let dossier = if module.needs_siren() {
+            self.company_dossier(domain).await?
+        } else {
+            None
+        };
+        let reads_records = module.keeps_history()
+            || (module.needs_siren() && module != EcosystemModule::OfficialIdentity);
+        if !reads_records {
             return Ok(RegistryContext {
                 dossier,
                 ..RegistryContext::default()
             });
         }
         let recorded = self.domain_ecosystem(domain).await?;
+        let siren = recorded.recorded_siren();
+        let identity_settled = recorded.identity_settled();
+        let previous = recorded
+            .findings
+            .into_iter()
+            .filter(|finding| finding.module == module)
+            .collect();
         Ok(RegistryContext {
             dossier,
-            recorded: recorded.recorded_siren(),
-            identity_settled: recorded.identity_settled(),
+            recorded: siren,
+            identity_settled,
+            previous,
         })
     }
 

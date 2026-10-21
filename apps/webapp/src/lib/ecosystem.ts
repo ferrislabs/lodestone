@@ -104,6 +104,18 @@ function factsOf(finding: EcosystemFinding, details: Details): string[] {
 		const procedure = text(details, 'procedure')
 		return [buyer, procedure].filter((fact): fact is string => fact !== null)
 	}
+	if (finding.module === 'hiring_activity' && finding.kind === 'job_offer') {
+		const contracts = Array.isArray(details.contracts)
+			? details.contracts.filter(
+					(contract): contract is string => typeof contract === 'string',
+				)
+			: []
+		return [
+			text(details, 'location'),
+			contracts.length > 0 ? contracts.join(', ') : null,
+			details.remote === true ? 'Télétravail' : null,
+		].filter((fact): fact is string => fact !== null)
+	}
 	return []
 }
 
@@ -118,7 +130,7 @@ export function findingRows(
 ): FindingRow[] {
 	return findings.map((finding) => {
 		const details: Details = finding.details ?? {}
-		const date = text(details, 'date')
+		const date = text(details, 'date') ?? text(details, 'posted_at')
 		const link = text(details, 'link')
 		return {
 			key: finding.key,

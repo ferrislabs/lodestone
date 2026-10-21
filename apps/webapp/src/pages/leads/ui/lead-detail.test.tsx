@@ -545,6 +545,165 @@ describe('LeadDetail', () => {
 		)
 	})
 
+	it('renders the stack by category, the hiring trend, the latest news and the DNS summary', () => {
+		const observed = '2026-10-08T09:00:00Z'
+		const { container } = renderDetail({
+			detail: {
+				...detail,
+				ecosystem: {
+					hosting_platform: null,
+					modules: [
+						{
+							module: 'website_stack',
+							provider_ready: true,
+							label: 'Site et stack technique',
+							status: 'done',
+							findings: [
+								{
+									module: 'website_stack',
+									key: 'technology:wordpress',
+									kind: 'technology',
+									label: 'CMS',
+									value: 'WordPress 6.4',
+									source_url: 'https://acme.test/',
+									observed_at: observed,
+									details: {
+										category: 'cms',
+										name: 'WordPress',
+										version: '6.4',
+										evidence: 'balise meta generator',
+									},
+								},
+								{
+									module: 'website_stack',
+									key: 'technology:cloudflare',
+									kind: 'technology',
+									label: 'Hébergement et CDN',
+									value: 'Cloudflare',
+									source_url: 'https://acme.test/',
+									observed_at: observed,
+									details: { category: 'hosting_cdn', name: 'Cloudflare' },
+								},
+							],
+						},
+						{
+							module: 'dns_email',
+							provider_ready: true,
+							label: 'Écosystème DNS et e-mail',
+							status: 'done',
+							findings: [
+								{
+									module: 'dns_email',
+									key: 'mail_provider:Microsoft 365',
+									kind: 'mail_provider',
+									label: 'Messagerie',
+									value: 'Microsoft 365 (MX)',
+									source_url: 'dns:acme.test?type=MX',
+									observed_at: observed,
+									details: {},
+								},
+								{
+									module: 'dns_email',
+									key: 'dmarc',
+									kind: 'dmarc',
+									label: 'DMARC',
+									value: 'p=reject (rejet)',
+									source_url: 'dns:_dmarc.acme.test?type=TXT',
+									observed_at: observed,
+									details: {},
+								},
+							],
+						},
+						{
+							module: 'hiring_activity',
+							provider_ready: true,
+							label: 'Activité de recrutement',
+							status: 'done',
+							findings: [
+								{
+									module: 'hiring_activity',
+									key: 'hiring_summary',
+									kind: 'hiring_summary',
+									label: 'Recrutement',
+									value: '12 offres ouvertes',
+									source_url: 'https://jobs.acme.test',
+									observed_at: observed,
+									details: {
+										count: 12,
+										delta: 4,
+										functions: [
+											{ function: 'engineering', count: 7 },
+											{ function: 'sales', count: 3 },
+										],
+									},
+								},
+							],
+						},
+						{
+							module: 'recent_activity',
+							provider_ready: true,
+							label: 'Activité récente',
+							status: 'done',
+							findings: [
+								{
+									module: 'recent_activity',
+									key: 'latest_news',
+									kind: 'latest_news',
+									label: 'Dernière actualité',
+									value: 'Sortie de la version 5 (2026-10-02)',
+									source_url: 'https://acme.test/actualites/v5',
+									observed_at: observed,
+									details: {},
+								},
+								{
+									module: 'recent_activity',
+									key: 'recent_item:https://acme.test/actualites/v5',
+									kind: 'recent_item',
+									label: 'Publication',
+									value: 'Sortie de la version 5',
+									source_url: 'https://acme.test/actualites/v5',
+									observed_at: observed,
+									details: { date: '2026-10-02' },
+								},
+							],
+						},
+					],
+				},
+			},
+		})
+		const website = container.querySelector('[data-module="website_stack"]')
+		expect(
+			website?.querySelector('[data-category="cms"]')?.textContent,
+		).toContain('WordPress 6.4')
+		expect(
+			website?.querySelector('[data-category="hosting_cdn"]')?.textContent,
+		).toContain('Hébergement et CDN')
+		const dns = container.querySelector('[data-module="dns_email"]')
+		expect(dns?.querySelector('[data-dns="mail_provider"]')?.textContent).toBe(
+			'MessagerieMicrosoft 365 (MX)',
+		)
+		expect(dns?.textContent).toContain('p=reject (rejet)')
+		const hiring = container.querySelector('[data-module="hiring_activity"]')
+		expect(hiring?.textContent).toContain('12 offres ouvertes')
+		expect(hiring?.querySelector('[data-trend="up"]')?.textContent).toBe(
+			'+4 depuis le dernier passage',
+		)
+		expect(
+			hiring?.querySelector('[data-hiring="functions"]')?.textContent,
+		).toContain('7 Tech et ingénierie')
+		const recent = container.querySelector('[data-module="recent_activity"]')
+		expect(recent?.querySelector('[data-latest]')?.textContent).toBe(
+			'Dernière actualité : Sortie de la version 5 (2026-10-02)',
+		)
+		const item = recent?.querySelector(
+			'[data-recent-item="https://acme.test/actualites/v5"]',
+		)
+		expect(item?.textContent).toContain('2 oct. 2026')
+		expect(item?.querySelector('a')?.getAttribute('href')).toBe(
+			'https://acme.test/actualites/v5',
+		)
+	})
+
 	it('renders legal announcements and public contracts with dates, amounts and badges', () => {
 		const { container } = renderDetail({
 			detail: {

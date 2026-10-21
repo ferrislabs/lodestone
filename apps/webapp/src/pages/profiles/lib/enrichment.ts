@@ -1,7 +1,5 @@
 import type { Schemas } from '#/api/api.client'
 import {
-	type FindingRow,
-	findingRows,
 	formatDuration,
 	moduleStatusLabel,
 	PROVIDER_NOT_READY,
@@ -10,6 +8,7 @@ import {
 	type StatusTone,
 	statusTone,
 } from '#/lib/ecosystem'
+import { type ModuleView, moduleView } from '#/lib/ecosystem-views'
 import { formatDateTime, formatNumber } from '#/lib/format'
 import {
 	defaultValue,
@@ -190,7 +189,7 @@ export interface DryRunView {
 	summary: string
 	tone: StatusTone
 	notice: string | null
-	rows: FindingRow[]
+	view: ModuleView
 }
 
 function countLabel(count: number): string {
@@ -206,6 +205,6 @@ export function dryRunView(result: DryRunResult): DryRunView {
 		summary: `${result.domain} · ${moduleStatusLabel(result.status)} en ${formatDuration(result.duration_ms)} · ${countLabel(result.findings.length)}`,
 		tone: statusTone(result.status),
 		notice,
-		rows: findingRows(result.findings),
+		view: moduleView(result.module, result.findings),
 	}
 }

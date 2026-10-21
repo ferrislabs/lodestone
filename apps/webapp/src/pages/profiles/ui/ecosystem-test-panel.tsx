@@ -1,4 +1,4 @@
-import { FindingList } from '#/components/ecosystem/finding-list'
+import { ModuleFindings } from '#/components/ecosystem/module-findings'
 import { ModuleStatusChip } from '#/components/ecosystem/module-status-chip'
 import { Button } from '#/components/ui/button'
 import { Input } from '#/components/ui/input'
@@ -120,7 +120,7 @@ export function EcosystemTestPanel({ test, actions }: EcosystemTestPanelProps) {
 					{result.notice ? (
 						<p className="text-sm text-muted-foreground">{result.notice}</p>
 					) : null}
-					<FindingList rows={result.rows} empty="Aucun élément trouvé." />
+					<ModuleFindings view={result.view} empty="Aucun élément trouvé." />
 				</div>
 			) : null}
 		</section>

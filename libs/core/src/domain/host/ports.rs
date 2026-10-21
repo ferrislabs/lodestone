@@ -61,6 +61,16 @@ pub trait DnsResolver: Send + Sync {
     ) -> impl Future<Output = Result<Vec<Hostname>, DnsError>> + Send;
 }
 
+pub trait DnsRecords: Send + Sync {
+    fn mx_hosts(
+        &self,
+        domain: &NormalizedDomain,
+    ) -> impl Future<Output = Result<Vec<Hostname>, DnsError>> + Send;
+
+    fn txt_records(&self, name: &str)
+    -> impl Future<Output = Result<Vec<String>, DnsError>> + Send;
+}
+
 pub trait CtCursors: Send + Sync {
     fn next_index(
         &self,

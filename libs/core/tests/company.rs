@@ -1101,7 +1101,9 @@ async fn the_agents_run_once_every_module_of_the_inspection_settled(pool: PgPool
             (EcosystemModule::LegalLife, ModuleStatus::Pending),
             (EcosystemModule::PublicContracts, ModuleStatus::Pending),
             (EcosystemModule::WebsiteStack, ModuleStatus::Done),
-            (EcosystemModule::HiringActivity, ModuleStatus::Pending)
+            (EcosystemModule::DnsEmail, ModuleStatus::Pending),
+            (EcosystemModule::HiringActivity, ModuleStatus::Pending),
+            (EcosystemModule::RecentActivity, ModuleStatus::Pending)
         ]
     );
     assert_eq!(detail.enrichment.status, EnrichmentStatus::Pending);
@@ -1109,7 +1111,9 @@ async fn the_agents_run_once_every_module_of_the_inspection_settled(pool: PgPool
     harness
         .inspect(&[
             EcosystemModule::OfficialIdentity,
+            EcosystemModule::DnsEmail,
             EcosystemModule::HiringActivity,
+            EcosystemModule::RecentActivity,
         ])
         .await;
     assert_eq!(harness.qualify().await, 0);
@@ -1318,7 +1322,7 @@ async fn every_agent_document_set_carries_the_ecosystem_findings(pool: PgPool) {
             .iter()
             .filter(|(_, content)| content.starts_with("Ecosystem, module"))
             .collect();
-        assert_eq!(ecosystem.len(), 5, "{:?}", call.documents);
+        assert_eq!(ecosystem.len(), 7, "{:?}", call.documents);
         let website = ecosystem
             .iter()
             .find(|(source, _)| source == "https://mairie.fr/website_stack")
