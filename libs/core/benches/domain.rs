@@ -105,11 +105,19 @@ mod scoring {
         "role_contact_found",
     ];
 
+    const SOURCES: &[SourceName] = &[
+        SourceName::DnsCname,
+        SourceName::HttpProbe,
+        SourceName::Boamp,
+        SourceName::FranceTravail,
+    ];
+
     fn signals(count: usize) -> Vec<IndependentSignal> {
         let observed_at = Utc.timestamp_opt(1_800_000_000, 0).unwrap();
         (0..count)
             .map(|i| IndependentSignal {
                 kind: SignalKind::parse(KINDS[i % KINDS.len()]).unwrap(),
+                source: SOURCES[i % SOURCES.len()],
                 strength: UnitInterval::new((i % 10) as f64 / 10.0).unwrap(),
                 observed_at: observed_at - chrono::Duration::days((i % 400) as i64),
             })

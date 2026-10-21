@@ -18,23 +18,13 @@ export const STRENGTH_ROWS: readonly StrengthRow[] = [
 		strength: 0.7,
 	},
 	{
-		origin: 'Candidat accepté par le LLM',
+		origin: 'Candidat par mots-clés sous le minimum',
 		signal: "Appels d'offres, offres d'emploi",
-		strength: 0.6,
-	},
-	{
-		origin: 'Adresse trouvée dans security.txt',
-		signal: 'Contact par rôle trouvé',
-		strength: 0.7,
-	},
-	{
-		origin: 'Adresse extraite par le LLM',
-		signal: 'Contact par rôle trouvé',
 		strength: 0.5,
 	},
 	{
-		origin: "Adresse devinée à partir d'un rôle",
-		signal: 'Contact par rôle trouvé',
-		strength: 0.2,
+		origin: 'Certificate Transparency',
+		signal: 'Certificat observé',
+		strength: 0.3,
 	},
 ]

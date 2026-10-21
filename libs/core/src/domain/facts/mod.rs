@@ -5,8 +5,10 @@ use chrono::{DateTime, SecondsFormat, Utc};
 use crate::domain::{
     NormalizedDomain,
     company::{CompanyDossier, DossierState},
+    enrichment::CONTACT_SOURCES,
     host::{CandidateHost, Hostname},
     lead::{Lead, Signal},
+    text::fold,
     values::{SignalKind, SourceName, UnitInterval},
 };
 
@@ -60,6 +62,7 @@ pub struct CompanyFacts {
 #[derive(Debug, Clone, PartialEq)]
 pub struct IndependentSignal {
     pub kind: SignalKind,
+    pub source: SourceName,
     pub strength: UnitInterval,
     pub observed_at: DateTime<Utc>,
 }
@@ -135,29 +138,48 @@ impl CompanyFacts {
     }
 }
 
-fn normalised_value(value: Option<&str>) -> String {
-    value
-        .map(|raw| raw.trim().to_lowercase())
-        .unwrap_or_default()
+const GENDER_MARKERS: [&str; 4] = ["h", "f", "m", "x"];
+
+fn independence_value(value: Option<&str>) -> String {
+    let spaced: String = fold(value.unwrap_or_default())
+        .chars()
+        .map(|letter| {
+            if letter.is_alphanumeric() {
+                letter
+            } else {
+                ' '
+            }
+        })
+        .collect();
+    spaced
+        .split_whitespace()
+        .filter(|token| !GENDER_MARKERS.contains(token))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn outranks(candidate: &Signal, kept: &Signal) -> bool {
+    candidate
+        .observed_at
+        .cmp(&kept.observed_at)
+        .then_with(|| candidate.strength.get().total_cmp(&kept.strength.get()))
+        .then_with(|| kept.source.as_str().cmp(candidate.source.as_str()))
+        .is_gt()
 }
 
 pub fn independent_signals<'a>(
     signals: impl Iterator<Item = &'a Signal>,
 ) -> Vec<IndependentSignal> {
-    let mut latest: BTreeMap<(&str, String, &str), &Signal> = BTreeMap::new();
-    for signal in signals {
+    let mut latest: BTreeMap<(&str, String), &Signal> = BTreeMap::new();
+    for signal in signals.filter(|signal| !CONTACT_SOURCES.contains(&signal.source)) {
         let key = (
             signal.kind.as_str(),
-            normalised_value(signal.value.as_deref()),
-            signal.source.as_str(),
+            independence_value(signal.value.as_deref()),
         );
         latest
             .entry(key)
             .and_modify(|kept| {
-                if (signal.observed_at, signal.strength.get())
-                    .partial_cmp(&(kept.observed_at, kept.strength.get()))
-                    .is_some_and(std::cmp::Ordering::is_gt)
-                {
+                if outranks(signal, kept) {
                     *kept = signal;
                 }
             })
@@ -167,6 +189,7 @@ pub fn independent_signals<'a>(
         .into_values()
         .map(|signal| IndependentSignal {
             kind: signal.kind.clone(),
+            source: signal.source,
             strength: signal.strength,
             observed_at: signal.observed_at,
         })
@@ -740,7 +763,7 @@ mod tests {
     }
 
     #[test]
-    fn identical_kind_value_and_source_are_one_independent_signal() {
+    fn identical_kind_and_value_are_one_independent_signal_whatever_the_source() {
         let signals = [
             valued(
                 "saas_provider",
@@ -780,7 +803,7 @@ mod tests {
         ];
         let facts = LeadFacts::compute(&lead("acme.com"), &signals, &[]);
         assert_eq!(facts.signal_count, 5);
-        assert_eq!(facts.independent_signals(), 4);
+        assert_eq!(facts.independent_signals(), 3);
         assert_eq!(facts.sources.len(), 2);
         assert_eq!(facts.kinds.len(), 2);
         let merged = facts
@@ -788,7 +811,187 @@ mod tests {
             .iter()
             .find(|signal| signal.kind.as_str() == "saas_provider" && signal.observed_at == at(30))
             .unwrap();
-        assert_eq!(merged.kind.as_str(), "saas_provider");
+        assert_eq!(merged.source, SourceName::DnsCname);
+    }
+
+    #[test]
+    fn the_kept_observation_is_the_freshest_then_the_strongest() {
+        let weak = Signal {
+            strength: UnitInterval::new(0.4).unwrap(),
+            ..valued("job_offer", "devops", SourceName::Ats, "jobs.acme.com", 20)
+        };
+        let strong = Signal {
+            strength: UnitInterval::new(0.6).unwrap(),
+            ..valued(
+                "job_offer",
+                "DevOps",
+                SourceName::FranceTravail,
+                "jobs.acme.com",
+                20,
+            )
+        };
+        let older = Signal {
+            strength: UnitInterval::new(1.0).unwrap(),
+            ..valued(
+                "job_offer",
+                "devops",
+                SourceName::HackerNewsHiring,
+                "jobs.acme.com",
+                10,
+            )
+        };
+        let kept = independent_signals([&weak, &strong, &older].into_iter());
+        assert_eq!(kept.len(), 1);
+        assert_eq!(kept[0].source, SourceName::FranceTravail);
+        assert_eq!(kept[0].observed_at, at(20));
+        assert_eq!(kept[0].strength.get(), 0.6);
+    }
+
+    #[test]
+    fn a_perfect_tie_keeps_the_same_source_whatever_the_order() {
+        let ats = valued("job_offer", "devops", SourceName::Ats, "jobs.acme.com", 10);
+        let boamp = valued(
+            "job_offer",
+            "devops",
+            SourceName::Boamp,
+            "jobs.acme.com",
+            10,
+        );
+        let forward = independent_signals([&ats, &boamp].into_iter());
+        let backward = independent_signals([&boamp, &ats].into_iter());
+        assert_eq!(forward, backward);
+        assert_eq!(forward[0].source, SourceName::Ats);
+    }
+
+    #[test]
+    fn contact_signals_are_not_independent_evidence() {
+        let evidence = [valued(
+            "saas_provider",
+            "auth0",
+            SourceName::DnsCname,
+            "sso.acme.com",
+            0,
+        )];
+        let contacts = [
+            valued(
+                "role_contact_found",
+                "cto",
+                SourceName::PublicPage,
+                "www.acme.com",
+                0,
+            ),
+            valued(
+                "security_txt_contact",
+                "security",
+                SourceName::SecurityTxt,
+                "www.acme.com",
+                0,
+            ),
+            valued(
+                "role_contact_guessed",
+                "admin",
+                SourceName::RoleGuess,
+                "www.acme.com",
+                0,
+            ),
+        ];
+        let all: Vec<Signal> = evidence.iter().chain(&contacts).cloned().collect();
+        let without = LeadFacts::compute(&lead("acme.com"), &evidence, &[]);
+        let with = LeadFacts::compute(&lead("acme.com"), &all, &[]);
+        assert_eq!(with.independent, without.independent);
+        assert_eq!(with.independent_signals(), 1);
+        assert_eq!(with.signal_count, 4);
+        assert_eq!(with.sources.len(), 4);
+        assert_eq!(with.kinds.len(), 4);
+        assert!(independent_signals(contacts.iter()).is_empty());
+    }
+
+    #[test]
+    fn the_same_offer_seen_on_two_sources_is_one_independent_signal() {
+        let signals = [
+            valued(
+                "job_offer",
+                "Ingénieur IAM H/F",
+                SourceName::FranceTravail,
+                "jobs.acme.com",
+                10,
+            ),
+            valued(
+                "job_offer",
+                "Ingenieur IAM (F/H)",
+                SourceName::WelcomeToTheJungle,
+                "jobs.acme.com",
+                20,
+            ),
+        ];
+        let facts = LeadFacts::compute(&lead("acme.com"), &signals, &[]);
+        assert_eq!(facts.signal_count, 2);
+        assert_eq!(facts.independent_signals(), 1);
+        assert_eq!(facts.independent[0].source, SourceName::WelcomeToTheJungle);
+        assert_eq!(facts.sources.len(), 2);
+    }
+
+    #[test]
+    fn two_different_titles_are_two_independent_signals() {
+        let signals = [
+            valued(
+                "job_offer",
+                "Ingénieur IAM H/F",
+                SourceName::FranceTravail,
+                "jobs.acme.com",
+                10,
+            ),
+            valued(
+                "job_offer",
+                "Architecte sécurité (F/H)",
+                SourceName::WelcomeToTheJungle,
+                "jobs.acme.com",
+                10,
+            ),
+        ];
+        let facts = LeadFacts::compute(&lead("acme.com"), &signals, &[]);
+        assert_eq!(facts.independent_signals(), 2);
+    }
+
+    #[test]
+    fn the_same_title_under_another_kind_is_independent() {
+        let signals = [
+            valued(
+                "job_offer",
+                "Ingénieur IAM",
+                SourceName::FranceTravail,
+                "jobs.acme.com",
+                10,
+            ),
+            valued(
+                "public_tender",
+                "Ingénieur IAM",
+                SourceName::Boamp,
+                "jobs.acme.com",
+                10,
+            ),
+        ];
+        assert_eq!(independent_signals(signals.iter()).len(), 2);
+    }
+
+    #[test]
+    fn the_independence_value_drops_case_accents_punctuation_and_gender_markers() {
+        assert_eq!(
+            independence_value(Some("Ingénieur IAM H/F")),
+            "ingenieur iam"
+        );
+        assert_eq!(
+            independence_value(Some("Ingenieur IAM (F/H)")),
+            "ingenieur iam"
+        );
+        assert_eq!(independence_value(Some("sso.acme.com")), "sso acme com");
+        assert_eq!(
+            independence_value(Some("  Chef de projet – M/F/X  ")),
+            "chef de projet"
+        );
+        assert_eq!(independence_value(Some("Œuvre d’art")), "oeuvre d art");
+        assert_eq!(independence_value(Some("H/F")), "");
+        assert_eq!(independence_value(None), "");
     }
 
     #[test]

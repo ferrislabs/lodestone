@@ -540,7 +540,7 @@ export const FIELD_COPY: Readonly<Record<string, FieldCopy>> = {
 	'evidence.weights.strength': {
 		label: 'Force des signaux',
 		description:
-			'Poids de la force des signaux : moyenne des trois signaux indépendants les plus forts, chacun avec la force donnée par sa source et diminué selon son âge, de 0 à 10.',
+			'Poids de la force des signaux : signal indépendant le plus fort, relevé par les deux suivants, chacun avec la force donnée par sa source et diminué selon son âge, de 0 à 10.',
 	},
 	'evidence.half_life_days': {
 		label: 'Demi-vie des signaux (jours)',

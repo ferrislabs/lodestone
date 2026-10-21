@@ -251,6 +251,18 @@ describe('scoring tab', () => {
 		)
 	})
 
+	it('explains the signal strength as raised by the next signals, with each offer counted once', () => {
+		render(<Harness />)
+		const text = screen.getByText(
+			/La force des signaux \(0 à 100\)/,
+		).textContent
+		expect(text).toContain('le plus fort, relevé par les deux suivants')
+		expect(text).toContain('ne la fait jamais baisser')
+		expect(text).toContain('plusieurs sources compte une fois')
+		expect(text).toContain('les contacts trouvés ne comptent pas')
+		expect(text).not.toContain('moyenne des trois')
+	})
+
 	it('says the verdict stays pending without any scoring agent', () => {
 		render(<Harness initial={{ ...base(), scoring_agents: [] }} />)
 		expect(screen.getByText(/Aucun agent de scoring/)).toBeTruthy()

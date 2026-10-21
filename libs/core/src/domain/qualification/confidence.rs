@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
@@ -10,7 +12,7 @@ use crate::domain::{
     scoring::{signal_strength, strength_score},
 };
 
-pub const SCORING_VERSION: i32 = 5;
+pub const SCORING_VERSION: i32 = 6;
 
 const VOLUME_SCALE: f64 = 3.0;
 const SOURCES_FOR_FULL_DIVERSITY: f64 = 2.0;
@@ -21,6 +23,10 @@ const INDEPENDENT_ANGLES: usize = 2;
 
 fn count(value: usize) -> f64 {
     f64::from(u32::try_from(value).unwrap_or(u32::MAX))
+}
+
+fn distinct<'a>(names: impl Iterator<Item = &'a str>) -> usize {
+    names.collect::<BTreeSet<_>>().len()
 }
 
 pub fn calibrate(probabilities: &[(String, f64)], floor: f64) -> Vec<(String, f64)> {
@@ -129,10 +135,17 @@ impl EvidenceStrength {
             })
             .sum();
         let independent = facts.independent_signals();
+        let source_count = distinct(
+            facts
+                .independent
+                .iter()
+                .map(|signal| signal.source.as_str()),
+        );
+        let kind_count = distinct(facts.independent.iter().map(|signal| signal.kind.as_str()));
         let strength = signal_strength(&facts.independent, settings, now);
         let components = EvidenceComponents {
             volume: 1.0 - (-decayed / VOLUME_SCALE).exp(),
-            diversity: diversity(facts.sources.len(), facts.kinds.len()),
+            diversity: diversity(source_count, kind_count),
             environment: facts.production_share().unwrap_or(UNKNOWN_ENVIRONMENT),
             strength,
         };
@@ -144,8 +157,8 @@ impl EvidenceStrength {
             only_non_production: facts.only_non_production(),
             independent_signals: independent,
             decayed_signals: decayed,
-            source_count: facts.sources.len(),
-            kind_count: facts.kinds.len(),
+            source_count,
+            kind_count,
         }
     }
 }
@@ -654,14 +667,107 @@ mod tests {
     }
 
     #[test]
-    fn another_value_kind_or_source_is_independent() {
+    fn another_value_or_kind_is_independent_but_another_source_is_not() {
         let signals = [
             dated("saas_provider", "auth0", SourceName::DnsCname, 0),
             dated("saas_provider", "okta", SourceName::DnsCname, 0),
             dated("product_detected", "auth0", SourceName::DnsCname, 0),
             dated("saas_provider", "auth0", SourceName::HttpProbe, 0),
         ];
-        assert_eq!(evidence_of(&signals).independent_signals, 4);
+        assert_eq!(evidence_of(&signals).independent_signals, 3);
+    }
+
+    #[test]
+    fn the_same_offer_seen_on_two_sources_counts_once() {
+        let signals = [
+            dated(
+                "job_offer",
+                "Ingénieur IAM H/F",
+                SourceName::FranceTravail,
+                5,
+            ),
+            dated(
+                "job_offer",
+                "Ingenieur IAM (F/H)",
+                SourceName::WelcomeToTheJungle,
+                0,
+            ),
+        ];
+        let evidence = evidence_of(&signals);
+        assert_eq!(evidence.signal_count, 2);
+        assert_eq!(evidence.independent_signals, 1);
+        assert_eq!(evidence.source_count, 1);
+        assert_eq!(evidence.kind_count, 1);
+        assert_eq!(evidence.components.diversity, 0.5);
+        assert!((evidence.decayed_signals - 1.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn two_different_titles_on_two_sources_are_two_independent_signals() {
+        let signals = [
+            dated(
+                "job_offer",
+                "Ingénieur IAM H/F",
+                SourceName::FranceTravail,
+                0,
+            ),
+            dated(
+                "job_offer",
+                "Architecte sécurité (F/H)",
+                SourceName::WelcomeToTheJungle,
+                0,
+            ),
+        ];
+        let evidence = evidence_of(&signals);
+        assert_eq!(evidence.independent_signals, 2);
+        assert_eq!(evidence.source_count, 2);
+        assert_eq!(evidence.kind_count, 1);
+        assert_eq!(evidence.components.diversity, 1.0);
+    }
+
+    #[test]
+    fn contact_signals_change_neither_the_strength_nor_the_volume_nor_the_diversity() {
+        let evidence = [
+            dated("saas_provider", "auth0", SourceName::DnsCname, 0),
+            dated("job_offer", "devops", SourceName::Ats, 30),
+        ];
+        let contacts = [
+            dated("role_contact_found", "cto", SourceName::PublicPage, 0),
+            dated(
+                "security_txt_contact",
+                "security",
+                SourceName::SecurityTxt,
+                0,
+            ),
+            dated("role_contact_guessed", "admin", SourceName::RoleGuess, 0),
+        ];
+        let all: Vec<Signal> = evidence.iter().chain(&contacts).cloned().collect();
+        let without = evidence_of(&evidence);
+        let with = evidence_of(&all);
+        assert_eq!(with.signal_count, 5);
+        assert_eq!(without.signal_count, 2);
+        assert_eq!(with.components, without.components);
+        assert_eq!(with.score, without.score);
+        assert_eq!(with.signal_score, without.signal_score);
+        assert_eq!(with.independent_signals, without.independent_signals);
+        assert_eq!(with.decayed_signals, without.decayed_signals);
+        assert_eq!(with.source_count, 2);
+        assert_eq!(with.kind_count, 2);
+    }
+
+    #[test]
+    fn a_lead_with_only_contacts_has_no_evidence() {
+        let signals = [
+            dated("role_contact_found", "cto", SourceName::PublicPage, 0),
+            dated("role_contact_guessed", "admin", SourceName::RoleGuess, 0),
+        ];
+        let evidence = evidence_of(&signals);
+        assert_eq!(evidence.independent_signals, 0);
+        assert_eq!(evidence.components.strength, 0.0);
+        assert_eq!(evidence.components.volume, 0.0);
+        assert_eq!(evidence.components.diversity, 0.0);
+        assert_eq!(evidence.source_count, 0);
+        assert_eq!(evidence.kind_count, 0);
     }
 
     #[test]
@@ -758,7 +864,7 @@ mod tests {
     }
 
     #[test]
-    fn the_strength_averages_the_three_strongest_signals_of_the_lead_and_its_siblings() {
+    fn the_strength_combines_the_three_strongest_signals_of_the_lead_and_its_siblings() {
         let strong = |value: &str, strength: f64| Signal {
             strength: UnitInterval::new(strength).unwrap(),
             ..dated("saas_provider", value, SourceName::DnsCname, 0)
@@ -772,10 +878,38 @@ mod tests {
         }];
         let facts = LeadFacts::compute_aggregated(&lead(), &own, &[], &siblings);
         let evidence = EvidenceStrength::compute(&facts, &settings(), now());
-        assert!((evidence.components.strength - 0.6).abs() < 1e-9);
-        assert_eq!(evidence.signal_score, 60.0);
+        let expected = 1.0 - 0.1 * 0.65 * 0.95;
+        assert!((evidence.components.strength - expected).abs() < 1e-9);
+        assert_eq!(evidence.signal_score, 93.8);
         let alone = evidence_of(&own);
-        assert!((alone.components.strength - 0.55).abs() < 1e-9);
+        assert!((alone.components.strength - 0.91).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_weaker_signal_never_lowers_the_evidence_strength() {
+        let tender = Signal {
+            strength: UnitInterval::new(0.7).unwrap(),
+            ..dated("public_tender", "marché IAM", SourceName::Boamp, 0)
+        };
+        let certificate = Signal {
+            strength: UnitInterval::new(0.3).unwrap(),
+            ..dated(
+                "certificate_seen",
+                "sso.luzernrisk.com",
+                SourceName::CertificateTransparency,
+                0,
+            )
+        };
+        let alone = evidence_of(std::slice::from_ref(&tender));
+        let together = evidence_of(&[tender, certificate]);
+        assert!((alone.components.strength - 0.7).abs() < 1e-9);
+        assert!((together.components.strength - 0.745).abs() < 1e-9);
+        assert_eq!(together.signal_score, 74.5);
+    }
+
+    #[test]
+    fn the_scoring_version_is_six() {
+        assert_eq!(SCORING_VERSION, 6);
     }
 
     #[test]

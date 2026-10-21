@@ -111,7 +111,7 @@ Validation is `validate_scoring` (`libs/core/src/domain/scoring_agent/mod.rs`) a
 
 **Storage and due logic.** Results live in `scoring_results` (lead, profile revision, agent, status, criteria answers, score, verdict, reasons, provenance, raw samples), upserted on `(lead_id, profile_revision, agent_id)`. The lead score is `leads.llm_score`, the verdict and its confidence `leads.verdict` and `leads.confidence`, the verdict probabilities, reason and source `lead_qualification_state.verdict_probabilities`, `verdict_reason` and `verdict_source` (`scoring`, or `indicators` for a lead qualified before the scoring agents existed and not scored since: it keeps its former computed verdict until scored). The indicators stay in `opinion`, `evidence`, `indicator_confidence` and `indicator_cap`. A lead is due for scoring when its qualification results changed (`lead_qualification_state.completed_at` differs from `scoring_for`) or its profile revision differs from `scoring_revision`. The aggregator only summarises a lead whose scoring is up to date, and receives the scoring results (score, verdict, reasons) as documents; it still must not restate figures.
 
-**Rescoring.** The rescoring loop (no model call) refreshes the indicators and the decay (`SCORING_VERSION` 5) and no longer decides: it recombines the stored scoring results and changes a verdict only through exclusions (a lead scored by the scoring agents is recombined, an `indicators` lead is untouched unless a qualification agent excludes it).
+**Rescoring.** The rescoring loop (no model call) refreshes the indicators and the decay (`SCORING_VERSION` 6) and no longer decides: it recombines the stored scoring results and changes a verdict only through exclusions (a lead scored by the scoring agents is recombined, an `indicators` lead is untouched unless a qualification agent excludes it).
 
 **Quality.** Decision label snapshots keep the scoring results (`scoring_agents`, `llm_score`, `indicator_confidence`, `verdict_source`); the versions table of `GET /api/v1/quality` has a `kind` (`qualification`, `scoring`, `aggregator`), so precision is counted per scoring agent and per version (model and prompt).
 
@@ -147,23 +147,23 @@ The strength of the evidence is computed in code (ADR 0007, "Evidence and calibr
 
 **Company.** Leads whose domains have dossiers with the same SIREN belong to one company entity (`companies`, keyed by SIREN, legal name from the dossier). Facts and evidence of a lead aggregate the signals, sources, signal kinds and hosts of the lead and of its siblings of the *same profile*; siblings in other profiles are listed on the lead page (`company.siblings`) but never counted. A lead without a SIREN stays standalone.
 
-**Independence.** Signals with the same kind, normalised value (trimmed, lowercased) and source are one independent signal, across the whole company. `facts.signal_count` counts every signal, `facts.independent_signals` the independent ones. The age of an independent signal is the age of its freshest observation.
+**Independence.** Signals with the same kind and the same normalised value are one independent signal, whatever their source, across the whole company: the same offer or tender seen on several sources counts once. The normalised value is folded (lowercase, accents removed, `œ` as `oe`), every character that is not a letter or a digit becomes a space, the gender markers `h`, `f`, `m` and `x` are dropped and the remaining words are joined with one space, so « Ingénieur IAM H/F » and « Ingenieur IAM (F/H) » are the same value, `ingenieur iam`. Contact signals (sources `public_page`, `security_txt` and `role_guess`: the addresses found by the contact finders) are not evidence: they are ignored, and add nothing to the volume, the diversity or the strength. `facts.signal_count` counts every signal, contacts included, `facts.independent_signals` the independent ones. An independent signal is its freshest observation, then its strongest, then the source whose name comes first; the age and the strength of the signal are those of that observation, and its source is the one counted in the diversity.
 
 **Formulas.** With `n` independent signals, `age_i` the age in days at the instant of scoring (never negative) and `h(kind)` the half-life of the kind:
 
 - `decay_i = 0.5 ^ (age_i / h(kind_i))`, so 1 today, 0.5 after one half-life.
 - `decayed = sum(decay_i)`.
 - `volume = 1 - exp(-decayed / 3)`.
-- `diversity = min(1, (sources + 0.5 x (kinds - 1)) / 2)` with `sources` the distinct sources and `kinds` the distinct signal kinds (at least one kind counts as zero extra).
+- `diversity = min(1, (sources + 0.5 x (kinds - 1)) / 2)` with `sources` the distinct sources and `kinds` the distinct signal kinds of the independent signals (at least one kind counts as zero extra). `evidence.source_count` and `evidence.kind_count` are these two counts; the sources and kinds listed in the facts of the lead describe every signal, contacts included.
 - `environment`: share of production hosts among the hosts carrying signals, 0.5 when none.
-- `strength` = the mean of the three highest `s_i x decay_i` among the independent signals, with `s_i` the strength (0 to 1) the source gave the signal (fewer signals: the mean of those there are; 0 when there is none). It needs no profile setting. The strength of an independent signal is the one of its freshest observation, and signals of the siblings count as for the other components.
+- `strength` = `1 - (1 - w_0) x (1 - 0.5 x w_1) x (1 - 0.25 x w_2)`, with `w_0 >= w_1 >= w_2` the three highest `s_i x decay_i` among the independent signals, `s_i` the strength (0 to 1) the source gave the signal (fewer signals: the missing ones count as 0; 0 when there is none). Each rank is damped by `RANK_DAMPING` = 0.5 (`libs/core/src/domain/scoring/mod.rs`). A lone signal keeps its value, and a weaker extra signal never lowers the strength: it can only raise it. It needs no profile setting. The strength of an independent signal is the one of its freshest observation, and signals of the siblings count as for the other components.
 - `score = weighted mean of the four components` with `evidence.weights`.
 
 **Half-lives.** `evidence.half_life_days` is an object of integers from 1 to 3650, keyed by signal kind (lowercase snake case) plus `default`. Defaults: `job_offer` 90, `public_tender` 180, `awarded_contract` 365, `saas_provider` 365, `product_detected` 365, `debt_marker` 365, `contact` 365, `role_contact_found` 365, `default` 180. A kind absent from the object falls back to its default above, then to `default`, then to 180. The editor shows one field per kind in "Demi-vie des signaux (jours)".
 
 **API.** The lead page shows `facts.independent_signals`, `facts.sibling_domains` and, in `evidence`, `independent_signals`, `decayed_signals`, `source_count` and `kind_count`. The lead list accepts `group_by=company`: one row per company and profile, the lead with the best confidence (then signal strength) standing for the others, which are returned in `grouped_leads`; the other filters apply before grouping, and `total` counts rows. Default is `none`. The webapp groups by default ("Regrouper par entreprise") and shows a "+N domaines" badge that expands the sibling domains.
 
-**Rescoring.** `SCORING_VERSION` 3 (v10 counting rules) rescored every stored lead without calling a model; version 4 (v11) refreshes the indicators of every stored lead the same way. A lead is rescored whenever the number of signals it aggregates changes, including signals of a sibling. Decay is evaluated at each scoring; it does not run on its own.
+**Rescoring.** `SCORING_VERSION` 3 (v10 counting rules) rescored every stored lead without calling a model; version 4 (v11) refreshes the indicators of every stored lead the same way. Version 6 (issue 249) rescores every stored lead the same way: the strength is monotone (the mean of the three strongest signals fell when a weaker one was added), contact signals are no longer evidence, and the same offer or tender seen on several sources counts once. A lead is rescored whenever the number of signals it aggregates changes, including signals of a sibling. Decay is evaluated at each scoring; it does not run on its own.
 
 ### Exclusions
 
@@ -246,7 +246,7 @@ The leads list (`GET /api/v1/profiles/{profile_id}/leads`) accepts `verdict` (co
 Each signal carries a `strength` from 0 to 1 set by its source. The strength of the signals of a lead is computed in code, with no profile setting:
 
 - For every independent signal of the lead and of its siblings of the same profile, `s_i x decay_i`, the strength set by the source times the age decay of its kind (see "Evidence indicators").
-- Strength = the mean of the three highest of these values (fewer when the lead has fewer signals, 0 when it has none), from 0 to 1. It is the `strength` component of the evidence.
+- Strength = `1 - (1 - w_0) x (1 - 0.5 x w_1) x (1 - 0.25 x w_2)` over the three highest of these values `w_0 >= w_1 >= w_2` (a missing value counts as 0, so the strength is 0 when the lead has none), from 0 to 1. The strongest signal is raised by the next two, and a weaker extra signal never lowers it. It is the `strength` component of the evidence. Contact signals are not evidence and never enter it.
 - `leads.score` = round(strength x 100, 1): the "Force des signaux", from 0 to 100. It is recomputed whenever a source or the contact finder records signals, and by the rescoring loop, because decay changes it with the days. The leads list `min_score` filter, the `score_desc` and `score_asc` sorts, the `score` field of the exports and of the webhook, and the lead page all use it. It orders the leads found by the sourcing; it does not decide the verdict, the scoring agents do (`llm_score`).
 - Since schema 13 a lead no longer carries a per-factor breakdown (`score_breakdown` is gone from the API, the exports and the webhook payload).
 
@@ -259,11 +259,11 @@ Strengths set by the sources:
 | HTTP probe | `debt_marker` | 0.6 |
 | DNS CNAME | `saas_provider` | 0.9 |
 | Keyword candidate accepted by the rules | keyword sources (`public_tender`, `job_offer`, ...) | 0.7 |
-| Address found in `security.txt` | `role_contact_found` | 0.7 |
-| Address extracted by the LLM | `role_contact_found` | 0.5 |
-| Address guessed from a role | `role_contact_found` | 0.2 |
+| Keyword candidate under the minimum of keywords | keyword sources (`public_tender`, `job_offer`, ...) | 0.5 |
 
-Example: a lead with a Keycloak fingerprint (strength 0.9) and a job offer accepted by the rules (strength 0.7), both observed today, has a strength of `(0.9 + 0.7) / 2 = 0.8`, a score of 80. A third signal of 0.3 brings it to `(0.9 + 0.7 + 0.3) / 3 = 0.63`.
+The contact signals (`role_contact_found`, `security_txt_contact`, `role_contact_guessed`) carry a strength too, but they are not evidence and do not count in the strength of the lead.
+
+Example: a tender accepted by the rules (strength 0.7) and a certificate (strength 0.3), both observed today, have a strength of `1 - (1 - 0.7) x (1 - 0.5 x 0.3) = 0.745`, a score of 74.5. Alone the tender has 0.7: the certificate raises the strength instead of lowering it. A Keycloak fingerprint (0.9) and a job offer (0.7) have `1 - 0.1 x 0.65 = 0.935`, and a third signal of 0.3 brings it to `1 - 0.1 x 0.65 x 0.925 = 0.939875`.
 
 ## Search agents
 

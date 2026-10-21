@@ -918,6 +918,11 @@ describe('evidence settings panel', () => {
 			'60',
 		)
 		expect(screen.queryByLabelText('Score de référence')).toBeNull()
+		const text = screen.getByText(/Mesurée par le code/).textContent
+		expect(text).toContain('plusieurs sources compte')
+		expect(text).toContain('les contacts trouvés ne comptent pas')
+		expect(text).toContain('le plus fort, relevé par les deux suivants')
+		expect(text).not.toContain('moyenne des trois')
 		for (const label of [
 			'Poids : volume de signaux',
 			'Poids : diversité des sources',

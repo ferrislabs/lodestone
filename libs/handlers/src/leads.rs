@@ -189,7 +189,7 @@ pub struct EvidenceComponentsDto {
     pub diversity: f64,
     /// Share of production hosts among the hosts carrying signals; 50 when no signal names a host.
     pub environment: f64,
-    /// Signal strength: mean of the three strongest independent signals, each given by its source and decayed by its age, in percent from 0 to 100.
+    /// Signal strength: the strongest independent signal raised by the next two, each given by its source and decayed by its age, so a weaker signal never lowers it, in percent from 0 to 100.
     pub strength: f64,
 }
 
@@ -240,7 +240,7 @@ pub struct LeadDto {
     pub profile: ProfileRefDto,
     pub domain: String,
     pub status: LeadStatusDto,
-    /// Signal strength in percent from 0 to 100: mean of the three strongest independent signals, each given by its source and decayed by its age. Not a verdict score, see `llm_score`.
+    /// Signal strength in percent from 0 to 100: the strongest independent signal raised by the next two, each given by its source and decayed by its age, so a weaker signal never lowers it. Not a verdict score, see `llm_score`.
     pub score: f64,
     /// Confidence of the verdict in percent from 0 to 100: the probability of the winning verdict in the weighted mean of the scoring agents, 100 when a qualification agent excluded the lead. Absent while the verdict is pending.
     pub confidence: Option<f64>,

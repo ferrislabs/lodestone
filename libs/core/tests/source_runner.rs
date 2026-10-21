@@ -302,7 +302,7 @@ async fn same_input_gets_separate_leads_and_the_strength_of_its_signals_per_prof
 }
 
 #[sqlx::test(migrations = "../../migrations")]
-async fn the_lead_score_is_the_mean_of_its_three_strongest_decayed_signals(pool: PgPool) {
+async fn the_lead_score_combines_its_three_strongest_decayed_signals(pool: PgPool) {
     let alpha = active_profile(&pool, "alpha").await;
     let usecase = LodestoneUseCase::new(pool.clone());
     let active = usecase
@@ -347,7 +347,7 @@ async fn the_lead_score_is_the_mean_of_its_three_strongest_decayed_signals(pool:
         )
         .await
         .unwrap();
-    assert_eq!(lead_score(&pool, alpha, "acme.com").await.score.get(), 60.0);
+    assert_eq!(lead_score(&pool, alpha, "acme.com").await.score.get(), 93.5);
 
     let later = at(100) + chrono::Duration::days(365);
     usecase
@@ -359,5 +359,5 @@ async fn the_lead_score_is_the_mean_of_its_three_strongest_decayed_signals(pool:
         )
         .await
         .unwrap();
-    assert_eq!(lead_score(&pool, alpha, "acme.com").await.score.get(), 30.0);
+    assert_eq!(lead_score(&pool, alpha, "acme.com").await.score.get(), 55.0);
 }
