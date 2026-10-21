@@ -156,3 +156,206 @@ async fn a_missing_api_key_is_reported(pool: PgPool) {
 
     assert_eq!(error, AuthFailure::MissingCredential("api_key"));
 }
+
+async fn tested(rig: &Rig, key: &str) -> ProviderConfiguration {
+    rig.engine.test(&rig.uc, &rig.cipher, key).await.unwrap()
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn decp_is_ready_when_the_dataset_api_answers(pool: PgPool) {
+    let rig = Rig::new(pool).await;
+    rig.save(
+        provider_descriptor("decp").unwrap(),
+        json!({"dataset_api_url": rig.server.url("/dataset")}),
+        &[],
+    )
+    .await;
+    let dataset = rig
+        .server
+        .mock_async(|when, then| {
+            when.method(GET).path("/dataset");
+            then.status(200).json_body(json!({"id": "decp"}));
+        })
+        .await;
+
+    let configuration = tested(&rig, "decp").await;
+
+    assert_eq!(configuration.status, ProviderStatus::Ready);
+    assert!(rig.uc.is_provider_usable("decp").await.unwrap());
+    dataset.assert_async().await;
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn decp_fails_when_the_dataset_api_answers_an_error(pool: PgPool) {
+    let rig = Rig::new(pool).await;
+    rig.save(
+        provider_descriptor("decp").unwrap(),
+        json!({"dataset_api_url": rig.server.url("/dataset")}),
+        &[],
+    )
+    .await;
+    rig.server
+        .mock_async(|when, then| {
+            when.method(GET).path("/dataset");
+            then.status(404);
+        })
+        .await;
+
+    let configuration = tested(&rig, "decp").await;
+
+    assert_eq!(configuration.status, ProviderStatus::Failing);
+    assert!(configuration.last_test_message.unwrap().contains("404"));
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn ted_accepts_any_answer_below_a_server_error(pool: PgPool) {
+    let rig = Rig::new(pool).await;
+    rig.save(
+        provider_descriptor("ted").unwrap(),
+        json!({"base_url": rig.server.url("/search")}),
+        &[],
+    )
+    .await;
+    let search = rig
+        .server
+        .mock_async(|when, then| {
+            when.method(GET).path("/search");
+            then.status(405);
+        })
+        .await;
+
+    let configuration = tested(&rig, "ted").await;
+
+    assert_eq!(configuration.status, ProviderStatus::Ready);
+    search.assert_async().await;
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn ted_fails_on_a_server_error(pool: PgPool) {
+    let rig = Rig::new(pool).await;
+    rig.save(
+        provider_descriptor("ted").unwrap(),
+        json!({"base_url": rig.server.url("/search")}),
+        &[],
+    )
+    .await;
+    rig.server
+        .mock_async(|when, then| {
+            when.method(GET).path("/search");
+            then.status(502);
+        })
+        .await;
+
+    assert_eq!(tested(&rig, "ted").await.status, ProviderStatus::Failing);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn certificate_transparency_is_ready_when_the_log_list_answers(pool: PgPool) {
+    let rig = Rig::new(pool).await;
+    rig.save(
+        provider_descriptor("certificate_transparency").unwrap(),
+        json!({"log_list_url": rig.server.url("/log_list.json")}),
+        &[],
+    )
+    .await;
+    let list = rig
+        .server
+        .mock_async(|when, then| {
+            when.method(GET).path("/log_list.json");
+            then.status(200).json_body(json!({"operators": []}));
+        })
+        .await;
+
+    let configuration = tested(&rig, "certificate_transparency").await;
+
+    assert_eq!(configuration.status, ProviderStatus::Ready);
+    list.assert_async().await;
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn certificate_transparency_fails_when_the_log_list_is_unreachable(pool: PgPool) {
+    let rig = Rig::new(pool).await;
+    rig.save(
+        provider_descriptor("certificate_transparency").unwrap(),
+        json!({"log_list_url": "http://127.0.0.1:9/log_list.json"}),
+        &[],
+    )
+    .await;
+
+    let configuration = tested(&rig, "certificate_transparency").await;
+
+    assert_eq!(configuration.status, ProviderStatus::Failing);
+    assert!(
+        configuration
+            .last_test_message
+            .unwrap()
+            .contains("injoignable")
+    );
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn company_research_queries_the_search_endpoint(pool: PgPool) {
+    let rig = Rig::new(pool).await;
+    rig.save(
+        provider_descriptor("company_research").unwrap(),
+        json!({"entreprises_url": rig.server.url("/search")}),
+        &[],
+    )
+    .await;
+    let search = rig
+        .server
+        .mock_async(|when, then| {
+            when.method(GET)
+                .path("/search")
+                .query_param("per_page", "1");
+            then.status(200).json_body(json!({"results": []}));
+        })
+        .await;
+
+    let configuration = tested(&rig, "company_research").await;
+
+    assert_eq!(configuration.status, ProviderStatus::Ready);
+    search.assert_async().await;
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn company_research_fails_on_a_rate_limit_answer(pool: PgPool) {
+    let rig = Rig::new(pool).await;
+    rig.save(
+        provider_descriptor("company_research").unwrap(),
+        json!({"entreprises_url": rig.server.url("/search")}),
+        &[],
+    )
+    .await;
+    rig.server
+        .mock_async(|when, then| {
+            when.method(GET).path("/search");
+            then.status(429);
+        })
+        .await;
+
+    let configuration = tested(&rig, "company_research").await;
+
+    assert_eq!(configuration.status, ProviderStatus::Failing);
+    assert!(configuration.last_test_message.unwrap().contains("429"));
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn crawler_style_providers_have_no_external_endpoint_and_always_pass(pool: PgPool) {
+    let rig = Rig::new(pool).await;
+    for key in ["ats", "dns_cname", "http_probe", "contacts"] {
+        rig.save(provider_descriptor(key).unwrap(), json!({}), &[])
+            .await;
+
+        let configuration = tested(&rig, key).await;
+
+        assert_eq!(configuration.status, ProviderStatus::Ready, "{key}");
+        assert!(
+            configuration
+                .last_test_message
+                .unwrap()
+                .contains("aucun point d'accès externe"),
+            "{key}"
+        );
+    }
+}

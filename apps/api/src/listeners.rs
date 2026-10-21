@@ -4,6 +4,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use crate::providers::blocking_provider;
 use chrono::{DateTime, Utc};
 use common::CoreError;
 use dns::HickoryResolver;
@@ -56,6 +57,10 @@ impl ListenerStep for CtStep {
             .await
     }
 
+    async fn blocking_provider(&self) -> Result<Option<&'static str>, CoreError> {
+        blocking_provider(&self.usecase, SourceName::CertificateTransparency.as_str()).await
+    }
+
     async fn run_once(&self) -> Result<StepOutcome, SourceRunError> {
         let report = self
             .usecase
@@ -84,6 +89,10 @@ impl<S: Source> ListenerStep for HostStep<S> {
 
     async fn is_active(&self) -> Result<bool, CoreError> {
         self.usecase.has_enabled_agent(self.source.name()).await
+    }
+
+    async fn blocking_provider(&self) -> Result<Option<&'static str>, CoreError> {
+        blocking_provider(&self.usecase, self.source.name().as_str()).await
     }
 
     async fn run_once(&self) -> Result<StepOutcome, SourceRunError> {
@@ -123,6 +132,10 @@ impl<F: ContactFinder> ListenerStep for ContactStep<F> {
         Ok(true)
     }
 
+    async fn blocking_provider(&self) -> Result<Option<&'static str>, CoreError> {
+        blocking_provider(&self.usecase, self.finder.name().as_str()).await
+    }
+
     async fn run_once(&self) -> Result<StepOutcome, SourceRunError> {
         let due = |at| {
             self.targets
@@ -155,6 +168,10 @@ impl<B: CompanyBuilder> ListenerStep for CompanyStep<B> {
 
     async fn is_active(&self) -> Result<bool, CoreError> {
         Ok(true)
+    }
+
+    async fn blocking_provider(&self) -> Result<Option<&'static str>, CoreError> {
+        blocking_provider(&self.usecase, COMPANY_RESEARCH_LISTENER).await
     }
 
     async fn run_once(&self) -> Result<StepOutcome, SourceRunError> {

@@ -60,20 +60,26 @@ export function stateLabel(state: SourceState): string {
 	return STATE_LABELS[state]
 }
 
+export const PROVIDER_NOT_READY_LABEL = 'Provider non prêt'
+
+export function providerReady(source: Source): boolean {
+	return source.provider == null || source.provider.status === 'ready'
+}
+
 export function canRun(source: Source): boolean {
-	return sourceState(source) === 'pending'
+	return sourceState(source) === 'pending' && providerReady(source)
 }
 
 export function runDisabledReason(source: Source): string | null {
 	switch (sourceState(source)) {
 		case 'pending':
-			return null
+			return providerReady(source)
+				? null
+				: 'Le fournisseur doit être prêt dans le catalogue'
 		case 'running':
 			return 'La source est déjà en cours'
 		case 'unavailable':
-			return source.unavailable_reason === 'missing_credentials'
-				? 'Identifiants manquants : la source est désactivée'
-				: "Aucune tâche n'est planifiée pour cette source"
+			return "Aucune tâche n'est planifiée pour cette source"
 		case 'failed':
 			return 'La tâche a échoué définitivement et ne sera plus planifiée'
 		case 'succeeded':

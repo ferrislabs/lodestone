@@ -11,6 +11,7 @@ import {
 } from '#/pages/sources/lib/state'
 import type { Source, SourceState } from '#/pages/sources/lib/types'
 import { LastRun } from '#/pages/sources/ui/last-run'
+import { ProviderNotice } from '#/pages/sources/ui/provider-notice'
 
 interface SourceRowProps {
 	source: Source
@@ -19,6 +20,7 @@ interface SourceRowProps {
 	pending: boolean
 	error: string | null
 	onRun: (source: string) => void
+	onOpenProvider: (key: string) => void
 }
 
 function badgeVariant(state: SourceState) {
@@ -71,6 +73,7 @@ export function SourceRow({
 	pending,
 	error,
 	onRun,
+	onOpenProvider,
 }: SourceRowProps) {
 	const state = sourceState(source)
 	const reason = runDisabledReason(source)
@@ -82,7 +85,10 @@ export function SourceRow({
 		<TableRow data-source={source.source} data-state={state}>
 			<TableCell className="font-medium">{sourceTitle(source)}</TableCell>
 			<TableCell>
-				<Badge variant={badgeVariant(state)}>{stateLabel(state)}</Badge>
+				<div className="flex flex-col items-start gap-1">
+					<Badge variant={badgeVariant(state)}>{stateLabel(state)}</Badge>
+					<ProviderNotice source={source} onOpenProvider={onOpenProvider} />
+				</div>
 			</TableCell>
 			<TableCell>
 				<NextRun source={source} now={now} />

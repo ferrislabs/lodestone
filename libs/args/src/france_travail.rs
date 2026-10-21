@@ -10,7 +10,7 @@ pub struct FranceTravailArgs {
         env = "FRANCE_TRAVAIL_CLIENT_ID",
         name = "FRANCE_TRAVAIL_CLIENT_ID",
         long_help = "OAuth2 client id of the France Travail partner application. \
-The source is disabled unless both the id and the secret are set"
+Optional seed: with the secret, it creates the catalog configuration on the first start when none exists"
     )]
     pub client_id: Option<Secret>,
 
@@ -18,7 +18,8 @@ The source is disabled unless both the id and the secret are set"
         long = "france-travail-client-secret",
         env = "FRANCE_TRAVAIL_CLIENT_SECRET",
         name = "FRANCE_TRAVAIL_CLIENT_SECRET",
-        long_help = "OAuth2 client secret of the France Travail partner application, never logged"
+        long_help = "OAuth2 client secret of the France Travail partner application, never logged. \
+Optional seed of the catalog configuration, ignored once it exists"
     )]
     pub client_secret: Option<Secret>,
 
@@ -27,7 +28,7 @@ The source is disabled unless both the id and the secret are set"
         env = "FRANCE_TRAVAIL_TOKEN_URL",
         name = "FRANCE_TRAVAIL_TOKEN_URL",
         default_value = "https://entreprise.francetravail.fr/connexion/oauth2/access_token?realm=%2Fpartenaire",
-        long_help = "OAuth2 token endpoint, queried with the client credentials grant"
+        long_help = "OAuth2 token endpoint, queried with the client credentials grant. Seeds the catalog configuration"
     )]
     pub token_url: Url,
 
@@ -36,7 +37,7 @@ The source is disabled unless both the id and the secret are set"
         env = "FRANCE_TRAVAIL_API_BASE_URL",
         name = "FRANCE_TRAVAIL_API_BASE_URL",
         default_value = "https://api.francetravail.io/partenaire/offresdemploi/v2",
-        long_help = "Base URL of the Offres d'emploi v2 API, `/offres/search` is appended"
+        long_help = "Base URL of the Offres d'emploi v2 API, `/offres/search` is appended. Seeds the catalog configuration"
     )]
     pub api_base_url: Url,
 

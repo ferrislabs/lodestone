@@ -612,6 +612,7 @@ export namespace Schemas {
     state: string;
     updated_at?: (string | null) | undefined;
   };
+  export type SourceProviderRefDto = { key: string; name: string; status: string };
   export type DataEnvelope_SourceDto = {
     data: {
       attempts: number;
@@ -623,6 +624,7 @@ export namespace Schemas {
       listener?: (null | ListenerDto) | undefined;
       mode: string;
       next_run_at?: (string | null) | undefined;
+      provider?: (null | SourceProviderRefDto) | undefined;
       running_since?: (string | null) | undefined;
       source: string;
       status: string;
@@ -749,6 +751,7 @@ export namespace Schemas {
       listener?: (null | ListenerDto) | undefined;
       mode: string;
       next_run_at?: (string | null) | undefined;
+      provider?: (null | SourceProviderRefDto) | undefined;
       running_since?: (string | null) | undefined;
       source: string;
       status: string;
@@ -876,6 +879,7 @@ export namespace Schemas {
     listener?: (null | ListenerDto) | undefined;
     mode: string;
     next_run_at?: (string | null) | undefined;
+    provider?: (null | SourceProviderRefDto) | undefined;
     running_since?: (string | null) | undefined;
     source: string;
     status: string;

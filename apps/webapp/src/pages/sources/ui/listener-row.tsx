@@ -12,11 +12,13 @@ import {
 import { shortError, sourceTitle } from '#/pages/sources/lib/state'
 import type { Listener, Source } from '#/pages/sources/lib/types'
 import { LastRun } from '#/pages/sources/ui/last-run'
+import { ProviderNotice } from '#/pages/sources/ui/provider-notice'
 
 interface ListenerRowProps {
 	source: Source
 	listener: Listener
 	now: number
+	onOpenProvider: (key: string) => void
 }
 
 function badgeVariant(tone: ReturnType<typeof listenerBadge>['tone']) {
@@ -33,7 +35,12 @@ function badgeVariant(tone: ReturnType<typeof listenerBadge>['tone']) {
 	}
 }
 
-export function ListenerRow({ source, listener, now }: ListenerRowProps) {
+export function ListenerRow({
+	source,
+	listener,
+	now,
+	onOpenProvider,
+}: ListenerRowProps) {
 	const badge = listenerBadge(listener.state)
 	return (
 		<TableRow data-source={source.source} data-listener={listener.state}>
@@ -46,6 +53,7 @@ export function ListenerRow({ source, listener, now }: ListenerRowProps) {
 							{shortError(listener.last_error)}
 						</span>
 					) : null}
+					<ProviderNotice source={source} onOpenProvider={onOpenProvider} />
 					{listener.state === 'stale' ? (
 						<span className="max-w-56 text-xs text-muted-foreground">
 							{lastUpdateText(listener.updated_at, now)}. {STALE_EXPLANATION}.

@@ -6,6 +6,7 @@ import {
 	canRun,
 	groupedSources,
 	isSettled,
+	providerReady,
 	runDisabledReason,
 	runSummary,
 	shortError,
@@ -112,15 +113,23 @@ describe('run availability', () => {
 		expect(runDisabledReason(source('boamp'))).toBeNull()
 	})
 
-	it('explains missing credentials', () => {
-		expect(
-			runDisabledReason(
-				source('france_travail', {
-					status: 'unavailable',
-					unavailable_reason: 'missing_credentials',
-				}),
-			),
-		).toBe('Identifiants manquants : la source est désactivée')
+	it('a source whose provider is not ready cannot be run', () => {
+		for (const status of ['not_configured', 'untested', 'failing']) {
+			const blocked = source('boamp', {
+				provider: { key: 'boamp', name: 'BOAMP', status },
+			})
+			expect(providerReady(blocked)).toBe(false)
+			expect(canRun(blocked)).toBe(false)
+			expect(runDisabledReason(blocked)).toBe(
+				'Le fournisseur doit être prêt dans le catalogue',
+			)
+		}
+		const ready = source('boamp', {
+			provider: { key: 'boamp', name: 'BOAMP', status: 'ready' },
+		})
+		expect(providerReady(ready)).toBe(true)
+		expect(canRun(ready)).toBe(true)
+		expect(providerReady(source('qualification'))).toBe(true)
 	})
 })
 

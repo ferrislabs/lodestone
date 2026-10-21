@@ -106,4 +106,20 @@ describe('agent card run action', () => {
 			),
 		)
 	})
+
+	it('shows the french message of a provider that is not ready instead of an already running source', async () => {
+		stubRun(409, {
+			code: 'E_CONFLICT',
+			message:
+				"Conflict: Le fournisseur « BOAMP » n'est pas prêt : configurez-le et testez-le dans le catalogue avant de lancer la source.",
+			status: 409,
+		})
+		renderHarness()
+		fireEvent.click(screen.getByRole('button', { name: /Lancer la source/ }))
+		await waitFor(() =>
+			expect(screen.getByRole('status').textContent).toBe(
+				"Le fournisseur « BOAMP » n'est pas prêt : configurez-le et testez-le dans le catalogue avant de lancer la source.",
+			),
+		)
+	})
 })
