@@ -1939,3 +1939,25 @@ async fn a_scoring_call_failure_is_recorded_with_its_next_attempt(pool: PgPool) 
     assert_eq!(scoring.status, StageStatus::Waiting);
     assert_eq!(scoring.reason_code, Some(StageReason::CallFailureBackoff));
 }
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_lead_decided_before_its_scoring_is_not_scored(pool: PgPool) {
+    let harness = Harness::new(pool.clone()).await;
+    harness
+        .profile(
+            vec![qualification_agent("fit")],
+            vec![scoring_agent("global", 5, None, 1)],
+        )
+        .await;
+    harness.observe("acme.com", SourceName::HttpProbe, 10).await;
+    harness.qualify().await;
+    sqlx::query("UPDATE leads SET status = 'rejected' WHERE domain = 'acme.com'")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let report = harness.score().await;
+
+    assert_eq!((report.leads, report.backlog), (0, 0));
+    assert!(harness.scoring_calls().is_empty());
+}

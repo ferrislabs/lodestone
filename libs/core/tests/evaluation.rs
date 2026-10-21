@@ -2806,3 +2806,57 @@ async fn running_agents_are_listed_in_flight_while_they_wait_for_the_model(pool:
     pass.await.unwrap();
     assert!(harness.usecase.in_flight().is_empty());
 }
+
+async fn set_status(pool: &PgPool, host: &str, status: &str) {
+    sqlx::query("UPDATE leads SET status = $2 WHERE domain = $1")
+        .bind(host)
+        .bind(status)
+        .execute(pool)
+        .await
+        .unwrap();
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn decided_leads_are_not_qualified_again_until_reopened(pool: PgPool) {
+    let harness = Harness::new(pool.clone(), 10);
+    harness.default_provider("model-default").await;
+    let profile = harness.profile(vec![agent("solo", None, "q")]).await;
+    harness.observe("acme.com", SourceName::HttpProbe, 10).await;
+    assert_eq!(harness.step(settings(100, 10)).await.leads, 1);
+
+    harness
+        .revise(profile, vec![revised(agent("solo", None, "q"))])
+        .await;
+    harness.observe("acme.com", SourceName::DnsCname, 20).await;
+    for status in ["validated", "rejected", "contacted"] {
+        set_status(&pool, "acme.com", status).await;
+        let decided = harness.step(settings(100, 10)).await;
+        assert_eq!((decided.leads, decided.backlog), (0, 0), "{status}");
+    }
+    assert_eq!(harness.calls(), 1);
+
+    set_status(&pool, "acme.com", "new").await;
+    assert_eq!(harness.step(settings(100, 10)).await.leads, 1);
+    assert_eq!(harness.calls(), 2);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_strongest_leads_are_qualified_first(pool: PgPool) {
+    let harness = Harness::new(pool.clone(), 10);
+    harness.default_provider("model-default").await;
+    let profile = harness.profile(vec![agent("solo", None, "q")]).await;
+    harness.observe("weak.com", SourceName::HttpProbe, 10).await;
+    harness
+        .observe("strong.com", SourceName::HttpProbe, 20)
+        .await;
+    sqlx::query("UPDATE leads SET score = CASE domain WHEN 'weak.com' THEN 10 ELSE 90 END")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let first = harness.step(settings(100, 1)).await;
+
+    assert_eq!((first.leads, first.backlog), (1, 1));
+    assert!(harness.indicated(profile, "strong.com").await.1.is_some());
+    assert!(harness.indicated(profile, "weak.com").await.1.is_none());
+}
