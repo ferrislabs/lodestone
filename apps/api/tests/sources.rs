@@ -6,7 +6,8 @@ use chrono::{DateTime, Duration as Delta, Utc};
 use common::Secret;
 use http::{Method, StatusCode};
 use lodestone_core::{
-    JobKind, JobQueue, NewJob, ProviderStatus, Run, RunId, RunOutcome, RunRepository, SourceName,
+    CancelReason, JobKind, JobQueue, NewJob, ProviderStatus, Run, RunId, RunOutcome, RunRepository,
+    SourceName,
     infrastructure::{
         job::postgres::PgJobQueue, postgres::with_tx, run::postgres::PgRunRepository,
     },
@@ -464,4 +465,43 @@ async fn support_profile(pool: &PgPool) -> lodestone_core::ProfileId {
     .await
     .unwrap();
     lodestone_core::ProfileId(id)
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_cancelled_run_reports_why_it_stopped(pool: PgPool) {
+    let api = Api::new(pool.clone()).await;
+    api.schedule("source.run", "source:boamp", 6).await;
+    let profile = support_profile(&pool).await;
+    with_tx(&pool, async |shared| {
+        let mut repo = PgRunRepository::new(&shared);
+        let run = Run::start(
+            RunId(common::generate_uuid_v7()),
+            profile,
+            SourceName::Boamp,
+            None,
+            Utc::now() - Delta::minutes(5),
+        );
+        repo.insert(&run).await?;
+        repo.finish(
+            run.id,
+            &RunOutcome::Cancelled {
+                volume: 2,
+                signals: 1,
+                reason: CancelReason::AgentRemoved,
+            },
+            Utc::now(),
+        )
+        .await?;
+        Ok(())
+    })
+    .await
+    .unwrap();
+
+    let listed = api.list().await;
+
+    let run = &entry(&listed, "boamp")["last_runs"][0];
+    assert_eq!(run["status"], "cancelled");
+    assert_eq!(run["cancel_reason"], "agent_removed");
+    assert_eq!(run["volume"], 2);
+    assert!(run["error"].is_null());
 }

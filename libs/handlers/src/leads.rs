@@ -5,13 +5,13 @@ use axum::{
     extract::{Path, Query, State, rejection::JsonRejection},
 };
 use lodestone_core::{
-    AGENT_FAILED_AFTER, AgentFailure, AgentKind, Assessment, Calibrations, ContactEmail,
+    AGENT_FAILED_AFTER, AgentFailure, AgentKind, AgentStop, Assessment, Calibrations, ContactEmail,
     DraftMessage, DraftReview, DraftStatus, EnrichmentState, EnrichmentStatus, EnrichmentStep,
     Exclusion, Lead, LeadDetail, LeadFacts, LeadId, LeadQuery, LeadScoring, LeadSort, LeadStatus,
     LlmProviderRecord, Profile, ProfileId, QualificationResult, Rejection, RejectionProblem,
     ResultStatus, RunProvenance, SUMMARY_FAILED_AFTER, ScoringResult, Signal, SignalKind,
     SummaryState, Verdict, VerdictAnswer, VerdictCap, VerdictFilter, VerdictProbabilities,
-    VerdictReason, VerdictSource, WaitingReason, calibrate_verdict,
+    VerdictReason, VerdictSource, WaitingReason, WorkKind, calibrate_verdict,
     definition::{QualificationAgent, Question, ScoringAgent},
     signal_sentence,
 };
@@ -1064,6 +1064,47 @@ impl AgentFailureDto {
 }
 
 #[derive(Debug, Serialize, PartialEq, ToSchema)]
+pub struct AgentStopDto {
+    /// One of `sourcing`, `enrichment`, `qualification`, `scoring`, `aggregator`.
+    pub kind: String,
+    pub agent_id: String,
+    /// Display name of the agent, its identifier when the profile no longer defines it.
+    pub agent_name: String,
+    /// One of `agent_removed`, `agent_disabled`, `profile_deactivated`, `profile_deleted`.
+    pub reason: String,
+    pub profile_revision: u32,
+    #[schema(format = DateTime)]
+    pub stopped_at: String,
+}
+
+impl AgentStopDto {
+    fn new(stop: &AgentStop, detail: &LeadDetail) -> Self {
+        let agent = stop.target.agent.as_str();
+        let name = match stop.target.kind {
+            WorkKind::Qualification => detail
+                .qualification_agents
+                .iter()
+                .find(|known| known.id.as_str() == agent)
+                .map(|known| known.name.clone()),
+            WorkKind::Scoring => detail
+                .scoring_agents
+                .iter()
+                .find(|known| known.id.as_str() == agent)
+                .map(|known| known.name.clone()),
+            WorkKind::Sourcing | WorkKind::Enrichment | WorkKind::Aggregator => None,
+        };
+        Self {
+            kind: stop.target.kind.as_str().to_owned(),
+            agent_id: agent.to_owned(),
+            agent_name: name.unwrap_or_else(|| agent.to_owned()),
+            reason: stop.reason.as_str().to_owned(),
+            profile_revision: stop.revision.get(),
+            stopped_at: stop.stopped_at.to_rfc3339(),
+        }
+    }
+}
+
+#[derive(Debug, Serialize, PartialEq, ToSchema)]
 pub struct HostFactDto {
     pub host: String,
     /// One of production, development, staging, test, preproduction, demo.
@@ -1199,6 +1240,8 @@ pub struct LeadDetailDto {
     pub summary_state: Option<SummaryStateDto>,
     /// Qualification and scoring agents whose model call failed and is waiting for a new attempt; empty when none is.
     pub agent_failures: Vec<AgentFailureDto>,
+    /// Agents whose work on this lead stopped because they were removed or disabled, or because the profile was deactivated; empty when none did.
+    pub agent_stops: Vec<AgentStopDto>,
     /// Company dossier of the lead domain; null until the company research listener has seen the domain.
     pub company: Option<CompanyDto>,
     pub enrichment: EnrichmentDto,
@@ -1255,6 +1298,11 @@ impl LeadDetailDto {
                 .agent_failures
                 .iter()
                 .map(|failure| AgentFailureDto::new(failure, detail))
+                .collect(),
+            agent_stops: detail
+                .agent_stops
+                .iter()
+                .map(|stop| AgentStopDto::new(stop, detail))
                 .collect(),
             company: detail.company.as_ref().map(|dossier| {
                 CompanyDto::from(dossier).with_entity(detail.entity.as_ref(), &detail.siblings)

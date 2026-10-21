@@ -4,11 +4,13 @@ use chrono::{DateTime, Utc};
 use common::{CoreError, generate_uuid_v7};
 use lodestone_macros::transactional;
 use serde_json::json;
+use tokio::select;
 
 use crate::{
     application::{LodestoneUseCase, jobs::JobError},
     domain::{
         NormalizedDomain,
+        agent_work::{AgentWork, CancelReason, WorkTarget, all_cancelled},
         facts::independent_signals,
         job::{Job, JobKind, NewJob, ports::Clock},
         lead::{
@@ -36,6 +38,58 @@ pub struct SourceRunReport {
     pub items: u64,
     pub signals: u64,
     pub skipped_no_lead: u64,
+    pub cancelled: u64,
+}
+
+impl SourceRunReport {
+    fn empty() -> Self {
+        Self {
+            runs: Vec::new(),
+            items: 0,
+            signals: 0,
+            skipped_no_lead: 0,
+            cancelled: 0,
+        }
+    }
+}
+
+pub(crate) struct Recorded {
+    pub(crate) processed: u64,
+    pub(crate) signals: u64,
+    pub(crate) skipped: u64,
+    pub(crate) stopped: Option<CancelReason>,
+}
+
+impl Recorded {
+    pub(crate) fn outcome(&self, volume: u64) -> RunOutcome {
+        match self.stopped {
+            Some(reason) => RunOutcome::Cancelled {
+                volume: self.processed,
+                signals: self.signals,
+                reason,
+            },
+            None => RunOutcome::Succeeded {
+                volume,
+                signals: self.signals,
+            },
+        }
+    }
+}
+
+pub(crate) enum Collected<T> {
+    Items(T),
+    Stopped(CancelReason),
+}
+
+pub(crate) async fn collect_until<F, T>(works: &[AgentWork], collect: F) -> Collected<T>
+where
+    F: Future<Output = T>,
+{
+    select! {
+        biased;
+        reason = all_cancelled(works) => Collected::Stopped(reason),
+        items = collect => Collected::Items(items),
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -137,7 +191,7 @@ impl LodestoneUseCase {
     {
         let name = source.name();
         let profiles: Vec<ActiveProfile> = self
-            .list_active_profiles()
+            .refreshed_active_profiles()
             .await?
             .into_iter()
             .filter(|active| active.revision.definition.definition().has_targets(name))
@@ -155,13 +209,12 @@ impl LodestoneUseCase {
             })
             .collect();
         if targets.is_empty() {
-            return Ok(SourceRunReport {
-                runs: Vec::new(),
-                items: 0,
-                signals: 0,
-                skipped_no_lead: 0,
-            });
+            return Ok(SourceRunReport::empty());
         }
+        let works: Vec<AgentWork> = targets
+            .iter()
+            .map(|(active, target)| self.agent_work(active, WorkTarget::of_source(target)))
+            .collect();
 
         let started_at = clock.now();
         let runs: Vec<Run> = targets
@@ -180,7 +233,27 @@ impl LodestoneUseCase {
             self.insert_runs(&runs).await?;
         }
 
-        let collected = source.collect(&profiles, started_at).await;
+        let collected = match collect_until(&works, source.collect(&profiles, started_at)).await {
+            Collected::Items(collected) => collected,
+            Collected::Stopped(reason) => {
+                if recording == RunRecording::WhenProcessed {
+                    self.insert_runs(&runs).await?;
+                }
+                for (run, work) in runs.iter().zip(&works) {
+                    let outcome = RunOutcome::Cancelled {
+                        volume: 0,
+                        signals: 0,
+                        reason: work.stop_reason().unwrap_or(reason),
+                    };
+                    self.finish_run(run.id, &outcome, clock.now()).await?;
+                }
+                return Ok(SourceRunReport {
+                    runs: runs.iter().map(|run| run.id).collect(),
+                    cancelled: count(runs.len()),
+                    ..SourceRunReport::empty()
+                });
+            }
+        };
         if recording == RunRecording::WhenProcessed
             && !matches!(&collected, Ok(items) if items.is_empty())
         {
@@ -202,43 +275,33 @@ impl LodestoneUseCase {
         };
 
         if items.is_empty() && recording == RunRecording::WhenProcessed {
-            return Ok(SourceRunReport {
-                runs: Vec::new(),
-                items: 0,
-                signals: 0,
-                skipped_no_lead: 0,
-            });
+            return Ok(SourceRunReport::empty());
         }
 
         let mut total_signals = 0;
         let mut skipped_no_lead = 0;
-        for ((active, target), run) in targets.iter().zip(&runs) {
+        let mut cancelled = 0;
+        for (((active, target), run), work) in targets.iter().zip(&runs).zip(&works) {
             let served: Vec<&S::Item> = items
                 .iter()
                 .filter(|item| source.serves(item, target))
                 .collect();
             let volume = count(served.len());
-            let observations: Vec<Observation> = served
-                .iter()
-                .flat_map(|item| source.evaluate(item, active, target))
-                .map(|observation| Observation {
-                    agent: target.agent_id().cloned(),
-                    ..observation
-                })
-                .collect();
+            let batches = served.iter().map(|item| {
+                source
+                    .evaluate(item, active, target)
+                    .into_iter()
+                    .map(|observation| Observation {
+                        agent: target.agent_id().cloned(),
+                        ..observation
+                    })
+                    .collect::<Vec<Observation>>()
+            });
             let recorded = self
-                .record_observations_with(
-                    active,
-                    name,
-                    &observations,
-                    clock.now(),
-                    LeadCreation::of(target),
-                )
+                .record_until_stopped(active, name, batches, work, LeadCreation::of(target), clock)
                 .await;
-            let skipped = recorded.as_ref().map_or(0, |skipped| *skipped);
-            let signals = count(observations.len()).saturating_sub(skipped);
             let outcome = match &recorded {
-                Ok(_) => RunOutcome::Succeeded { volume, signals },
+                Ok(recorded) => recorded.outcome(volume),
                 Err(error) => RunOutcome::Failed {
                     volume,
                     signals: 0,
@@ -246,9 +309,12 @@ impl LodestoneUseCase {
                 },
             };
             self.finish_run(run.id, &outcome, clock.now()).await?;
-            recorded?;
-            total_signals += signals;
-            skipped_no_lead += skipped;
+            let recorded = recorded?;
+            if recorded.stopped.is_some() {
+                cancelled += 1;
+            }
+            total_signals += recorded.signals;
+            skipped_no_lead += recorded.skipped;
         }
 
         Ok(SourceRunReport {
@@ -256,7 +322,48 @@ impl LodestoneUseCase {
             items: count(items.len()),
             signals: total_signals,
             skipped_no_lead,
+            cancelled,
         })
+    }
+
+    pub(crate) async fn record_until_stopped<I, C>(
+        &self,
+        active: &ActiveProfile,
+        name: SourceName,
+        batches: I,
+        work: &AgentWork,
+        creation: LeadCreation,
+        clock: &C,
+    ) -> Result<Recorded, CoreError>
+    where
+        I: Iterator<Item = Vec<Observation>>,
+        C: Clock,
+    {
+        let mut recorded = Recorded {
+            processed: 0,
+            signals: 0,
+            skipped: 0,
+            stopped: work.stop_reason(),
+        };
+        if recorded.stopped.is_some() {
+            return Ok(recorded);
+        }
+        for observations in batches {
+            if let Some(reason) = work.stop_reason() {
+                recorded.stopped = Some(reason);
+                break;
+            }
+            recorded.processed += 1;
+            if observations.is_empty() {
+                continue;
+            }
+            let skipped = self
+                .record_observations_with(active, name, &observations, clock.now(), creation)
+                .await?;
+            recorded.skipped += skipped;
+            recorded.signals += count(observations.len()).saturating_sub(skipped);
+        }
+        Ok(recorded)
     }
 
     #[transactional(run)]

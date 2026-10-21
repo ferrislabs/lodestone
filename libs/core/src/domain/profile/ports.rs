@@ -41,4 +41,10 @@ pub trait ProfileRepository: Send {
 
     fn list_active(&mut self)
     -> impl Future<Output = Result<Vec<ActiveProfile>, CoreError>> + Send;
+
+    fn list_current(
+        &mut self,
+    ) -> impl Future<Output = Result<Vec<ActiveProfile>, CoreError>> + Send;
+
+    fn delete(&mut self, id: ProfileId) -> impl Future<Output = Result<bool, CoreError>> + Send;
 }

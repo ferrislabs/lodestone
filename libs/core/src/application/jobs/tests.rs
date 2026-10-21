@@ -7,7 +7,11 @@ use std::{
 
 use chrono::{DateTime, Utc};
 use common::CoreError;
-use tokio::{sync::watch, task::JoinHandle, time::Instant};
+use tokio::{
+    sync::watch,
+    task::JoinHandle,
+    time::{Instant, sleep},
+};
 
 use super::*;
 use crate::domain::job::{
@@ -181,6 +185,26 @@ impl JobQueue for MemoryQueue {
                 job.status = JobStatus::Pending;
                 job.attempts = 0;
                 job.run_at = run_at;
+                job.updated_at = now;
+                *held = None;
+                Ok(true)
+            }
+            _ => Ok(false),
+        }
+    }
+
+    async fn cancel(
+        &self,
+        id: JobId,
+        token: LeaseToken,
+        reason: CancelReason,
+        now: DateTime<Utc>,
+    ) -> Result<bool, CoreError> {
+        let mut jobs = self.jobs.lock().unwrap();
+        match jobs.get_mut(&id) {
+            Some((job, held)) if held.is_some_and(|(t, _)| t == token) => {
+                job.status = JobStatus::Cancelled;
+                job.last_error = Some(reason.as_str().to_owned());
                 job.updated_at = now;
                 *held = None;
                 Ok(true)
@@ -498,6 +522,20 @@ async fn rescheduled_job_runs_again_at_the_requested_time() {
     assert_eq!(job.status, JobStatus::Pending);
     assert_eq!(job.attempts, 0);
     assert_eq!(job.run_at, next_run);
+    assert_eq!(h.queue.claim_count(ids[0]), 1);
+    h.shutdown().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_cancelled_job_is_marked_cancelled_and_never_retried() {
+    let handler = ScriptedHandler::new(
+        Duration::from_millis(10),
+        vec![Ok(JobOutcome::Cancelled(CancelReason::AgentRemoved))],
+    );
+    let (h, ids) = Harness::start(handler, settings(1), &[3]).await;
+    let job = h.wait_for(ids[0], JobStatus::Cancelled).await;
+    assert_eq!(job.last_error.as_deref(), Some("agent_removed"));
+    sleep(Duration::from_secs(600)).await;
     assert_eq!(h.queue.claim_count(ids[0]), 1);
     h.shutdown().await;
 }

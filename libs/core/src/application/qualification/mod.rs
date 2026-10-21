@@ -6,12 +6,18 @@ use tracing::{info, warn};
 use crate::{
     application::{
         LodestoneUseCase,
-        evaluation::{EvaluationSettings, Loaded, ProviderBuilder, load_provider, render_signal},
+        evaluation::{
+            EvaluationSettings, Loaded, ProviderBuilder, load_provider, qualification_works,
+            render_signal,
+        },
         llm::gateway::{
-            CallSettings, LlmCallError, Prompt, RunBudget, SchemaCall, call_with_schema,
+            CallSettings, LlmCallError, Prompt, RunBudget, SchemaCall, call_with_schema_until,
         },
     },
     domain::{
+        agent_work::{
+            AgentWork, CancelReason, WorkKind, WorkTarget, first_stop, ports::AgentWorkRepository,
+        },
         aggregation::{
             AggregatorOutput, EVIDENCE_RETRY, Facts, agent_source, build, check,
             instruction_with_dossier, missing_results, render_agent, render_scoring, retry_message,
@@ -51,6 +57,7 @@ pub struct AggregationReport {
     pub leads: u64,
     pub unverified: u64,
     pub failed: u64,
+    pub stopped: u64,
     pub backlog: u64,
     pub budget_exhausted: bool,
 }
@@ -60,6 +67,21 @@ enum Outcome {
     Skipped,
     Failed(String),
     BudgetExhausted,
+    Stopped(CancelReason),
+}
+
+fn aggregation_works(usecase: &LodestoneUseCase, active: &ActiveProfile) -> Vec<AgentWork> {
+    let mut works = vec![usecase.agent_work(active, WorkTarget::aggregator())];
+    works.extend(qualification_works(usecase, active));
+    works.extend(
+        active
+            .revision
+            .definition
+            .definition()
+            .enabled_scoring_agents()
+            .map(|agent| usecase.agent_work(active, WorkTarget::new(WorkKind::Scoring, &agent.id))),
+    );
+    works
 }
 
 struct Candidate {
@@ -121,6 +143,7 @@ struct Summariser<'a, P, C> {
     loaded: &'a Loaded<P>,
     cache: &'a C,
     settings: EvaluationSettings,
+    work: &'a AgentWork,
 }
 
 impl<P, C> Summariser<'_, P, C>
@@ -214,7 +237,7 @@ where
                 },
                 schema: &schema,
             };
-            let structured = match call_with_schema(
+            let structured = match call_with_schema_until(
                 &self.loaded.provider,
                 self.cache,
                 call,
@@ -230,11 +253,13 @@ where
                     base_delay: self.settings.base_delay,
                 },
                 budget,
+                self.work,
             )
             .await
             {
                 Ok(structured) => structured,
                 Err(LlmCallError::BudgetExhausted) => return Ok(Outcome::BudgetExhausted),
+                Err(LlmCallError::Cancelled(reason)) => return Ok(Outcome::Stopped(reason)),
                 Err(error) => {
                     warn!(
                         lead_id = %lead.id,
@@ -315,6 +340,9 @@ where
         let Some(qualified_at) = lead.qualified_at else {
             return Ok(Outcome::Skipped);
         };
+        if let Some(reason) = first_stop(&aggregation_works(usecase, active)) {
+            return Ok(Outcome::Stopped(reason));
+        }
         match usecase.store_summary(&assessment, qualified_at, now).await {
             Ok(true) => Ok(Outcome::Stored { verified }),
             Ok(false) => Ok(Outcome::Skipped),
@@ -343,7 +371,7 @@ impl LodestoneUseCase {
         K: Clock,
     {
         let profiles: Vec<ActiveProfile> = self
-            .list_active_profiles()
+            .refreshed_active_profiles()
             .await?
             .into_iter()
             .filter(|active| {
@@ -387,16 +415,28 @@ impl LodestoneUseCase {
                 }
                 continue;
             };
+            let works = aggregation_works(self, active);
             let summariser = Summariser {
                 loaded: &loaded,
                 cache,
                 settings,
+                work: &works[0],
             };
             for lead in &leads {
+                if let Some(reason) = first_stop(&works) {
+                    info!(profile = %active.profile.id, reason = reason.as_str(), "aggregation pass stopped for the profile");
+                    continue 'profiles;
+                }
                 match summariser
                     .summarise(self, active, lead, &mut budget, clock)
                     .await?
                 {
+                    Outcome::Stopped(reason) => {
+                        report.stopped += 1;
+                        self.note_stop(lead.id, &works[0], reason, clock.now())
+                            .await?;
+                        continue 'profiles;
+                    }
                     Outcome::Stored { verified } => {
                         info!(
                             monotonic_counter.aggregation_summaries = 1u64,
@@ -516,7 +556,7 @@ impl LodestoneUseCase {
             .await
     }
 
-    #[transactional(lead, assessment, qualification)]
+    #[transactional(lead, assessment, qualification, agent_work)]
     async fn store_summary(
         &self,
         assessment: &Assessment,
@@ -526,6 +566,10 @@ impl LodestoneUseCase {
         let mut leads = lead_repository;
         let mut assessments = assessment_repository;
         let mut qualification = qualification_repository;
+        let mut stops = agent_work_repository;
+        stops
+            .clear_stops(assessment.lead_id, &[WorkKind::Aggregator])
+            .await?;
         let Some(current) = leads.find(assessment.lead_id).await? else {
             return Ok(false);
         };

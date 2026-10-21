@@ -6,6 +6,7 @@ import { Skeleton } from '#/components/ui/skeleton'
 import { failureOfKind } from '#/pages/leads/lib/agent-failure'
 import { waitingBadge } from '#/pages/leads/lib/enrichment'
 import type { LeadDetailData, LeadStatus } from '#/pages/leads/lib/types'
+import { AgentStopsNotice } from './agent-stops-notice'
 import { AssessmentsList } from './assessments-list'
 import { CompanyCard } from './company-card'
 import { ContactsList } from './contacts-list'
@@ -106,6 +107,7 @@ export function LeadDetail({
 					{detail.enrichment ? (
 						<LeadEnrichment enrichment={detail.enrichment} />
 					) : null}
+					<AgentStopsNotice stops={detail.agent_stops ?? []} />
 					<QualificationResults
 						results={detail.qualification_results}
 						failure={failureOfKind(detail.agent_failures, 'qualification')}

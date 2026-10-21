@@ -1,3 +1,4 @@
+pub(crate) mod agent_work;
 pub(crate) mod aggregation;
 pub(crate) mod ats_target;
 pub(crate) mod calibration;

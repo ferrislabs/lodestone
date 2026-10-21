@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use crate::domain::{
+    agent_work::ports::AgentStop,
     calibration::Calibrations,
     company::{CompanyDossier, CompanyEntity, SiblingLead},
     enrichment::EnrichmentState,
@@ -146,6 +147,7 @@ pub struct LeadDetail {
     pub calibrations: Calibrations,
     pub summary_state: Option<SummaryState>,
     pub agent_failures: Vec<AgentFailure>,
+    pub agent_stops: Vec<AgentStop>,
     pub scoring: Option<LeadScoring>,
     pub company: Option<CompanyDossier>,
     pub entity: Option<CompanyEntity>,

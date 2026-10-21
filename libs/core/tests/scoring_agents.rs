@@ -10,14 +10,15 @@ use std::{
     time::Duration,
 };
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, TimeDelta, Utc};
 use common::{EncryptionKey, Secret};
 use lodestone_core::{
-    ActiveProfile, AgentKind, Clock, CreateProfileCommand, GenerationParams, Lead, LeadDetail,
-    LeadRepository, LlmError, LlmProvider, LlmRequest, LlmResponse, LodestoneUseCase, Observation,
-    ProfileId, ProfileName, Provenance, ProviderDefinition, ProviderId, ProviderKind, ResultStatus,
-    ReviseProfileCommand, SignalKind, SourceName, Tier, TokenPricing, TokenUsage, UnitInterval,
-    ValidatedProfile, Verdict, VerdictReason, VerdictSource,
+    ActiveProfile, AgentKind, AgentRegistry, CancelReason, Clock, CreateProfileCommand,
+    GenerationParams, Lead, LeadDetail, LeadRepository, LlmError, LlmProvider, LlmRequest,
+    LlmResponse, LodestoneUseCase, Observation, ProfileId, ProfileName, Provenance,
+    ProviderDefinition, ProviderId, ProviderKind, ResultStatus, ReviseProfileCommand, SignalKind,
+    SourceName, Tier, TokenPricing, TokenUsage, UnitInterval, ValidatedProfile, Verdict,
+    VerdictReason, VerdictSource, WorkKind,
     evaluation::{EvaluationSettings, ProviderBuilder},
     infrastructure::{
         crypto::AesGcmCipher, lead::postgres::PgLeadRepository, llm_cache::postgres::PgLlmCache,
@@ -71,9 +72,15 @@ struct Seen {
     schema: Value,
 }
 
+enum Change {
+    Publish(Box<ActiveProfile>),
+    Delete(ProfileId),
+}
+
 struct Shared {
     replies: Mutex<HashMap<String, VecDeque<Reply>>>,
     seen: Mutex<Vec<Seen>>,
+    on_call: Mutex<Option<(Kind, LodestoneUseCase, Change)>>,
 }
 
 struct Scripted {
@@ -171,6 +178,18 @@ impl LlmProvider for Scripted {
         } else {
             Kind::Aggregator
         };
+        let mut on_call = self.shared.on_call.lock().unwrap();
+        if on_call
+            .as_ref()
+            .is_some_and(|(wanted, _, _)| *wanted == kind)
+            && let Some((_, usecase, change)) = on_call.take()
+        {
+            match change {
+                Change::Publish(changed) => usecase.agent_registry().publish(&changed),
+                Change::Delete(profile) => usecase.agent_registry().delete(profile),
+            }
+        }
+        drop(on_call);
         self.shared.seen.lock().unwrap().push(Seen {
             kind,
             model: self.model.clone(),
@@ -305,6 +324,7 @@ impl Harness {
             shared: Arc::new(Shared {
                 replies: Mutex::new(HashMap::new()),
                 seen: Mutex::new(Vec::new()),
+                on_call: Mutex::new(None),
             }),
         };
         let classifier = harness.provider(CLASSIFIER).await;
@@ -1580,4 +1600,80 @@ async fn the_migration_makes_stored_qualification_call_failures_due_again(pool: 
     assert_eq!(harness.qualify().await, 1);
     let detail = harness.detail(profile, "acme.com").await;
     assert_eq!(detail.qualification_results[0].status, ResultStatus::Valid);
+}
+
+impl Harness {
+    fn on_call(&self, kind: Kind, change: Change) {
+        *self.shared.on_call.lock().unwrap() = Some((kind, self.usecase.clone(), change));
+    }
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn deactivating_the_profile_during_scoring_stores_no_scoring(pool: PgPool) {
+    let harness = Harness::new(pool).await;
+    let profile = harness
+        .profile(
+            vec![qualification_agent("fit")],
+            vec![scoring_agent("global", 5, None, 1)],
+        )
+        .await;
+    harness.observe("acme.com", SourceName::HttpProbe, 10).await;
+    harness.qualify().await;
+    let mut deactivated = harness.active().await;
+    deactivated.profile.active = false;
+    deactivated.profile.updated_at += TimeDelta::seconds(1);
+    harness.on_call(Kind::Scoring, Change::Publish(Box::new(deactivated)));
+
+    let report = harness.score().await;
+
+    assert_eq!(report.stopped, 1);
+    assert_eq!(report.leads, 0);
+    assert_eq!(harness.count_rows().await, 0);
+    let detail = harness.detail(profile, "acme.com").await;
+    assert_eq!(detail.lead.llm_score, None);
+    assert_eq!(detail.agent_stops.len(), 1);
+    assert_eq!(detail.agent_stops[0].target.kind, WorkKind::Scoring);
+    assert_eq!(
+        detail.agent_stops[0].reason,
+        CancelReason::ProfileDeactivated
+    );
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn deleting_the_profile_during_aggregation_stores_no_summary(pool: PgPool) {
+    let harness = Harness::new(pool).await;
+    let profile = harness
+        .profile(
+            vec![qualification_agent("fit")],
+            vec![scoring_agent("global", 5, None, 1)],
+        )
+        .await;
+    harness.observe("acme.com", SourceName::HttpProbe, 10).await;
+    harness.qualify().await;
+    harness.score().await;
+    harness.on_call(Kind::Aggregator, Change::Delete(profile));
+
+    let report = harness
+        .usecase
+        .summarise_due_leads(
+            &harness.builder(),
+            &harness.cipher,
+            &harness.cache(),
+            settings(),
+            &harness.clock,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(report.stopped, 1);
+    assert_eq!(report.leads, 0);
+    assert_eq!(
+        harness.kinds(),
+        [Kind::Qualification, Kind::Scoring, Kind::Aggregator]
+    );
+    let detail = harness.detail(profile, "acme.com").await;
+    assert!(detail.assessments.is_empty());
+    assert_eq!(detail.agent_stops.len(), 1);
+    assert_eq!(detail.agent_stops[0].target.kind, WorkKind::Aggregator);
+    assert_eq!(detail.agent_stops[0].reason, CancelReason::ProfileDeleted);
 }

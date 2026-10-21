@@ -30,7 +30,9 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route("/profiles/import", post(profiles::import_profile))
         .route(
             "/profiles/{profile_id}",
-            get(profiles::get_profile).put(profiles::update_profile),
+            get(profiles::get_profile)
+                .put(profiles::update_profile)
+                .delete(profiles::delete_profile),
         )
         .route(
             "/profiles/{profile_id}/revisions",

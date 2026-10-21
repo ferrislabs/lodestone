@@ -3,7 +3,7 @@ use common::CoreError;
 use lodestone_macros::repository;
 
 use crate::{
-    Run, RunId, RunOutcome,
+    CancelReason, Run, RunId, RunOutcome,
     definition::AgentId,
     domain::run::ports::RunRepository,
     infrastructure::{
@@ -31,8 +31,8 @@ impl<'tx> RunRepository for PgRunRepository<'tx> {
         let mut tx = self.tx.lock().await;
         sqlx::query!(
             r#"
-            INSERT INTO runs (id, profile_id, source, status, started_at, finished_at, volume, signals, error, agent_id)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            INSERT INTO runs (id, profile_id, source, status, started_at, finished_at, volume, signals, error, agent_id, cancel_reason)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
             "#,
             run.id.0,
             run.profile_id.0,
@@ -44,6 +44,7 @@ impl<'tx> RunRepository for PgRunRepository<'tx> {
             signals,
             run.error.as_deref(),
             run.agent.as_ref().map(AgentId::as_str),
+            run.cancel_reason.map(CancelReason::as_str),
         )
         .execute(&mut ***tx)
         .await
@@ -66,6 +67,9 @@ impl<'tx> RunRepository for PgRunRepository<'tx> {
                 signals,
                 error,
             } => (*volume, *signals, Some(error.as_str())),
+            RunOutcome::Cancelled {
+                volume, signals, ..
+            } => (*volume, *signals, None),
         };
         let volume = to_i64(volume)?;
         let signals = to_i64(signals)?;
@@ -74,9 +78,9 @@ impl<'tx> RunRepository for PgRunRepository<'tx> {
             RunRow,
             r#"
             UPDATE runs
-            SET status = $2, volume = $3, signals = $4, error = $5, finished_at = $6
+            SET status = $2, volume = $3, signals = $4, error = $5, finished_at = $6, cancel_reason = $7
             WHERE id = $1 AND status = 'running'
-            RETURNING id, profile_id, source, status, started_at, finished_at, volume, signals, error, agent_id
+            RETURNING id, profile_id, source, status, started_at, finished_at, volume, signals, error, agent_id, cancel_reason
             "#,
             id.0,
             outcome.status().as_str(),
@@ -84,6 +88,7 @@ impl<'tx> RunRepository for PgRunRepository<'tx> {
             signals,
             error,
             finished_at,
+            outcome.cancel_reason().map(CancelReason::as_str),
         )
         .fetch_optional(&mut ***tx)
         .await
@@ -98,7 +103,7 @@ impl<'tx> RunRepository for PgRunRepository<'tx> {
         let row = sqlx::query_as!(
             RunRow,
             r#"
-            SELECT id, profile_id, source, status, started_at, finished_at, volume, signals, error, agent_id
+            SELECT id, profile_id, source, status, started_at, finished_at, volume, signals, error, agent_id, cancel_reason
             FROM runs
             WHERE id = $1
             "#,
@@ -117,7 +122,7 @@ impl<'tx> RunRepository for PgRunRepository<'tx> {
         let rows = sqlx::query_as!(
             RunRow,
             r#"
-            SELECT id, profile_id, source, status, started_at, finished_at, volume, signals, error, agent_id
+            SELECT id, profile_id, source, status, started_at, finished_at, volume, signals, error, agent_id, cancel_reason
             FROM runs
             ORDER BY started_at DESC, id DESC
             LIMIT $1

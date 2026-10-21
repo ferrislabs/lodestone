@@ -10,13 +10,14 @@ use std::{
 use chrono::{DateTime, Utc};
 use common::{EncryptionKey, Secret};
 use lodestone_core::{
-    ActiveProfile, Clock, CompanyDossier, CompanyRepository, CreateProfileCommand, DossierState,
-    GenerationParams, Lead, LeadId, LeadRepository, LeadScoring, LlmError, LlmProvider, LlmRequest,
-    LlmResponse, LodestoneUseCase, Observation, OfficialData, ProfileId, ProfileName, Provenance,
-    ProviderDefinition, ProviderId, ProviderKind, QualificationResult, ReasoningEffort, ResultId,
-    ResultStatus, ReviseProfileCommand, RevisionNumber, SCORING_VERSION, SignalKind, Siren,
-    SourceName, SuppressionTarget, Tier, TokenPricing, TokenUsage, UnitInterval, ValidatedProfile,
-    Verdict, VerdictCap, VerdictReason,
+    ActiveProfile, AgentRegistry, CancelReason, Clock, CompanyDossier, CompanyRepository,
+    CreateProfileCommand, DossierState, GenerationParams, Lead, LeadId, LeadRepository,
+    LeadScoring, LlmError, LlmProvider, LlmRequest, LlmResponse, LodestoneUseCase, Observation,
+    OfficialData, ProfileId, ProfileName, Provenance, ProviderDefinition, ProviderId, ProviderKind,
+    QualificationResult, ReasoningEffort, ResultId, ResultStatus, ReviseProfileCommand,
+    RevisionNumber, SCORING_VERSION, SignalKind, Siren, SourceName, SuppressionTarget, Tier,
+    TokenPricing, TokenUsage, UnitInterval, ValidatedProfile, Verdict, VerdictCap, VerdictReason,
+    WorkKind,
     evaluation::{EvaluationReport, EvaluationSettings, ProviderBuilder},
     infrastructure::{
         company::postgres::PgCompanyRepository, crypto::AesGcmCipher,
@@ -62,6 +63,7 @@ struct Shared {
     replies: Mutex<HashMap<String, VecDeque<Reply>>>,
     seen: Mutex<Vec<Seen>>,
     input_tokens: u64,
+    on_call: Mutex<Option<(LodestoneUseCase, ActiveProfile)>>,
 }
 
 struct Scripted {
@@ -141,6 +143,10 @@ fn answers_from(schema: &Value, pick: Pick, quote: &str) -> Value {
 
 impl LlmProvider for Scripted {
     async fn complete(&self, request: &LlmRequest<'_>) -> Result<LlmResponse, LlmError> {
+        let change = self.shared.on_call.lock().unwrap().take();
+        if let Some((usecase, changed)) = change {
+            usecase.agent_registry().publish(&changed);
+        }
         self.shared.seen.lock().unwrap().push(Seen {
             system: request.system.to_owned(),
             instruction: request.instruction.to_owned(),
@@ -257,6 +263,7 @@ impl Harness {
                 replies: Mutex::new(HashMap::new()),
                 seen: Mutex::new(Vec::new()),
                 input_tokens,
+                on_call: Mutex::new(None),
             }),
         }
     }
@@ -2281,4 +2288,41 @@ async fn escalation_spends_the_run_budget_and_a_replay_reuses_the_cached_calls(p
     assert_eq!(harness.calls_to("model-a"), 1);
     assert_eq!(harness.calls_to("model-b"), 1);
     assert!(harness.results(profile, "acme.com").await[0].escalated);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn disabling_an_agent_during_a_pass_stops_the_lead_and_stores_nothing(pool: PgPool) {
+    let harness = Harness::new(pool, 10);
+    harness.default_provider("model-default").await;
+    let profile = harness
+        .profile(vec![
+            agent("pertinence", None, "pertinence"),
+            agent("maturite", None, "maturite"),
+        ])
+        .await;
+    harness.observe("acme.com", SourceName::HttpProbe, 10).await;
+    let mut changed = harness.active().await;
+    let mut disabled = agent("maturite", None, "maturite");
+    disabled["enabled"] = json!(false);
+    changed.revision.number = changed.revision.number.next().unwrap();
+    changed.revision.definition = ValidatedProfile::parse(definition(vec![
+        agent("pertinence", None, "pertinence"),
+        disabled,
+    ]))
+    .unwrap();
+    *harness.shared.on_call.lock().unwrap() = Some((harness.usecase.clone(), changed));
+
+    let report = harness.step(settings(100, 10)).await;
+
+    assert_eq!(report.stopped, 1);
+    assert_eq!(report.leads, 0);
+    assert_eq!(harness.calls(), 1);
+    assert!(harness.results(profile, "acme.com").await.is_empty());
+    let lead = harness.lead(profile, "acme.com").await;
+    let detail = harness.usecase.lead_detail(lead.id).await.unwrap();
+    assert!(detail.scoring.is_none());
+    assert_eq!(detail.agent_stops.len(), 1);
+    assert_eq!(detail.agent_stops[0].target.kind, WorkKind::Qualification);
+    assert_eq!(detail.agent_stops[0].target.agent.as_str(), "maturite");
+    assert_eq!(detail.agent_stops[0].reason, CancelReason::AgentDisabled);
 }

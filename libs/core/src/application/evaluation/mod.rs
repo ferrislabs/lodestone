@@ -9,10 +9,14 @@ use crate::{
     application::{
         LodestoneUseCase,
         llm::gateway::{
-            CallSettings, LlmCallError, Prompt, RunBudget, SchemaCall, Structured, call_with_schema,
+            CallSettings, LlmCallError, Prompt, RunBudget, SchemaCall, Structured,
+            call_with_schema_until,
         },
     },
     domain::{
+        agent_work::{
+            AgentWork, CancelReason, WorkKind, WorkTarget, first_stop, ports::AgentWorkRepository,
+        },
         calibration::{Calibrations, opinion_score},
         company::PAGE_PROMPT_CHARS,
         facts::{LeadFacts, signal_sentence},
@@ -69,6 +73,7 @@ pub struct EvaluationReport {
     pub invalid: u64,
     pub rescored: u64,
     pub deferred: u64,
+    pub stopped: u64,
     pub backlog: u64,
     pub budget_exhausted: bool,
 }
@@ -251,18 +256,21 @@ enum AgentOutcome {
     Result(Box<QualificationResult>, Option<AgentOpinion>),
     CallFailed(CallFailure),
     BudgetExhausted,
+    Stopped(CancelReason),
 }
 
 enum PassOutcome {
     Done(Pass),
     CallFailed(CallFailure),
     BudgetExhausted,
+    Stopped(AgentWork, CancelReason),
 }
 
 enum LeadOutcome {
     Done { valid: u64, invalid: u64 },
     Deferred,
     BudgetExhausted,
+    Stopped,
 }
 
 enum SampleOutcome {
@@ -270,6 +278,13 @@ enum SampleOutcome {
     Invalid { error: String },
     CallFailed { error: String },
     BudgetExhausted,
+    Stopped(CancelReason),
+}
+
+enum Escalated {
+    Replaced(bool),
+    BudgetExhausted,
+    Stopped(AgentWork, CancelReason),
 }
 
 struct Pass {
@@ -320,6 +335,28 @@ struct AgentRun<'a, P> {
     subject: &'a Subject<'a>,
     agent: &'a QualificationAgent,
     prompt: &'a AgentPrompt,
+    work: &'a AgentWork,
+}
+
+pub(crate) fn qualification_works(
+    usecase: &LodestoneUseCase,
+    active: &ActiveProfile,
+) -> Vec<AgentWork> {
+    active
+        .revision
+        .definition
+        .definition()
+        .qualification_agents
+        .iter()
+        .filter(|agent| agent.enabled)
+        .map(|agent| {
+            usecase.agent_work(active, WorkTarget::new(WorkKind::Qualification, &agent.id))
+        })
+        .collect()
+}
+
+pub(crate) fn profile_stop(works: &[AgentWork]) -> Option<CancelReason> {
+    first_stop(works)
 }
 
 pub(crate) fn count(value: usize) -> u64 {
@@ -442,6 +479,7 @@ where
             subject,
             agent,
             prompt,
+            work,
         } = *run;
         let (plan, sample) = call;
         let schema = contract_schema(agent);
@@ -469,7 +507,7 @@ where
             },
             schema: &schema,
         };
-        call_with_schema(
+        call_with_schema_until(
             &loaded.provider,
             self.cache,
             call,
@@ -480,6 +518,7 @@ where
                 base_delay: self.settings.base_delay,
             },
             budget,
+            work,
         )
         .await
     }
@@ -503,6 +542,7 @@ where
             let structured = match self.ask(run, &instruction, call, budget).await {
                 Ok(structured) => structured,
                 Err(LlmCallError::BudgetExhausted) => return SampleOutcome::BudgetExhausted,
+                Err(LlmCallError::Cancelled(reason)) => return SampleOutcome::Stopped(reason),
                 Err(error) => {
                     if let Some((output, model)) = fallback {
                         return SampleOutcome::Valid { output, model };
@@ -562,7 +602,7 @@ where
         usecase: &LodestoneUseCase,
         subject: &Subject<'_>,
         agent: &QualificationAgent,
-        plan: RunPlan,
+        (plan, work): (RunPlan, &AgentWork),
         providers: &mut Providers<B::Provider>,
         budget: &mut RunBudget,
     ) -> Result<AgentOutcome, CoreError> {
@@ -592,6 +632,7 @@ where
             subject,
             agent,
             prompt: &prompt,
+            work,
         };
         let mut valid: Vec<ValidOutput> = Vec::new();
         let mut records: Vec<serde_json::Value> = Vec::new();
@@ -599,8 +640,12 @@ where
         let mut first_error: Option<String> = None;
         let mut call_errors: Vec<String> = Vec::new();
         for sample in 0..plan.samples {
+            if let Some(reason) = work.stop_reason() {
+                return Ok(AgentOutcome::Stopped(reason));
+            }
             match self.run_sample(&run, (plan, sample), budget).await {
                 SampleOutcome::BudgetExhausted => return Ok(AgentOutcome::BudgetExhausted),
+                SampleOutcome::Stopped(reason) => return Ok(AgentOutcome::Stopped(reason)),
                 SampleOutcome::CallFailed { error } => {
                     warn!(
                         agent = agent.id.as_str(),
@@ -704,11 +749,19 @@ where
             .filter(|agent| agent.enabled)
         {
             let plan = escalation.map_or_else(|| RunPlan::primary(agent), RunPlan::escalation);
+            let work = usecase.agent_work(
+                subject.active,
+                WorkTarget::new(WorkKind::Qualification, &agent.id),
+            );
+            if let Some(reason) = work.stop_reason() {
+                return Ok(PassOutcome::Stopped(work, reason));
+            }
             match self
-                .evaluate_agent(usecase, subject, agent, plan, providers, budget)
+                .evaluate_agent(usecase, subject, agent, (plan, &work), providers, budget)
                 .await?
             {
                 AgentOutcome::BudgetExhausted => return Ok(PassOutcome::BudgetExhausted),
+                AgentOutcome::Stopped(reason) => return Ok(PassOutcome::Stopped(work, reason)),
                 AgentOutcome::CallFailed(failure) => return Ok(PassOutcome::CallFailed(failure)),
                 AgentOutcome::Result(result, opinion) => {
                     info!(
@@ -734,21 +787,22 @@ where
         pass: &mut Pass,
         providers: &mut Providers<B::Provider>,
         budget: &mut RunBudget,
-    ) -> Result<Option<bool>, CoreError> {
+    ) -> Result<Escalated, CoreError> {
         if self
             .load(usecase, Some(provider), ESCALATION_LABEL, providers)
             .await?
             .is_none()
         {
             warn!(lead_id = %subject.lead.id, "escalation skipped, its provider is unavailable");
-            return Ok(Some(false));
+            return Ok(Escalated::Replaced(false));
         }
         let escalated = match self
             .run_agents(usecase, subject, Some(provider), providers, budget)
             .await?
         {
             PassOutcome::Done(escalated) => escalated,
-            PassOutcome::BudgetExhausted => return Ok(None),
+            PassOutcome::BudgetExhausted => return Ok(Escalated::BudgetExhausted),
+            PassOutcome::Stopped(work, reason) => return Ok(Escalated::Stopped(work, reason)),
             PassOutcome::CallFailed(failure) => {
                 warn!(
                     lead_id = %subject.lead.id,
@@ -756,7 +810,7 @@ where
                     error = failure.error,
                     "escalation skipped, its model call failed"
                 );
-                return Ok(Some(false));
+                return Ok(Escalated::Replaced(false));
             }
         };
         let mut replaced = false;
@@ -772,7 +826,7 @@ where
                 replaced = true;
             }
         }
-        Ok(Some(replaced))
+        Ok(Escalated::Replaced(replaced))
     }
 
     async fn evaluate_lead<K: Clock>(
@@ -824,6 +878,10 @@ where
         {
             PassOutcome::Done(pass) => pass,
             PassOutcome::BudgetExhausted => return Ok(LeadOutcome::BudgetExhausted),
+            PassOutcome::Stopped(work, reason) => {
+                usecase.note_stop(lead.id, &work, reason, at).await?;
+                return Ok(LeadOutcome::Stopped);
+            }
             PassOutcome::CallFailed(failure) => {
                 let record = failure.into_record(lead.id, AgentKind::Qualification, revision);
                 let attempts = usecase.note_agent_failure(&record, at).await?;
@@ -859,8 +917,12 @@ where
                 )
                 .await?
             {
-                None => return Ok(LeadOutcome::BudgetExhausted),
-                Some(true) => {
+                Escalated::BudgetExhausted => return Ok(LeadOutcome::BudgetExhausted),
+                Escalated::Stopped(work, reason) => {
+                    usecase.note_stop(lead.id, &work, reason, at).await?;
+                    return Ok(LeadOutcome::Stopped);
+                }
+                Escalated::Replaced(true) => {
                     escalated_revision = Some(revision);
                     judgement = judgement_of(definition, &facts, &scored(&pass), at);
                     info!(
@@ -868,7 +930,7 @@ where
                         "lead escalated"
                     );
                 }
-                Some(false) => {}
+                Escalated::Replaced(false) => {}
             }
         }
         let valid = count(pass.opinions.iter().flatten().count());
@@ -890,6 +952,13 @@ where
             escalated_revision,
             at,
         };
+        let works = qualification_works(usecase, active);
+        if let Some(work) = works.iter().find(|work| !work.is_live())
+            && let Some(reason) = work.stop_reason()
+        {
+            usecase.note_stop(lead.id, work, reason, at).await?;
+            return Ok(LeadOutcome::Stopped);
+        }
         usecase.store_evaluation(&pass.results, &completion).await?;
         Ok(LeadOutcome::Done { valid, invalid })
     }
@@ -938,7 +1007,7 @@ impl LodestoneUseCase {
             settings,
         };
         let profiles: Vec<ActiveProfile> = self
-            .list_active_profiles()
+            .refreshed_active_profiles()
             .await?
             .into_iter()
             .filter(|active| {
@@ -968,11 +1037,20 @@ impl LodestoneUseCase {
             let leads = self
                 .due_leads(active, remaining, gates, clock.now())
                 .await?;
+            let works = qualification_works(self, active);
             for lead in &leads {
+                if let Some(reason) = profile_stop(&works) {
+                    info!(profile = %active.profile.id, reason = reason.as_str(), "qualification pass stopped for the profile");
+                    continue 'profiles;
+                }
                 let outcome = evaluator
                     .evaluate_lead(self, active, lead, &mut providers, &mut budget, clock)
                     .await?;
                 match outcome {
+                    LeadOutcome::Stopped => {
+                        report.stopped += 1;
+                        continue 'profiles;
+                    }
                     LeadOutcome::Done { valid, invalid } => {
                         report.leads += 1;
                         report.valid += valid;
@@ -1063,16 +1141,27 @@ impl LodestoneUseCase {
         repo.agent_failures(lead_id).await
     }
 
-    #[transactional(qualification)]
+    #[transactional(qualification, agent_work)]
     async fn store_evaluation(
         &self,
         results: &[QualificationResult],
         completion: &Completion,
     ) -> Result<(), CoreError> {
         let mut repo = qualification_repository;
+        let mut stops = agent_work_repository;
         for result in results {
             repo.store_result(result).await?;
         }
+        stops
+            .clear_stops(
+                completion.lead_id,
+                &[
+                    WorkKind::Qualification,
+                    WorkKind::Scoring,
+                    WorkKind::Aggregator,
+                ],
+            )
+            .await?;
         repo.complete(completion).await
     }
 

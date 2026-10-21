@@ -467,7 +467,7 @@ pub async fn update_profile(
     let definition = validate(definition)?;
     let revised = state
         .usecase
-        .revise_profile(ReviseProfileCommand {
+        .update_profile(ReviseProfileCommand {
             profile_id: id,
             definition,
             created_by: Some(actor),
@@ -495,7 +495,7 @@ async fn set_active(
     actor(user)?;
     let profile = state
         .usecase
-        .set_profile_active(profile_id(raw)?, active)
+        .change_profile_activation(profile_id(raw)?, active)
         .await?;
     Ok(Response::OK(ProfileDto::from(&profile)))
 }
@@ -542,6 +542,30 @@ pub async fn deactivate_profile(
     Path(raw): Path<String>,
 ) -> Result<Response<ProfileDto>, ApiError> {
     set_active(&state, user, &raw, false).await
+}
+
+#[utoipa::path(
+    delete,
+    path = "/api/v1/profiles/{profile_id}",
+    tag = "profiles",
+    security(("bearer_auth" = [])),
+    params(("profile_id" = String, Path, description = "Profile identifier (UUID)")),
+    responses(
+        (status = 204, description = "The profile, its revisions and its leads were deleted; its running agents stop at their next step"),
+        (status = 400, description = "Malformed profile identifier"),
+        (status = 401, description = "Missing, malformed, invalid or expired bearer token"),
+        (status = 403, description = "The caller is not a user"),
+        (status = 404, description = "Unknown profile"),
+    )
+)]
+pub async fn delete_profile(
+    State(state): State<AppState>,
+    user: Option<Extension<AuthenticatedUser>>,
+    Path(raw): Path<String>,
+) -> Result<Response<()>, ApiError> {
+    actor(user)?;
+    state.usecase.delete_profile(profile_id(&raw)?).await?;
+    Ok(Response::NoContent)
 }
 
 fn export_filename(name: &str) -> String {

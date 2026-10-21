@@ -31,11 +31,13 @@ pub struct SourceRunDto {
     pub profile_id: String,
     pub profile_name: String,
     pub agent_id: Option<String>,
-    /// One of `running`, `succeeded`, `failed`.
+    /// One of `running`, `succeeded`, `failed`, `cancelled`.
     pub status: String,
     pub volume: u64,
     pub signals: u64,
     pub error: Option<String>,
+    /// Why a `cancelled` run stopped: `agent_removed`, `agent_disabled`, `profile_deactivated` or `profile_deleted`.
+    pub cancel_reason: Option<String>,
     #[schema(format = DateTime)]
     pub started_at: String,
     #[schema(format = DateTime)]
@@ -52,6 +54,9 @@ impl From<&SourceRunRecord> for SourceRunDto {
             volume: record.volume,
             signals: record.signals,
             error: record.error.clone(),
+            cancel_reason: record
+                .cancel_reason
+                .map(|reason| reason.as_str().to_owned()),
             started_at: record.started_at.to_rfc3339(),
             finished_at: record.finished_at.map(|at| at.to_rfc3339()),
         }
@@ -143,7 +148,7 @@ pub struct SourceDto {
     pub kind: String,
     /// Translation key of the source label.
     pub label_key: String,
-    /// One of `pending`, `running`, `succeeded`, `failed`, `unavailable` for scheduled sources;
+    /// One of `pending`, `running`, `succeeded`, `failed`, `cancelled`, `unavailable` for scheduled sources;
     /// the listener state for continuous ones.
     pub status: String,
     /// Why the source has no job; set only when `status` is `unavailable`. Always `not_scheduled`.

@@ -114,6 +114,7 @@ const detail: LeadDetailData = {
 	},
 	scoring_results: [],
 	agent_failures: [],
+	agent_stops: [],
 	enrichment: { status: 'disabled', steps: [] },
 	qualification_results: [
 		{
@@ -382,6 +383,46 @@ describe('LeadDetail', () => {
 		expect(
 			container.querySelector('[data-section="scoring"] [data-agent-failure]'),
 		).toBeNull()
+	})
+
+	it('says which agents stopped on this lead and why', () => {
+		const { container } = renderDetail({
+			detail: {
+				...detail,
+				agent_stops: [
+					{
+						kind: 'qualification',
+						agent_id: 'marche',
+						agent_name: 'Marché',
+						reason: 'agent_removed',
+						profile_revision: 2,
+						stopped_at: '2026-02-01T00:00:00Z',
+					},
+					{
+						kind: 'scoring',
+						agent_id: 'score-global',
+						agent_name: 'Score global',
+						reason: 'profile_deactivated',
+						profile_revision: 2,
+						stopped_at: '2026-02-01T00:00:00Z',
+					},
+				],
+			},
+		})
+		const stops = container.querySelectorAll('[data-agent-stop]')
+		expect(stops).toHaveLength(2)
+		expect(stops[0].getAttribute('data-agent-stop')).toBe('qualification')
+		expect(stops[0].textContent).toContain('Agent « Marché »')
+		expect(stops[0].textContent).toContain('Arrêté : agent supprimé')
+		expect(stops[1].textContent).toContain('Arrêté : profil désactivé')
+		expect(stops[1].textContent).toContain(
+			formatDateTime('2026-02-01T00:00:00Z'),
+		)
+	})
+
+	it('shows no stop notice when every agent ran', () => {
+		const { container } = renderDetail()
+		expect(container.querySelector('[data-section="agent-stops"]')).toBeNull()
 	})
 
 	it('keeps the usual wording when no call failed', () => {
