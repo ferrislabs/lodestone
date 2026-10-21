@@ -24,3 +24,8 @@ tokio = { workspace = true, features = ["test-util"] }
 tracing-subscriber = { workspace = true }
 httpmock = "0.7.0"
 flate2 = "1.1.9"
+divan = { workspace = true }
+
+[[bench]]
+name = "extract"
+harness = false

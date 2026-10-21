@@ -1,7 +1,13 @@
 name: CodSpeed Benchmarks
 
 on:
+  push:
+    branches:
+      - main
   pull_request:
+  # `workflow_dispatch` allows CodSpeed to trigger backtest
+  # performance analysis in order to generate initial data.
+  workflow_dispatch:
 
 jobs:
   benchmarks:
@@ -19,9 +25,9 @@ jobs:
           cache-target: release
           bins: cargo-codspeed
       - name: Build the benchmark target(s)
-        run: cargo codspeed build
+        run: cargo codspeed build -m simulation
       - name: Run the benchmarks
-        uses: CodSpeedHQ/action@f22792bfac16f3e14eb9fbea76f4a48e9cc22b93 # v4
+        uses: CodSpeedHQ/action@821a40cd6c80e3cfe387caf55668287addd808da # v5.5.0
         with:
           mode: simulation
           run: cargo codspeed run
