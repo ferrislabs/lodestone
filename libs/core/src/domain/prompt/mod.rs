@@ -2,6 +2,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 pub mod evidence;
+pub mod normalise;
 
 pub use evidence::{EvidenceProblem, verified_evidence};
 
@@ -98,10 +99,9 @@ impl EvidenceQuote {
         let Ok(index) = usize::try_from(self.document_index) else {
             return false;
         };
-        !self.quote.trim().is_empty()
-            && documents
-                .get(index)
-                .is_some_and(|document| document.content.contains(self.quote.as_str()))
+        documents
+            .get(index)
+            .is_some_and(|document| normalise::contains_normalised(document.content, &self.quote))
     }
 }
 

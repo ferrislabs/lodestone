@@ -21,6 +21,7 @@ tokio = { workspace = true, features = ["sync", "time", "rt", "macros"] }
 tracing = { workspace = true }
 psl = { workspace = true }
 idna = { workspace = true }
+unicode-normalization = { workspace = true }
 url = { workspace = true }
 thiserror = { workspace = true }
 regex = { workspace = true }
