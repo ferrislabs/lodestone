@@ -5,6 +5,8 @@ use crate::domain::{
     NormalizedDomain,
     company::{CompanyDossier, CompanyEntity, DossierState, SiblingLead},
     lead::LeadId,
+    profile::ProfileId,
+    targeting::TargetedLead,
 };
 
 #[cfg_attr(test, mockall::automock)]
@@ -68,4 +70,11 @@ pub trait CompanyRepository: Send {
         &mut self,
         lead_id: LeadId,
     ) -> impl Future<Output = Result<Vec<SiblingLead>, CoreError>> + Send;
+
+    fn targeted_leads(
+        &mut self,
+        profile_id: ProfileId,
+        after: Option<LeadId>,
+        limit: u32,
+    ) -> impl Future<Output = Result<Vec<TargetedLead>, CoreError>> + Send;
 }

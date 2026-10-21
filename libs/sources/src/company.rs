@@ -255,6 +255,9 @@ struct Entry {
     activite_principale: Option<String>,
     section_activite_principale: Option<String>,
     tranche_effectif_salarie: Option<String>,
+    categorie_entreprise: Option<String>,
+    nature_juridique: Option<String>,
+    etat_administratif: Option<String>,
     date_creation: Option<String>,
     siege: Option<Siege>,
 }
@@ -263,6 +266,7 @@ struct Entry {
 struct Siege {
     code_postal: Option<String>,
     libelle_commune: Option<String>,
+    departement: Option<String>,
     libelle_pays_etranger: Option<String>,
     tranche_effectif_salarie: Option<String>,
 }
@@ -271,6 +275,14 @@ fn non_empty(value: Option<String>) -> Option<String> {
     value
         .map(|text| text.trim().to_owned())
         .filter(|text| !text.is_empty())
+}
+
+fn administrative_state(code: Option<String>) -> Option<bool> {
+    match non_empty(code).as_deref() {
+        Some("A") => Some(true),
+        Some("C") => Some(false),
+        _ => None,
+    }
 }
 
 pub fn parse_official(body: &[u8], siren: &Siren) -> Result<Option<OfficialData>, String> {
@@ -322,6 +334,12 @@ pub fn parse_official(body: &[u8], siren: &Siren) -> Result<Option<OfficialData>
         head_office_country_code: country_code,
         created_on: non_empty(entry.date_creation)
             .and_then(|raw| chrono::NaiveDate::parse_from_str(&raw, "%Y-%m-%d").ok()),
+        active: administrative_state(entry.etat_administratif),
+        category: non_empty(entry.categorie_entreprise),
+        legal_nature: non_empty(entry.nature_juridique),
+        head_office_department: siege
+            .as_ref()
+            .and_then(|siege| non_empty(siege.departement.clone())),
     }))
 }
 

@@ -70,6 +70,7 @@ pub struct CompanyRunReport {
     pub changed: u64,
     pub failed: u64,
     pub excluded_out_of_country: u64,
+    pub excluded_off_target: u64,
     pub backlog: u64,
     pub rate_limited: bool,
     pub unconfirmed_links: UnconfirmedLinks,
@@ -148,6 +149,7 @@ impl LodestoneUseCase {
                 self.mark_domain_requalification(domain, now).await?;
             }
             report.excluded_out_of_country += self.exclude_out_of_country(&dossier, now).await?;
+            report.excluded_off_target += self.exclude_off_target(&dossier, now).await?;
             report.domains += 1;
             info!(
                 %domain,

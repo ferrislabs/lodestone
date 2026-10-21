@@ -345,6 +345,10 @@ fn official() -> OfficialData {
         head_office_country: Some("France".to_owned()),
         head_office_country_code: Some("FR".to_owned()),
         created_on: NaiveDate::from_ymd_opt(2010, 5, 4),
+        active: None,
+        category: None,
+        legal_nature: None,
+        head_office_department: None,
     }
 }
 
@@ -760,11 +764,21 @@ impl Harness {
     }
 
     async fn profile_named(&self, name: &str) -> ProfileId {
+        self.profile_with(name, definition()).await
+    }
+
+    async fn profile_targeting(&self, rules: Value) -> ProfileId {
+        let mut targeted = definition();
+        targeted["target_companies"] = rules;
+        self.profile_with("iam", targeted).await
+    }
+
+    async fn profile_with(&self, name: &str, definition: Value) -> ProfileId {
         let id = self
             .usecase
             .create_profile(CreateProfileCommand {
                 name: ProfileName::parse(name).unwrap(),
-                definition: ValidatedProfile::parse(definition()).unwrap(),
+                definition: ValidatedProfile::parse(definition).unwrap(),
                 created_by: None,
             })
             .await
@@ -1809,6 +1823,84 @@ async fn an_allowed_sourcing_signal_lifts_the_out_of_country_exclusion_only(pool
     }
     harness.research(&FakeCompany::new(vec![again])).await;
     assert_eq!(harness.exclusion(profile, "globex.com").await, None);
+}
+
+fn build_with(official: OfficialData) -> DossierBuild {
+    DossierBuild {
+        siren: Some(official.siren.clone()),
+        official: Some(official),
+        pages: pages(PAGE_TEXT),
+        reachable: true,
+        failure: None,
+        unconfirmed: UnconfirmedLinks::default(),
+    }
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_company_outside_the_target_is_excluded_before_any_model_call(pool: PgPool) {
+    let harness = Harness::new(pool);
+    harness.defaults().await;
+    let profile = harness
+        .profile_targeting(json!({"naf_exclude": ["28"]}))
+        .await;
+    harness.observe("acme.com", SourceName::HttpProbe, 10).await;
+    harness.observe("other.fr", SourceName::HttpProbe, 10).await;
+    let mut software = official();
+    software.naf_code = Some("62.01Z".to_owned());
+
+    let report = harness
+        .research(&FakeCompany::new(vec![
+            build_with(official()),
+            build_with(software),
+        ]))
+        .await;
+
+    assert_eq!(report.excluded_off_target, 1);
+    assert_eq!(report.excluded_out_of_country, 0);
+    assert_eq!(
+        harness.exclusion(profile, "acme.com").await.as_deref(),
+        Some("hors cible : activité 28.29B")
+    );
+    assert_eq!(harness.exclusion(profile, "other.fr").await, None);
+    let excluded = harness.lead(profile, "acme.com").await;
+    assert!(harness.usecase.lead_detail(excluded.id).await.is_err());
+    assert_eq!(harness.qualify().await, 1);
+    assert_eq!(harness.calls(false).len(), 1);
+    assert_eq!(harness.qualify().await, 0);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_closed_company_is_excluded_even_when_the_profile_has_no_rule(pool: PgPool) {
+    let harness = Harness::new(pool);
+    harness.defaults().await;
+    let profile = harness.profile().await;
+    harness.observe("acme.com", SourceName::HttpProbe, 10).await;
+    let mut closed = official();
+    closed.active = Some(false);
+
+    let report = harness
+        .research(&FakeCompany::new(vec![build_with(closed)]))
+        .await;
+
+    assert_eq!(report.excluded_off_target, 1);
+    assert_eq!(
+        harness.exclusion(profile, "acme.com").await.as_deref(),
+        Some("entreprise fermée")
+    );
+    assert_eq!(harness.qualify().await, 0);
+    assert!(harness.calls(false).is_empty());
+    let listing = harness
+        .usecase
+        .list_leads(
+            profile,
+            LeadQuery {
+                limit: 50,
+                ..LeadQuery::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(listing.page.total, 0);
 }
 
 #[sqlx::test(migrations = "../../migrations")]

@@ -659,7 +659,8 @@ async fn a_manual_run_is_enqueued_once_while_one_is_pending(pool: PgPool) {
     assert!(!usecase.enqueue_calibration(now()).await.unwrap());
 
     let jobs: Vec<(String, Value, Option<String>)> =
-        sqlx::query_as("SELECT kind, payload, dedup_key FROM jobs")
+        sqlx::query_as("SELECT kind, payload, dedup_key FROM jobs WHERE kind = $1")
+            .bind(CALIBRATION_JOB_KIND)
             .fetch_all(&pool)
             .await
             .unwrap();

@@ -6,12 +6,15 @@ use sqlx::{query, query_scalar};
 use tracing::instrument;
 
 use crate::{
-    LeadId, NormalizedDomain,
-    domain::company::{
-        CompanyDossier, CompanyEntity, DossierState, SiblingLead, ports::CompanyRepository,
+    LeadId, NormalizedDomain, ProfileId,
+    domain::{
+        company::{
+            CompanyDossier, CompanyEntity, DossierState, SiblingLead, ports::CompanyRepository,
+        },
+        targeting::TargetedLead,
     },
     infrastructure::{
-        company::postgres::model::{DossierRow, EntityRow, SiblingRow},
+        company::postgres::model::{DossierRow, EntityRow, SiblingRow, TargetedRow},
         lead::postgres::repository::NOT_SUPPRESSED,
         postgres::{SharedTx, error::map_sqlx_error},
     },
@@ -345,5 +348,34 @@ impl<'tx> CompanyRepository for PgCompanyRepository<'tx> {
             .await
             .map_err(map_sqlx_error)?;
         rows.into_iter().map(SiblingLead::try_from).collect()
+    }
+
+    #[tracing::instrument(skip(self), fields(db.system = "postgresql", db.operation = "select", db.table = "leads", profile.id = %profile_id), err)]
+    async fn targeted_leads(
+        &mut self,
+        profile_id: ProfileId,
+        after: Option<LeadId>,
+        limit: u32,
+    ) -> Result<Vec<TargetedLead>, CoreError> {
+        let mut tx = self.tx.lock().await;
+        let rows = sqlx::query_as::<_, TargetedRow>(
+            r#"
+            SELECT leads.id, leads.excluded_reason, d.official
+            FROM leads
+            JOIN company_dossiers d ON d.domain = leads.domain
+            WHERE leads.profile_id = $1
+              AND d.official IS NOT NULL
+              AND ($2::uuid IS NULL OR leads.id > $2)
+            ORDER BY leads.id
+            LIMIT $3
+            "#,
+        )
+        .bind(profile_id.0)
+        .bind(after.map(|id| id.0))
+        .bind(i64::from(limit))
+        .fetch_all(&mut ***tx)
+        .await
+        .map_err(map_sqlx_error)?;
+        rows.into_iter().map(TargetedLead::try_from).collect()
     }
 }

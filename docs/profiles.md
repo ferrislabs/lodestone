@@ -1,6 +1,6 @@
 # Detection profiles
 
-A detection profile describes one market: what is sold, which sourcing agents find leads in which sources, which profile-specific settings the ecosystem inspection of every lead uses, which qualification agents judge a lead, which scoring agents decide its score and verdict, how an aggregator sums it up, how signals are weighted and which contacts to prefer.
+A detection profile describes one market: what is sold, which companies it aims at, which sourcing agents find leads in which sources, which profile-specific settings the ecosystem inspection of every lead uses, which qualification agents judge a lead, which scoring agents decide its score and verdict, how an aggregator sums it up, how signals are weighted and which contacts to prefer.
 
 ## Storage
 
@@ -25,6 +25,7 @@ Without `UPDATE_SCHEMA=1` the same test fails if the committed file is stale. Th
 
 - `schema_version`: must be 19. See [Older versions](#older-versions).
 - `identity`: the offer and the target customer, in free text.
+- `target_companies`: optional, added to version 19 without a bump. Which companies the profile aims at, judged on the official register data before any model call: `min_employees`, `max_employees`, `categories` (`PME`, `ETI`, `GE`), `sector` (`any`, `public`, `private`), `naf_include`, `naf_exclude` (NAF code prefixes) and `departments`. Absent, or with no field set, means no rule. Closed companies are excluded for every profile. See [Target companies](#target-companies).
 - `language`: `fr` or `en`, default `fr` (was `llm.language` before 14). The language of every free-text field the LLM writes: the aggregator's summary, verdict narrative, approach angle, draft subject and body, the qualification summaries and the scoring reasons. The system prompts state it (`Write every free-text field (...) in French. Evidence quotes stay in the language of the document they come from.`), so evidence quotes stay in the source language and the verbatim check is unchanged. Changing the language changes the system prompt, hence the LLM cache key: answers are regenerated.
 - `agents`: the sourcing agents, they find leads (ADR 0005, ADR 0011). At least one is required unless the inspection is on and the profile has its own fingerprints or job keywords to highlight (`NoAgent`). `type` selects `search`, `certificates` or `dns`. `id` (slug matching `^[a-z0-9][a-z0-9-]{0,62}$`, unique in the profile), `name` (not empty) and `enabled` (default `true`, a disabled agent is kept but not run) are common.
   - `search` agent: looks for keywords across catalog providers (ADR 0010). `providers`: at least one catalog key that supports keyword search (`boamp`, `decp`, `ted`, `france_travail`, `hacker_news_hiring`, `welcome_to_the_jungle`), no duplicate; an unknown key (`UnknownProvider`) or a provider without keyword search (`ProviderCannotSearch`, `ats` included since schema 17) is rejected, a provider that is not ready is accepted but skipped at run time. `keywords` (at least one), `exclusions`, `accept_min_keywords` and `filters` are defined once for every provider (see "Search agents").
@@ -327,6 +328,54 @@ Both kinds take an optional `countries` (since schema 19): ISO 3166-1 alpha-2 co
 A host whose name is, or ends with, a SaaS tenant domain never creates a lead, whatever the countries: `crm.dev`, `force.com`, `salesforce.com`, `my.salesforce.com`, `okta.com`, `oktapreview.com`, `okta-emea.com`, `auth0.com`, `b2clogin.com`, `ciamlogin.com`, `onmicrosoft.com`, `sharepoint.com`, `zendesk.com`, `freshdesk.com`, `atlassian.net`, `myshopify.com`, `cloudfront.net`, `azurefd.net`, `herokudns.com`, `amazonaws.com` (data in code, `SAAS_TENANT_DOMAINS`, next to the hosting platforms). Such hosts are counted in `skipped_saas_tenant`. A tenant reaches a company only through a CNAME from the company's own domain, which the DNS agent reads. At startup, the existing leads of active profiles on these domains are suppressed with the reason « domaine d'un fournisseur SaaS » (idempotent).
 
 Validation paths include the agent index, for example `agents[1].keywords[0]`, `agents[1].providers[0]`, `agents[0].labels[1]`, `enrichment.custom.fingerprints[0].path` or `contact_ranking.guess_local_parts[1]`.
+
+## Target companies
+
+`target_companies` excludes the companies that are not the profile's market, on the official register data of the company dossier and before any model call. The section and every field are optional; an empty section is not stored in the revision. There is no trade-specific default.
+
+| Field | Type | Rule |
+| --- | --- | --- |
+| `min_employees`, `max_employees` | integers | The register gives a headcount range (INSEE code), not a number. A company is kept when its range overlaps from `min_employees` to `max_employees`; either bound may be missing. `NN` (non-employing unit) and `00` count as 0 employees, `53` as 10 000 and more. |
+| `categories` | `PME`, `ETI`, `GE` | The company category must be listed. Empty means every category. |
+| `sector` | `any` (default), `public`, `private` | `public` keeps the public-law entities (legal nature starting with 4 or 7), `private` excludes them. |
+| `naf_include` | NAF prefixes | The main activity must start with one of them. Empty means every activity. |
+| `naf_exclude` | NAF prefixes | A main activity starting with one of them excludes the company. |
+| `departments` | department codes | The department of the head office must be listed. Empty means every department. |
+
+A NAF prefix is a division (`78`), a group or class (`62.0`, `62.01`) or a full code (`78.20Z`), matching `^[0-9]{2}(\.[0-9]{1,2}[A-Z]?)?$`. A department code matches `^([0-9]{2}|2A|2B|97[1-6])$`. The head office department is the one given by the register (`siege.departement`); without it, it is derived from the postcode: the first three digits for `97xxx`, `2A` for `200xx` and `201xx`, `2B` for `202xx` to `206xx`, else the first two digits. A head office abroad has no department and passes the rule.
+
+**Order of the checks.** The first failing check gives the reason; the lead is excluded for the profile (`leads.excluded_reason`) and leaves the list, the detail, the qualification and the inspection, like the other exclusions.
+
+| # | Check | Reason |
+| --- | --- | --- |
+| 1 | the company is closed (`etat_administratif` `C`), with or without `target_companies` | « entreprise fermée » |
+| 2 | headcount range outside `min_employees` and `max_employees` | « hors cible : effectif 20 à 49 salariés » (the range, or its code) |
+| 3 | category not in `categories` | « hors cible : catégorie GE » |
+| 4 | `sector` public and the company private, or private and the company public | « hors cible : secteur privé », « hors cible : secteur public » |
+| 5 | main activity starts with a `naf_exclude` prefix | « hors cible : activité 78.20Z » |
+| 6 | `naf_include` set and the main activity starts with none | « hors cible : activité 62.01Z » |
+| 7 | `departments` set and the head office department is not listed | « hors cible : département 69 » |
+
+**What the register does not give passes.** A missing or unknown headcount code, category, legal nature, NAF code or department never excludes a company, and a company without official data (no SIREN found yet, dossier without official data) is not judged. Only a company known to be closed is excluded without a rule. The register fields read are `etat_administratif`, `categorie_entreprise`, `nature_juridique` and `siege.departement`, stored in the dossier official data next to the existing ones (`active`, `category`, `legal_nature`, `head_office_department`); dossiers built before this change lack them until their next refresh, and a missing field passes.
+
+**When it applies.**
+
+- Right after a company dossier with official data is saved, for every lead of its domain whose profile is active. The count is `excluded_off_target` in the company research report and the log line « leads outside the target companies suppressed ». The timeline of the lead records an `excluded` event with the reason.
+- The `targeting.sweep` job, one per profile revision (dedup key `targeting:sweep:<profile id>:<revision number>`, payload `{"profile_id": "<uuid>"}`), is queued in the transaction of every profile creation and every revision; an unchanged revision is deduplicated. Keying by revision keeps a revision saved while a sweep runs from being swallowed by the running job. The sweep is cheap and does nothing without rules. It reads, by batches of 500 leads, the leads of the profile whose dossier has official data and applies the current revision: a lead with no exclusion that fails is excluded; a lead excluded for a target reason (« hors cible : … » or « entreprise fermée ») that now passes is restored, with an `exclusion_lifted` event; one whose reason changed gets the new reason. A lead excluded for any other reason (« hors pays visé », « domaine d'un fournisseur SaaS ») is never touched. The log line « target companies swept » gives the counts. The job is idempotent, so a replay after a crash is safe.
+- A dossier refresh does not restore a lead by itself; the next sweep does.
+
+**Validation.** `min_employees` above `max_employees` (`MinAboveMax`, path `target_companies.min_employees`), a malformed prefix or department (`InvalidNafPrefix`, `InvalidDepartmentCode`, path `target_companies.naf_include[0]`), a duplicate entry (`Duplicate`, in `categories`, `naf_include`, `naf_exclude` and `departments`) and a prefix present in both `naf_include` and `naf_exclude` (`NafIncludedAndExcluded`, path `target_companies.naf_exclude[0]`) are rejected. An unknown category, sector or field is malformed.
+
+```json
+"target_companies": {
+  "min_employees": 10,
+  "max_employees": 249,
+  "categories": ["PME", "ETI"],
+  "sector": "private",
+  "naf_exclude": ["78"],
+  "departments": ["75", "92", "2A"]
+}
+```
 
 ## Ecosystem inspection
 

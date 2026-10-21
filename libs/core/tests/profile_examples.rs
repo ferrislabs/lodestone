@@ -5,7 +5,7 @@ use lodestone_core::{
     definition::{Agent, Escalation, ProfileDefinition},
 };
 use schemars::schema_for;
-use serde_json::{Map, Value, from_str, json, to_string_pretty};
+use serde_json::{Map, Value, from_str, json, to_string_pretty, to_value};
 
 const IAM: &str = include_str!("../../../docs/examples/profiles/iam-ferriskey.json");
 const IAM_V1: &str = include_str!("fixtures/profiles/iam-ferriskey.v1.json");
@@ -1010,6 +1010,72 @@ fn contract_schema_follows_the_example_questions() {
     assert_eq!(
         schema["properties"]["answers"]["properties"]["environnement"]["properties"]["choice"]["enum"],
         json!(["production", "mixte", "hors_production", "inconnu"])
+    );
+}
+
+#[test]
+fn the_examples_carry_no_target_companies_section() {
+    for raw in [IAM, ECOMMERCE] {
+        let profile = parse(raw);
+        assert!(profile.definition().target_companies.is_empty());
+        assert!(profile.to_json().get("target_companies").is_none());
+    }
+}
+
+#[test]
+fn a_target_companies_section_survives_a_round_trip_of_an_example() {
+    let mut value: Value = from_str(IAM).expect("json");
+    value["target_companies"] = json!({
+        "min_employees": 10,
+        "categories": ["PME", "ETI"],
+        "sector": "private",
+        "naf_exclude": ["78"],
+        "departments": ["75", "2A"]
+    });
+    let profile = parse(&value.to_string());
+    let mut written = value["target_companies"].clone();
+    written["naf_include"] = json!([]);
+    assert_eq!(profile.to_json()["target_companies"], written);
+    assert_eq!(parse_value(profile.to_json()), profile);
+}
+
+#[test]
+fn the_schema_describes_the_target_companies_section() {
+    let schema = to_value(schema_for!(ProfileDefinition)).expect("schema serializes");
+    let section = &schema["$defs"]["TargetCompanies"]["properties"];
+    for key in [
+        "min_employees",
+        "max_employees",
+        "categories",
+        "sector",
+        "naf_include",
+        "naf_exclude",
+        "departments",
+    ] {
+        assert!(section.get(key).is_some(), "missing {key}");
+    }
+    assert_eq!(
+        schema["$defs"]["CompanyCategory"]["enum"],
+        json!(["PME", "ETI", "GE"])
+    );
+    assert_eq!(
+        schema["$defs"]["SectorFilter"]["enum"],
+        json!(["any", "public", "private"])
+    );
+    assert_eq!(
+        schema["$defs"]["NafPrefix"]["pattern"],
+        r"^[0-9]{2}(\.[0-9]{1,2}[A-Z]?)?$"
+    );
+    assert_eq!(
+        schema["$defs"]["DepartmentCode"]["pattern"],
+        "^([0-9]{2}|2A|2B|97[1-6])$"
+    );
+    assert!(
+        !schema["required"]
+            .as_array()
+            .expect("required")
+            .iter()
+            .any(|key| key == "target_companies")
     );
 }
 

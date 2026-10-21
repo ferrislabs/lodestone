@@ -3,7 +3,8 @@ use serde::Deserialize;
 use super::definition::{
     Agent, Aggregator, ContactRanking, CustomInspection, Enrichment, Escalation, EvidenceSettings,
     Fingerprint, Identity, Inspection, Language, PROFILE_SCHEMA_VERSION, ProfileDefinition,
-    QualificationAgent, ScoringAgent, VerdictThresholds, default_accept_min_keywords,
+    QualificationAgent, ScoringAgent, TargetCompanies, VerdictThresholds,
+    default_accept_min_keywords,
 };
 
 pub(super) const LEGACY_EXTRA_SUBDOMAINS: [&str; 6] =
@@ -149,6 +150,7 @@ impl ProfileDefinitionV17 {
         ProfileDefinition {
             schema_version: PROFILE_SCHEMA_VERSION,
             identity: self.identity,
+            target_companies: TargetCompanies::default(),
             language: self.language,
             agents: self.agents,
             inspection: Inspection::default(),

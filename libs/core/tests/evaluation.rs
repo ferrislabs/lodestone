@@ -551,6 +551,10 @@ impl Harness {
             head_office_country: None,
             head_office_country_code: None,
             created_on: None,
+            active: None,
+            category: None,
+            legal_nature: None,
+            head_office_department: None,
         });
         with_tx(&self.pool, async |shared| {
             PgCompanyRepository::new(&shared).save(&dossier).await

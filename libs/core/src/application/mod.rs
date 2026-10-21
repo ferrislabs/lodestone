@@ -37,6 +37,7 @@ pub mod settings;
 pub mod source_providers;
 pub mod sources;
 pub mod suppression;
+pub mod targeting;
 pub mod timeline;
 pub mod triage;
 pub mod user;

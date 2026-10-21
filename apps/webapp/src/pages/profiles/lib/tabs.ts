@@ -51,7 +51,11 @@ function belongsTo(path: string, root: string): boolean {
 }
 
 export function tabOfPath(path: string): EditorTab | null {
-	if (belongsTo(path, 'identity') || belongsTo(path, 'language')) {
+	if (
+		belongsTo(path, 'identity') ||
+		belongsTo(path, 'language') ||
+		belongsTo(path, 'target_companies')
+	) {
 		return 'identity'
 	}
 	if (belongsTo(path, 'agents') || belongsTo(path, 'contact_ranking')) {

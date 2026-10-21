@@ -147,7 +147,7 @@ fn siren() -> Siren {
     Siren::parse("552081317").unwrap()
 }
 
-const EDF: &str = r#"{"results":[{"siren":"552081317","nom_complet":"ELECTRICITE DE FRANCE (EDF)","nom_raison_sociale":"ELECTRICITE DE FRANCE","activite_principale":"35.11Z","section_activite_principale":"D","tranche_effectif_salarie":"53","date_creation":"1955-01-01","siege":{"code_postal":"75008","libelle_commune":"PARIS","libelle_pays_etranger":null,"tranche_effectif_salarie":"32"}}]}"#;
+const EDF: &str = r#"{"results":[{"siren":"552081317","nom_complet":"ELECTRICITE DE FRANCE (EDF)","nom_raison_sociale":"ELECTRICITE DE FRANCE","activite_principale":"35.11Z","section_activite_principale":"D","tranche_effectif_salarie":"53","categorie_entreprise":"GE","nature_juridique":"5599","etat_administratif":"A","date_creation":"1955-01-01","siege":{"code_postal":"75008","libelle_commune":"PARIS","departement":"75","libelle_pays_etranger":null,"tranche_effectif_salarie":"32"}}]}"#;
 
 #[test]
 fn the_official_answer_is_mapped() {
@@ -173,6 +173,39 @@ fn the_official_answer_is_mapped() {
         official.created_on,
         chrono::NaiveDate::from_ymd_opt(1955, 1, 1)
     );
+}
+
+#[test]
+fn the_administrative_state_category_legal_nature_and_department_are_mapped() {
+    let official = parse_official(EDF.as_bytes(), &siren()).unwrap().unwrap();
+    assert_eq!(official.active, Some(true));
+    assert_eq!(official.category.as_deref(), Some("GE"));
+    assert_eq!(official.legal_nature.as_deref(), Some("5599"));
+    assert_eq!(official.head_office_department.as_deref(), Some("75"));
+}
+
+#[test]
+fn a_closed_company_is_inactive_and_an_unknown_state_is_left_open() {
+    let closed = EDF.replace(r#""etat_administratif":"A""#, r#""etat_administratif":"C""#);
+    let official = parse_official(closed.as_bytes(), &siren())
+        .unwrap()
+        .unwrap();
+    assert_eq!(official.active, Some(false));
+    let unknown = EDF.replace(r#""etat_administratif":"A""#, r#""etat_administratif":"X""#);
+    let official = parse_official(unknown.as_bytes(), &siren())
+        .unwrap()
+        .unwrap();
+    assert_eq!(official.active, None);
+}
+
+#[test]
+fn an_answer_without_the_new_fields_leaves_them_unknown() {
+    let body = r#"{"results":[{"siren":"552081317","nom_complet":"ACME","categorie_entreprise":null,"siege":{}}]}"#;
+    let official = parse_official(body.as_bytes(), &siren()).unwrap().unwrap();
+    assert_eq!(official.active, None);
+    assert_eq!(official.category, None);
+    assert_eq!(official.legal_nature, None);
+    assert_eq!(official.head_office_department, None);
 }
 
 #[test]

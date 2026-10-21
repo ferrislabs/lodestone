@@ -12,6 +12,7 @@ use lodestone_core::{
     is_continuous,
     jobs::{JobError, JobHandler, JobOutcome, SystemClock},
     sources::{SOURCE_JOB_KIND, SourceRunError, source_job, source_of_job},
+    targeting::{TARGETING_SWEEP_JOB_KIND, profile_of_job},
     timeline::{TIMELINE_PURGE_JOB_KIND, next_timeline_purge, timeline_purge_job},
     triage::{CandidateSource, TriageReport},
 };
@@ -233,6 +234,22 @@ impl JobRouter {
         }
     }
 
+    async fn run_target_sweep(&self, job: &Job) -> Result<JobOutcome, JobError> {
+        let profile_id = profile_of_job(job)?;
+        let report = self
+            .usecase
+            .sweep_target_companies(profile_id, SystemClock.now())
+            .await
+            .map_err(|error| JobError::Retryable(error.to_string()))?;
+        info!(
+            profile = %profile_id,
+            excluded = report.excluded,
+            restored = report.restored,
+            "target companies swept"
+        );
+        Ok(JobOutcome::Done)
+    }
+
     async fn run_page_recheck(&self) -> Result<JobOutcome, JobError> {
         let Some(pages) = &self.pages else {
             return Err(JobError::Permanent(
@@ -356,6 +373,7 @@ impl JobHandler for JobRouter {
             CALIBRATION_JOB_KIND => self.run_calibration(job).await,
             PAGE_RECHECK_JOB_KIND => self.run_page_recheck().await,
             TIMELINE_PURGE_JOB_KIND => self.run_timeline_purge().await,
+            TARGETING_SWEEP_JOB_KIND => self.run_target_sweep(job).await,
             other => Err(JobError::Permanent(format!(
                 "no handler for job kind `{other}`"
             ))),
@@ -423,8 +441,10 @@ pub async fn schedule_page_recheck(
 #[cfg(test)]
 mod tests {
     use lodestone_core::{
-        CONTINUOUS_SOURCES, HACKER_NEWS_HIRING, WELCOME_TO_THE_JUNGLE, provider_key_of_source,
+        CONTINUOUS_SOURCES, HACKER_NEWS_HIRING, ProfileId, RevisionNumber, WELCOME_TO_THE_JUNGLE,
+        provider_key_of_source, targeting::sweep_job,
     };
+    use uuid::Uuid;
 
     use super::*;
 
@@ -560,6 +580,28 @@ mod tests {
         assert_eq!(
             recheck_outcome(3, Some(Duration::from_secs(600)), now),
             JobOutcome::RescheduleAt(now + Delta::minutes(10))
+        );
+    }
+
+    #[test]
+    fn the_targeting_sweep_job_is_deduplicated_per_profile_revision_and_is_not_a_source() {
+        let profile = ProfileId(Uuid::from_u128(1));
+        let other = ProfileId(Uuid::from_u128(2));
+        let job = sweep_job(profile, RevisionNumber::FIRST, Utc::now()).unwrap();
+        assert_eq!(job.kind.as_str(), TARGETING_SWEEP_JOB_KIND);
+        assert_eq!(job.kind.as_str(), "targeting.sweep");
+        assert_eq!(job.dedup_key, Some(format!("targeting:sweep:{profile}:1")));
+        assert_ne!(
+            job.dedup_key,
+            sweep_job(other, RevisionNumber::FIRST, Utc::now())
+                .unwrap()
+                .dedup_key
+        );
+        assert!(removed_job_reason(TARGETING_SWEEP_JOB_KIND).is_none());
+        assert!(
+            !scheduled_sources()
+                .iter()
+                .any(|source| source.as_str().contains("targeting"))
         );
     }
 
