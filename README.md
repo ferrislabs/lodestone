@@ -8,6 +8,18 @@ Market criteria live in detection profiles stored in Postgres. The first profile
 
 Backend in Rust (Axum + SQLx + PostgreSQL), frontend in React 19 + TanStack.
 
+## Documentation
+
+- [Operator guide](docs/operator-guide.md): architecture, first run, day-2 operations, adding a source, troubleshooting.
+- [Writing a profile](docs/profile-authoring.md): every field, scoring, LLM context, worked examples, import.
+- [Configuration reference](docs/configuration.md): every environment variable.
+- [Compliance notes](docs/compliance.md): politeness, data minimization, suppression, LLM data handling.
+- [Deploying with Helm](docs/deploy/helm.md)
+- [Metrics](docs/metrics.md)
+- [Webhooks and exports](docs/webhooks.md)
+- [Profile schema notes](docs/profiles.md) and [JSON Schema](docs/schemas/profile.v1.schema.json)
+- [Glossary](docs/glossary.md), [plan](docs/plan.md), [ADRs](docs/adr/)
+
 ## Workspace layout
 
 ```
