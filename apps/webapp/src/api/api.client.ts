@@ -141,6 +141,7 @@ export namespace Schemas {
   export type CompanyDto = {
     built_at?: (string | null) | undefined;
     error?: (string | null) | undefined;
+    ignored_links: number;
     legal_name?: (string | null) | undefined;
     next_attempt_at: string;
     official?: (null | OfficialDataDto) | undefined;
@@ -212,6 +213,7 @@ export namespace Schemas {
     data: {
       built_at?: (string | null) | undefined;
       error?: (string | null) | undefined;
+      ignored_links: number;
       legal_name?: (string | null) | undefined;
       next_attempt_at: string;
       official?: (null | OfficialDataDto) | undefined;

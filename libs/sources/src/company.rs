@@ -2,17 +2,21 @@ use std::{sync::Arc, sync::LazyLock, time::Duration};
 
 use lodestone_core::{
     CompanyBuilder, CompanyPage, DossierBuild, FetchError, FetchPurpose, FetchRequest,
-    FetchResponse, Fetcher, NormalizedDomain, OfficialData, PAGE_STORE_CHARS, Siren, SourceError,
-    SourceName, bounded_error, headcount_label, naf_section_label,
+    FetchResponse, Fetcher, LinkRejection, NormalizedDomain, OfficialData, PAGE_STORE_CHARS,
+    PageReview, PageVerifier, Siren, SourceError, SourceName, UnconfirmedLinks, bounded_error,
+    headcount_label, naf_section_label,
 };
 use regex::Regex;
 use serde::Deserialize;
 use tracing::debug;
 use url::Url;
 
-use crate::{ats::jobs::html_to_text, endpoint::Endpoint};
+use crate::{
+    ats::jobs::html_to_text,
+    endpoint::Endpoint,
+    link_check::{LinkChecker, LinkOrigin, LinkVerdict, fetch_waiting, rejection_of},
+};
 
-const FETCH_ATTEMPTS: usize = 3;
 const SIREN_LABEL_WINDOW: usize = 40;
 
 #[derive(Debug, Clone)]
@@ -26,6 +30,15 @@ pub struct CompanySettings {
 pub struct CompanyResearch<F: Fetcher> {
     fetcher: Arc<F>,
     settings: CompanySettings,
+}
+
+impl<F: Fetcher> Clone for CompanyResearch<F> {
+    fn clone(&self) -> Self {
+        Self {
+            fetcher: Arc::clone(&self.fetcher),
+            settings: self.settings.clone(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -157,37 +170,55 @@ fn fallback(home: &Url, paths: &[&str]) -> Vec<Url> {
         .collect()
 }
 
-pub fn candidates(links: &[PageLink], home: &Url, limit: usize) -> Vec<(Url, PageKind)> {
-    let mut chosen: Vec<(Url, PageKind)> = Vec::new();
-    let mut push = |url: Url, kind: PageKind| {
-        if !chosen.iter().any(|(known, _)| *known == url) {
-            chosen.push((url, kind));
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Candidate {
+    pub url: Url,
+    pub kind: PageKind,
+    pub origin: LinkOrigin,
+}
+
+pub fn candidates(links: &[PageLink], home: &Url, limit: usize) -> Vec<Candidate> {
+    let mut chosen: Vec<Candidate> = Vec::new();
+    let mut push = |url: Url, kind: PageKind, origin: LinkOrigin| {
+        if !chosen.iter().any(|known| known.url == url) {
+            chosen.push(Candidate { url, kind, origin });
         }
     };
     let of_kind = |kind: PageKind| links.iter().filter(move |link| link.kind == kind);
     let mut legal = of_kind(PageKind::Legal).peekable();
     if legal.peek().is_none() {
         for url in fallback(home, FALLBACK_LEGAL) {
-            push(url, PageKind::Legal);
+            push(url, PageKind::Legal, LinkOrigin::Guessed);
         }
     }
     for link in legal {
-        push(link.url.clone(), PageKind::Legal);
+        push(link.url.clone(), PageKind::Legal, LinkOrigin::Linked);
     }
     for link in of_kind(PageKind::Terms) {
-        push(link.url.clone(), PageKind::Terms);
+        push(link.url.clone(), PageKind::Terms, LinkOrigin::Linked);
     }
     let mut about = of_kind(PageKind::About).peekable();
     if about.peek().is_none() {
         for url in fallback(home, FALLBACK_ABOUT) {
-            push(url, PageKind::About);
+            push(url, PageKind::About, LinkOrigin::Guessed);
         }
     }
     for link in about {
-        push(link.url.clone(), PageKind::About);
+        push(link.url.clone(), PageKind::About, LinkOrigin::Linked);
     }
     chosen.truncate(limit);
     chosen
+}
+
+fn stored_origin(url: &Url) -> LinkOrigin {
+    let path = url.path();
+    if path == "/" || path.is_empty() {
+        LinkOrigin::Home
+    } else if FALLBACK_LEGAL.contains(&path) || FALLBACK_ABOUT.contains(&path) {
+        LinkOrigin::Guessed
+    } else {
+        LinkOrigin::Linked
+    }
 }
 
 pub fn find_siren(text: &str) -> Option<Siren> {
@@ -294,24 +325,6 @@ pub fn parse_official(body: &[u8], siren: &Siren) -> Result<Option<OfficialData>
     }))
 }
 
-fn is_parsable(response: &FetchResponse) -> bool {
-    match response.header("content-type") {
-        None => true,
-        Some(value) => {
-            let media = value
-                .split(';')
-                .next()
-                .unwrap_or("")
-                .trim()
-                .to_ascii_lowercase();
-            matches!(
-                media.as_str(),
-                "text/html" | "text/plain" | "application/xhtml+xml"
-            )
-        }
-    }
-}
-
 struct Fetched {
     page: CompanyPage,
     html: String,
@@ -320,7 +333,7 @@ struct Fetched {
 
 enum Read {
     Page(Box<Fetched>),
-    Skipped,
+    Unconfirmed(LinkRejection),
 }
 
 impl<F: Fetcher> CompanyResearch<F> {
@@ -336,42 +349,53 @@ impl<F: Fetcher> CompanyResearch<F> {
         url.map_err(|_| SourceError::Fetch(FetchError::InvalidUrl))
     }
 
-    async fn fetch_waiting(
-        &self,
-        url: Url,
-        purpose: FetchPurpose,
-    ) -> Result<FetchResponse, FetchError> {
+    async fn fetch(&self, url: Url, purpose: FetchPurpose) -> Result<FetchResponse, FetchError> {
         let request = FetchRequest {
             url,
             purpose,
             source: SourceName::PublicPage,
         };
-        let mut attempt = 1;
-        loop {
-            match self.fetcher.fetch(&request).await {
-                Err(FetchError::RateLimited { retry_after })
-                    if attempt < FETCH_ATTEMPTS
-                        && retry_after <= self.settings.max_rate_limit_wait =>
-                {
-                    attempt += 1;
-                    tokio::time::sleep(retry_after).await;
-                }
-                other => return other,
-            }
-        }
+        fetch_waiting(
+            self.fetcher.as_ref(),
+            &request,
+            self.settings.max_rate_limit_wait,
+        )
+        .await
     }
 
-    async fn read(&self, url: Url) -> Result<Read, FetchError> {
-        let response = self.fetch_waiting(url, FetchPurpose::Crawl).await?;
-        if response.status >= 400 || !is_parsable(&response) {
-            debug!(url = %response.final_url, status = response.status, "company page ignored");
-            return Ok(Read::Skipped);
+    fn checker(&self) -> LinkChecker<'_, F> {
+        LinkChecker::new(
+            self.fetcher.as_ref(),
+            SourceName::PublicPage,
+            self.settings.max_rate_limit_wait,
+        )
+    }
+
+    async fn read(
+        &self,
+        checker: &mut LinkChecker<'_, F>,
+        url: Url,
+        origin: LinkOrigin,
+    ) -> Result<Read, FetchError> {
+        let response = match self.fetch(url.clone(), FetchPurpose::Crawl).await {
+            Ok(response) => response,
+            Err(error) => {
+                if origin != LinkOrigin::Home
+                    && let Some(reason) = rejection_of(&error)
+                {
+                    checker.reject(reason);
+                    debug!(%url, %error, reason = reason.as_str(), "company page not confirmed");
+                    return Ok(Read::Unconfirmed(reason));
+                }
+                return Err(error);
+            }
+        };
+        if let LinkVerdict::NotFound(reason) = checker.confirm(&url, origin, &response).await? {
+            debug!(%url, final_url = %response.final_url, status = response.status, reason = reason.as_str(), "company page not confirmed");
+            return Ok(Read::Unconfirmed(reason));
         }
         let html = response.text().into_owned();
         let full_text = html_to_text(&html);
-        if full_text.is_empty() {
-            return Ok(Read::Skipped);
-        }
         let text: String = full_text.chars().take(PAGE_STORE_CHARS).collect();
         Ok(Read::Page(Box::new(Fetched {
             page: CompanyPage {
@@ -388,7 +412,7 @@ impl<F: Fetcher> CompanyResearch<F> {
         url.query_pairs_mut()
             .append_pair("q", siren.as_str())
             .append_pair("per_page", "1");
-        let response = self.fetch_waiting(url, FetchPurpose::Api).await?;
+        let response = self.fetch(url, FetchPurpose::Api).await?;
         if response.status != 200 {
             return Err(SourceError::Upstream(format!(
                 "company register answered {}",
@@ -404,42 +428,68 @@ impl<F: Fetcher> CompanyResearch<F> {
     }
 }
 
-fn unreachable_build(reason: &str) -> DossierBuild {
+fn unreachable_build(reason: &str, unconfirmed: UnconfirmedLinks) -> DossierBuild {
     DossierBuild {
         siren: None,
         official: None,
         pages: Vec::new(),
         reachable: false,
         failure: Some(bounded_error(reason)),
+        unconfirmed,
     }
 }
 
 impl<F: Fetcher> CompanyBuilder for CompanyResearch<F> {
     async fn build(&self, domain: &NormalizedDomain) -> Result<DossierBuild, SourceError> {
         let home_url = self.home_url(domain)?;
-        let home = match self.read(home_url.clone()).await {
+        let mut checker = self.checker();
+        let home = match self
+            .read(&mut checker, home_url.clone(), LinkOrigin::Home)
+            .await
+        {
             Ok(Read::Page(fetched)) => *fetched,
-            Ok(Read::Skipped) => return Ok(unreachable_build("home page unusable")),
+            Ok(Read::Unconfirmed(reason)) => {
+                return Ok(unreachable_build(
+                    &format!("home page not confirmed: {reason}"),
+                    checker.unconfirmed(),
+                ));
+            }
             Err(FetchError::RateLimited { retry_after }) => {
                 return Err(SourceError::RateLimited { retry_after });
             }
             Err(FetchError::DisallowedByRobots) => {
-                return Ok(unreachable_build("robots.txt disallows the home page"));
+                return Ok(unreachable_build(
+                    "robots.txt disallows the home page",
+                    checker.unconfirmed(),
+                ));
             }
-            Err(error) => return Ok(unreachable_build(&error.to_string())),
+            Err(error) => {
+                return Ok(unreachable_build(&error.to_string(), checker.unconfirmed()));
+            }
         };
         let base = Url::parse(&home.page.url).unwrap_or(home_url);
         let links = page_links(&home.html, &base, domain);
         let wanted = candidates(&links, &base, self.settings.max_pages.saturating_sub(1));
         let mut others: Vec<(Fetched, PageKind)> = Vec::new();
-        for (url, kind) in wanted {
-            match self.read(url.clone()).await {
-                Ok(Read::Page(fetched)) => others.push((*fetched, kind)),
-                Ok(Read::Skipped) => {}
+        for candidate in wanted {
+            match self
+                .read(&mut checker, candidate.url.clone(), candidate.origin)
+                .await
+            {
+                Ok(Read::Page(fetched)) => {
+                    let known = fetched.page.url == home.page.url
+                        || others
+                            .iter()
+                            .any(|(other, _)| other.page.url == fetched.page.url);
+                    if !known {
+                        others.push((*fetched, candidate.kind));
+                    }
+                }
+                Ok(Read::Unconfirmed(_)) => {}
                 Err(FetchError::RateLimited { retry_after }) => {
                     return Err(SourceError::RateLimited { retry_after });
                 }
-                Err(error) => debug!(%url, %error, "company page skipped"),
+                Err(error) => debug!(url = %candidate.url, %error, "company page skipped"),
             }
         }
         let legal_first = others
@@ -472,7 +522,32 @@ impl<F: Fetcher> CompanyBuilder for CompanyResearch<F> {
             pages: all,
             reachable: true,
             failure,
+            unconfirmed: checker.unconfirmed(),
         })
+    }
+}
+
+impl<F: Fetcher> PageVerifier for CompanyResearch<F> {
+    async fn review(&self, pages: &[CompanyPage]) -> Result<PageReview, SourceError> {
+        let mut checker = self.checker();
+        let mut review = PageReview::default();
+        for page in pages {
+            let Ok(url) = Url::parse(&page.url) else {
+                continue;
+            };
+            let origin = stored_origin(&url);
+            match self.read(&mut checker, url, origin).await {
+                Ok(Read::Unconfirmed(reason)) => review.rejected.push((page.url.clone(), reason)),
+                Ok(Read::Page(_)) => {}
+                Err(FetchError::RateLimited { retry_after }) => {
+                    return Err(SourceError::RateLimited { retry_after });
+                }
+                Err(error) => {
+                    debug!(url = %page.url, %error, "stored company page kept, it could not be checked")
+                }
+            }
+        }
+        Ok(review)
     }
 }
 

@@ -92,6 +92,15 @@ export function companyNotice(company: Company | null): string | null {
 	return null
 }
 
+export function ignoredLinksNote(count: number): string | null {
+	if (count <= 0) {
+		return null
+	}
+	return count === 1
+		? '1 lien ignoré : page introuvable, vide ou redirigée vers l’accueil.'
+		: `${count} liens ignorés : pages introuvables, vides ou redirigées vers l’accueil.`
+}
+
 export function pageLabel(url: string): string {
 	try {
 		const parsed = new URL(url)

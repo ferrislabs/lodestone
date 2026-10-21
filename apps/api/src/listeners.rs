@@ -187,6 +187,14 @@ impl<B: CompanyBuilder> ListenerStep for CompanyStep<B> {
             .usecase
             .listen_company_research(&self.builder, self.settings, &SystemClock)
             .await?;
+        if report.unconfirmed_links.total() > 0 {
+            info!(
+                domains = report.domains,
+                unconfirmed_links = report.unconfirmed_links.total(),
+                unconfirmed_by_reason = %report.unconfirmed_links,
+                "company research ignored unconfirmed links"
+            );
+        }
         Ok(StepOutcome {
             processed: report.domains,
             signals: report.changed,

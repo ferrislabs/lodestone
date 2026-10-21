@@ -1509,8 +1509,8 @@ const OFFICIAL: &str = r#"{
 async fn seed_dossier(pool: &PgPool, domain: &str, state: &str, with_official: bool) {
     let official: Option<Value> = with_official.then(|| serde_json::from_str(OFFICIAL).unwrap());
     sqlx::query(
-        "INSERT INTO company_dossiers (domain, state, siren, official, pages, built_at, next_attempt_at)
-         VALUES ($1, $2, $3, $4, $5, now(), now() + interval '90 days')",
+        "INSERT INTO company_dossiers (domain, state, siren, official, pages, built_at, next_attempt_at, ignored_links, pages_checked_at)
+         VALUES ($1, $2, $3, $4, $5, now(), now() + interval '90 days', 3, now())",
     )
     .bind(domain)
     .bind(state)
@@ -1557,6 +1557,7 @@ async fn the_detail_carries_the_company_dossier_and_the_official_facts(pool: PgP
             {"url": "https://acme.com/mentions-legales"}
         ])
     );
+    assert_eq!(company["ignored_links"], 3);
     assert!(company["built_at"].is_string());
     let facts = &body["data"]["facts"];
     assert_eq!(facts["official"]["legal_name"], "ELECTRICITE DE FRANCE");

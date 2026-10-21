@@ -30,8 +30,8 @@ pub use domain::{
     company::{
         CompanyBuilder, CompanyDossier, CompanyEntity, CompanyPage, DossierBuild, DossierDocument,
         DossierState, InvalidSiren, OFFICIAL_SOURCE, OfficialData, PAGE_PROMPT_CHARS,
-        PAGE_STORE_CHARS, SiblingLead, Siren, bounded_error, headcount_label, naf_section_label,
-        ports::CompanyRepository,
+        PAGE_STORE_CHARS, PageReview, PageVerifier, SiblingLead, Siren, bounded_error,
+        headcount_label, naf_section_label, ports::CompanyRepository,
     },
     contact::{
         ContactFinder, ContactTargets, FoundAddress, rank_contacts, rank_of,
@@ -49,6 +49,7 @@ pub use domain::{
     },
     fetch::{
         FetchError, FetchPurpose, FetchRequest, FetchResponse,
+        link::{LinkRejection, UnconfirmedLinks},
         ports::{Fetcher, HostVisitRepository},
     },
     host::{
