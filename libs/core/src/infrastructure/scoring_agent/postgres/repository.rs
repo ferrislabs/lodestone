@@ -46,6 +46,7 @@ const SCORING_DUE: &str = r#"
     FROM leads
     JOIN lead_qualification_state state ON state.lead_id = leads.id
     WHERE leads.profile_id = $1
+      AND leads.status IN ('new', 'qualified', 'uncertain')
       AND state.profile_revision = $2
       AND (
           state.scoring_revision IS DISTINCT FROM state.profile_revision
@@ -71,7 +72,7 @@ impl<'tx> ScoringRepository for PgScoringRepository<'tx> {
     ) -> Result<Vec<Lead>, CoreError> {
         let revision = revision_number(revision)?;
         let query = format!(
-            "SELECT leads.id, leads.profile_id, leads.domain, leads.status, leads.score, leads.confidence, leads.verdict, leads.llm_score, leads.qualified_at, leads.first_seen_at, leads.last_seen_at, leads.updated_at {SCORING_DUE}{NOT_SUPPRESSED} ORDER BY leads.first_seen_at ASC, leads.id ASC LIMIT $4"
+            "SELECT leads.id, leads.profile_id, leads.domain, leads.status, leads.score, leads.confidence, leads.verdict, leads.llm_score, leads.qualified_at, leads.first_seen_at, leads.last_seen_at, leads.updated_at {SCORING_DUE}{NOT_SUPPRESSED} ORDER BY leads.score DESC, leads.first_seen_at ASC, leads.id ASC LIMIT $4"
         );
         let mut tx = self.tx.lock().await;
         let rows = sqlx::query_as::<_, LeadRow>(&query)
