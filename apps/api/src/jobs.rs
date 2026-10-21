@@ -6,21 +6,16 @@ use std::{
 
 use chrono::Utc;
 use common::CoreError;
-use dns::HickoryResolver;
 use fetch::PoliteFetcher;
 use llm::any::AnyProvider;
 use lodestone_core::{
     Clock, Job, JobKind, JobQueue, LodestoneUseCase, NewJob, PartnerAward, SourceName, Tier,
     TierError, TokenPricing, WEBHOOK_JOB_KIND,
-    contacts::ContactRunSettings,
     infrastructure::{
-        candidate_host::postgres::PgCandidateHosts,
-        contact_target::postgres::{PgAtsTargets, PgContactTargets},
-        crypto::AesGcmCipher,
-        ct_cursor::postgres::PgCtCursors,
-        job::postgres::PgJobQueue,
+        contact_target::postgres::PgAtsTargets, crypto::AesGcmCipher, job::postgres::PgJobQueue,
         llm_cache::postgres::PgLlmCache,
     },
+    is_continuous,
     jobs::{JobError, JobHandler, JobOutcome, SystemClock},
     llm::gateway::CallSettings,
     qualification::QualificationSettings,
@@ -30,27 +25,15 @@ use lodestone_core::{
 use sources::{
     ats::AtsSource,
     boamp::BoampSource,
-    contact_pages::PublicPageFinder,
-    ct::CtSource,
     decp::{DecpSource, partner_awards},
-    dns_cname::DnsCnameSource,
     france_travail::FranceTravailSource,
-    http_probe::HttpProbeSource,
-    role_guess::RoleGuessFinder,
-    security_txt::SecurityTxtFinder,
     ted::TedSource,
 };
 use tracing::{info, warn};
 
 use crate::webhook::{WebhookSink, run_webhook_job};
 
-pub const WIRED_SOURCES: [SourceName; 10] = [
-    SourceName::CertificateTransparency,
-    SourceName::DnsCname,
-    SourceName::HttpProbe,
-    SourceName::PublicPage,
-    SourceName::SecurityTxt,
-    SourceName::RoleGuess,
+pub const WIRED_SOURCES: [SourceName; 4] = [
     SourceName::Boamp,
     SourceName::Decp,
     SourceName::Ted,
@@ -68,37 +51,21 @@ const QUALIFICATION_BASE_DELAY: Duration = Duration::from_secs(2);
 const TRIAGE_MAX_TOKENS: u32 = 1024;
 const TRIAGE_BASE_DELAY: Duration = Duration::from_secs(2);
 
-pub type DnsCname = DnsCnameSource<HickoryResolver, PgCandidateHosts>;
-pub type HttpProbe = HttpProbeSource<PoliteFetcher, PgCandidateHosts, LodestoneUseCase>;
 pub type Boamp = BoampSource<PoliteFetcher>;
 pub type Decp = DecpSource<PoliteFetcher>;
 pub type Ted = TedSource<PoliteFetcher>;
 pub type FranceTravail = FranceTravailSource<PoliteFetcher>;
 pub type Ats = AtsSource<PoliteFetcher, PgAtsTargets>;
-pub type CertificateTransparency = CtSource<PoliteFetcher, PgCandidateHosts, PgCtCursors>;
-
-pub struct ContactFinders {
-    pub public_page: PublicPageFinder<PoliteFetcher>,
-    pub security_txt: SecurityTxtFinder<PoliteFetcher>,
-    pub role_guess: RoleGuessFinder<HickoryResolver>,
-    pub targets: PgContactTargets,
-    pub settings: ContactRunSettings,
-}
 
 pub struct WiredSources {
-    pub certificate_transparency: CertificateTransparency,
-    pub dns_cname: DnsCname,
-    pub http_probe: HttpProbe,
     pub boamp: Boamp,
     pub decp: Decp,
     pub ted: Ted,
     pub france_travail: Option<FranceTravail>,
     pub ats: Ats,
-    pub contacts: ContactFinders,
 }
 
 pub struct Intervals {
-    pub certificate_transparency: Duration,
     pub other_sources: Duration,
     pub decp: Duration,
 }
@@ -360,58 +327,12 @@ impl JobRouter {
 
     async fn run_source(&self, job: &Job) -> Result<JobOutcome, JobError> {
         let source = source_of_job(job)?;
+        if is_continuous(source) {
+            return Err(JobError::Permanent(format!(
+                "source `{source}` listens continuously and has no recurring job"
+            )));
+        }
         let result = match source {
-            SourceName::CertificateTransparency => self
-                .usecase
-                .run_source(&self.sources.certificate_transparency, &SystemClock)
-                .await
-                .map(|report| (report.items, report.signals)),
-            SourceName::DnsCname => self
-                .usecase
-                .run_source(&self.sources.dns_cname, &SystemClock)
-                .await
-                .map(|report| (report.items, report.signals)),
-            SourceName::HttpProbe => self
-                .usecase
-                .run_source(&self.sources.http_probe, &SystemClock)
-                .await
-                .map(|report| (report.items, report.signals)),
-            SourceName::PublicPage => {
-                let contacts = &self.sources.contacts;
-                self.usecase
-                    .run_contact_finder(
-                        &contacts.public_page,
-                        &contacts.targets,
-                        contacts.settings,
-                        &SystemClock,
-                    )
-                    .await
-                    .map(|report| (report.domains, report.contacts))
-            }
-            SourceName::SecurityTxt => {
-                let contacts = &self.sources.contacts;
-                self.usecase
-                    .run_contact_finder(
-                        &contacts.security_txt,
-                        &contacts.targets,
-                        contacts.settings,
-                        &SystemClock,
-                    )
-                    .await
-                    .map(|report| (report.domains, report.contacts))
-            }
-            SourceName::RoleGuess => {
-                let contacts = &self.sources.contacts;
-                self.usecase
-                    .run_contact_finder(
-                        &contacts.role_guess,
-                        &contacts.targets,
-                        contacts.settings,
-                        &SystemClock,
-                    )
-                    .await
-                    .map(|report| (report.domains, report.contacts))
-            }
             SourceName::Boamp => self.run_boamp().await,
             SourceName::Decp => self.run_decp().await,
             SourceName::Ted => self.run_ted().await,
@@ -424,7 +345,6 @@ impl JobRouter {
             }
         };
         let interval = match source {
-            SourceName::CertificateTransparency => self.intervals.certificate_transparency,
             SourceName::Decp => self.intervals.decp,
             _ => self.intervals.other_sources,
         };
@@ -496,7 +416,17 @@ pub async fn schedule_wired_sources(
 
 #[cfg(test)]
 mod tests {
+    use lodestone_core::CONTINUOUS_SOURCES;
+
     use super::*;
+
+    #[test]
+    fn continuous_sources_are_never_scheduled() {
+        for source in CONTINUOUS_SOURCES {
+            assert!(!WIRED_SOURCES.contains(&source));
+            assert!(!scheduled_sources(true).contains(&source));
+        }
+    }
 
     #[test]
     fn the_qualification_job_is_recurring_and_deduplicated() {

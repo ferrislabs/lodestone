@@ -85,6 +85,8 @@ Common flags / env vars (see `libs/args/src/`):
 | `JOBS_RETRY_BASE_SECONDS` | `--jobs-retry-base-seconds` | `10` |
 | `JOBS_SHUTDOWN_GRACE_SECONDS` | `--jobs-shutdown-grace-seconds` | `20` |
 | `JOBS_SOURCE_INTERVAL_MINUTES` | `--jobs-source-interval-minutes` | `60` |
+| `LISTENER_IDLE_SECONDS` | `--listener-idle-seconds` | `15` |
+| `LISTENER_LOCK_RETRY_SECONDS` | `--listener-lock-retry-seconds` | `15` |
 | `OUTBOUND_CONTACT` | `--outbound-contact` | required, email or https URL |
 | `OUTBOUND_REQUESTS_PER_HOST_PER_MINUTE` | `--outbound-requests-per-host-per-minute` | `6` |
 | `OUTBOUND_REVISIT_INTERVAL_HOURS` | `--outbound-revisit-interval-hours` | `720` |
@@ -93,7 +95,6 @@ Common flags / env vars (see `libs/args/src/`):
 | `CT_MAX_LOGS` | `--ct-max-logs` | `4` |
 | `CT_TILES_PER_RUN` | `--ct-tiles-per-run` | `16` |
 | `CT_MAX_LAG_TILES` | `--ct-max-lag-tiles` | `256` |
-| `CT_INTERVAL_SECONDS` | `--ct-interval-seconds` | `60` |
 | `CONTACT_PAGE_PATHS` | `--contact-page-paths` | `/,/contact,/mentions-legales,/legal,/about` |
 | `CONTACT_BATCH_SIZE` | `--contact-batch-size` | `10` |
 | `CONTACT_MAX_RATE_LIMIT_WAIT_SECONDS` | `--contact-max-rate-limit-wait-seconds` | `75` |

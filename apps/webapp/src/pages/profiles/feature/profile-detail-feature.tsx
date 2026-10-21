@@ -30,8 +30,10 @@ import { ProfileDetail } from '#/pages/profiles/ui/profile-detail'
 import { ProfileEditor } from '#/pages/profiles/ui/profile-editor'
 import { RevisionHistory } from '#/pages/profiles/ui/revision-history'
 import { useSourceTrigger } from '#/pages/sources/feature/use-source-trigger'
+import { listenerSummaries } from '#/pages/sources/lib/listener'
 
 const NO_REVISIONS: RevisionSummary[] = []
+const LISTENER_REFRESH_MS = 15_000
 
 export function ProfileDetailFeature() {
 	const { profileId } = useParams({ from: '/_app/profiles/$profileId' })
@@ -39,6 +41,11 @@ export function ProfileDetailFeature() {
 	const queryClient = useQueryClient()
 	const activation = useProfileActivation()
 	const sourceTrigger = useSourceTrigger()
+	const sourcesQuery = useQuery({
+		...lodestoneApi().get('/api/v1/sources').queryOptions,
+		refetchInterval: LISTENER_REFRESH_MS,
+	})
+	const listeners = listenerSummaries(sourcesQuery.data?.data ?? [])
 	const search = useSearch({ from: '/_app/profiles/$profileId' })
 	const tab = search.tab ?? 'identity'
 	const setTab = (next: ProfileTab) =>
@@ -129,6 +136,8 @@ export function ProfileDetailFeature() {
 						problems={problems}
 						onNavigate={setTab}
 						sourceTrigger={sourceTrigger}
+						listeners={listeners}
+						now={Date.now()}
 						onChange={(next) => {
 							if (update.isError) update.reset()
 							setLocalProblems([])

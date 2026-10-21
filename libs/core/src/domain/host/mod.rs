@@ -1,4 +1,4 @@
-use std::fmt;
+use std::{fmt, time::Duration};
 
 use chrono::{DateTime, Utc};
 use thiserror::Error;
@@ -6,6 +6,16 @@ use thiserror::Error;
 use crate::domain::{NormalizedDomain, lead::str_enum};
 
 pub mod ports;
+
+pub const TRANSIENT_RETRY: Duration = Duration::from_secs(3600);
+
+pub fn transient_checked_at(now: DateTime<Utc>, revisit: Duration) -> DateTime<Utc> {
+    let revisit = chrono::Duration::from_std(revisit).unwrap_or(chrono::Duration::zero());
+    let retry = chrono::Duration::from_std(TRANSIENT_RETRY)
+        .unwrap_or(chrono::Duration::zero())
+        .min(revisit);
+    now - revisit + retry
+}
 
 const MAX_HOSTNAME_LENGTH: usize = 253;
 const MAX_LABEL_LENGTH: usize = 63;

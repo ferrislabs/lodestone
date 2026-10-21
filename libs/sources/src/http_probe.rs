@@ -11,6 +11,7 @@ use lodestone_core::{
     FetchResponse, Fetcher, Hostname, LodestoneUseCase, Observation, ProfileId, Provenance,
     RevisionNumber, SignalKind, Source, SourceError, SourceName, UnitInterval,
     definition::{Agent, AgentId, DebtRule, Fingerprint, Matcher, VersionExtractor},
+    transient_checked_at,
 };
 use regex::Regex;
 use serde_json::json;
@@ -303,8 +304,8 @@ fn probed(response: &FetchResponse) -> ProbedResponse {
 
 enum HostOutcome {
     Probed(ProbedHost),
-    Skipped,
-    Dropped,
+    Skipped(Hostname),
+    Dropped(Hostname),
 }
 
 struct ProbeContext<F, G> {
@@ -333,7 +334,7 @@ impl<F: Fetcher, G: ProbeGuard> ProbeContext<F, G> {
 
     async fn probe(&self, candidate: CandidateHost) -> Result<HostOutcome, SourceError> {
         let Ok(_permit) = self.permits.acquire().await else {
-            return Ok(HostOutcome::Skipped);
+            return Ok(HostOutcome::Skipped(candidate.host));
         };
         let reserved = self
             .guard
@@ -341,7 +342,7 @@ impl<F: Fetcher, G: ProbeGuard> ProbeContext<F, G> {
             .await
             .map_err(upstream)?;
         if !reserved {
-            return Ok(HostOutcome::Skipped);
+            return Ok(HostOutcome::Skipped(candidate.host));
         }
         let mut responses = Vec::with_capacity(self.paths.len());
         for path in self.paths.iter() {
@@ -359,7 +360,9 @@ impl<F: Fetcher, G: ProbeGuard> ProbeContext<F, G> {
             };
             let response = match self.fetcher.fetch(&request).await {
                 Ok(response) => Some(probed(&response)),
-                Err(FetchError::RateLimited { .. }) => return Ok(HostOutcome::Dropped),
+                Err(FetchError::RateLimited { .. }) => {
+                    return Ok(HostOutcome::Dropped(candidate.host));
+                }
                 Err(error) => {
                     tracing::debug!(host = %candidate.host, path, %error, "probe fetch failed");
                     None
@@ -428,20 +431,34 @@ where
             tasks.spawn(async move { (index, context.probe(candidate).await) });
         }
         let mut done: Vec<(usize, ProbedHost)> = Vec::new();
+        let mut skipped: Vec<Hostname> = Vec::new();
+        let mut dropped: Vec<Hostname> = Vec::new();
         while let Some(joined) = tasks.join_next().await {
             match joined {
                 Ok((index, Ok(HostOutcome::Probed(item)))) => done.push((index, item)),
-                Ok((_, Ok(HostOutcome::Skipped | HostOutcome::Dropped))) => {}
+                Ok((_, Ok(HostOutcome::Skipped(host)))) => skipped.push(host),
+                Ok((_, Ok(HostOutcome::Dropped(host)))) => dropped.push(host),
                 Ok((_, Err(error))) => return Err(error),
                 Err(error) => tracing::debug!(%error, "probe task aborted"),
             }
         }
         done.sort_by_key(|(index, _)| *index);
         let items: Vec<ProbedHost> = done.into_iter().map(|(_, item)| item).collect();
-        if !items.is_empty() {
-            let names: Vec<Hostname> = items.iter().map(|item| item.host.host.clone()).collect();
+        let mut names: Vec<Hostname> = items.iter().map(|item| item.host.host.clone()).collect();
+        names.extend(skipped);
+        if !names.is_empty() {
             self.hosts
                 .mark_checked(&names, SourceName::HttpProbe, now)
+                .await
+                .map_err(upstream)?;
+        }
+        if !dropped.is_empty() {
+            self.hosts
+                .mark_checked(
+                    &dropped,
+                    SourceName::HttpProbe,
+                    transient_checked_at(now, self.settings.revisit_interval),
+                )
                 .await
                 .map_err(upstream)?;
         }

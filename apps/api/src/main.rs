@@ -2,9 +2,8 @@ use std::{error::Error, net::SocketAddr, num::NonZeroU32, sync::Arc, time::Durat
 
 use api::{
     internal_router::internal_router,
-    jobs::{
-        ContactFinders, Intervals, JobRouter, LlmRuntime, WiredSources, schedule_wired_sources,
-    },
+    jobs::{Intervals, JobRouter, LlmRuntime, WiredSources, schedule_wired_sources},
+    listeners::{ContactStep, CtStep, HostStep},
     logger::init_tracing_and_logging,
     router::router,
     webhook::WebhookSink,
@@ -30,6 +29,7 @@ use lodestone_core::{
         llm_cache::postgres::PgLlmCache,
     },
     jobs::{SystemClock, WorkerPool, WorkerSettings},
+    listeners::{Listener, ListenerSettings},
 };
 use server::{get_addr, run_server, shutdown_signal};
 use sources::{
@@ -184,29 +184,24 @@ async fn main() -> Result<(), Box<dyn Error>> {
             max_lag_tiles: args.ct.max_lag_tiles.get(),
         },
     );
-    let contacts = ContactFinders {
-        public_page: PublicPageFinder::new(
-            Arc::clone(&fetcher),
-            ContactPageSettings {
-                max_pages: args.contacts.page_paths.len(),
-                paths: args.contacts.page_paths.clone(),
-                max_rate_limit_wait: args.contacts.max_rate_limit_wait(),
-            },
-        ),
-        security_txt: SecurityTxtFinder::new(
-            Arc::clone(&fetcher),
-            args.contacts.max_rate_limit_wait(),
-        ),
-        role_guess: RoleGuessFinder::new(resolver),
-        targets: PgContactTargets::new(pool.clone()),
-        settings: ContactRunSettings {
-            batch_size: args.contacts.batch_size,
-            revisit_interval: outbound_config.revisit_interval,
-        },
+    let contact_settings = ContactRunSettings {
+        batch_size: args.contacts.batch_size,
+        revisit_interval: outbound_config.revisit_interval,
     };
+    let public_page = PublicPageFinder::new(
+        Arc::clone(&fetcher),
+        ContactPageSettings {
+            max_pages: args.contacts.page_paths.len(),
+            paths: args.contacts.page_paths.clone(),
+            max_rate_limit_wait: args.contacts.max_rate_limit_wait(),
+        },
+    );
+    let security_txt =
+        SecurityTxtFinder::new(Arc::clone(&fetcher), args.contacts.max_rate_limit_wait());
+    let role_guess = RoleGuessFinder::new(resolver);
     let http_probe = HttpProbeSource::new(
         fetcher,
-        Arc::new(PgCandidateHosts::new(pool)),
+        Arc::new(PgCandidateHosts::new(pool.clone())),
         Arc::new(app_state.usecase.clone()),
         HttpProbeSettings {
             batch_size: PROBE_BATCH_SIZE,
@@ -238,18 +233,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let job_router = JobRouter::new(
         app_state.usecase.clone(),
         WiredSources {
-            certificate_transparency,
-            dns_cname,
-            http_probe,
             boamp,
             decp,
             ted,
             france_travail,
             ats,
-            contacts,
         },
         Intervals {
-            certificate_transparency: args.ct.interval(),
             other_sources: jobs_config.source_interval,
             decp: args.decp.interval(),
         },
@@ -258,6 +248,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     .with_webhook(webhook);
     schedule_wired_sources(&queue, args.france_travail.credentials().is_some()).await?;
 
+    let usecase = app_state.usecase.clone();
     let router = router(app_state)?;
     let internal_router = internal_router()?;
 
@@ -284,6 +275,81 @@ async fn main() -> Result<(), Box<dyn Error>> {
         },
     );
 
+    let instance = instance_id();
+    let listener_settings = ListenerSettings {
+        idle: args.listeners.idle(),
+        lock_retry: args.listeners.lock_retry(),
+        yield_pause: ListenerSettings::DEFAULT_YIELD,
+        backoff_base: ListenerSettings::DEFAULT_BACKOFF_BASE,
+        backoff_max: ListenerSettings::DEFAULT_BACKOFF_MAX,
+        shutdown_grace: jobs_config.shutdown_grace,
+    };
+    let revisit = outbound_config.revisit_interval;
+    let ct_listener = Listener::new(
+        CtStep {
+            usecase: usecase.clone(),
+            source: certificate_transparency,
+        },
+        pool.clone(),
+        instance.clone(),
+        listener_settings,
+    );
+    let dns_listener = Listener::new(
+        HostStep {
+            usecase: usecase.clone(),
+            source: dns_cname,
+            hosts: PgCandidateHosts::new(pool.clone()),
+            revisit,
+        },
+        pool.clone(),
+        instance.clone(),
+        listener_settings,
+    );
+    let probe_listener = Listener::new(
+        HostStep {
+            usecase: usecase.clone(),
+            source: http_probe,
+            hosts: PgCandidateHosts::new(pool.clone()),
+            revisit,
+        },
+        pool.clone(),
+        instance.clone(),
+        listener_settings,
+    );
+    let security_txt_listener = Listener::new(
+        ContactStep {
+            usecase: usecase.clone(),
+            finder: security_txt,
+            targets: PgContactTargets::new(pool.clone()),
+            settings: contact_settings,
+        },
+        pool.clone(),
+        instance.clone(),
+        listener_settings,
+    );
+    let public_page_listener = Listener::new(
+        ContactStep {
+            usecase: usecase.clone(),
+            finder: public_page,
+            targets: PgContactTargets::new(pool.clone()),
+            settings: contact_settings,
+        },
+        pool.clone(),
+        instance.clone(),
+        listener_settings,
+    );
+    let role_guess_listener = Listener::new(
+        ContactStep {
+            usecase,
+            finder: role_guess,
+            targets: PgContactTargets::new(pool.clone()),
+            settings: contact_settings,
+        },
+        pool,
+        instance,
+        listener_settings,
+    );
+
     let shutdown = Shutdown {
         workers: shutdown_tx,
         public: public_handle.clone(),
@@ -296,17 +362,28 @@ async fn main() -> Result<(), Box<dyn Error>> {
         on_signal.trigger();
     });
 
-    info!(%addr, %internal_addr, workers = jobs_config.workers.get(), "starting api, internal http servers and job workers");
+    info!(%addr, %internal_addr, workers = jobs_config.workers.get(), "starting api, internal http servers, job workers and continuous listeners");
 
     tokio::join!(
         serve(addr, router, public_handle, &shutdown),
         serve(internal_addr, internal_router, internal_handle, &shutdown),
-        workers.run(shutdown_rx),
+        workers.run(shutdown_rx.clone()),
+        ct_listener.run(shutdown_rx.clone()),
+        dns_listener.run(shutdown_rx.clone()),
+        probe_listener.run(shutdown_rx.clone()),
+        security_txt_listener.run(shutdown_rx.clone()),
+        public_page_listener.run(shutdown_rx.clone()),
+        role_guess_listener.run(shutdown_rx),
     );
 
     observability.shutdown();
 
     Ok(())
+}
+
+fn instance_id() -> String {
+    let host = std::env::var("HOSTNAME").unwrap_or_else(|_| "lodestone".to_owned());
+    format!("{host}-{}", std::process::id())
 }
 
 #[derive(Clone)]

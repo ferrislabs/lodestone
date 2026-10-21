@@ -29,6 +29,7 @@ import { ScoringExplainer } from '#/pages/profiles/ui/scoring-explainer'
 import { ScoringGrid } from '#/pages/profiles/ui/scoring-grid'
 import { ThresholdField } from '#/pages/profiles/ui/threshold-field'
 import type { SourceTrigger } from '#/pages/sources/feature/use-source-trigger'
+import type { ListenerSummary } from '#/pages/sources/lib/types'
 
 const DEFINITION_HINTS: UiHints = {
 	...PROFILE_HINTS,
@@ -50,6 +51,8 @@ interface DefinitionTabContentProps {
 	onChange: (next: JsonObject) => void
 	onNavigate?: (tab: EditorTab) => void
 	sourceTrigger?: SourceTrigger
+	listeners?: Readonly<Record<string, ListenerSummary>>
+	now?: number
 }
 
 function section(key: string) {
@@ -67,6 +70,8 @@ export function DefinitionTabContent({
 	onChange,
 	onNavigate,
 	sourceTrigger,
+	listeners,
+	now,
 }: DefinitionTabContentProps) {
 	const agents = useAgentsUi(value, onChange)
 	const scoring = useScoringUi(value, onChange)
@@ -164,6 +169,8 @@ export function DefinitionTabContent({
 							confirmingRemove={agents.confirmingRemove}
 							picking={agents.picking}
 							sourceTrigger={sourceTrigger}
+							listeners={listeners}
+							now={now}
 							onOpenPicker={agents.openPicker}
 							onClosePicker={agents.closePicker}
 							onAdd={agents.add}

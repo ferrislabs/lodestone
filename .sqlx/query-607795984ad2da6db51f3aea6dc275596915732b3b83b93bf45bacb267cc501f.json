@@ -1,0 +1,68 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT name, holder, state, last_activity_at, last_error,\n                items_total, signals_total, backlog, updated_at\n            FROM listeners\n            ORDER BY name\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "holder",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "state",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "last_activity_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 4,
+        "name": "last_error",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "items_total",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 6,
+        "name": "signals_total",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 7,
+        "name": "backlog",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 8,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      true,
+      false,
+      true,
+      true,
+      false,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "607795984ad2da6db51f3aea6dc275596915732b3b83b93bf45bacb267cc501f"
+}

@@ -75,11 +75,44 @@ fn count(value: usize) -> u64 {
     u64::try_from(value).unwrap_or(u64::MAX)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RunRecording {
+    Always,
+    WhenProcessed,
+}
+
 impl LodestoneUseCase {
     pub async fn run_source<S, C>(
         &self,
         source: &S,
         clock: &C,
+    ) -> Result<SourceRunReport, SourceRunError>
+    where
+        S: Source,
+        C: Clock,
+    {
+        self.run_source_recording(source, clock, RunRecording::Always)
+            .await
+    }
+
+    pub async fn listen_source<S, C>(
+        &self,
+        source: &S,
+        clock: &C,
+    ) -> Result<SourceRunReport, SourceRunError>
+    where
+        S: Source,
+        C: Clock,
+    {
+        self.run_source_recording(source, clock, RunRecording::WhenProcessed)
+            .await
+    }
+
+    async fn run_source_recording<S, C>(
+        &self,
+        source: &S,
+        clock: &C,
+        recording: RunRecording,
     ) -> Result<SourceRunReport, SourceRunError>
     where
         S: Source,
@@ -132,9 +165,17 @@ impl LodestoneUseCase {
                 )
             })
             .collect();
-        self.insert_runs(&runs).await?;
+        if recording == RunRecording::Always {
+            self.insert_runs(&runs).await?;
+        }
 
-        let items = match source.collect(&profiles, started_at).await {
+        let collected = source.collect(&profiles, started_at).await;
+        if recording == RunRecording::WhenProcessed
+            && !matches!(&collected, Ok(items) if items.is_empty())
+        {
+            self.insert_runs(&runs).await?;
+        }
+        let items = match collected {
             Ok(items) => items,
             Err(error) => {
                 let outcome = RunOutcome::Failed {
@@ -148,6 +189,14 @@ impl LodestoneUseCase {
                 return Err(error.into());
             }
         };
+
+        if items.is_empty() && recording == RunRecording::WhenProcessed {
+            return Ok(SourceRunReport {
+                runs: Vec::new(),
+                items: 0,
+                signals: 0,
+            });
+        }
 
         let mut total_signals = 0;
         for ((active, agent), run) in targets.iter().zip(&runs) {

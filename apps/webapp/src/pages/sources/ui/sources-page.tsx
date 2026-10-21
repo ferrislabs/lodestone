@@ -8,6 +8,7 @@ import {
 } from '#/components/ui/table'
 import { groupedSources } from '#/pages/sources/lib/state'
 import type { Source } from '#/pages/sources/lib/types'
+import { ListenerRow } from '#/pages/sources/ui/listener-row'
 import { SourceRow } from '#/pages/sources/ui/source-row'
 
 const SKELETON_ROWS = ['a', 'b', 'c', 'd']
@@ -38,7 +39,8 @@ export function SourcesPage({
 			<div className="flex flex-col gap-1">
 				<h1 className="text-2xl font-bold tracking-tight">Sources</h1>
 				<p className="text-sm text-muted-foreground">
-					Chaque source tourne sur sa propre tâche récurrente. « Lancer
+					Les sources en écoute continue tournent en permanence. Les autres
+					sources tournent sur leur propre tâche récurrente : « Lancer
 					maintenant » avance le prochain passage à l'instant présent pour tous
 					les profils.
 				</p>
@@ -62,30 +64,57 @@ export function SourcesPage({
 						>
 							<h2 className="text-base font-semibold">{group.title}</h2>
 							<div className="rounded-xl border bg-card">
-								<Table>
-									<TableHeader>
-										<TableRow>
-											<TableHead>Source</TableHead>
-											<TableHead>État</TableHead>
-											<TableHead>Prochain passage</TableHead>
-											<TableHead>Dernier passage</TableHead>
-											<TableHead>Action</TableHead>
-										</TableRow>
-									</TableHeader>
-									<TableBody>
-										{group.sources.map((source) => (
-											<SourceRow
-												key={source.source}
-												source={source}
-												now={now}
-												scheduled={scheduled.has(source.source)}
-												pending={pending.has(source.source)}
-												error={errors[source.source] ?? null}
-												onRun={onRun}
-											/>
-										))}
-									</TableBody>
-								</Table>
+								{group.continuous ? (
+									<Table>
+										<TableHeader>
+											<TableRow>
+												<TableHead>Source</TableHead>
+												<TableHead>État</TableHead>
+												<TableHead>Dernière activité</TableHead>
+												<TableHead>File d'attente</TableHead>
+												<TableHead>Totaux</TableHead>
+												<TableHead>Dernier passage</TableHead>
+											</TableRow>
+										</TableHeader>
+										<TableBody>
+											{group.sources.map((source) =>
+												source.listener ? (
+													<ListenerRow
+														key={source.source}
+														source={source}
+														listener={source.listener}
+														now={now}
+													/>
+												) : null,
+											)}
+										</TableBody>
+									</Table>
+								) : (
+									<Table>
+										<TableHeader>
+											<TableRow>
+												<TableHead>Source</TableHead>
+												<TableHead>État</TableHead>
+												<TableHead>Prochain passage</TableHead>
+												<TableHead>Dernier passage</TableHead>
+												<TableHead>Action</TableHead>
+											</TableRow>
+										</TableHeader>
+										<TableBody>
+											{group.sources.map((source) => (
+												<SourceRow
+													key={source.source}
+													source={source}
+													now={now}
+													scheduled={scheduled.has(source.source)}
+													pending={pending.has(source.source)}
+													error={errors[source.source] ?? null}
+													onRun={onRun}
+												/>
+											))}
+										</TableBody>
+									</Table>
+								)}
 							</div>
 						</section>
 					))

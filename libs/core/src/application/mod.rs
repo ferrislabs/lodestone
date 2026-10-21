@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use auth::{AuthService, FerrisKeyRepository};
 use common::{Config, CoreError};
 use rate_limit::{InMemoryRateLimiter, Quota, RateLimitService};
@@ -10,6 +12,7 @@ pub mod contacts;
 pub mod drafts;
 pub mod jobs;
 pub mod leads;
+pub mod listeners;
 pub mod llm;
 pub mod output;
 pub mod partners;
@@ -30,6 +33,7 @@ pub type LodestoneRateLimitService = RateLimitService<InMemoryRateLimiter>;
 pub struct LodestoneUseCase {
     pub(crate) pool: PgPool,
     pub(crate) webhooks: Option<WebhookPolicy>,
+    pub(crate) listener_stale_after: Duration,
 }
 
 impl LodestoneUseCase {
@@ -37,7 +41,13 @@ impl LodestoneUseCase {
         Self {
             pool,
             webhooks: None,
+            listener_stale_after: crate::domain::listener::STALE_FLOOR,
         }
+    }
+
+    pub fn with_listener_stale_after(mut self, stale_after: Duration) -> Self {
+        self.listener_stale_after = stale_after;
+        self
     }
 
     pub fn with_webhooks(mut self, policy: Option<WebhookPolicy>) -> Self {

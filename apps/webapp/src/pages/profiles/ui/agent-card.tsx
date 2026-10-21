@@ -14,8 +14,13 @@ import {
 } from '#/pages/profiles/lib/agents'
 import { belongsToPath } from '#/pages/profiles/lib/tabs'
 import { DependencyNoteText } from '#/pages/profiles/ui/agent-form'
+import {
+	agentListenerLine,
+	isContinuousKind,
+	listenerBadge,
+} from '#/pages/sources/lib/listener'
 import { triggerResultLabel } from '#/pages/sources/lib/state'
-import type { TriggerResult } from '#/pages/sources/lib/types'
+import type { ListenerSummary, TriggerResult } from '#/pages/sources/lib/types'
 
 interface AgentCardProps {
 	agent: JsonValue
@@ -27,6 +32,8 @@ interface AgentCardProps {
 	runPending?: boolean
 	runResult?: TriggerResult | null
 	onRunSource?: () => void
+	listener?: ListenerSummary
+	now?: number
 	onEdit: () => void
 	onEnabled: (enabled: boolean) => void
 	onRequestRemove: () => void
@@ -44,6 +51,8 @@ export function AgentCard({
 	runPending = false,
 	runResult = null,
 	onRunSource,
+	listener,
+	now = 0,
 	onEdit,
 	onEnabled,
 	onRequestRemove,
@@ -128,7 +137,16 @@ export function AgentCard({
 					</>
 				)}
 			</div>
-			{onRunSource && kind ? (
+			{kind && isContinuousKind(kind) ? (
+				<p
+					data-listener-line
+					data-tone={listenerBadge(listener?.state ?? '').tone}
+					className="text-xs text-muted-foreground"
+				>
+					{agentListenerLine(listener, now)}
+				</p>
+			) : null}
+			{onRunSource && kind && !isContinuousKind(kind) ? (
 				<div className="flex items-center gap-2">
 					<Button
 						type="button"

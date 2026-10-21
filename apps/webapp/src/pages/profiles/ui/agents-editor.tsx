@@ -12,6 +12,7 @@ import { AgentCard } from '#/pages/profiles/ui/agent-card'
 import { AgentPicker } from '#/pages/profiles/ui/agent-picker'
 import { AgentSheet } from '#/pages/profiles/ui/agent-sheet'
 import type { SourceTrigger } from '#/pages/sources/feature/use-source-trigger'
+import type { ListenerSummary } from '#/pages/sources/lib/types'
 
 interface AgentsEditorProps {
 	context: FormContext
@@ -21,6 +22,8 @@ interface AgentsEditorProps {
 	confirmingRemove: number | null
 	picking: boolean
 	sourceTrigger?: SourceTrigger
+	listeners?: Readonly<Record<string, ListenerSummary>>
+	now?: number
 	onOpenPicker: () => void
 	onClosePicker: () => void
 	onAdd: (kind: AgentKind) => void
@@ -43,6 +46,8 @@ export function AgentsEditor({
 	confirmingRemove,
 	picking,
 	sourceTrigger,
+	listeners,
+	now,
 	onOpenPicker,
 	onClosePicker,
 	onAdd,
@@ -94,6 +99,8 @@ export function AgentsEditor({
 									? () => sourceTrigger.trigger(kind)
 									: undefined
 							}
+							listener={kind ? listeners?.[kind] : undefined}
+							now={now}
 							onEdit={() => onEdit(index)}
 							onEnabled={(enabled) => onEnabled(index, enabled)}
 							onRequestRemove={() => onRequestRemove(index)}

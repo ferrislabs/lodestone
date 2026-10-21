@@ -18,8 +18,9 @@ pub use domain::{
         ports::{Fetcher, HostVisitRepository},
     },
     host::{
-        CandidateHost, HostOrigin, Hostname, InvalidHostname,
+        CandidateHost, HostOrigin, Hostname, InvalidHostname, TRANSIENT_RETRY,
         ports::{CandidateHosts, CtCursors, DnsError, DnsResolver, MxLookup},
+        transient_checked_at,
     },
     job::{
         ClaimedJob, FailureDecision, InvalidJobKind, Job, JobId, JobKind, JobStatus, LeaseToken,
@@ -38,6 +39,10 @@ pub use domain::{
         },
         ports::{AssessmentRepository, ContactRepository, LeadRepository, SignalRepository},
         query::{LeadDetail, LeadListing, LeadPage, LeadQuery, LeadSort, ProfileSummary},
+    },
+    listener::{
+        CONTINUOUS_SOURCES, ListenerState, ListenerStatus, StatusUpdate, StepOutcome,
+        is_continuous, lock_key, stale_after,
     },
     llm::{
         LlmError, LlmProvider, LlmRequest, LlmResponse, ProviderDefinition, ProviderKind,

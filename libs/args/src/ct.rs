@@ -1,4 +1,4 @@
-use std::{num::NonZeroU64, time::Duration};
+use std::num::NonZeroU64;
 
 use url::Url;
 
@@ -39,21 +39,6 @@ pub struct CtArgs {
         long_help = "A log further behind than this many tiles skips ahead to stay current"
     )]
     pub max_lag_tiles: NonZeroU64,
-
-    #[arg(
-        long = "ct-interval-seconds",
-        env = "CT_INTERVAL_SECONDS",
-        name = "CT_INTERVAL_SECONDS",
-        default_value_t = 60,
-        long_help = "Seconds between two certificate transparency runs"
-    )]
-    pub interval_seconds: u64,
-}
-
-impl CtArgs {
-    pub fn interval(&self) -> Duration {
-        Duration::from_secs(self.interval_seconds)
-    }
 }
 
 #[cfg(test)]
@@ -72,7 +57,6 @@ mod tests {
         let cmd = Cmd::try_parse_from(["cmd"]).unwrap();
         assert_eq!(cmd.ct.max_logs, 4);
         assert_eq!(cmd.ct.tiles_per_run.get(), 16);
-        assert_eq!(cmd.ct.interval(), Duration::from_secs(60));
         assert_eq!(cmd.ct.log_list_url.host_str(), Some("www.gstatic.com"));
     }
 

@@ -36,12 +36,16 @@ pub async fn state(args: Arc<Args>) -> Result<AppState, ServerError> {
             max_attempts: config.jobs.max_attempts,
         });
 
+    let stale_after = lodestone_core::stale_after(args.listeners.idle());
     let service = create_service(config).await.unwrap();
 
     Ok(AppState {
         args,
         auth: service.auth,
-        usecase: service.usecase.with_webhooks(webhooks),
+        usecase: service
+            .usecase
+            .with_webhooks(webhooks)
+            .with_listener_stale_after(stale_after),
         rate_limit: service.rate_limit,
         rate_limit_quota: service.rate_limit_quota,
         cipher: Arc::new(cipher),

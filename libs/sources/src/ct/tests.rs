@@ -307,6 +307,13 @@ async fn later_runs_read_full_tiles_within_budget_and_store_matches() {
 
     assert_eq!(source.fetcher.tile_requests().len(), 3);
     assert_eq!(cursor(&source), Some(7 * 256));
+    assert_eq!(
+        source.last_pass(),
+        crate::ct::CtPass {
+            tiles_read: 3,
+            lag_tiles: 3
+        }
+    );
 
     let filter = labels(&wanted);
     let entries = ct::parse_data_tile(TILE, 0).unwrap();
@@ -348,6 +355,7 @@ async fn a_log_too_far_behind_skips_ahead() {
     assert_eq!(requests.len(), 2);
     assert!(requests[0].ends_with("/tile/data/990"), "{}", requests[0]);
     assert_eq!(cursor(&source), Some(992 * 256));
+    assert_eq!(source.last_pass().lag_tiles, 8);
 }
 
 #[tokio::test]

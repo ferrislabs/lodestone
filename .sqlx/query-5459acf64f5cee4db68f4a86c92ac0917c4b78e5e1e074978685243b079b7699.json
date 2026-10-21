@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT COUNT(*) AS \"count!\"\n            FROM (SELECT DISTINCT leads.domain FROM leads\n                  JOIN profiles ON profiles.id = leads.profile_id AND profiles.active) l\n            LEFT JOIN lead_domain_checks c ON c.domain = l.domain AND c.source = $1\n            WHERE (c.checked_at IS NULL OR c.checked_at < $2)\n              AND NOT EXISTS (\n                  SELECT 1 FROM suppression_list s WHERE s.kind = 'domain' AND s.value = l.domain\n              )\n              AND ($3::text IS NULL OR EXISTS (\n                  SELECT 1 FROM lead_domain_checks p WHERE p.domain = l.domain AND p.source = $3\n              ))\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Timestamptz",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "5459acf64f5cee4db68f4a86c92ac0917c4b78e5e1e074978685243b079b7699"
+}
