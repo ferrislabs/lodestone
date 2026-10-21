@@ -186,6 +186,53 @@ async fn decp_is_ready_when_the_dataset_api_answers(pool: PgPool) {
 }
 
 #[sqlx::test(migrations = "../../migrations")]
+async fn bodacc_is_ready_when_its_dataset_metadata_answers(pool: PgPool) {
+    let rig = Rig::new(pool).await;
+    rig.save(
+        provider_descriptor("bodacc").unwrap(),
+        json!({"base_url": rig.server.url("/datasets/annonces-commerciales")}),
+        &[],
+    )
+    .await;
+    let dataset = rig
+        .server
+        .mock_async(|when, then| {
+            when.method(GET).path("/datasets/annonces-commerciales");
+            then.status(200)
+                .json_body(json!({"dataset_id": "annonces-commerciales"}));
+        })
+        .await;
+
+    let configuration = tested(&rig, "bodacc").await;
+
+    assert_eq!(configuration.status, ProviderStatus::Ready);
+    assert!(rig.uc.is_provider_usable("bodacc").await.unwrap());
+    dataset.assert_async().await;
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn bodacc_fails_when_its_dataset_answers_an_error(pool: PgPool) {
+    let rig = Rig::new(pool).await;
+    rig.save(
+        provider_descriptor("bodacc").unwrap(),
+        json!({"base_url": rig.server.url("/datasets/annonces-commerciales")}),
+        &[],
+    )
+    .await;
+    rig.server
+        .mock_async(|when, then| {
+            when.method(GET).path("/datasets/annonces-commerciales");
+            then.status(503);
+        })
+        .await;
+
+    let configuration = tested(&rig, "bodacc").await;
+
+    assert_eq!(configuration.status, ProviderStatus::Failing);
+    assert!(configuration.last_test_message.unwrap().contains("503"));
+}
+
+#[sqlx::test(migrations = "../../migrations")]
 async fn decp_fails_when_the_dataset_api_answers_an_error(pool: PgPool) {
     let rig = Rig::new(pool).await;
     rig.save(

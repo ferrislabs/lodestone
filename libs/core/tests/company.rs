@@ -13,13 +13,14 @@ use std::{
 use chrono::{DateTime, NaiveDate, Utc};
 use common::{EncryptionKey, Secret};
 use lodestone_core::{
-    ActiveProfile, Clock, CompanyBuilder, CompanyPage, CreateProfileCommand, DossierBuild,
-    DossierState, EcosystemFinding, EcosystemModule, EnrichmentState, EnrichmentStatus,
-    GenerationParams, InspectionTarget, Lead, LeadQuery, LeadRepository, LinkRejection, LlmError,
-    LlmProvider, LlmRequest, LlmResponse, LodestoneUseCase, ModuleRunner, ModuleStatus,
-    NormalizedDomain, Observation, OfficialData, PageReview, PageVerifier, ProfileId, ProfileName,
-    Provenance, ProviderDefinition, ProviderKind, SignalKind, Siren, SourceError, SourceName, Tier,
-    TokenPricing, TokenUsage, UnconfirmedLinks, UnitInterval, ValidatedProfile, WaitingReason,
+    ActiveProfile, BODACC, COMPANY_RESEARCH, Clock, CompanyBuilder, CompanyPage,
+    CreateProfileCommand, DECP, DossierBuild, DossierState, EcosystemFinding, EcosystemModule,
+    EnrichmentState, EnrichmentStatus, GenerationParams, Inspection, InspectionTarget, Lead,
+    LeadQuery, LeadRepository, LinkRejection, LlmError, LlmProvider, LlmRequest, LlmResponse,
+    LodestoneUseCase, ModuleRunner, ModuleStatus, NormalizedDomain, Observation, OfficialData,
+    PageReview, PageVerifier, ProfileId, ProfileName, Provenance, ProviderDefinition, ProviderKind,
+    SignalKind, Siren, SourceError, SourceName, Tier, TokenPricing, TokenUsage, UnconfirmedLinks,
+    UnitInterval, ValidatedProfile, WaitingReason,
     company::{CompanyRunReport, CompanyRunSettings, PageRecheckReport},
     ecosystem::InspectionRunSettings,
     evaluation::{EvaluationSettings, ProviderBuilder},
@@ -51,18 +52,24 @@ impl ModuleRunner for FakeModule {
         self.0
     }
 
-    async fn inspect(
-        &self,
-        target: &InspectionTarget<'_>,
-    ) -> Result<Vec<EcosystemFinding>, SourceError> {
-        Ok(vec![EcosystemFinding::new(
+    async fn inspect(&self, target: &InspectionTarget<'_>) -> Result<Inspection, SourceError> {
+        Ok(Inspection::Found(vec![EcosystemFinding::new(
             self.0,
             "fact",
             "Fait observé",
             format!("FACT-OF-{}", self.0.as_str()),
             format!("https://{}/{}", target.domain, self.0.as_str()),
             target.now,
-        )])
+        )
+        .with_details(match self.0 {
+            EcosystemModule::LegalLife => {
+                json!({"date": "2026-09-10", "court": "Greffe du tribunal de commerce de Lyon"})
+            }
+            EcosystemModule::PublicContracts => {
+                json!({"date": "2026-08-10", "buyer": "Commune de Lorient", "amount_eur": 1200.5, "procedure": "Procédure adaptée"})
+            }
+            _ => Value::Null,
+        })]))
     }
 }
 
@@ -427,7 +434,24 @@ impl Harness {
             .unwrap();
     }
 
+    async fn provider(&self, key: &str, status: &str, replace: bool) {
+        let sql = if replace {
+            "INSERT INTO source_provider_configurations (provider_key, settings, status, created_at, updated_at) VALUES ($1, '{}'::jsonb, $2, now(), now()) ON CONFLICT (provider_key) DO UPDATE SET status = EXCLUDED.status"
+        } else {
+            "INSERT INTO source_provider_configurations (provider_key, settings, status, created_at, updated_at) VALUES ($1, '{}'::jsonb, $2, now(), now()) ON CONFLICT (provider_key) DO NOTHING"
+        };
+        query(sql)
+            .bind(key)
+            .bind(status)
+            .execute(&self.pool)
+            .await
+            .unwrap();
+    }
+
     async fn inspect(&self, modules: &[EcosystemModule]) {
+        for key in [COMPANY_RESEARCH, BODACC, DECP] {
+            self.provider(key, "ready", false).await;
+        }
         let runners: Vec<FakeModule> = modules.iter().copied().map(FakeModule).collect();
         self.usecase
             .inspect_due_domains(
@@ -1001,6 +1025,56 @@ async fn the_agents_wait_for_the_enrichment_then_run_after_the_timeout(pool: PgP
 }
 
 #[sqlx::test(migrations = "../../migrations")]
+async fn a_module_whose_provider_is_not_ready_is_skipped_and_does_not_hold_the_lead(pool: PgPool) {
+    let harness = Harness::new(pool).enriching();
+    harness.defaults().await;
+    let profile = harness.profile().await;
+    harness
+        .observe_kind("mairie.fr", SourceName::Boamp, "public_tender", 10)
+        .await;
+    harness.created_at_clock_zero().await;
+    harness.provider(BODACC, "failing", true).await;
+
+    harness.inspect(&EcosystemModule::AVAILABLE).await;
+
+    let lead = harness.lead(profile, "mairie.fr").await;
+    let detail = harness.usecase.lead_detail(lead.id).await.unwrap();
+    assert_eq!(
+        detail.ecosystem.state_of(EcosystemModule::LegalLife).status,
+        ModuleStatus::Pending
+    );
+    assert_eq!(
+        detail
+            .ecosystem
+            .state_of(EcosystemModule::PublicContracts)
+            .status,
+        ModuleStatus::Done
+    );
+    assert_eq!(detail.enrichment.status, EnrichmentStatus::Complete);
+    assert_eq!(detail.enrichment.waiting_reason, None);
+    let readiness = harness.usecase.ecosystem_readiness().await.unwrap();
+    assert!(!readiness.is_ready(EcosystemModule::LegalLife));
+    assert!(readiness.is_ready(EcosystemModule::OfficialIdentity));
+    let listed = harness.listed_enrichment(profile, &lead).await;
+    assert_eq!(listed.status, EnrichmentStatus::Complete);
+    assert_eq!(harness.qualify().await, 1);
+
+    harness.provider(BODACC, "ready", true).await;
+    harness.inspect(&EcosystemModule::AVAILABLE).await;
+    let detail = harness.usecase.lead_detail(lead.id).await.unwrap();
+    assert_eq!(
+        detail.ecosystem.state_of(EcosystemModule::LegalLife).status,
+        ModuleStatus::Done
+    );
+    assert!(
+        detail
+            .ecosystem
+            .findings_of(EcosystemModule::LegalLife)
+            .any(|found| found.value == "FACT-OF-legal_life")
+    );
+}
+
+#[sqlx::test(migrations = "../../migrations")]
 async fn the_agents_run_once_every_module_of_the_inspection_settled(pool: PgPool) {
     let harness = Harness::new(pool).enriching();
     harness.defaults().await;
@@ -1024,6 +1098,8 @@ async fn the_agents_run_once_every_module_of_the_inspection_settled(pool: PgPool
         statuses,
         [
             (EcosystemModule::OfficialIdentity, ModuleStatus::Pending),
+            (EcosystemModule::LegalLife, ModuleStatus::Pending),
+            (EcosystemModule::PublicContracts, ModuleStatus::Pending),
             (EcosystemModule::WebsiteStack, ModuleStatus::Done),
             (EcosystemModule::HiringActivity, ModuleStatus::Pending)
         ]
@@ -1035,6 +1111,10 @@ async fn the_agents_run_once_every_module_of_the_inspection_settled(pool: PgPool
             EcosystemModule::OfficialIdentity,
             EcosystemModule::HiringActivity,
         ])
+        .await;
+    assert_eq!(harness.qualify().await, 0);
+    harness
+        .inspect(&[EcosystemModule::LegalLife, EcosystemModule::PublicContracts])
         .await;
     assert_eq!(harness.qualify().await, 1);
     let detail = harness.usecase.lead_detail(lead.id).await.unwrap();
@@ -1238,12 +1318,26 @@ async fn every_agent_document_set_carries_the_ecosystem_findings(pool: PgPool) {
             .iter()
             .filter(|(_, content)| content.starts_with("Ecosystem, module"))
             .collect();
-        assert_eq!(ecosystem.len(), 3, "{:?}", call.documents);
+        assert_eq!(ecosystem.len(), 5, "{:?}", call.documents);
         let website = ecosystem
             .iter()
             .find(|(source, _)| source == "https://mairie.fr/website_stack")
             .unwrap();
         assert!(website.1.contains("- Fait observé: FACT-OF-website_stack"));
+        let legal = ecosystem
+            .iter()
+            .find(|(source, _)| source == "https://mairie.fr/legal_life")
+            .unwrap();
+        assert!(legal.1.contains(
+            "- Fait observé (2026-09-10): FACT-OF-legal_life; court Greffe du tribunal de commerce de Lyon"
+        ));
+        let contracts = ecosystem
+            .iter()
+            .find(|(source, _)| source == "https://mairie.fr/public_contracts")
+            .unwrap();
+        assert!(contracts.1.contains(
+            "- Fait observé (2026-08-10): FACT-OF-public_contracts; buyer Commune de Lorient; amount 1200.50 EUR; procedure Procédure adaptée"
+        ));
     }
     let aggregator = calls.iter().find(|call| call.aggregator).unwrap();
     assert!(

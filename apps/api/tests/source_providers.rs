@@ -148,7 +148,8 @@ async fn the_catalog_lists_every_provider_as_not_configured(pool: PgPool) {
             "dns_cname",
             "http_probe",
             "contacts",
-            "company_research"
+            "company_research",
+            "bodacc"
         ]
     );
     for provider in providers {

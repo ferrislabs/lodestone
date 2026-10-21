@@ -1,6 +1,6 @@
 use fetch::{ApiFetcher, ApiRequest};
 use lodestone_core::{
-    ATS, CERTIFICATE_TRANSPARENCY, COMPANY_RESEARCH, CONTACTS, Credential, DECP, DNS_CNAME,
+    ATS, BODACC, CERTIFICATE_TRANSPARENCY, COMPANY_RESEARCH, CONTACTS, Credential, DECP, DNS_CNAME,
     FetchError, HACKER_NEWS_HIRING, HACKER_NEWS_THREAD_TITLE, HTTP_PROBE, ProbeContext,
     ProbeOutcome, ProviderProbe, SourceName, TED, provider_descriptor,
 };
@@ -285,6 +285,15 @@ impl<'f, F: ApiFetcher> Probe<'f, F> {
                 "L'API Recherche d'entreprises",
                 SourceName::PublicPage,
                 COMPANY_QUERY,
+                false,
+            )),
+            BODACC => Some(Self::endpoint(
+                fetcher,
+                BODACC,
+                "base_url",
+                "Le jeu de données du BODACC",
+                SourceName::PublicPage,
+                &[],
                 false,
             )),
             ATS | HTTP_PROBE | CONTACTS => Some(Self::Offline(OfflineProbe {

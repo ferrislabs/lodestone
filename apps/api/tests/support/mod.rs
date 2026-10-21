@@ -27,7 +27,9 @@ use rsa::{RsaPrivateKey, pkcs1::EncodeRsaPrivateKey, rand_core::OsRng, traits::P
 use serde_json::{Value, json};
 use source_providers::ProviderEngine;
 use sources::{
+    bodacc::BodaccSettings,
     company::CompanySettings,
+    decp::holders::HolderSettings,
     ecosystem::{EcosystemConfig, EcosystemModules, WebsiteSettings},
     endpoint::Endpoint,
 };
@@ -153,6 +155,18 @@ impl Harness {
                     max_pages: 2,
                     max_rate_limit_wait: Duration::from_secs(1),
                     origin: Url::parse(&server.base_url()).ok(),
+                },
+                bodacc: BodaccSettings {
+                    dataset_url: Endpoint::from(
+                        Url::parse(&format!("{}/bodacc/annonces", server.base_url())).expect("url"),
+                    ),
+                    max_rate_limit_wait: Duration::from_secs(1),
+                },
+                holders: HolderSettings {
+                    holders_url: Endpoint::from(
+                        Url::parse(&format!("{}/decp/holders/", server.base_url())).expect("url"),
+                    ),
+                    max_rate_limit_wait: Duration::from_secs(1),
                 },
                 website: WebsiteSettings {
                     max_rate_limit_wait: Duration::from_secs(1),

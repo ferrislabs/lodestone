@@ -4,7 +4,9 @@ import {
 	findingRows,
 	formatDuration,
 	moduleStatusLabel,
+	PROVIDER_NOT_READY,
 	platformNotice,
+	providerLink,
 	type StatusTone,
 	statusTone,
 } from '#/lib/ecosystem'
@@ -128,11 +130,14 @@ export interface ModuleCard {
 	stats: ModuleStat[]
 	example: ModuleExample | null
 	canTest: boolean
+	providerLink: string | null
 }
 
 function chipOf(module: EcosystemModuleInfo, enabled: boolean): ModuleChip {
 	if (!module.available) return { label: 'À venir', tone: 'soon' }
 	if (!enabled) return { label: 'Désactivé', tone: 'off' }
+	if (!module.provider_ready)
+		return { label: PROVIDER_NOT_READY, tone: 'failed' }
 	return { label: 'Actif', tone: 'done' }
 }
 
@@ -174,6 +179,9 @@ export function moduleCards(
 							sourceUrl: example.source_url,
 						},
 			canTest: module.available,
+			providerLink: module.available
+				? providerLink(module.provider, module.provider_ready)
+				: null,
 		}
 	})
 }
@@ -192,7 +200,7 @@ function countLabel(count: number): string {
 export function dryRunView(result: DryRunResult): DryRunView {
 	const notice =
 		result.status === 'not_applicable'
-			? platformNotice(result.hosting_platform)
+			? (platformNotice(result.hosting_platform) ?? result.error ?? null)
 			: (result.error ?? null)
 	return {
 		summary: `${result.domain} · ${moduleStatusLabel(result.status)} en ${formatDuration(result.duration_ms)} · ${countLabel(result.findings.length)}`,

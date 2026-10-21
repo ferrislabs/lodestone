@@ -28,6 +28,7 @@ describe('moduleSections', () => {
 			modules: [
 				{
 					module: 'official_identity',
+					provider_ready: true,
 					label: 'Identité officielle',
 					status: 'done',
 					last_run: '2026-10-08T10:05:00Z',
@@ -46,7 +47,17 @@ describe('moduleSections', () => {
 					],
 				},
 				{
+					module: 'legal_life',
+					provider: 'bodacc',
+					provider_ready: false,
+					label: 'Vie légale',
+					status: 'not_applicable',
+					error: 'SIREN inconnu',
+					findings: [],
+				},
+				{
 					module: 'hiring_activity',
+					provider_ready: true,
 					label: 'Activité de recrutement',
 					status: 'failed',
 					error: 'home page not confirmed',
@@ -61,7 +72,9 @@ describe('moduleSections', () => {
 				statusLabel: 'Fait',
 				tone: 'done',
 				lastRun: formatDateTime('2026-10-08T10:05:00Z'),
-				error: null,
+				note: null,
+				failed: false,
+				providerLink: null,
 				rows: [
 					{
 						key: 'legal_name',
@@ -70,8 +83,24 @@ describe('moduleSections', () => {
 						sourceUrl:
 							'https://recherche-entreprises.api.gouv.fr/search?q=552100554',
 						highlighted: false,
+						date: null,
+						amount: null,
+						badge: null,
+						facts: [],
+						link: null,
 					},
 				],
+			},
+			{
+				module: 'legal_life',
+				label: 'Vie légale',
+				statusLabel: 'Non applicable',
+				tone: 'skipped',
+				lastRun: null,
+				note: 'SIREN inconnu',
+				failed: false,
+				providerLink: '/sources/providers/bodacc',
+				rows: [],
 			},
 			{
 				module: 'hiring_activity',
@@ -79,7 +108,9 @@ describe('moduleSections', () => {
 				statusLabel: 'Échec',
 				tone: 'failed',
 				lastRun: null,
-				error: 'home page not confirmed',
+				note: 'home page not confirmed',
+				failed: true,
+				providerLink: null,
 				rows: [],
 			},
 		])

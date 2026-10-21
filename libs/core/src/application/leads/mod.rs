@@ -16,7 +16,9 @@ use crate::{
             CompanyDossier, CompanyEntity, DossierDocument, PAGE_PROMPT_CHARS, SiblingLead,
             ports::CompanyRepository,
         },
-        ecosystem::{ecosystem_documents, hosting_platform, ports::EcosystemRepository},
+        ecosystem::{
+            EcosystemReadiness, ecosystem_documents, hosting_platform, ports::EcosystemRepository,
+        },
         enrichment::{
             EnrichmentState, InspectionRecord, enrichment_state, listed_enrichment_state,
         },
@@ -207,6 +209,7 @@ impl LodestoneUseCase {
                 enabled: true,
                 hosting_platform: hosting_platform(&lead.domain),
                 modules: ecosystem.modules.clone(),
+                readiness: EcosystemReadiness::default(),
             });
         let enrichment = self.lead_enrichment_state(&record, &lead_signals);
         let context = company_context(

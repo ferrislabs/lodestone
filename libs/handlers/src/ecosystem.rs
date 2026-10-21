@@ -4,8 +4,8 @@ use axum::{
 };
 use chrono::Utc;
 use lodestone_core::{
-    DomainEcosystem, EcosystemFinding, EcosystemModule, FindingExample, ModuleState, ModuleStats,
-    ModuleStatus, ecosystem::DryRunError,
+    DomainEcosystem, EcosystemFinding, EcosystemModule, EcosystemReadiness, FindingExample,
+    ModuleState, ModuleStats, ModuleStatus, PROVIDER_NOT_READY, ecosystem::DryRunError,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -136,10 +136,14 @@ impl From<&ModuleState> for ModuleStateDto {
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, ToSchema)]
-#[schema(description = "One module of the inspection of a lead: its status and its findings.")]
+#[schema(
+    description = "One module of the inspection of a lead: its status and its findings. A module that reads a catalog provider names it in `provider`; while that provider is not ready the module is skipped (`provider_ready` false, « Fournisseur non prêt »)."
+)]
 pub struct EcosystemModuleReportDto {
     #[serde(flatten)]
     pub state: ModuleStateDto,
+    pub provider: Option<String>,
+    pub provider_ready: bool,
     pub findings: Vec<EcosystemFindingDto>,
 }
 
@@ -153,13 +157,19 @@ pub struct EcosystemDto {
 }
 
 impl EcosystemDto {
-    pub fn new(ecosystem: &DomainEcosystem, hosting_platform: Option<&str>) -> Self {
+    pub fn new(
+        ecosystem: &DomainEcosystem,
+        hosting_platform: Option<&str>,
+        readiness: &EcosystemReadiness,
+    ) -> Self {
         Self {
             hosting_platform: hosting_platform.map(str::to_owned),
             modules: EcosystemModule::AVAILABLE
                 .into_iter()
                 .map(|module| EcosystemModuleReportDto {
                     state: ModuleStateDto::from(&ecosystem.state_of(module)),
+                    provider: module.provider().map(str::to_owned),
+                    provider_ready: readiness.is_ready(module),
                     findings: ecosystem
                         .findings_of(module)
                         .map(EcosystemFindingDto::from)
@@ -221,6 +231,8 @@ pub struct EcosystemModuleInfoDto {
     pub learns: String,
     pub available: bool,
     pub reads_site: bool,
+    pub provider: Option<String>,
+    pub provider_ready: bool,
     pub refresh_days: i64,
     pub stats: ModuleStatsDto,
 }
@@ -239,6 +251,7 @@ pub async fn list_ecosystem_modules(
     State(state): State<AppState>,
 ) -> Result<Response<Vec<EcosystemModuleInfoDto>>, ApiError> {
     let stats = state.usecase.ecosystem_stats(Utc::now()).await?;
+    let readiness = state.usecase.ecosystem_readiness().await?;
     Ok(Response::OK(
         EcosystemModule::ALL
             .into_iter()
@@ -255,6 +268,8 @@ pub async fn list_ecosystem_modules(
                     learns: module.learns().to_owned(),
                     available: module.is_available(),
                     reads_site: module.reads_site(),
+                    provider: module.provider().map(str::to_owned),
+                    provider_ready: readiness.is_ready(module),
                     refresh_days: module.refresh_interval().num_days(),
                     stats: ModuleStatsDto::from(&module_stats),
                 }
@@ -293,7 +308,7 @@ pub struct EcosystemDryRunDto {
         (status = 401, description = "Missing, malformed, invalid or expired bearer token"),
         (status = 403, description = "The caller is not a user"),
         (status = 404, description = "Unknown lead, or its domain is suppressed"),
-        (status = 409, description = "The module is not available yet"),
+        (status = 409, description = "The module is not available yet, or its catalog provider is not ready (« Fournisseur non prêt »)"),
         (status = 429, description = "A host of the module is rate limited, try again later"),
     )
 )]
@@ -315,6 +330,9 @@ pub async fn dry_run_ecosystem_module(
         .map_err(|error| match error {
             DryRunError::Unavailable(module) => {
                 ApiError::Conflict(format!("the module `{module}` is not available yet"))
+            }
+            DryRunError::ProviderNotReady(provider) => {
+                ApiError::Conflict(format!("{PROVIDER_NOT_READY} : {provider}"))
             }
             DryRunError::RateLimited { .. } => ApiError::TooManyRequests,
             DryRunError::Core(error) => ApiError::from(error),

@@ -1,5 +1,6 @@
 import { FindingList } from '#/components/ecosystem/finding-list'
 import { ModuleStatusChip } from '#/components/ecosystem/module-status-chip'
+import { ProviderNotReady } from '#/components/ecosystem/provider-not-ready'
 import { Badge } from '#/components/ui/badge'
 import { platformNotice } from '#/lib/ecosystem'
 import {
@@ -64,13 +65,25 @@ export function LeadEcosystem({ ecosystem, enrichment }: LeadEcosystemProps) {
 								tone={section.tone}
 							/>
 						</div>
+						{section.providerLink ? (
+							<ProviderNotReady href={section.providerLink} />
+						) : null}
 						{section.lastRun ? (
 							<span className="text-xs text-muted-foreground">
 								Dernier passage : {section.lastRun}
 							</span>
 						) : null}
-						{section.error ? (
-							<p className="text-xs text-destructive">{section.error}</p>
+						{section.note ? (
+							<p
+								data-module-note={section.module}
+								className={
+									section.failed
+										? 'text-xs text-destructive'
+										: 'text-xs text-muted-foreground'
+								}
+							>
+								{section.note}
+							</p>
 						) : null}
 						<FindingList rows={section.rows} empty="Aucun élément trouvé." />
 					</article>

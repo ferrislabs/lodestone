@@ -1,4 +1,5 @@
 import { ModuleStatusChip } from '#/components/ecosystem/module-status-chip'
+import { ProviderNotReady } from '#/components/ecosystem/provider-not-ready'
 import type { FormContext } from '#/components/schema-form/context'
 import { ObjectFields } from '#/components/schema-form/fields'
 import { Button } from '#/components/ui/button'
@@ -61,6 +62,7 @@ function ModuleCardView({
 				<ModuleStatusChip label={card.chip.label} tone={card.chip.tone} />
 			</div>
 			<p className="text-sm text-muted-foreground">{card.learns}</p>
+			{card.providerLink ? <ProviderNotReady href={card.providerLink} /> : null}
 			<dl className="grid grid-cols-3 gap-2 text-sm">
 				{card.stats.map((stat) => (
 					<div key={stat.label} className="flex flex-col">

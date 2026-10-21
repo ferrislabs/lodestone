@@ -123,14 +123,27 @@ fn inspection_due(gate: usize) -> String {
         .map(|module| format!("'{}'", module.as_str()))
         .collect::<Vec<_>>()
         .join(", ");
+    let providers = EcosystemModule::AVAILABLE
+        .iter()
+        .map(|module| format!("'{}'", module.provider().unwrap_or_default()))
+        .collect::<Vec<_>>()
+        .join(", ");
     format!(
         r#"
       AND (
           ${gate}::timestamptz IS NULL
           OR leads.created_at <= ${gate}
           OR NOT EXISTS (
-              SELECT 1 FROM UNNEST(ARRAY[{modules}]::text[]) AS expected(module)
-              WHERE NOT EXISTS (
+              SELECT 1 FROM UNNEST(ARRAY[{modules}]::text[], ARRAY[{providers}]::text[]) AS expected(module, provider)
+              WHERE (
+                  expected.provider = ''
+                  OR EXISTS (
+                      SELECT 1 FROM source_provider_configurations configured
+                      WHERE configured.provider_key = expected.provider
+                        AND configured.status = 'ready'
+                  )
+              )
+              AND NOT EXISTS (
                   SELECT 1 FROM lead_ecosystem_modules inspected
                   WHERE inspected.domain = leads.domain
                     AND inspected.module = expected.module

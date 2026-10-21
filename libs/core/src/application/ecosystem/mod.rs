@@ -10,11 +10,12 @@ use crate::{
     application::{LodestoneUseCase, sources::SourceRunError},
     domain::{
         NormalizedDomain,
-        company::bounded_error,
+        company::{CompanyDossier, Siren, bounded_error},
         ecosystem::{
-            DomainEcosystem, DueDomain, EcosystemFinding, EcosystemModule, InspectionSettings,
-            InspectionTarget, ModuleOutcome, ModuleRun, ModuleRunner, ModuleStats, ModuleStatus,
-            STATS_WINDOW_DAYS, hosting_platform, ports::EcosystemRepository,
+            DomainEcosystem, DueDomain, EcosystemFinding, EcosystemModule, EcosystemReadiness,
+            InspectionSettings, InspectionTarget, ModuleOutcome, ModuleRun, ModuleRunner,
+            ModuleStats, ModuleStatus, STATS_WINDOW_DAYS, SirenLookup, hosting_platform,
+            ports::EcosystemRepository,
         },
         job::ports::Clock,
         lead::{Lead, LeadId, ports::LeadRepository},
@@ -59,6 +60,8 @@ pub struct DryRun {
 pub enum DryRunError {
     #[error("the module `{0}` is not available yet")]
     Unavailable(&'static str),
+    #[error("Fournisseur non prêt : {0}")]
+    ProviderNotReady(&'static str),
     #[error("rate limited, retry after {retry_after:?}")]
     RateLimited { retry_after: StdDuration },
     #[error(transparent)]
@@ -95,6 +98,23 @@ fn count(value: usize) -> u64 {
     u64::try_from(value).unwrap_or(u64::MAX)
 }
 
+#[derive(Default)]
+struct RegistryContext {
+    dossier: Option<CompanyDossier>,
+    recorded: Option<Siren>,
+    identity_settled: bool,
+}
+
+impl RegistryContext {
+    fn lookup(&self) -> SirenLookup<'_> {
+        SirenLookup::of(
+            self.dossier.as_ref(),
+            self.recorded.as_ref(),
+            self.identity_settled,
+        )
+    }
+}
+
 impl LodestoneUseCase {
     pub async fn has_inspected_profile(&self) -> Result<bool, CoreError> {
         Ok(!inspected_profiles(&self.list_active_profiles().await?).is_empty())
@@ -117,8 +137,19 @@ impl LodestoneUseCase {
             return Ok(report);
         }
         let ids: Vec<ProfileId> = inspected.iter().map(|active| active.profile.id).collect();
+        let readiness = self.ecosystem_readiness().await?;
+        let mut ready: Vec<EcosystemModule> = Vec::new();
         for runner in runners {
             let module = runner.module();
+            if !readiness.is_ready(module) {
+                info!(
+                    module = module.as_str(),
+                    provider = module.provider().unwrap_or_default(),
+                    "ecosystem module skipped, provider not ready"
+                );
+                continue;
+            }
+            ready.push(module);
             let due = self
                 .due_ecosystem_domains(module, &ids, clock.now(), settings.batch_size)
                 .await?;
@@ -132,22 +163,19 @@ impl LodestoneUseCase {
             for item in &due {
                 let now = clock.now();
                 let outcome = if not_applicable(module, &item.domain) {
-                    ModuleOutcome::NotApplicable
+                    ModuleOutcome::NotApplicable(None)
                 } else {
                     let merged = settings_for(&inspected, item);
-                    let dossier = if module == EcosystemModule::OfficialIdentity {
-                        self.company_dossier(&item.domain).await?
-                    } else {
-                        None
-                    };
+                    let registry = self.registry_context(module, &item.domain).await?;
                     let target = InspectionTarget {
                         domain: &item.domain,
                         settings: &merged,
-                        dossier: dossier.as_ref(),
+                        dossier: registry.dossier.as_ref(),
+                        siren: registry.lookup(),
                         now,
                     };
                     match runner.inspect(&target).await {
-                        Ok(findings) => ModuleOutcome::Done(findings),
+                        Ok(inspection) => inspection.outcome(),
                         Err(SourceError::RateLimited { retry_after }) => {
                             report.rate_limited = true;
                             self.postpone_ecosystem(
@@ -167,7 +195,7 @@ impl LodestoneUseCase {
                 };
                 let next_run = match outcome {
                     ModuleOutcome::Failed(_) => now + module.failure_retry(),
-                    ModuleOutcome::Done(_) | ModuleOutcome::NotApplicable => {
+                    ModuleOutcome::Done(_) | ModuleOutcome::NotApplicable(_) => {
                         now + module.refresh_interval()
                     }
                 };
@@ -182,7 +210,7 @@ impl LodestoneUseCase {
                             run.latest_example = Some(first.example(&item.domain));
                         }
                     }
-                    ModuleOutcome::NotApplicable => report.not_applicable += 1,
+                    ModuleOutcome::NotApplicable(_) => report.not_applicable += 1,
                     ModuleOutcome::Failed(_) => report.failed += 1,
                 }
                 run.leads_inspected += item.leads;
@@ -197,10 +225,7 @@ impl LodestoneUseCase {
                 );
             }
         }
-        let modules: Vec<EcosystemModule> = runners.iter().map(ModuleRunner::module).collect();
-        report.backlog = self
-            .count_due_ecosystem(&modules, &ids, clock.now())
-            .await?;
+        report.backlog = self.count_due_ecosystem(&ready, &ids, clock.now()).await?;
         Ok(report)
     }
 
@@ -216,6 +241,11 @@ impl LodestoneUseCase {
             .iter()
             .find(|runner| runner.module() == module)
             .ok_or(DryRunError::Unavailable(module.as_str()))?;
+        if let Some(provider) = module.provider()
+            && !self.is_provider_usable(provider).await?
+        {
+            return Err(DryRunError::ProviderNotReady(provider));
+        }
         let started = Instant::now();
         let platform = hosting_platform(&lead.domain);
         let mut dry_run = DryRun {
@@ -235,17 +265,25 @@ impl LodestoneUseCase {
             .as_ref()
             .map(|definition| InspectionSettings::of([definition]))
             .unwrap_or_default();
+        let registry = self.registry_context(module, &lead.domain).await?;
         let target = InspectionTarget {
             domain: &lead.domain,
             settings: &settings,
-            dossier: None,
+            dossier: registry.dossier.as_ref(),
+            siren: registry.lookup(),
             now,
         };
         match runner.inspect(&target).await {
-            Ok(findings) => {
-                dry_run.status = ModuleStatus::Done;
-                dry_run.findings = findings;
-            }
+            Ok(inspection) => match inspection.outcome() {
+                ModuleOutcome::Done(findings) => {
+                    dry_run.status = ModuleStatus::Done;
+                    dry_run.findings = findings;
+                }
+                outcome => {
+                    dry_run.status = outcome.status();
+                    dry_run.error = outcome.note().map(str::to_owned);
+                }
+            },
             Err(SourceError::RateLimited { retry_after }) => {
                 return Err(DryRunError::RateLimited { retry_after });
             }
@@ -256,6 +294,41 @@ impl LodestoneUseCase {
         }
         dry_run.duration = started.elapsed();
         Ok(dry_run)
+    }
+
+    async fn registry_context(
+        &self,
+        module: EcosystemModule,
+        domain: &NormalizedDomain,
+    ) -> Result<RegistryContext, CoreError> {
+        if !module.needs_siren() {
+            return Ok(RegistryContext::default());
+        }
+        let dossier = self.company_dossier(domain).await?;
+        if module == EcosystemModule::OfficialIdentity {
+            return Ok(RegistryContext {
+                dossier,
+                ..RegistryContext::default()
+            });
+        }
+        let recorded = self.domain_ecosystem(domain).await?;
+        Ok(RegistryContext {
+            dossier,
+            recorded: recorded.recorded_siren(),
+            identity_settled: recorded.identity_settled(),
+        })
+    }
+
+    pub async fn ecosystem_readiness(&self) -> Result<EcosystemReadiness, CoreError> {
+        let mut not_ready = Vec::new();
+        for module in EcosystemModule::AVAILABLE {
+            if let Some(provider) = module.provider()
+                && !self.is_provider_usable(provider).await?
+            {
+                not_ready.push(module);
+            }
+        }
+        Ok(EcosystemReadiness::with_not_ready(not_ready))
     }
 
     pub async fn ecosystem_stats(&self, now: DateTime<Utc>) -> Result<Vec<ModuleStats>, CoreError> {

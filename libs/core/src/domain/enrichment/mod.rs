@@ -1,7 +1,7 @@
 use chrono::{DateTime, Duration, Utc};
 
 use crate::domain::{
-    ecosystem::{EcosystemModule, ModuleState},
+    ecosystem::{EcosystemModule, EcosystemReadiness, ModuleState},
     lead::{Signal, str_enum},
     profile::definition::ProfileDefinition,
     values::SourceName,
@@ -43,6 +43,7 @@ pub struct InspectionRecord {
     pub enabled: bool,
     pub hosting_platform: Option<&'static str>,
     pub modules: Vec<ModuleState>,
+    pub readiness: EcosystemReadiness,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -126,7 +127,10 @@ pub fn listed_enrichment_state(
     let wait_until = record.created_at.checked_add_signed(wait);
     let status = if !record.enabled {
         EnrichmentStatus::Disabled
-    } else if modules.iter().all(|state| state.status.is_settled()) {
+    } else if modules
+        .iter()
+        .all(|state| state.status.is_settled() || !record.readiness.is_ready(state.module))
+    {
         EnrichmentStatus::Complete
     } else if wait_until.is_none_or(|until| now >= until) {
         EnrichmentStatus::TimedOut
@@ -196,6 +200,7 @@ mod tests {
             enabled,
             hosting_platform: None,
             modules: modules.to_vec(),
+            readiness: EcosystemReadiness::default(),
         }
     }
 
@@ -232,6 +237,8 @@ mod tests {
         assert_eq!(timed_out.waiting_reason, None);
         let settled = [
             state(EcosystemModule::OfficialIdentity, ModuleStatus::Done, 3),
+            state(EcosystemModule::LegalLife, ModuleStatus::NotApplicable, 3),
+            state(EcosystemModule::PublicContracts, ModuleStatus::Done, 3),
             state(
                 EcosystemModule::WebsiteStack,
                 ModuleStatus::NotApplicable,
@@ -246,6 +253,29 @@ mod tests {
             at(10),
         );
         assert_eq!(complete.status, EnrichmentStatus::Complete);
+        let without_bodacc = [
+            state(EcosystemModule::OfficialIdentity, ModuleStatus::Done, 3),
+            state(EcosystemModule::PublicContracts, ModuleStatus::Done, 3),
+            state(EcosystemModule::WebsiteStack, ModuleStatus::Done, 4),
+            state(EcosystemModule::HiringActivity, ModuleStatus::Done, 5),
+        ];
+        let mut waiting_record = record(true, &without_bodacc);
+        let still_waiting =
+            enrichment_state(&waiting_record, &signals, Duration::minutes(30), at(10));
+        assert_eq!(still_waiting.status, EnrichmentStatus::Pending);
+        waiting_record.readiness =
+            EcosystemReadiness::with_not_ready(vec![EcosystemModule::LegalLife]);
+        let not_ready = enrichment_state(&waiting_record, &signals, Duration::minutes(30), at(10));
+        assert_eq!(not_ready.status, EnrichmentStatus::Complete);
+        assert_eq!(not_ready.waiting_reason, None);
+        assert_eq!(
+            not_ready
+                .modules
+                .iter()
+                .find(|module| module.module == EcosystemModule::LegalLife)
+                .map(|module| module.status),
+            Some(ModuleStatus::Pending)
+        );
         let disabled =
             enrichment_state(&record(false, &[]), &signals, Duration::minutes(30), at(10));
         assert_eq!(disabled.status, EnrichmentStatus::Disabled);

@@ -2,9 +2,10 @@ use std::{iter::once, sync::Arc, sync::LazyLock, time::Duration};
 
 use chrono::{DateTime, Utc};
 use lodestone_core::{
-    CompanyBuilder, EcosystemFinding, EcosystemModule, FetchError, FetchPurpose, FetchRequest,
-    FetchResponse, Fetcher, InspectionSettings, InspectionTarget, ModuleRunner, NormalizedDomain,
-    OfficialData, SourceError, SourceName,
+    CompanyBuilder, CompanyPage, EcosystemFinding, EcosystemModule, FetchError, FetchPurpose,
+    FetchRequest, FetchResponse, Fetcher, Inspection, InspectionSettings, InspectionTarget,
+    ModuleRunner, NormalizedDomain, OFFICIAL_SOURCE, OfficialData, SIREN_FINDING_KEY,
+    SIREN_UNKNOWN, Siren, SourceError, SourceName,
 };
 use regex::Regex;
 use serde_json::json;
@@ -13,10 +14,14 @@ use url::Url;
 
 use crate::{
     ats::AtsScanner,
-    company::{CompanyResearch, CompanySettings},
+    bodacc::{BodaccSettings, LegalLifeModule},
+    company::{CompanyResearch, CompanySettings, find_siren},
+    decp::holders::{HolderSettings, PublicContractsModule},
     http_probe::{ProbedPath, detect, probed},
     link_check::{LinkChecker, LinkOrigin, LinkVerdict, fetch_waiting},
 };
+
+pub(crate) mod registry;
 
 pub const MAX_JOB_OFFERS: usize = 20;
 const MAX_CAREER_PAGES: usize = 3;
@@ -41,13 +46,54 @@ fn rate_limited(error: FetchError) -> SourceError {
     }
 }
 
+fn siren_finding(siren: &Siren, source: &str, observed_at: DateTime<Utc>) -> EcosystemFinding {
+    EcosystemFinding::new(
+        EcosystemModule::OfficialIdentity,
+        "siren",
+        "SIREN",
+        siren.as_str(),
+        source,
+        observed_at,
+    )
+    .keyed(SIREN_FINDING_KEY)
+    .with_details(json!({
+        "public_page": format!("https://annuaire-entreprises.data.gouv.fr/entreprise/{siren}"),
+    }))
+}
+
+pub fn siren_page<'a>(pages: &'a [CompanyPage], siren: &Siren) -> Option<&'a str> {
+    pages
+        .iter()
+        .skip(1)
+        .chain(pages.first())
+        .find(|page| find_siren(&page.text).as_ref() == Some(siren))
+        .map(|page| page.url.as_str())
+}
+
+pub fn identity_inspection(
+    siren: Option<&Siren>,
+    official: Option<&OfficialData>,
+    pages: &[CompanyPage],
+    observed_at: DateTime<Utc>,
+) -> Inspection {
+    let Some(siren) = siren.or(official.map(|official| &official.siren)) else {
+        return Inspection::NotApplicable(SIREN_UNKNOWN);
+    };
+    let register = format!("{OFFICIAL_SOURCE}?q={siren}");
+    let siren_source = siren_page(pages, siren).unwrap_or(register.as_str());
+    Inspection::Found(match official {
+        Some(official) => official_findings(official, siren_source, observed_at),
+        None => vec![siren_finding(siren, siren_source, observed_at)],
+    })
+}
+
 pub fn official_findings(
     official: &OfficialData,
+    siren_source: &str,
     observed_at: DateTime<Utc>,
 ) -> Vec<EcosystemFinding> {
     let module = EcosystemModule::OfficialIdentity;
     let source = official.source_url();
-    let public_page = official.public_page();
     let mut findings = vec![
         EcosystemFinding::new(
             module,
@@ -58,16 +104,7 @@ pub fn official_findings(
             observed_at,
         )
         .keyed("legal_name"),
-        EcosystemFinding::new(
-            module,
-            "siren",
-            "SIREN",
-            official.siren.as_str(),
-            source.as_str(),
-            observed_at,
-        )
-        .keyed("siren")
-        .with_details(json!({"public_page": public_page})),
+        siren_finding(&official.siren, siren_source, observed_at),
     ];
     let activity = match (&official.naf_code, &official.naf_label) {
         (Some(code), Some(label)) => Some(format!("{code}, {label}")),
@@ -146,25 +183,27 @@ impl<F: Fetcher> IdentityModule<F> {
         Self { research }
     }
 
-    pub async fn inspect(
-        &self,
-        target: &InspectionTarget<'_>,
-    ) -> Result<Vec<EcosystemFinding>, SourceError> {
+    pub async fn inspect(&self, target: &InspectionTarget<'_>) -> Result<Inspection, SourceError> {
         if let Some(dossier) = target.dossier
             && let Some(built_at) = dossier.built_at
         {
             let observed_at = dossier.content_at.unwrap_or(built_at);
-            return Ok(dossier
-                .official
-                .as_ref()
-                .map(|official| official_findings(official, observed_at))
-                .unwrap_or_default());
+            return Ok(identity_inspection(
+                dossier.siren.as_ref(),
+                dossier.official.as_ref(),
+                &dossier.pages,
+                observed_at,
+            ));
         }
         let built = self.research.build(target.domain).await?;
         match (&built.official, built.failure) {
-            (Some(official), _) => Ok(official_findings(official, target.now)),
             (None, Some(failure)) => Err(SourceError::Upstream(failure)),
-            (None, None) => Ok(Vec::new()),
+            (official, _) => Ok(identity_inspection(
+                built.siren.as_ref(),
+                official.as_ref(),
+                &built.pages,
+                target.now,
+            )),
         }
     }
 }
@@ -509,6 +548,8 @@ impl<F: Fetcher> HiringModule<F> {
 
 pub struct EcosystemModules<F: Fetcher> {
     pub identity: IdentityModule<F>,
+    pub legal: LegalLifeModule<F>,
+    pub contracts: PublicContractsModule<F>,
     pub website: WebsiteModule<F>,
     pub hiring: HiringModule<F>,
 }
@@ -516,6 +557,8 @@ pub struct EcosystemModules<F: Fetcher> {
 #[derive(Debug, Clone)]
 pub struct EcosystemConfig {
     pub company: CompanySettings,
+    pub bodacc: BodaccSettings,
+    pub holders: HolderSettings,
     pub website: WebsiteSettings,
     pub max_career_paths: usize,
     pub max_rate_limit_wait: Duration,
@@ -523,11 +566,15 @@ pub struct EcosystemConfig {
 
 impl<F: Fetcher> EcosystemModules<F> {
     pub fn new(fetcher: Arc<F>, config: EcosystemConfig) -> Self {
+        let research = CompanyResearch::new(Arc::clone(&fetcher), config.company);
         Self {
-            identity: IdentityModule::new(CompanyResearch::new(
+            legal: LegalLifeModule::new(Arc::clone(&fetcher), config.bodacc, research.clone()),
+            contracts: PublicContractsModule::new(
                 Arc::clone(&fetcher),
-                config.company,
-            )),
+                config.holders,
+                research.clone(),
+            ),
+            identity: IdentityModule::new(research),
             website: WebsiteModule::new(Arc::clone(&fetcher), config.website),
             hiring: HiringModule::new(AtsScanner::new(
                 fetcher,
@@ -537,9 +584,11 @@ impl<F: Fetcher> EcosystemModules<F> {
         }
     }
 
-    pub fn runners(&self) -> [EcosystemRunner<'_, F>; 3] {
+    pub fn runners(&self) -> [EcosystemRunner<'_, F>; 5] {
         [
             EcosystemRunner::OfficialIdentity(&self.identity),
+            EcosystemRunner::LegalLife(&self.legal),
+            EcosystemRunner::PublicContracts(&self.contracts),
             EcosystemRunner::WebsiteStack(&self.website),
             EcosystemRunner::HiringActivity(&self.hiring),
         ]
@@ -548,6 +597,8 @@ impl<F: Fetcher> EcosystemModules<F> {
 
 pub enum EcosystemRunner<'a, F: Fetcher> {
     OfficialIdentity(&'a IdentityModule<F>),
+    LegalLife(&'a LegalLifeModule<F>),
+    PublicContracts(&'a PublicContractsModule<F>),
     WebsiteStack(&'a WebsiteModule<F>),
     HiringActivity(&'a HiringModule<F>),
 }
@@ -556,19 +607,20 @@ impl<F: Fetcher> ModuleRunner for EcosystemRunner<'_, F> {
     fn module(&self) -> EcosystemModule {
         match self {
             Self::OfficialIdentity(_) => EcosystemModule::OfficialIdentity,
+            Self::LegalLife(_) => EcosystemModule::LegalLife,
+            Self::PublicContracts(_) => EcosystemModule::PublicContracts,
             Self::WebsiteStack(_) => EcosystemModule::WebsiteStack,
             Self::HiringActivity(_) => EcosystemModule::HiringActivity,
         }
     }
 
-    async fn inspect(
-        &self,
-        target: &InspectionTarget<'_>,
-    ) -> Result<Vec<EcosystemFinding>, SourceError> {
+    async fn inspect(&self, target: &InspectionTarget<'_>) -> Result<Inspection, SourceError> {
         match self {
             Self::OfficialIdentity(module) => module.inspect(target).await,
-            Self::WebsiteStack(module) => module.inspect(target).await,
-            Self::HiringActivity(module) => module.inspect(target).await,
+            Self::LegalLife(module) => module.inspect(target).await,
+            Self::PublicContracts(module) => module.inspect(target).await,
+            Self::WebsiteStack(module) => module.inspect(target).await.map(Inspection::Found),
+            Self::HiringActivity(module) => module.inspect(target).await.map(Inspection::Found),
         }
     }
 }

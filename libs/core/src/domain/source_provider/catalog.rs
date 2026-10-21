@@ -12,6 +12,7 @@ pub const DNS_CNAME: &str = "dns_cname";
 pub const HTTP_PROBE: &str = "http_probe";
 pub const CONTACTS: &str = "contacts";
 pub const COMPANY_RESEARCH: &str = "company_research";
+pub const BODACC: &str = "bodacc";
 pub const HACKER_NEWS_HIRING: &str = "hacker_news_hiring";
 pub const HACKER_NEWS_THREAD_TITLE: &str = "Ask HN: Who is hiring?";
 
@@ -24,6 +25,9 @@ const DECP_DEFAULT_URL: &str = "https://www.data.gouv.fr/api/1/datasets/donnees-
 const TED_DEFAULT_URL: &str = "https://api.ted.europa.eu/v3/notices/search";
 const CT_DEFAULT_URL: &str = "https://www.gstatic.com/ct/log_list/v3/log_list.json";
 const COMPANY_DEFAULT_URL: &str = "https://recherche-entreprises.api.gouv.fr/search";
+pub const DECP_HOLDERS_DEFAULT_URL: &str =
+    "https://tabular-api.data.gouv.fr/api/resources/22847056-61df-452d-837d-8b8ceadbfc52/data/";
+pub const BODACC_DEFAULT_URL: &str = "https://bodacc-datadila.opendatasoft.com/api/explore/v2.1/catalog/datasets/annonces-commerciales";
 const HACKER_NEWS_DEFAULT_URL: &str = "https://hn.algolia.com/api/v1/";
 const URL_HELP: &str = "Lue à chaque collecte et pour tester la connexion ; la variable d'environnement ne sert qu'à l'initialiser.";
 
@@ -40,9 +44,18 @@ const FRANCE_TRAVAIL_FIELDS: &[FieldSpec] = &[
     FieldSpec::url("api_base_url", "URL de l'API", false).with_default(FRANCE_TRAVAIL_API_URL),
 ];
 
-const DECP_FIELDS: &[FieldSpec] = &[FieldSpec::url("dataset_api_url", "URL de l'API", false)
-    .with_default(DECP_DEFAULT_URL)
-    .with_help(URL_HELP)];
+const DECP_FIELDS: &[FieldSpec] = &[
+    FieldSpec::url("dataset_api_url", "URL de l'API", false)
+        .with_default(DECP_DEFAULT_URL)
+        .with_help(URL_HELP),
+    FieldSpec::url("holders_url", "URL des marchés par titulaire", false)
+        .with_default(DECP_HOLDERS_DEFAULT_URL)
+        .with_help("API tabulaire de data.gouv.fr des DECP consolidées, lue par le module « Marchés publics » pour retrouver les marchés dont une entreprise est titulaire."),
+];
+
+const BODACC_FIELDS: &[FieldSpec] = &[FieldSpec::url("base_url", "URL du jeu de données", false)
+    .with_default(BODACC_DEFAULT_URL)
+    .with_help("Jeu de données « annonces-commerciales » de l'API OpenDataSoft du BODACC ; les annonces sont lues sous /records.")];
 
 const TED_FIELDS: &[FieldSpec] = &[FieldSpec::url("base_url", "URL de l'API", false)
     .with_default(TED_DEFAULT_URL)
@@ -74,7 +87,7 @@ const NO_SEARCH: Capabilities = Capabilities {
     filters: NO_FILTERS,
 };
 
-static CATALOG: [SourceProviderDescriptor; 11] = [
+static CATALOG: [SourceProviderDescriptor; 12] = [
     SourceProviderDescriptor {
         key: BOAMP,
         name: "BOAMP",
@@ -231,6 +244,18 @@ static CATALOG: [SourceProviderDescriptor; 11] = [
             "API publique de l'administration française, sans compte requis, sous Licence Ouverte.",
         ),
     },
+    SourceProviderDescriptor {
+        key: BODACC,
+        name: "BODACC",
+        description: "Annonces du Bulletin officiel des annonces civiles et commerciales lues par SIREN : créations, modifications, ventes et cessions, radiations, procédures collectives et dépôts des comptes.",
+        category: ProviderCategory::Companies,
+        auth: AuthSpec::None,
+        fields: BODACC_FIELDS,
+        capabilities: NO_SEARCH,
+        terms_note: Some(
+            "Données ouvertes de la DILA publiées sous Licence Ouverte / Open Licence (Etalab), sans compte requis.",
+        ),
+    },
 ];
 
 pub fn provider_key_of_source(source: &str) -> Option<&'static str> {
@@ -340,6 +365,29 @@ mod tests {
         assert_eq!(ats.category, ProviderCategory::Companies);
         assert!(!ats.capabilities.keyword_search);
         assert!(ats.description.contains("domaine est connu"));
+    }
+
+    #[test]
+    fn bodacc_is_an_open_company_register_without_search() {
+        let bodacc = descriptor(BODACC).unwrap();
+        assert_eq!(bodacc.category, ProviderCategory::Companies);
+        assert_eq!(bodacc.auth.kind().as_str(), "none");
+        assert!(!bodacc.capabilities.keyword_search);
+        assert_eq!(
+            bodacc.field("base_url").and_then(|field| field.default),
+            Some(BODACC_DEFAULT_URL)
+        );
+        assert!(
+            bodacc
+                .terms_note
+                .is_some_and(|note| note.contains("Licence Ouverte"))
+        );
+        assert_eq!(
+            descriptor(DECP)
+                .and_then(|decp| decp.field("holders_url"))
+                .and_then(|field| field.default),
+            Some(DECP_HOLDERS_DEFAULT_URL)
+        );
     }
 
     #[test]

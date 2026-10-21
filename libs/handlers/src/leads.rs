@@ -6,12 +6,12 @@ use axum::{
 };
 use lodestone_core::{
     AGENT_FAILED_AFTER, AgentFailure, AgentKind, AgentStop, Assessment, Calibrations, ContactEmail,
-    DraftMessage, DraftReview, DraftStatus, EnrichmentState, EnrichmentStatus, Exclusion, Lead,
-    LeadDetail, LeadFacts, LeadId, LeadQuery, LeadScoring, LeadSort, LeadStatus, LlmProviderRecord,
-    Profile, ProfileId, QualificationResult, Rejection, RejectionProblem, ResultStatus,
-    RunProvenance, SUMMARY_FAILED_AFTER, ScoringResult, Signal, SignalKind, SummaryState, Verdict,
-    VerdictAnswer, VerdictCap, VerdictFilter, VerdictProbabilities, VerdictReason, VerdictSource,
-    WaitingReason, WorkKind, calibrate_verdict,
+    DraftMessage, DraftReview, DraftStatus, EcosystemReadiness, EnrichmentState, EnrichmentStatus,
+    Exclusion, Lead, LeadDetail, LeadFacts, LeadId, LeadQuery, LeadScoring, LeadSort, LeadStatus,
+    LlmProviderRecord, Profile, ProfileId, QualificationResult, Rejection, RejectionProblem,
+    ResultStatus, RunProvenance, SUMMARY_FAILED_AFTER, ScoringResult, Signal, SignalKind,
+    SummaryState, Verdict, VerdictAnswer, VerdictCap, VerdictFilter, VerdictProbabilities,
+    VerdictReason, VerdictSource, WaitingReason, WorkKind, calibrate_verdict,
     definition::{QualificationAgent, Question, ScoringAgent},
     signal_sentence,
 };
@@ -1261,10 +1261,18 @@ fn ordered_scoring(detail: &LeadDetail, providers: &[LlmProviderRecord]) -> Vec<
 }
 
 impl LeadDetailDto {
-    pub fn new(detail: &LeadDetail, providers: &[LlmProviderRecord]) -> Self {
+    pub fn new(
+        detail: &LeadDetail,
+        providers: &[LlmProviderRecord],
+        readiness: &EcosystemReadiness,
+    ) -> Self {
         Self {
             enrichment: EnrichmentDto::from(&detail.enrichment),
-            ecosystem: EcosystemDto::new(&detail.ecosystem, detail.enrichment.hosting_platform),
+            ecosystem: EcosystemDto::new(
+                &detail.ecosystem,
+                detail.enrichment.hosting_platform,
+                readiness,
+            ),
             summary_state: detail.summary_state.as_ref().and_then(SummaryStateDto::new),
             agent_failures: detail
                 .agent_failures
@@ -1586,7 +1594,10 @@ pub async fn lead_detail(
     } else {
         state.usecase.list_llm_providers().await?
     };
-    Ok(Response::OK(LeadDetailDto::new(&detail, &providers)))
+    let readiness = state.usecase.ecosystem_readiness().await?;
+    Ok(Response::OK(LeadDetailDto::new(
+        &detail, &providers, &readiness,
+    )))
 }
 
 #[utoipa::path(

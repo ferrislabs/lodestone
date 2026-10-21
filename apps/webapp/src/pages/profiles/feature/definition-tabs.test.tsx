@@ -65,6 +65,7 @@ function blank(): JsonObject {
 const MODULES: EcosystemModuleInfo[] = [
 	{
 		module: 'official_identity',
+		provider_ready: true,
 		label: 'Identité officielle',
 		question: 'Qui est officiellement cette entreprise ?',
 		learns: 'Raison sociale, SIREN et siège.',
@@ -75,16 +76,41 @@ const MODULES: EcosystemModuleInfo[] = [
 	},
 	{
 		module: 'legal_life',
+		provider_ready: true,
 		label: 'Vie légale',
 		question: 'Que dit sa vie légale ?',
 		learns: 'Événements publiés au BODACC.',
-		available: false,
+		available: true,
 		reads_site: false,
 		refresh_days: 7,
 		stats: { leads_inspected: 0, findings_count: 0 },
 	},
 	{
+		module: 'public_contracts',
+		provider: 'decp',
+		provider_ready: false,
+		label: 'Marchés publics',
+		question: 'Remporte-t-elle des marchés publics ?',
+		learns: 'Marchés dont elle est titulaire, d’après les DECP.',
+		available: true,
+		reads_site: false,
+		refresh_days: 14,
+		stats: { leads_inspected: 0, findings_count: 0 },
+	},
+	{
+		module: 'dns_email',
+		provider_ready: true,
+		label: 'Écosystème DNS et e-mail',
+		question: 'Quels services utilise-t-elle pour son domaine et ses e-mails ?',
+		learns: 'Fournisseurs déclarés dans les enregistrements DNS.',
+		available: false,
+		reads_site: true,
+		refresh_days: 7,
+		stats: { leads_inspected: 0, findings_count: 0 },
+	},
+	{
 		module: 'hiring_activity',
+		provider_ready: true,
 		label: 'Activité de recrutement',
 		question: 'Recrute-t-elle, et sur quels postes ?',
 		learns: 'Page carrières, outil de recrutement et offres publiées.',
@@ -569,10 +595,28 @@ describe('definition tabs', () => {
 		fireEvent.click(hiring.getByRole('button', { name: 'Tester sur un lead' }))
 		expect(ecosystem.onTest).toHaveBeenCalledWith('hiring_activity')
 		const legal = within(screen.getByRole('region', { name: 'Vie légale' }))
-		expect(legal.getByText('À venir')).toBeTruthy()
+		expect(legal.getByText('Actif')).toBeTruthy()
+		expect(legal.queryByText('À venir')).toBeNull()
+		fireEvent.click(legal.getByRole('button', { name: 'Tester sur un lead' }))
+		expect(ecosystem.onTest).toHaveBeenCalledWith('legal_life')
+		const contracts = within(
+			screen.getByRole('region', { name: 'Marchés publics' }),
+		)
+		expect(contracts.getAllByText('Fournisseur non prêt')).toHaveLength(2)
 		expect(
-			legal.queryByRole('button', { name: 'Tester sur un lead' }),
+			contracts
+				.getByRole('link', { name: 'Fournisseur non prêt' })
+				.getAttribute('href'),
+		).toBe('/sources/providers/decp')
+		expect(
+			legal.queryByRole('link', { name: 'Fournisseur non prêt' }),
 		).toBeNull()
+		expect(contracts.getByText('Rafraîchi tous les 14 jours')).toBeTruthy()
+		const dns = within(
+			screen.getByRole('region', { name: 'Écosystème DNS et e-mail' }),
+		)
+		expect(dns.getByText('À venir')).toBeTruthy()
+		expect(dns.queryByRole('button', { name: 'Tester sur un lead' })).toBeNull()
 		const identity = within(
 			screen.getByRole('region', { name: 'Identité officielle' }),
 		)
@@ -681,7 +725,7 @@ describe('definition tabs', () => {
 		).toBe('https://jobs.acme.fr/2')
 		expect(
 			screen.queryAllByRole('button', { name: 'Tester sur un lead' }),
-		).toHaveLength(1)
+		).toHaveLength(3)
 		fireEvent.click(panel.getByRole('button', { name: 'Fermer' }))
 		expect(ecosystem.testActions.onClose).toHaveBeenCalled()
 	})

@@ -51,10 +51,24 @@ fn every_module_has_french_copy_and_a_stable_key() {
         EcosystemModule::AVAILABLE,
         [
             EcosystemModule::OfficialIdentity,
+            EcosystemModule::LegalLife,
+            EcosystemModule::PublicContracts,
             EcosystemModule::WebsiteStack,
             EcosystemModule::HiringActivity
         ]
     );
+    assert_eq!(
+        EcosystemModule::LegalLife.refresh_interval(),
+        Duration::days(7)
+    );
+    assert_eq!(
+        EcosystemModule::PublicContracts.refresh_interval(),
+        Duration::days(14)
+    );
+    assert!(EcosystemModule::LegalLife.needs_siren());
+    assert!(EcosystemModule::PublicContracts.needs_siren());
+    assert!(EcosystemModule::OfficialIdentity.needs_siren());
+    assert!(!EcosystemModule::WebsiteStack.needs_siren());
     assert!(EcosystemModule::WebsiteStack.reads_site());
     assert!(!EcosystemModule::LegalLife.reads_site());
     assert!(!ModuleStatus::Pending.is_settled());
@@ -146,4 +160,154 @@ fn a_module_state_defaults_to_pending() {
     let outcome = ModuleOutcome::Failed("boom".to_owned());
     assert_eq!(outcome.status(), ModuleStatus::Failed);
     assert!(outcome.findings().is_empty());
+    assert_eq!(outcome.note(), Some("boom"));
+}
+
+#[test]
+fn a_module_without_siren_is_not_applicable_with_its_reason() {
+    let outcome = Inspection::NotApplicable(SIREN_UNKNOWN).outcome();
+    assert_eq!(outcome.status(), ModuleStatus::NotApplicable);
+    assert_eq!(outcome.note(), Some("SIREN inconnu"));
+    assert_eq!(ModuleOutcome::NotApplicable(None).note(), None);
+    let found = Inspection::Found(Vec::new()).outcome();
+    assert_eq!(found.status(), ModuleStatus::Done);
+}
+
+fn identity_finding(siren: &str) -> EcosystemFinding {
+    EcosystemFinding::new(
+        EcosystemModule::OfficialIdentity,
+        "siren",
+        "SIREN",
+        siren,
+        "https://acme.fr/mentions-legales",
+        at(1),
+    )
+    .keyed(SIREN_FINDING_KEY)
+}
+
+#[test]
+fn the_siren_comes_from_the_dossier_then_from_the_identity_findings() {
+    let siren = Siren::parse("552100554").unwrap();
+    let other = Siren::parse("732829320").unwrap();
+    let mut dossier = CompanyDossier::pending(domain("acme.fr"), at(0));
+    assert_eq!(SirenLookup::of(None, None, false), SirenLookup::Unresolved);
+    assert_eq!(
+        SirenLookup::of(Some(&dossier), None, false),
+        SirenLookup::Unresolved
+    );
+    assert_eq!(SirenLookup::of(None, None, true), SirenLookup::Unknown);
+    assert_eq!(
+        SirenLookup::of(None, Some(&other), false),
+        SirenLookup::Known(&other)
+    );
+    dossier.state = DossierState::Partial;
+    dossier.built_at = Some(at(1));
+    assert_eq!(
+        SirenLookup::of(Some(&dossier), None, false),
+        SirenLookup::Unknown
+    );
+    dossier.siren = Some(siren.clone());
+    assert_eq!(
+        SirenLookup::of(Some(&dossier), Some(&other), false),
+        SirenLookup::Known(&siren)
+    );
+    let ecosystem = DomainEcosystem {
+        modules: vec![ModuleState {
+            module: EcosystemModule::OfficialIdentity,
+            status: ModuleStatus::NotApplicable,
+            last_run: Some(at(2)),
+            error: Some(SIREN_UNKNOWN.to_owned()),
+        }],
+        findings: vec![identity_finding("552 100 554")],
+    };
+    assert_eq!(ecosystem.recorded_siren(), Some(siren));
+    assert!(ecosystem.identity_settled());
+    assert!(!DomainEcosystem::default().identity_settled());
+    assert_eq!(DomainEcosystem::default().recorded_siren(), None);
+}
+
+#[test]
+fn legal_and_contract_findings_give_concise_document_lines() {
+    let source = "https://bodacc-datadila.opendatasoft.com/api/explore/v2.1/catalog/datasets/annonces-commerciales/records?where=registre%3D%22552100554%22";
+    let findings = [
+        EcosystemFinding::new(
+            EcosystemModule::LegalLife,
+            "collective_proceeding",
+            "Procédure collective",
+            "Jugement d'ouverture de liquidation judiciaire",
+            source,
+            at(1),
+        )
+        .with_details(json!({"date": "2026-09-10", "court": "Greffe du Tribunal de Nanterre"})),
+        EcosystemFinding::new(
+            EcosystemModule::LegalLife,
+            "accounts_filing",
+            "Dépôt des comptes",
+            "Comptes annuels et rapports, clôture le 2025-12-31",
+            source,
+            at(1),
+        )
+        .with_details(json!({"date": "2026-04-02"})),
+        EcosystemFinding::new(
+            EcosystemModule::PublicContracts,
+            "contract",
+            "Marché remporté",
+            "Diagnostic des réseaux d'eau potable",
+            "https://tabular-api.data.gouv.fr/api/resources/r/data/?titulaire_id__contains=552100554",
+            at(1),
+        )
+        .with_details(json!({
+            "date": "2026-08-10",
+            "buyer": "Communauté de communes du Pays d'Iroise",
+            "amount_eur": 400000.0,
+            "procedure": "Procédure adaptée"
+        })),
+    ];
+    let documents = ecosystem_documents(&findings);
+    assert_eq!(documents.len(), 2);
+    assert_eq!(documents[0].source, source);
+    assert!(
+        documents[0]
+            .content
+            .starts_with("Ecosystem, module legal life (legal_life)")
+    );
+    assert!(documents[0].content.contains(
+        "- Procédure collective (2026-09-10): Jugement d'ouverture de liquidation judiciaire; court Greffe du Tribunal de Nanterre"
+    ));
+    assert!(documents[0].content.contains(
+        "- Dépôt des comptes (2026-04-02): Comptes annuels et rapports, clôture le 2025-12-31"
+    ));
+    assert!(documents[1].content.contains(
+        "- Marché remporté (2026-08-10): Diagnostic des réseaux d'eau potable; buyer Communauté de communes du Pays d'Iroise; amount 400000 EUR; procedure Procédure adaptée"
+    ));
+}
+
+#[test]
+fn the_official_modules_depend_on_their_catalog_provider() {
+    assert_eq!(
+        EcosystemModule::OfficialIdentity.provider(),
+        Some("company_research")
+    );
+    assert_eq!(EcosystemModule::LegalLife.provider(), Some("bodacc"));
+    assert_eq!(EcosystemModule::PublicContracts.provider(), Some("decp"));
+    assert_eq!(EcosystemModule::WebsiteStack.provider(), None);
+    assert_eq!(EcosystemModule::HiringActivity.provider(), None);
+    let readiness = EcosystemReadiness::with_not_ready(vec![EcosystemModule::LegalLife]);
+    assert!(!readiness.is_ready(EcosystemModule::LegalLife));
+    assert!(readiness.is_ready(EcosystemModule::PublicContracts));
+    assert!(EcosystemReadiness::default().is_ready(EcosystemModule::LegalLife));
+    assert_eq!(PROVIDER_NOT_READY, "Fournisseur non prêt");
+}
+
+#[test]
+fn readiness_comes_from_the_ready_provider_keys() {
+    let readiness = EcosystemReadiness::from_ready_providers(&[
+        "company_research".to_owned(),
+        "decp".to_owned(),
+    ]);
+    assert_eq!(
+        readiness,
+        EcosystemReadiness::with_not_ready(vec![EcosystemModule::LegalLife])
+    );
+    assert!(readiness.is_ready(EcosystemModule::WebsiteStack));
 }

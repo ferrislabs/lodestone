@@ -286,7 +286,11 @@ export namespace Schemas {
     module: EcosystemModule;
     status: EcosystemModuleStatus;
   };
-  export type EcosystemModuleReportDto = ModuleStateDto & { findings: Array<EcosystemFindingDto> };
+  export type EcosystemModuleReportDto = ModuleStateDto & {
+    findings: Array<EcosystemFindingDto>;
+    provider?: (string | null) | undefined;
+    provider_ready: boolean;
+  };
   export type EcosystemDto = {
     hosting_platform?: (string | null) | undefined;
     modules: Array<EcosystemModuleReportDto>;
@@ -746,6 +750,8 @@ export namespace Schemas {
       label: string;
       learns: string;
       module: EcosystemModule;
+      provider?: (string | null) | undefined;
+      provider_ready: boolean;
       question: string;
       reads_site: boolean;
       refresh_days: number;
@@ -882,6 +888,8 @@ export namespace Schemas {
     label: string;
     learns: string;
     module: EcosystemModule;
+    provider?: (string | null) | undefined;
+    provider_ready: boolean;
     question: string;
     reads_site: boolean;
     refresh_days: number;

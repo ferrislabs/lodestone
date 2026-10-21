@@ -1,0 +1,156 @@
+{
+ "total_count": 8,
+ "results": [
+  {
+   "id": "A202601733059",
+   "publicationavis": "A",
+   "dateparution": "2026-09-10",
+   "familleavis": "collective",
+   "familleavis_lib": "Procédures collectives",
+   "typeavis": "annonce",
+   "typeavis_lib": "Avis initial",
+   "tribunal": "Greffe du Tribunal des Activités Economiques de Lyon",
+   "commercant": "ACME",
+   "registre": [
+    "552100554",
+    "552 100 554"
+   ],
+   "jugement": "{\"type\": \"initial\", \"famille\": \"Jugement d'ouverture\", \"nature\": \"Jugement d'ouverture d'une proc\\u00e9dure de redressement judiciaire\", \"date\": \"2026-09-01\", \"complementJugement\": \"Jugement ouvrant une proc\\u00e9dure de redressement judiciaire, date de cessation des paiements le 3 mars 2026.\"}",
+   "acte": null,
+   "modificationsgenerales": null,
+   "depot": null,
+   "radiationaurcs": null,
+   "url_complete": "https://www.bodacc.fr/pages/annonces-commerciales-detail/?q.id=id:A202601733059"
+  },
+  {
+   "id": "C20260173516",
+   "publicationavis": "C",
+   "dateparution": "2026-06-02",
+   "familleavis": "dpc",
+   "familleavis_lib": "Dépôts des comptes",
+   "typeavis": "annonce",
+   "typeavis_lib": "Avis initial",
+   "tribunal": "GREFFE DU TRIBUNAL DE COMMERCE DE LYON",
+   "commercant": "ACME",
+   "registre": [
+    "552100554",
+    "552 100 554"
+   ],
+   "jugement": null,
+   "acte": null,
+   "modificationsgenerales": null,
+   "depot": "{\"dateCloture\": \"2025-12-31\", \"typeDepot\": \"Comptes annuels et rapports\"}",
+   "radiationaurcs": null,
+   "url_complete": "https://www.bodacc.fr/pages/annonces-commerciales-detail/?q.id=id:C20260173516"
+  },
+  {
+   "id": "B20260171167",
+   "publicationavis": "B",
+   "dateparution": "2026-03-08",
+   "familleavis": "modification",
+   "familleavis_lib": "Modifications diverses",
+   "typeavis": "annonce",
+   "typeavis_lib": "Avis initial",
+   "tribunal": "GREFFE DU TRIBUNAL DE COMMERCE DE LYON",
+   "commercant": "ACME",
+   "registre": [
+    "552100554",
+    "552 100 554"
+   ],
+   "jugement": null,
+   "acte": null,
+   "modificationsgenerales": "{\"descriptif\": \"Modification de l'administration. Transfert du si\\u00e8ge social.\"}",
+   "depot": null,
+   "radiationaurcs": null,
+   "url_complete": "https://www.bodacc.fr/pages/annonces-commerciales-detail/?q.id=id:B20260171167"
+  },
+  {
+   "id": "A202002282709",
+   "publicationavis": "A",
+   "dateparution": "2020-11-24",
+   "familleavis": "vente",
+   "familleavis_lib": "Ventes et cessions",
+   "typeavis": "rectificatif",
+   "typeavis_lib": "Avis rectificatif",
+   "tribunal": "GREFFE DU TRIBUNAL DE COMMERCE DE LYON",
+   "commercant": "ACME",
+   "registre": [
+    "552100554",
+    "552 100 554"
+   ],
+   "jugement": null,
+   "acte": "{\"vente\": {\"categorieVente\": \"Achat d'un fonds par une personne morale\"}, \"descriptif\": \"Fonds de commerce de logiciels\"}",
+   "modificationsgenerales": null,
+   "depot": null,
+   "radiationaurcs": null,
+   "url_complete": "https://www.bodacc.fr/pages/annonces-commerciales-detail/?q.id=id:A202002282709"
+  },
+  {
+   "id": "B201900247176",
+   "publicationavis": "B",
+   "dateparution": "2019-02-04",
+   "familleavis": "radiation",
+   "familleavis_lib": "Radiations",
+   "typeavis": "annonce",
+   "typeavis_lib": "Avis initial",
+   "tribunal": "GREFFE DU TRIBUNAL DE COMMERCE DE LYON",
+   "commercant": "ACME",
+   "registre": [
+    "552100554",
+    "552 100 554"
+   ],
+   "jugement": null,
+   "acte": null,
+   "modificationsgenerales": null,
+   "depot": null,
+   "radiationaurcs": "{\"radiationPM\": \"O\"}",
+   "url_complete": null
+  },
+  {
+   "id": "A2004016725",
+   "publicationavis": "A",
+   "dateparution": "2004-09-02",
+   "familleavis": "creation",
+   "familleavis_lib": "Créations",
+   "typeavis": "annonce",
+   "typeavis_lib": "Avis initial",
+   "tribunal": "GREFFE DU TRIBUNAL DE COMMERCE DE LYON",
+   "commercant": "ACME",
+   "registre": [
+    "552100554",
+    "552 100 554"
+   ],
+   "jugement": null,
+   "acte": "{\"dateCommencementActivite\": \"2004-06-09\", \"creation\": {\"categorieCreation\": \"Cr\\u00e9ation d'un \\u00e9tablissement principal\"}}",
+   "modificationsgenerales": null,
+   "depot": null,
+   "radiationaurcs": null,
+   "url_complete": "https://www.bodacc.fr/pages/annonces-commerciales-detail/?q.id=id:A2004016725"
+  },
+  {
+   "id": "A202601733059",
+   "publicationavis": "A",
+   "dateparution": "2026-09-10",
+   "familleavis": "collective",
+   "familleavis_lib": "Procédures collectives",
+   "typeavis": "annonce",
+   "typeavis_lib": "Avis initial",
+   "tribunal": "GREFFE DU TRIBUNAL DE COMMERCE DE LYON",
+   "commercant": "ACME",
+   "registre": [
+    "552100554",
+    "552 100 554"
+   ],
+   "jugement": null,
+   "acte": null,
+   "modificationsgenerales": null,
+   "depot": null,
+   "radiationaurcs": null,
+   "url_complete": "https://www.bodacc.fr/pages/annonces-commerciales-detail/?q.id=id:A202601733059"
+  },
+  {
+   "id": "X1",
+   "familleavis": "creation"
+  }
+ ]
+}

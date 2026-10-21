@@ -465,6 +465,7 @@ describe('LeadDetail', () => {
 					modules: [
 						{
 							module: 'official_identity',
+							provider_ready: true,
 							label: 'Identité officielle',
 							status: 'done',
 							last_run: '2026-02-01T10:00:00Z',
@@ -484,6 +485,7 @@ describe('LeadDetail', () => {
 						},
 						{
 							module: 'hiring_activity',
+							provider_ready: true,
 							label: 'Activité de recrutement',
 							status: 'done',
 							last_run: '2026-02-01T10:00:00Z',
@@ -502,6 +504,7 @@ describe('LeadDetail', () => {
 						},
 						{
 							module: 'website_stack',
+							provider_ready: true,
 							label: 'Site et stack technique',
 							status: 'pending',
 							findings: [],
@@ -542,6 +545,137 @@ describe('LeadDetail', () => {
 		)
 	})
 
+	it('renders legal announcements and public contracts with dates, amounts and badges', () => {
+		const { container } = renderDetail({
+			detail: {
+				...detail,
+				ecosystem: {
+					hosting_platform: null,
+					modules: [
+						{
+							module: 'legal_life',
+							provider_ready: true,
+							label: 'Vie légale',
+							status: 'done',
+							last_run: '2026-10-08T09:00:00Z',
+							findings: [
+								{
+									module: 'legal_life',
+									key: 'bodacc:A202601733059',
+									kind: 'collective_proceeding',
+									label: 'Procédure collective',
+									value: "Jugement d'ouverture de redressement judiciaire",
+									source_url:
+										'https://bodacc-datadila.opendatasoft.com/api/explore/v2.1/catalog/datasets/annonces-commerciales/records',
+									observed_at: '2026-09-10T00:00:00Z',
+									details: {
+										date: '2026-09-10',
+										court: 'Greffe du Tribunal de commerce de Lyon',
+										collective: true,
+										link: 'https://www.bodacc.fr/pages/annonces-commerciales-detail/?q.id=id:A202601733059',
+									},
+								},
+								{
+									module: 'legal_life',
+									key: 'bodacc:C1',
+									kind: 'accounts_filing',
+									label: 'Dépôt des comptes',
+									value: 'Comptes annuels et rapports, clôture le 2025-12-31',
+									source_url:
+										'https://bodacc-datadila.opendatasoft.com/api/explore/v2.1/catalog/datasets/annonces-commerciales/records',
+									observed_at: '2026-06-02T00:00:00Z',
+									details: { date: '2026-06-02', collective: false },
+								},
+							],
+						},
+						{
+							module: 'public_contracts',
+							provider_ready: true,
+							label: 'Marchés publics',
+							status: 'done',
+							last_run: '2026-10-08T09:00:00Z',
+							findings: [
+								{
+									module: 'public_contracts',
+									key: 'contract:1',
+									kind: 'contract',
+									label: 'Marché remporté',
+									value: 'Diagnostic des réseaux',
+									source_url:
+										'https://tabular-api.data.gouv.fr/api/resources/r/data/?titulaire_id__contains=552100554',
+									observed_at: '2026-08-10T00:00:00Z',
+									details: {
+										date: '2026-08-10',
+										buyer: 'Commune de Lorient',
+										amount_eur: 400000,
+										procedure: 'Procédure adaptée',
+									},
+								},
+							],
+						},
+						{
+							module: 'official_identity',
+							provider: 'company_research',
+							provider_ready: false,
+							label: 'Identité officielle',
+							status: 'not_applicable',
+							last_run: '2026-10-08T09:00:00Z',
+							error: 'SIREN inconnu',
+							findings: [],
+						},
+					],
+				},
+			},
+		})
+		const legal = container.querySelector('[data-module="legal_life"]')
+		const collective = legal?.querySelector(
+			'[data-finding="bodacc:A202601733059"]',
+		)
+		expect(
+			collective?.querySelector('[data-badge="collective"]')?.textContent,
+		).toBe('Procédure collective')
+		expect(collective?.textContent).toContain(
+			'10 sept. 2026 · Greffe du Tribunal de commerce de Lyon',
+		)
+		expect(
+			screen
+				.getAllByRole('link', { name: "Voir l'annonce" })[0]
+				.getAttribute('href'),
+		).toBe(
+			'https://www.bodacc.fr/pages/annonces-commerciales-detail/?q.id=id:A202601733059',
+		)
+		const accounts = legal?.querySelector('[data-finding="bodacc:C1"]')
+		expect(accounts?.querySelector('[data-badge]')).toBeNull()
+		expect(accounts?.textContent).toContain('2 juin 2026')
+		const award = container.querySelector(
+			'[data-module="public_contracts"] [data-finding="contract:1"]',
+		)
+		expect(award?.textContent?.replace(/\s/g, ' ')).toContain(
+			'10 août 2026 · 400 000 € · Commune de Lorient · Procédure adaptée',
+		)
+		expect(award?.querySelector('a')?.getAttribute('href')).toBe(
+			'https://tabular-api.data.gouv.fr/api/resources/r/data/?titulaire_id__contains=552100554',
+		)
+		const identity = container.querySelector(
+			'[data-module="official_identity"]',
+		)
+		expect(identity?.textContent).toContain('Non applicable')
+		expect(
+			identity?.querySelector('[data-module-note="official_identity"]')
+				?.textContent,
+		).toBe('SIREN inconnu')
+		const notReady = identity?.querySelector('[data-provider-not-ready]')
+		expect(notReady?.textContent).toBe('Fournisseur non prêt')
+		expect(notReady?.getAttribute('href')).toBe(
+			'/sources/providers/company_research',
+		)
+		expect(
+			container.querySelector(
+				'[data-module="legal_life"] [data-provider-not-ready]',
+			),
+		).toBeNull()
+	})
+
 	it('flags a site hosted on a platform', () => {
 		const { container } = renderDetail({
 			detail: {
@@ -551,6 +685,7 @@ describe('LeadDetail', () => {
 					modules: [
 						{
 							module: 'website_stack',
+							provider_ready: true,
 							label: 'Site et stack technique',
 							status: 'not_applicable',
 							findings: [],
