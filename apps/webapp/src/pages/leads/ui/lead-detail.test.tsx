@@ -63,6 +63,22 @@ const detail: LeadDetailData = {
 			created_at: '2026-02-01T00:00:00Z',
 		},
 	],
+	facts: {
+		hosts: [
+			{ host: 'login.dev.acme.test', environment: 'development', signals: 1 },
+		],
+		distinct_hosts: 1,
+		production_hosts: 0,
+		production_share: 0,
+		only_non_production: true,
+		distinct_subdomains: 3,
+		signal_count: 1,
+		source_count: 1,
+		sources: ['crawler'],
+		first_seen_at: '2026-01-01T00:00:00Z',
+		last_seen_at: '2026-02-01T00:00:00Z',
+		probable_country: { code: 'FR', name: 'France' },
+	},
 	score_breakdown: [
 		{
 			signal: 'hiring_page',
@@ -77,6 +93,7 @@ const detail: LeadDetailData = {
 			id: 's1',
 			kind: 'hiring_page',
 			value: 'careers',
+			sentence: 'acme.test publie une page de recrutement (careers)',
 			source: 'crawler',
 			agent: 'ats-fr',
 			provenance: 'https://acme.test/careers',
@@ -138,6 +155,94 @@ function renderDetail(
 }
 
 describe('LeadDetail', () => {
+	it('shows the facts block with its environments, sources, dates and country', () => {
+		const { container } = renderDetail()
+		const facts = container.querySelector('[data-section="facts"]')
+		expect(facts?.textContent).toContain('Faits')
+		expect(facts?.textContent).toContain('1 hôte · dev')
+		expect(facts?.textContent).toContain('Sous-domaines vus3')
+		expect(facts?.textContent).toContain('Signaux1')
+		expect(facts?.textContent).toContain('Sources1 · crawler')
+		expect(facts?.textContent).toContain('Première détection')
+		expect(facts?.textContent).toContain('Dernière détection')
+		expect(facts?.textContent).toContain('Pays probableFrance')
+	})
+
+	it('warns when no signal comes from a production host', () => {
+		const { container } = renderDetail()
+		expect(
+			container.querySelector('[data-warning="non-production"]')?.textContent,
+		).toBe('Uniquement des hôtes hors production')
+	})
+
+	it('shows no warning when a production host exists', () => {
+		const { container } = renderDetail({
+			detail: {
+				...detail,
+				facts: {
+					...detail.facts,
+					hosts: [
+						{ host: 'sso.acme.test', environment: 'production', signals: 1 },
+					],
+					production_hosts: 1,
+					production_share: 1,
+					only_non_production: false,
+				},
+			},
+		})
+		expect(container.querySelector('[data-warning]')).toBeNull()
+		expect(
+			container.querySelector('[data-section="facts"]')?.textContent,
+		).toContain('1 hôte · prod')
+	})
+
+	it('shows an unknown country and no host for a lead without any', () => {
+		const { container } = renderDetail({
+			detail: {
+				...detail,
+				facts: {
+					...detail.facts,
+					hosts: [],
+					distinct_hosts: 0,
+					production_hosts: 0,
+					production_share: null,
+					only_non_production: false,
+					probable_country: null,
+					sources: [],
+					source_count: 0,
+					signal_count: 0,
+				},
+			},
+		})
+		const facts = container.querySelector('[data-section="facts"]')
+		expect(facts?.textContent).toContain('Aucun hôte identifié')
+		expect(facts?.textContent).toContain('Pays probableInconnu')
+		expect(facts?.textContent).toContain('SourcesAucune')
+		expect(container.querySelector('[data-warning]')).toBeNull()
+	})
+
+	it('renders without facts or signal sentences from an older API', () => {
+		const legacy = {
+			...detail,
+			facts: undefined,
+			signals: detail.signals.map((signal) => ({
+				...signal,
+				sentence: undefined,
+			})),
+		} as unknown as LeadDetailData
+		const { container } = renderDetail({ detail: legacy })
+		expect(container.querySelector('[data-section="facts"]')).toBeNull()
+		const first = detail.signals[0]
+		expect(container.textContent).toContain(`${first.kind} : ${first.value}`)
+	})
+
+	it('lists the signals as readable sentences', () => {
+		renderDetail()
+		expect(
+			screen.getByText('acme.test publie une page de recrutement (careers)'),
+		).toBeTruthy()
+	})
+
 	it('renders header, breakdown, signals, contacts and assessments', () => {
 		renderDetail()
 		expect(screen.getByRole('heading', { name: 'acme.test' })).toBeTruthy()

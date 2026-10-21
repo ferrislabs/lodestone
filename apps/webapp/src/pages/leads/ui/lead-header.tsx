@@ -1,5 +1,5 @@
 import { Button } from '#/components/ui/button'
-import { formatDateTime, formatScore } from '#/pages/leads/lib/format'
+import { formatScore } from '#/pages/leads/lib/format'
 import { leadStatusLabel } from '#/pages/leads/lib/labels'
 import type { Lead, LeadStatus } from '#/pages/leads/lib/types'
 import { formatConfidence } from '#/pages/leads/lib/verdict'
@@ -40,14 +40,6 @@ export function LeadHeader({
 				<div>
 					<dt className="text-muted-foreground">Confiance</dt>
 					<dd className="font-mono">{formatConfidence(lead.confidence)}</dd>
-				</div>
-				<div>
-					<dt className="text-muted-foreground">Première détection</dt>
-					<dd>{formatDateTime(lead.first_seen_at)}</dd>
-				</div>
-				<div>
-					<dt className="text-muted-foreground">Dernière détection</dt>
-					<dd>{formatDateTime(lead.last_seen_at)}</dd>
 				</div>
 			</dl>
 			<div className="flex flex-wrap items-center gap-2">

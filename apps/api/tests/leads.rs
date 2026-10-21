@@ -71,6 +71,35 @@ impl Seed {
         .expect("signal");
     }
 
+    async fn host_signal(&self, lead: &str, kind: &str, value: &str, source: &str, host: &str) {
+        sqlx::query(
+            "INSERT INTO signals (id, lead_id, kind, value, source, raw, provenance, strength, observed_at, fingerprint)
+             VALUES ($1, $2::uuid, $3, $4, $5, $6, $7, 0.9, now(), $1::text)",
+        )
+        .bind(common::generate_uuid_v7())
+        .bind(lead)
+        .bind(kind)
+        .bind(value)
+        .bind(source)
+        .bind(json!({"host": host}))
+        .bind(format!("dns:{host}?type=CNAME"))
+        .execute(&self.pool)
+        .await
+        .expect("host signal");
+    }
+
+    async fn candidate_host(&self, host: &str, domain: &str) {
+        sqlx::query(
+            "INSERT INTO candidate_hosts (host, domain, origin, first_seen_at, last_seen_at)
+             VALUES ($1, $2, 'certificate_transparency', now(), now())",
+        )
+        .bind(host)
+        .bind(domain)
+        .execute(&self.pool)
+        .await
+        .expect("candidate host");
+    }
+
     async fn contact(&self, lead: &str, address: &str) {
         sqlx::query(
             "INSERT INTO contact_emails (id, lead_id, address, provenance, method, confidence, kind, found_at)
@@ -862,6 +891,67 @@ async fn detail_lists_the_qualification_results_with_labels_and_providers(pool: 
     assert!(invalid["agent_score"].is_null());
     assert_eq!(invalid["answers"].as_array().unwrap().len(), 0);
     assert!(invalid["error"].as_str().unwrap().contains("maturite"));
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_detail_exposes_the_facts_and_the_signal_sentences(pool: PgPool) {
+    let (seed, profile) = listing_fixture(&pool).await;
+    let lead = seed.lead(&profile, "luzernrisk.com", "new", 1.0, 1).await;
+    seed.host_signal(
+        &lead,
+        "saas_provider",
+        "auth0",
+        "dns_cname",
+        "login.dev.luzernrisk.com",
+    )
+    .await;
+    seed.candidate_host("login.dev.luzernrisk.com", "luzernrisk.com")
+        .await;
+    seed.candidate_host("www.luzernrisk.com", "luzernrisk.com")
+        .await;
+    seed.candidate_host("www.other.com", "other.com").await;
+    let api = Api::new(pool).await;
+
+    let (status, body) = api.get(&format!("/api/v1/leads/{lead}")).await;
+
+    assert_eq!(status, StatusCode::OK);
+    let data = &body["data"];
+    assert_eq!(
+        data["signals"][0]["sentence"],
+        "login.dev.luzernrisk.com pointe vers Auth0 (CNAME)"
+    );
+    let facts = &data["facts"];
+    assert_eq!(facts["hosts"][0]["host"], "login.dev.luzernrisk.com");
+    assert_eq!(facts["hosts"][0]["environment"], "development");
+    assert_eq!(facts["hosts"][0]["signals"], 1);
+    assert_eq!(facts["distinct_hosts"], 1);
+    assert_eq!(facts["production_hosts"], 0);
+    assert_eq!(facts["production_share"], 0.0);
+    assert_eq!(facts["only_non_production"], true);
+    assert_eq!(facts["distinct_subdomains"], 2);
+    assert_eq!(facts["signal_count"], 1);
+    assert_eq!(facts["source_count"], 1);
+    assert_eq!(facts["sources"], json!(["dns_cname"]));
+    assert!(facts["first_seen_at"].is_string());
+    assert!(facts["last_seen_at"].is_string());
+    assert!(facts["probable_country"].is_null());
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_facts_name_the_probable_country_and_stay_empty_without_hosts(pool: PgPool) {
+    let (seed, profile) = listing_fixture(&pool).await;
+    let lead = seed.lead(&profile, "bare.fr", "new", 1.0, 1).await;
+    let api = Api::new(pool).await;
+
+    let (status, body) = api.get(&format!("/api/v1/leads/{lead}")).await;
+
+    assert_eq!(status, StatusCode::OK);
+    let facts = &body["data"]["facts"];
+    assert_eq!(facts["hosts"], json!([]));
+    assert!(facts["production_share"].is_null());
+    assert_eq!(facts["only_non_production"], false);
+    assert_eq!(facts["signal_count"], 0);
+    assert_eq!(facts["probable_country"]["code"], "FR");
 }
 
 #[sqlx::test(migrations = "../../migrations")]

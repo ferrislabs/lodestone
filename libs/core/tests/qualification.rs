@@ -34,7 +34,7 @@ use support::{at, domain};
 const IAM: &str = include_str!("../../../docs/examples/profiles/iam-ferriskey.json");
 const CLASSIFIER: &str = "model-class";
 const SYNTHESIS: &str = "model-synth";
-const GOOD_QUOTE: &str = "value: keycloak-http_probe";
+const GOOD_QUOTE: &str = "Keycloak-http_probe (sonde HTTP, version 21.1)";
 
 #[derive(Clone)]
 struct TestClock(Arc<AtomicI64>);
@@ -589,10 +589,23 @@ async fn the_prompt_holds_the_aggregator_context_signals_agents_and_computed_fac
     );
     assert!(call.instruction.contains("Documents 0 to 1"));
     assert_eq!(call.documents.len(), 5);
-    assert!(call.documents[0].1.contains("signal: product_detected"));
-    assert!(call.documents[1].1.contains("signal: product_detected"));
+    assert!(call.documents[0].1.starts_with(
+        "acme.com expose Keycloak-http_probe (sonde HTTP, version 21.1)\nsource: http_probe"
+    ));
+    assert!(call.documents[1].1.contains("source: dns_cname"));
+    assert!(!call.documents[0].1.contains("signal: product_detected"));
     assert_eq!(call.documents[2].0, "lead");
     assert!(call.documents[2].1.starts_with("lead: acme.com"));
+    assert!(call.documents[2].1.contains("- production hosts: 1 of 1"));
+    assert!(
+        call.documents[2]
+            .1
+            .contains("- signals: 2 from 2 distinct source(s)")
+    );
+    assert!(
+        call.system
+            .contains("computed by the system from stored data")
+    );
     assert_eq!(call.documents[3].0, "qualification:one");
     let block = &call.documents[3].1;
     let evaluates = block.find("evaluates: DESCRIPTION-OF-one").unwrap();

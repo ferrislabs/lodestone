@@ -3,6 +3,7 @@ use common::CoreError;
 use thiserror::Error;
 
 use crate::domain::{
+    NormalizedDomain,
     host::{CandidateHost, Hostname},
     values::SourceName,
 };
@@ -26,6 +27,14 @@ pub trait CandidateHosts: Send + Sync {
         source: SourceName,
         at: DateTime<Utc>,
     ) -> impl Future<Output = Result<(), CoreError>> + Send;
+}
+
+#[cfg_attr(test, mockall::automock)]
+pub trait KnownHostRepository: Send {
+    fn list_for_domain(
+        &mut self,
+        domain: &NormalizedDomain,
+    ) -> impl Future<Output = Result<Vec<CandidateHost>, CoreError>> + Send;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]

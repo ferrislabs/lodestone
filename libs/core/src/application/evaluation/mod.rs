@@ -13,8 +13,9 @@ use crate::{
         },
     },
     domain::{
+        facts::signal_sentence,
         job::ports::Clock,
-        lead::{Lead, LeadId, Signal, ports::SignalRepository},
+        lead::{Lead, LeadId, Signal},
         llm::{
             LlmError, LlmProvider, ProviderDefinition, UntrustedDocument,
             cache::{CacheScope, LlmCache},
@@ -107,16 +108,13 @@ where
 }
 
 pub fn render_signal(signal: &Signal) -> String {
-    let raw = serde_json::to_string_pretty(&signal.raw).unwrap_or_else(|_| signal.raw.to_string());
     format!(
-        "signal: {}\nvalue: {}\nsource: {}\nobserved: {}\n{}",
-        signal.kind.as_str(),
-        signal.value.as_deref().unwrap_or("-"),
+        "{}\nsource: {}\nobserved: {}",
+        signal_sentence(signal),
         signal.source.as_str(),
         signal
             .observed_at
             .to_rfc3339_opts(SecondsFormat::Secs, true),
-        raw,
     )
 }
 
@@ -386,8 +384,8 @@ where
         clock: &K,
     ) -> Result<LeadOutcome, CoreError> {
         let definition = active.revision.definition.definition();
-        let signals = usecase.evaluation_signals(lead.id).await?;
-        let overview = lead_document(lead.domain.as_str(), lead.first_seen_at);
+        let (signals, facts) = usecase.signals_with_facts(lead).await?;
+        let overview = lead_document(lead.domain.as_str(), &facts);
         let contents: Vec<String> = signals.iter().map(render_signal).collect();
         let mut documents = Vec::with_capacity(signals.len() + 1);
         documents.push(UntrustedDocument {
@@ -555,12 +553,6 @@ impl LodestoneUseCase {
             .await
     }
 
-    #[transactional(signal)]
-    async fn evaluation_signals(&self, lead_id: LeadId) -> Result<Vec<Signal>, CoreError> {
-        let mut repo = signal_repository;
-        repo.list_for_lead(lead_id).await
-    }
-
     #[transactional(qualification)]
     async fn store_evaluation(
         &self,
@@ -592,6 +584,7 @@ mod tests {
     use super::*;
     use crate::domain::{
         lead::SignalId,
+        prompt::{EvidenceQuote, check_evidence},
         values::{Provenance, SignalKind, SourceName, UnitInterval},
     };
 
@@ -611,15 +604,42 @@ mod tests {
     }
 
     #[test]
-    fn rendering_is_stable_plain_text() {
+    fn rendering_is_a_sentence_then_source_and_date() {
         assert_eq!(
             render_signal(&signal(Some("keycloak"))),
-            "signal: product_detected\nvalue: keycloak\nsource: http_probe\nobserved: 2027-01-15T08:00:00Z\n{\n  \"version\": \"21.1\"\n}"
+            "example.com expose Keycloak (sonde HTTP, version 21.1)\nsource: http_probe\nobserved: 2027-01-15T08:00:00Z"
         );
     }
 
     #[test]
-    fn a_missing_value_renders_a_dash() {
-        assert!(render_signal(&signal(None)).contains("\nvalue: -\n"));
+    fn a_missing_value_falls_back_to_the_kind() {
+        assert!(render_signal(&signal(None)).starts_with("product_detected\nsource: http_probe"));
+    }
+
+    #[test]
+    fn a_quote_from_the_rendered_sentence_passes_the_evidence_check() {
+        let content = render_signal(&signal(Some("keycloak")));
+        let documents = [UntrustedDocument {
+            source: "https://example.com/realms/master",
+            content: &content,
+        }];
+        let quotes = [
+            EvidenceQuote {
+                document_index: 0,
+                quote: "expose Keycloak (sonde HTTP, version 21.1)".to_owned(),
+            },
+            EvidenceQuote {
+                document_index: 0,
+                quote: "sso.example.com expose Keycloak".to_owned(),
+            },
+        ];
+        let check = check_evidence(&quotes, &documents);
+        assert_eq!(check.verified.len(), 1);
+        assert_eq!(check.rejected, 1);
+    }
+
+    #[test]
+    fn the_raw_json_is_not_given_to_the_model() {
+        assert!(!render_signal(&signal(Some("keycloak"))).contains('{'));
     }
 }

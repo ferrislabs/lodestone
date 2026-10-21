@@ -3,6 +3,8 @@ import type { Schemas } from '#/api/api.client'
 export type LeadStatus = Schemas.LeadStatusDto
 export type Lead = Schemas.LeadDto
 export type LeadDetailData = Schemas.DataEnvelope_LeadDetailDto['data']
+export type LeadFacts = Schemas.LeadFactsDto
+export type HostFact = Schemas.HostFactDto
 export type Signal = Schemas.SignalDto
 export type Contact = Schemas.ContactDto
 export type Assessment = Schemas.AssessmentDto

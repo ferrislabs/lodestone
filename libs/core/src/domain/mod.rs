@@ -1,6 +1,7 @@
 pub(crate) mod aggregation;
 pub(crate) mod ats_target;
 pub(crate) mod contact;
+pub(crate) mod facts;
 pub(crate) mod fetch;
 pub(crate) mod host;
 pub(crate) mod job;

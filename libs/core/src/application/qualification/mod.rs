@@ -20,7 +20,7 @@ use crate::{
         lead::{
             Assessment, AssessmentId, Evidence, Lead, LeadStatus, Signal,
             draft::{DraftReview, carry_draft},
-            ports::{AssessmentRepository, LeadRepository, SignalRepository},
+            ports::{AssessmentRepository, LeadRepository},
         },
         llm::{
             LlmProvider, UntrustedDocument,
@@ -122,12 +122,12 @@ where
             warn!(lead_id = %lead.id, missing = missing.len(), "aggregation skipped, agent results are missing");
             return Ok(Outcome::Skipped);
         }
-        let signals = usecase.aggregation_signals(lead.id).await?;
+        let (signals, facts) = usecase.signals_with_facts(lead).await?;
         if signals.is_empty() {
             return Ok(Outcome::Skipped);
         }
         let signal_contents: Vec<String> = signals.iter().map(render_signal).collect();
-        let overview = lead_document(lead.domain.as_str(), lead.first_seen_at);
+        let overview = lead_document(lead.domain.as_str(), &facts);
         let blocks = agent_blocks(definition, &results);
         let mut documents: Vec<UntrustedDocument<'_>> = signals
             .iter()
@@ -433,15 +433,6 @@ impl LodestoneUseCase {
         let mut repo = qualification_repository;
         repo.count_due_summaries(active.profile.id, active.revision.number)
             .await
-    }
-
-    #[transactional(signal)]
-    async fn aggregation_signals(
-        &self,
-        lead_id: crate::domain::lead::LeadId,
-    ) -> Result<Vec<Signal>, CoreError> {
-        let mut repo = signal_repository;
-        repo.list_for_lead(lead_id).await
     }
 
     #[transactional(lead, assessment, qualification)]

@@ -5,6 +5,7 @@ import { Skeleton } from '#/components/ui/skeleton'
 import type { LeadDetailData, LeadStatus } from '#/pages/leads/lib/types'
 import { AssessmentsList } from './assessments-list'
 import { ContactsList } from './contacts-list'
+import { LeadFacts } from './lead-facts'
 import { LeadHeader } from './lead-header'
 import { LeadSummary } from './lead-summary'
 import { QualificationResults } from './qualification-results'
@@ -69,6 +70,7 @@ export function LeadDetail({
 						changing={changing}
 						changeError={changeError}
 					/>
+					{detail.facts ? <LeadFacts facts={detail.facts} /> : null}
 					<QualificationResults results={detail.qualification_results} />
 					<LeadSummary
 						assessment={detail.assessments[0] ?? null}
