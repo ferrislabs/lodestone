@@ -225,6 +225,16 @@ export const FIELD_COPY: Readonly<Record<string, FieldCopy>> = {
 		description:
 			"Probabilité minimale, de 0,5 à 1, d'une option qui exclut le lead pour l'écarter. 0,6 par défaut.",
 	},
+	'qualification_agents[].samples': {
+		label: 'Échantillons',
+		description:
+			"Nombre d'appels indépendants au modèle par lead, de 1 à 5. La réponse de chaque axe est le choix majoritaire. 3 par défaut.",
+	},
+	'qualification_agents[].sampling_temperature': {
+		label: "Température d'échantillonnage",
+		description:
+			"Température de 0 à 1,5 des appels quand il y a plus d'un échantillon ; elle remplace celle du fournisseur. 0,7 par défaut.",
+	},
 	'qualification_agents[].questions': {
 		label: "Axes d'analyse",
 		description:
@@ -278,6 +288,26 @@ export const FIELD_COPY: Readonly<Record<string, FieldCopy>> = {
 		label: 'Exclut le lead',
 		description:
 			"Quand l'agent choisit cette option avec une preuve vérifiée et une probabilité au moins égale au seuil d'exclusion, le lead est écarté. Jamais sur l'option « inconnu ».",
+	},
+	escalation: {
+		label: 'Escalade',
+		description:
+			'Réévalue par un fournisseur plus puissant les leads dont la confiance tombe dans une bande grise.',
+	},
+	'escalation.provider': {
+		label: "Fournisseur d'escalade",
+		description:
+			"Fournisseur LLM déclaré qui réévalue les leads de la bande grise. L'escalade est désactivée quand il est vide.",
+	},
+	'escalation.band_low': {
+		label: 'À partir de',
+		description:
+			'Confiance minimale, en pourcentage, à partir de laquelle un lead est escaladé. 40 par défaut.',
+	},
+	'escalation.band_high': {
+		label: "Jusqu'à (exclu)",
+		description:
+			'Confiance, en pourcentage, sous laquelle un lead est escaladé. Doit être supérieure à la borne basse. 70 par défaut.',
 	},
 	aggregator: {
 		label: 'Agrégateur',

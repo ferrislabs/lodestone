@@ -1,5 +1,6 @@
 import { Badge } from '#/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '#/components/ui/card'
+import { agreementLabel, escalationLabel } from '#/pages/leads/lib/agreement'
 import { formatDateTime } from '#/pages/leads/lib/format'
 import type {
 	QualificationAnswer,
@@ -61,7 +62,14 @@ function Grounding({ answer }: { answer: QualificationAnswer }) {
 	)
 }
 
-function Measure({ answer }: { answer: QualificationAnswer }) {
+function Measure({
+	answer,
+	samples,
+}: {
+	answer: QualificationAnswer
+	samples: number
+}) {
+	const agreement = agreementLabel(answer.agreement, samples)
 	return (
 		<li
 			className="flex flex-col gap-1.5 rounded-md bg-muted/30 p-2.5"
@@ -81,6 +89,11 @@ function Measure({ answer }: { answer: QualificationAnswer }) {
 					· confiance {formatProbability(answer.confidence)}
 				</span>
 			</p>
+			{agreement ? (
+				<p className="text-xs text-muted-foreground" data-part="agreement">
+					{agreement}
+				</p>
+			) : null}
 			<Grounding answer={answer} />
 			<ul className="flex flex-col gap-1">
 				{answer.probabilities.map((item) => (
@@ -118,6 +131,11 @@ function AgentReport({ result }: { result: QualificationResult }) {
 					<Badge variant={valid ? 'secondary' : 'destructive'}>
 						{valid ? 'Valide' : 'Invalide'}
 					</Badge>
+					{result.escalated ? (
+						<Badge variant="outline" data-part="escalated">
+							{escalationLabel(result.provider_name, result.model)}
+						</Badge>
+					) : null}
 					{valid ? (
 						<span className="ml-auto text-sm">
 							Score de l'agent :{' '}
@@ -157,7 +175,11 @@ function AgentReport({ result }: { result: QualificationResult }) {
 					</h4>
 					<ul className="flex flex-col gap-2">
 						{result.answers.map((answer) => (
-							<Measure key={answer.question_id} answer={answer} />
+							<Measure
+								key={answer.question_id}
+								answer={answer}
+								samples={result.provenance.samples}
+							/>
 						))}
 					</ul>
 				</div>

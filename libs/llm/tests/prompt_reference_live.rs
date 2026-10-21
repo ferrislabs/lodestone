@@ -80,6 +80,7 @@ async fn run_case<P: LlmProvider>(provider: &P) -> Result<(), String> {
         instruction: &instruction,
         documents: &untrusted,
         max_tokens: 4096,
+        temperature: None,
     };
     let settings = CallSettings {
         max_retries: 2,

@@ -111,6 +111,7 @@ pub struct VersionPrecision {
     pub agent_name: Option<String>,
     pub model: String,
     pub prompt_version: String,
+    pub escalated: bool,
     pub validated: u64,
     pub rejected: u64,
     pub precision: Option<f64>,
@@ -319,7 +320,7 @@ fn version_precision(
     decisions: &[&DecisionLabel],
     agent_names: &BTreeMap<String, String>,
 ) -> Vec<VersionPrecision> {
-    type Key<'a> = (Option<&'a str>, &'a str, &'a str);
+    type Key<'a> = (Option<&'a str>, &'a str, &'a str, bool);
     let mut tallies: BTreeMap<Key<'_>, (u64, u64)> = BTreeMap::new();
     for label in decisions {
         let validated = is_validated(label);
@@ -332,19 +333,20 @@ fn version_precision(
                 snapshot
                     .provenance
                     .as_ref()
-                    .map(|provenance| (Some(agent.as_str()), provenance))
+                    .map(|provenance| (Some(agent.as_str()), provenance, snapshot.escalated))
             });
         let aggregator = label
             .snapshot
             .aggregator
             .as_ref()
-            .map(|provenance| (None, provenance));
-        for (agent, provenance) in agents.chain(aggregator) {
+            .map(|provenance| (None, provenance, false));
+        for (agent, provenance, escalated) in agents.chain(aggregator) {
             let entry = tallies
                 .entry((
                     agent,
                     provenance.model.as_str(),
                     provenance.prompt_version.as_str(),
+                    escalated,
                 ))
                 .or_default();
             if validated {
@@ -357,11 +359,12 @@ fn version_precision(
     tallies
         .into_iter()
         .map(
-            |((agent, model, prompt_version), (validated, rejected))| VersionPrecision {
+            |((agent, model, prompt_version, escalated), (validated, rejected))| VersionPrecision {
                 agent_id: agent.map(str::to_owned),
                 agent_name: agent.map(|agent| agent_name(agent_names, agent)),
                 model: model.to_owned(),
                 prompt_version: prompt_version.to_owned(),
+                escalated,
                 validated,
                 rejected,
                 precision: ratio(validated, validated + rejected),
@@ -640,6 +643,7 @@ mod tests {
                     status: status.to_owned(),
                     score,
                     provenance: None,
+                    escalated: false,
                 },
             );
             self
@@ -652,6 +656,7 @@ mod tests {
                     status: "valid".to_owned(),
                     score: Some(0.5),
                     provenance: Some(provenance(model, version)),
+                    escalated: false,
                 },
             );
             self
@@ -1062,6 +1067,38 @@ mod tests {
     }
 
     #[test]
+    fn escalated_runs_are_counted_apart_from_the_original_ones() {
+        let mut escalated =
+            rejected(30.0, "a_verifier").versioned("fit", "qwen3", "qualification-agent@a");
+        escalated
+            .label
+            .snapshot
+            .agents
+            .get_mut("fit")
+            .unwrap()
+            .escalated = true;
+        let labels = vec![
+            validated(80.0, "fiable")
+                .versioned("fit", "qwen3", "qualification-agent@a")
+                .done(),
+            escalated.done(),
+        ];
+        let report = QualityReport::compute(
+            &labels,
+            VerdictCounts::default(),
+            &[info(VerdictThresholds::default())],
+            None,
+            &BTreeMap::new(),
+        );
+        let rows: Vec<(bool, u64, u64)> = report
+            .versions
+            .iter()
+            .map(|row| (row.escalated, row.validated, row.rejected))
+            .collect();
+        assert_eq!(rows, vec![(false, 1, 0), (true, 0, 1)]);
+    }
+
+    #[test]
     fn invalid_agent_results_and_legacy_labels_carry_no_version() {
         let mut invalid = validated(80.0, "fiable");
         invalid.label.snapshot.agents.insert(
@@ -1070,6 +1107,7 @@ mod tests {
                 status: "invalid".to_owned(),
                 score: None,
                 provenance: Some(provenance("qwen3", "qualification-agent@a")),
+                escalated: false,
             },
         );
         let labels = vec![

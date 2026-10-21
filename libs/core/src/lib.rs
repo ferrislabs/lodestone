@@ -92,13 +92,14 @@ pub use domain::{
     qualification::{
         Answer, Completion, EvidenceComponents, EvidenceStrength, Exclusion, Judgement,
         LeadScoring, QualificationResult, ResultId, ResultStatus, SCORING_VERSION,
-        SUMMARY_FAILED_AFTER, SummaryState, ValidAnswers, ValidOutput, Verdict, VerdictCap,
-        VerdictReason, Violation, Violations, agent_score, calibrate, exclusions, judge,
+        SUMMARY_FAILED_AFTER, SummaryState, VOTE_SHARE_WEIGHT, ValidAnswers, ValidOutput, Verdict,
+        VerdictCap, VerdictReason, Violation, Violations, agent_score, calibrate, exclusions,
+        judge,
         ports::QualificationRepository,
         prompt::{
             AgentPrompt, build as agent_prompt, lead_document, with_ungrounded, with_violations,
         },
-        question_score, summary_retry_delay, validate_answers, verdict_for,
+        question_score, sample_record, summary_retry_delay, validate_answers, verdict_for, vote,
     },
     quality::{
         AgentSeparation, AgentSnapshot, ConfidenceBucket, DecisionCounts, DecisionKind,

@@ -1,5 +1,5 @@
 {
-  "schema_version": 8,
+  "schema_version": 9,
   "identity": {
     "offer": "FerrisKey (open source IAM/CIAM in Rust) and Autharie (managed IAM), both by Ferrislabs",
     "target_customer": "Organizations running self-hosted Keycloak or a similar IAM, or paying for a SaaS IAM"
@@ -165,6 +165,8 @@
       "system_prompt": "You judge whether a company is a relevant prospect for the offer, using the relevance criteria. Base your answers only on what the documents state.\n\nRelevance criteria: The organization operates its own identity infrastructure, such as a self-hosted Keycloak, or pays for a SaaS IAM, and shows signs of migration, staffing or procurement around it. Physical access control and unrelated directories are not relevant.",
       "weight": 5,
       "exclusion_threshold": 0.6,
+      "samples": 3,
+      "sampling_temperature": 0.7,
       "questions": [
         {
           "id": "pertinence",
@@ -212,6 +214,8 @@
       "system_prompt": "You assess how the company runs its identity infrastructure from the signals and documents. Self-hosted and ageing Keycloak, or custom authentication code, means high debt and a strong opportunity. A recent SaaS IAM means a weaker one. Answer unknown when nothing shows it.",
       "weight": 5,
       "exclusion_threshold": 0.6,
+      "samples": 3,
+      "sampling_temperature": 0.7,
       "questions": [
         {
           "id": "maturite",
@@ -252,6 +256,8 @@
       "system_prompt": "Tu évalues si les preuves d'un lead viennent de systèmes réellement utilisés. Appuie-toi sur le bloc « Faits » (environnement par hôte, part de production, sources) et sur les documents. Des hôtes de production, une instance publique stable ou des offres d'emploi qui parlent d'exploitation indiquent un usage réel. Des hôtes nommés dev, test, staging ou demo, un projet de démonstration ou un dépôt d'exemple indiquent de la non-production. Ne déduis pas l'environnement d'un simple nom de domaine sans indice. Réponds « inconnu » quand rien ne permet de trancher.",
       "weight": 4,
       "exclusion_threshold": 0.6,
+      "samples": 3,
+      "sampling_temperature": 0.7,
       "questions": [
         {
           "id": "environnement",
@@ -327,6 +333,8 @@
       "system_prompt": "Tu classes l'organisation par type et par taille à partir des documents et du bloc « Faits ». Le secteur public achète par appels d'offres, un grand compte a ses équipes et ses processus d'achat, une ETI décide plus vite, une PME ou une startup a peu de moyens dédiés. Appuie-toi sur ce que les documents disent de l'effectif, du chiffre d'affaires, du statut ou du secteur. Ne devine pas la taille d'après le nom. Réponds « inconnu » quand rien ne permet de trancher. L'opérateur ajuste les scores selon sa cible.",
       "weight": 3,
       "exclusion_threshold": 0.6,
+      "samples": 3,
+      "sampling_temperature": 0.7,
       "questions": [
         {
           "id": "type",
@@ -423,6 +431,8 @@
       "system_prompt": "Zone visée : France et Europe francophone.\n\nTu évalues si l'entreprise appartient à la zone visée ci-dessus et si elle travaille dans la langue du marché. Appuie-toi sur le pays déduit des domaines dans le bloc « Faits » (extension de pays), sur l'adresse, la langue des documents et les offres d'emploi. Une extension de pays seule est un indice, pas une preuve : une extension .com ne dit rien. Une entreprise voisine de la zone, ou présente dans la zone par une filiale, est « proche ». Réponds « inconnu » quand rien ne permet de trancher. Modifie la première phrase pour changer de zone.",
       "weight": 4,
       "exclusion_threshold": 0.6,
+      "samples": 3,
+      "sampling_temperature": 0.7,
       "questions": [
         {
           "id": "zone",
@@ -498,6 +508,8 @@
       "system_prompt": "Tu évalues si le lead a une raison d'agir maintenant, à partir des signaux et des documents. Cherche une migration annoncée ou probable, une dette technique visible (versions anciennes, fin de support, contournements), le coût ou les limites du SaaS actuel (prix, dépendance, conformité, hébergement des données) et des offres d'emploi sur le sujet de l'offre. Un projet de migration en cours ou un déclencheur explicite est fort. L'absence de signal n'est pas un signal négatif : réponds « inconnu » ou « aucun » selon ce que disent les documents, sans rien supposer.",
       "weight": 6,
       "exclusion_threshold": 0.6,
+      "samples": 3,
+      "sampling_temperature": 0.7,
       "questions": [
         {
           "id": "migration",
@@ -580,6 +592,8 @@
       "system_prompt": "Tu évalues l'entreprise à partir de sa fiche entreprise. Les documents « Company dossier » contiennent les données officielles du registre français (raison sociale, activité NAF, tranche d'effectif, siège, date de création) et le texte de pages du site de l'entreprise (accueil, à propos, mentions légales). Les données officielles sont fiables ; le texte du site est ce que l'entreprise dit d'elle-même. Appuie-toi uniquement sur cette fiche et sur le bloc « Faits ». Si la fiche est absente, ou si elle indique que le SIREN est introuvable, réponds « inconnu » : ne devine ni l'activité ni l'effectif d'après le nom de domaine. Évalue si l'activité de l'entreprise est pertinente pour l'offre, si sa taille correspond à la cible et si elle a de vrais enjeux d'identité et d'accès (clients, collaborateurs ou partenaires à authentifier, données sensibles, conformité). Ajuste la cible de taille dans ce prompt selon ton marché.",
       "weight": 4,
       "exclusion_threshold": 0.6,
+      "samples": 3,
+      "sampling_temperature": 0.7,
       "questions": [
         {
           "id": "activite_pertinente",
@@ -690,6 +704,8 @@
       "system_prompt": "Tu décides si une entreprise doit être écartée des prospects. Tu n'évalues pas son intérêt : tu cherches uniquement une raison explicite de l'exclure. Choisis une option qui exclut seulement quand une phrase des documents le dit explicitement et copie cette phrase mot pour mot comme preuve. Un nom proche d'une entreprise de la liste, une simple ressemblance ou une impression ne suffisent pas : réponds alors « non » ou « inconnu ». Quand rien dans les documents ne permet de trancher, réponds « inconnu ».\n\nLes listes suivantes sont maintenues par l'opérateur. Modifie-les pour adapter l'agent à ton marché.\n\nClients actuels : (liste à compléter)\nConcurrents : Okta, Auth0, Ping Identity, ForgeRock, Microsoft Entra, Keycloak, Red Hat\nÉditeurs et intégrateurs du domaine : Thales, Wallix, Ilex, Inwebo, Ubble, IDnow, Evidian, Eviden, Atos, Capgemini, Sopra Steria, Wavestone\n\nPour « hébergeur ou agence », exclus seulement quand le signal détecté concerne un client de l'entreprise (elle héberge ou opère le site d'un tiers) et non l'entreprise elle-même. Pour « domaine parqué ou inactif », exclus seulement quand les documents montrent une page de parking, un site en vente ou un domaine sans activité.",
       "weight": 1,
       "exclusion_threshold": 0.6,
+      "samples": 3,
+      "sampling_temperature": 0.7,
       "questions": [
         {
           "id": "editeur_integrateur",
@@ -837,6 +853,11 @@
   "aggregator": {
     "provider_id": null,
     "system_prompt": "You write the summary of a lead for a B2B lead detection tool. You receive the lead, its signals, and the answers and scores of every qualification agent. Write a short synthesis, the verdict narrative, an approach angle and a message draft for the operator to review. Quote evidence verbatim from the documents. Never change the computed confidence or the verdict. Base your text only on what is provided and do not invent facts."
+  },
+  "escalation": {
+    "provider": null,
+    "band_low": 40,
+    "band_high": 70
   },
   "verdict": {
     "reliable_from": 70,

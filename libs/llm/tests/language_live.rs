@@ -60,6 +60,8 @@ fn fake_result(
         }}),
         agent_score: Some(score),
         error: None,
+        escalated: false,
+        raw_samples: json!([]),
         created_at: std::time::SystemTime::now().into(),
     }
 }
@@ -179,6 +181,7 @@ async fn the_aggregator_summarises_an_iam_lead_in_french_live() {
         prompt: built.tag.clone(),
         domain: lodestone_core::NormalizedDomain::from_host("example-retail.fr").unwrap(),
         agent: None,
+        sample: 0,
     };
     let settings = CallSettings {
         max_retries: 2,
@@ -199,6 +202,7 @@ async fn the_aggregator_summarises_an_iam_lead_in_french_live() {
                 instruction: &current,
                 documents: &documents,
                 max_tokens: 4096,
+                temperature: None,
             },
             schema: &schema,
         };

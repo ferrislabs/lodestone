@@ -10,6 +10,8 @@ import {
 	DEFAULT_AGGREGATOR_PROMPT,
 	displayOrder,
 	EVIDENCE_WEIGHT_KEYS,
+	escalationOf,
+	escalationProblems,
 	evidenceProblems,
 	evidenceSettingsOf,
 	exclusionThresholdOf,
@@ -28,6 +30,9 @@ import {
 	removeOption,
 	removeQuestion,
 	renameQualificationAgent,
+	samplesOf,
+	samplingTemperatureOf,
+	setEscalationField,
 	setEvidenceField,
 	setEvidenceWeight,
 	setOptionField,
@@ -66,7 +71,7 @@ describe('templates', () => {
 		])
 	})
 
-	it('builds templates that pass the v8 validation', () => {
+	it('builds templates that pass the v9 validation', () => {
 		for (const template of QUALIFICATION_TEMPLATES) {
 			if (template.id === 'vide') continue
 			const agent = newQualificationAgent(template.id, new Set(['ats']))
@@ -801,6 +806,122 @@ describe('validateQualification', () => {
 		expect(exclusionThresholdOf({ exclusion_threshold: 0.75 })).toBe(75)
 		expect(exclusionThresholdOf({})).toBe(60)
 		expect(exclusionThresholdOf({ exclusion_threshold: null })).toBeNull()
+	})
+
+	it('gives every template agent three samples at 0.7', () => {
+		for (const template of QUALIFICATION_TEMPLATES) {
+			const agent = newQualificationAgent(template.id, new Set())
+			expect(agent.samples, template.id).toBe(3)
+			expect(agent.sampling_temperature, template.id).toBe(0.7)
+		}
+	})
+
+	it('reads the sampling fields with their defaults', () => {
+		expect(samplesOf({ samples: 5 })).toBe(5)
+		expect(samplesOf({})).toBe(3)
+		expect(samplesOf({ samples: null })).toBeNull()
+		expect(samplingTemperatureOf({ sampling_temperature: 1.2 })).toBe(1.2)
+		expect(samplingTemperatureOf({})).toBe(0.7)
+		expect(samplingTemperatureOf({ sampling_temperature: null })).toBeNull()
+	})
+
+	it('validates the samples from 1 to 5', () => {
+		const agent = newQualificationAgent('pertinence', new Set())
+		const path = 'qualification_agents[0].samples'
+		for (const bad of [0, 6, 2.5, null]) {
+			const problems = validateQualification(
+				withQualification(profile(), [{ ...agent, samples: bad }]),
+			)
+			expect(
+				problems.filter((problem) => problem.path === path),
+				String(bad),
+			).toEqual([{ path, message: 'Doit être un entier de 1 à 5' }])
+		}
+		for (const good of [1, 3, 5]) {
+			expect(
+				validateQualification(
+					withQualification(profile(), [{ ...agent, samples: good }]),
+				),
+			).toEqual([])
+		}
+	})
+
+	it('validates the sampling temperature from 0 to 1.5', () => {
+		const agent = newQualificationAgent('pertinence', new Set())
+		const path = 'qualification_agents[0].sampling_temperature'
+		for (const bad of [-0.1, 1.6, null]) {
+			const problems = validateQualification(
+				withQualification(profile(), [{ ...agent, sampling_temperature: bad }]),
+			)
+			expect(
+				problems.filter((problem) => problem.path === path),
+				String(bad),
+			).toEqual([{ path, message: 'Doit être un nombre de 0 à 1.5' }])
+		}
+		for (const good of [0, 0.7, 1.5]) {
+			expect(
+				validateQualification(
+					withQualification(profile(), [
+						{ ...agent, sampling_temperature: good },
+					]),
+				),
+			).toEqual([])
+		}
+	})
+
+	it('reads the escalation with its defaults', () => {
+		expect(escalationOf({})).toEqual({
+			provider: '',
+			bandLow: 40,
+			bandHigh: 70,
+		})
+		expect(
+			escalationOf({
+				escalation: { provider: 'p1', band_low: 20, band_high: 60 },
+			}),
+		).toEqual({ provider: 'p1', bandLow: 20, bandHigh: 60 })
+		expect(escalationOf({ escalation: { provider: null } }).provider).toBe('')
+	})
+
+	it('sets one escalation field and keeps the others', () => {
+		const value = setEscalationField(
+			{ escalation: { provider: null, band_low: 40, band_high: 70 } },
+			'band_low',
+			25,
+		)
+		expect(value.escalation).toEqual({
+			provider: null,
+			band_low: 25,
+			band_high: 70,
+		})
+		expect(setEscalationField({}, 'provider', 'p1').escalation).toEqual({
+			provider: 'p1',
+		})
+	})
+
+	it('validates the grey band as ordered percentages', () => {
+		expect(
+			escalationProblems({ provider: '', bandLow: 40, bandHigh: 70 }),
+		).toEqual([])
+		expect(
+			escalationProblems({ provider: '', bandLow: 70, bandHigh: 70 }),
+		).toEqual([
+			{
+				path: 'escalation.band_high',
+				message: "« Jusqu'à » doit être supérieur à « À partir de »",
+			},
+		])
+		expect(
+			escalationProblems({ provider: '', bandLow: null, bandHigh: 101 }).map(
+				(problem) => problem.path,
+			),
+		).toEqual(['escalation.band_low', 'escalation.band_high'])
+		expect(
+			validateQualification({
+				...profile(),
+				escalation: { provider: null, band_low: 80, band_high: 20 },
+			}).map((problem) => problem.path),
+		).toEqual(['escalation.band_high'])
 	})
 
 	it('rejects an unknown option that excludes', () => {

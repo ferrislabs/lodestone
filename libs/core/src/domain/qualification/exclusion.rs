@@ -124,6 +124,8 @@ mod tests {
             system_prompt: "p".to_owned(),
             weight: 1,
             exclusion_threshold: threshold,
+            samples: 1,
+            sampling_temperature: 0.7,
             questions,
         }
     }
@@ -152,6 +154,8 @@ mod tests {
             answers,
             agent_score: Some(0.5),
             error: None,
+            escalated: false,
+            raw_samples: json!([]),
             created_at: Utc.timestamp_opt(1_800_000_000, 0).unwrap(),
         }
     }

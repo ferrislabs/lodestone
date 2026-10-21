@@ -1,5 +1,5 @@
 export const NEW_PROFILE_TEMPLATE = `{
-  "schema_version": 6,
+  "schema_version": 9,
   "identity": {
     "offer": "",
     "target_customer": ""
@@ -9,6 +9,11 @@ export const NEW_PROFILE_TEMPLATE = `{
   "aggregator": {
     "provider_id": null,
     "system_prompt": ""
+  },
+  "escalation": {
+    "provider": null,
+    "band_low": 40,
+    "band_high": 70
   },
   "verdict": {
     "reliable_from": 70,

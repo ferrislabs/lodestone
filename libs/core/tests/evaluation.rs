@@ -40,6 +40,7 @@ impl Clock for FixedClock {
 #[derive(Debug, Clone)]
 enum Reply {
     Best,
+    Middle,
     Worst,
     Raw(Value),
     Fail(LlmError),
@@ -51,6 +52,8 @@ struct Seen {
     instruction: String,
     documents: Vec<String>,
     schema: Value,
+    model: String,
+    temperature: Option<f64>,
 }
 
 struct Shared {
@@ -88,7 +91,14 @@ fn quote_of(request: &LlmRequest<'_>) -> String {
         .to_owned()
 }
 
-fn answers_from(schema: &Value, last: bool, quote: &str) -> Value {
+#[derive(Clone, Copy)]
+enum Pick {
+    First,
+    Middle,
+    Last,
+}
+
+fn answers_from(schema: &Value, pick: Pick, quote: &str) -> Value {
     let mut answers = serde_json::Map::new();
     let questions = schema["properties"]["answers"]["properties"]
         .as_object()
@@ -99,10 +109,10 @@ fn answers_from(schema: &Value, last: bool, quote: &str) -> Value {
             .iter()
             .filter(|value| value.as_str() != Some("inconnu"))
             .collect();
-        let chosen = if last {
-            known[known.len() - 1]
-        } else {
-            known[0]
+        let chosen = match pick {
+            Pick::First => known[0],
+            Pick::Middle => known[known.len() / 2],
+            Pick::Last => known[known.len() - 1],
         };
         let probabilities: serde_json::Map<String, Value> = all
             .iter()
@@ -138,6 +148,8 @@ impl LlmProvider for Scripted {
                 .map(|document| document.content.to_owned())
                 .collect(),
             schema: request.schema.clone(),
+            model: self.model.clone(),
+            temperature: request.temperature,
         });
         let reply = self
             .shared
@@ -148,8 +160,9 @@ impl LlmProvider for Scripted {
             .and_then(VecDeque::pop_front)
             .unwrap_or(Reply::Best);
         let output = match reply {
-            Reply::Best => answers_from(request.schema, false, &quote_of(request)),
-            Reply::Worst => answers_from(request.schema, true, &quote_of(request)),
+            Reply::Best => answers_from(request.schema, Pick::First, &quote_of(request)),
+            Reply::Middle => answers_from(request.schema, Pick::Middle, &quote_of(request)),
+            Reply::Worst => answers_from(request.schema, Pick::Last, &quote_of(request)),
             Reply::Raw(value) => value,
             Reply::Fail(error) => return Err(error),
         };
@@ -189,6 +202,7 @@ fn agent(id: &str, weight: u8, provider: Option<ProviderId>, question: &str) -> 
         "provider_id": provider.map(|provider| provider.0.to_string()),
         "system_prompt": format!("PROMPT-OF-{id}"),
         "weight": weight,
+        "samples": 1,
         "questions": [{
             "id": question,
             "wording": "Pertinent ?",
@@ -201,6 +215,11 @@ fn agent(id: &str, weight: u8, provider: Option<ProviderId>, question: &str) -> 
             ]
         }]
     })
+}
+
+fn sampled(mut agent: Value, samples: u8) -> Value {
+    agent["samples"] = json!(samples);
+    agent
 }
 
 fn definition(agents: Vec<Value>) -> Value {
@@ -343,6 +362,35 @@ impl Harness {
 
     fn calls(&self) -> usize {
         self.shared.seen.lock().unwrap().len()
+    }
+
+    fn calls_to(&self, model: &str) -> usize {
+        self.seen()
+            .iter()
+            .filter(|seen| seen.model == model)
+            .count()
+    }
+
+    async fn escalating_profile(
+        &self,
+        agents: Vec<Value>,
+        provider: Option<ProviderId>,
+    ) -> ProfileId {
+        let mut value = definition(agents);
+        value["escalation"]["provider"] = json!(provider.map(|provider| provider.0.to_string()));
+        let id = self
+            .usecase
+            .create_profile(CreateProfileCommand {
+                name: ProfileName::parse("iam").unwrap(),
+                definition: ValidatedProfile::parse(value).unwrap(),
+                created_by: None,
+            })
+            .await
+            .unwrap()
+            .profile
+            .id;
+        self.usecase.set_profile_active(id, true).await.unwrap();
+        id
     }
 
     async fn active(&self) -> ActiveProfile {
@@ -665,7 +713,7 @@ async fn a_contract_violation_is_retried_once_with_the_violation_list(pool: PgPo
 fn solo_answers() -> Value {
     let profile = ValidatedProfile::parse(definition(vec![agent("solo", 5, None, "q")])).unwrap();
     let schema = lodestone_core::contract_schema(&profile.definition().qualification_agents[0]);
-    answers_from(&schema, false, "lead: acme.com")
+    answers_from(&schema, Pick::First, "lead: acme.com")
 }
 
 #[sqlx::test(migrations = "../../migrations")]
@@ -1404,6 +1452,8 @@ fn the_aggregator_document_carries_the_quote_and_the_ungrounded_marker() {
         }}),
         agent_score: Some(1.0),
         error: None,
+        escalated: false,
+        raw_samples: json!([]),
         created_at: chrono::DateTime::from_timestamp(0, 0).unwrap(),
     };
     let grounded = lodestone_core::render_agent(agent, Some(&result));
@@ -1425,6 +1475,7 @@ fn excluding_agent(id: &str, provider: ProviderId, threshold: f64) -> Value {
         "system_prompt": format!("PROMPT-OF-{id}"),
         "weight": 1,
         "exclusion_threshold": threshold,
+        "samples": 1,
         "questions": [{
             "id": "client_actuel",
             "wording": "Déjà client ?",
@@ -1597,4 +1648,474 @@ async fn a_threshold_above_the_probability_keeps_the_lead(pool: PgPool) {
 
     let scoring = harness.scoring(profile, "acme.com").await.unwrap();
     assert!(scoring.exclusions.is_empty());
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn three_samples_are_three_calls_at_the_sampling_temperature_and_the_majority_wins(
+    pool: PgPool,
+) {
+    let harness = Harness::new(pool.clone(), 10);
+    let provider = harness.provider("model-a", 0).await;
+    harness.script("model-a", vec![Reply::Best, Reply::Worst, Reply::Best]);
+    let profile = harness
+        .profile(vec![sampled(agent("solo", 5, Some(provider), "q"), 3)])
+        .await;
+    harness.observe("acme.com", SourceName::HttpProbe, 10).await;
+
+    let report = harness.step(settings(100, 10)).await;
+
+    assert_eq!((report.leads, report.valid, report.invalid), (1, 1, 0));
+    assert_eq!(harness.calls(), 3);
+    assert!(
+        harness
+            .seen()
+            .iter()
+            .all(|seen| seen.temperature == Some(0.7))
+    );
+    let cached: i64 = sqlx::query_scalar("SELECT count(*) FROM llm_cache")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(cached, 3);
+    let results = harness.results(profile, "acme.com").await;
+    let result = &results[0];
+    assert_eq!(result.status, ResultStatus::Valid);
+    assert_eq!(result.answers["q"]["choice"], "forte");
+    let agreement = result.answers["q"]["agreement"].as_f64().unwrap();
+    assert!((agreement - 2.0 / 3.0).abs() < 1e-9);
+    assert_eq!(result.provenance.samples, 3);
+    assert_eq!(result.provenance.generation.temperature, Some(0.7));
+    assert!(!result.escalated);
+    let raw = result.raw_samples.as_array().unwrap();
+    assert_eq!(raw.len(), 3);
+    assert_eq!(raw[1]["answers"]["q"]["choice"], "faible");
+    assert!(raw.iter().all(|sample| sample["valid"] == true));
+    let forte = result.answers["q"]["probabilities"]["forte"]
+        .as_f64()
+        .unwrap();
+    assert!((forte - (0.5 * 2.0 / 3.0 + 0.5 * 2.0 / 3.0)).abs() < 1e-9);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn identical_replies_still_cost_one_call_per_sample_and_replays_are_cached(pool: PgPool) {
+    let harness = Harness::new(pool.clone(), 10);
+    let provider = harness.provider("model-a", 0).await;
+    let profile = harness
+        .profile(vec![sampled(agent("solo", 5, Some(provider), "q"), 3)])
+        .await;
+    harness.observe("acme.com", SourceName::HttpProbe, 10).await;
+    harness.step(settings(100, 10)).await;
+    assert_eq!(harness.calls(), 3);
+
+    sqlx::query("DELETE FROM lead_qualification_state")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let report = harness.step(settings(100, 10)).await;
+
+    assert_eq!(report.leads, 1);
+    assert_eq!(harness.calls(), 3);
+    let results = harness.results(profile, "acme.com").await;
+    assert_eq!(results[0].answers["q"]["agreement"], 1.0);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_budget_is_charged_per_sample_call(pool: PgPool) {
+    let harness = Harness::new(pool, 1_000_000);
+    let pricey = harness.provider("model-pricey", 1).await;
+    let profile = harness
+        .profile(vec![sampled(agent("solo", 5, Some(pricey), "q"), 3)])
+        .await;
+    harness.observe("acme.com", SourceName::HttpProbe, 10).await;
+
+    let report = harness.step(settings(2, 10)).await;
+
+    assert!(report.budget_exhausted);
+    assert_eq!(report.leads, 0);
+    assert_eq!(harness.calls(), 2);
+    assert!(
+        harness
+            .lead(profile, "acme.com")
+            .await
+            .qualified_at
+            .is_none()
+    );
+
+    let report = harness.step(settings(10, 10)).await;
+
+    assert!(!report.budget_exhausted);
+    assert_eq!(report.leads, 1);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn an_invalid_sample_is_dropped_and_the_others_vote(pool: PgPool) {
+    let harness = Harness::new(pool, 10);
+    let provider = harness.provider("model-a", 0).await;
+    harness.script(
+        "model-a",
+        vec![Reply::Best, Reply::Fail(LlmError::Refused), Reply::Best],
+    );
+    let profile = harness
+        .profile(vec![sampled(agent("solo", 5, Some(provider), "q"), 3)])
+        .await;
+    harness.observe("acme.com", SourceName::HttpProbe, 10).await;
+
+    let report = harness.step(settings(100, 10)).await;
+
+    assert_eq!((report.valid, report.invalid), (1, 0));
+    let results = harness.results(profile, "acme.com").await;
+    let result = &results[0];
+    assert_eq!(result.status, ResultStatus::Valid);
+    assert_eq!(result.provenance.samples, 2);
+    assert_eq!(result.answers["q"]["choice"], "forte");
+    assert_eq!(result.answers["q"]["agreement"], 1.0);
+    let raw = result.raw_samples.as_array().unwrap();
+    assert_eq!(raw.len(), 3);
+    assert_eq!(raw[1]["valid"], false);
+    assert!(raw[1]["error"].as_str().unwrap().contains("Échec"));
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_result_is_invalid_only_when_every_sample_is_invalid(pool: PgPool) {
+    let harness = Harness::new(pool, 10);
+    let provider = harness.provider("model-a", 0).await;
+    harness.script(
+        "model-a",
+        vec![
+            Reply::Fail(LlmError::Refused),
+            Reply::Fail(LlmError::Refused),
+            Reply::Fail(LlmError::Refused),
+        ],
+    );
+    let profile = harness
+        .profile(vec![sampled(agent("solo", 5, Some(provider), "q"), 3)])
+        .await;
+    harness.observe("acme.com", SourceName::HttpProbe, 10).await;
+
+    let report = harness.step(settings(100, 10)).await;
+
+    assert_eq!((report.valid, report.invalid), (0, 1));
+    let results = harness.results(profile, "acme.com").await;
+    let result = &results[0];
+    assert_eq!(result.status, ResultStatus::Invalid);
+    assert!(result.error.as_deref().unwrap().contains("Échec"));
+    assert_eq!(result.raw_samples.as_array().unwrap().len(), 3);
+    assert_eq!(result.provenance.samples, 1);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_single_sample_keeps_the_provider_temperature_and_stores_no_agreement(pool: PgPool) {
+    let harness = Harness::new(pool, 10);
+    let provider = harness.provider("model-a", 0).await;
+    let profile = harness
+        .profile(vec![agent("solo", 5, Some(provider), "q")])
+        .await;
+    harness.observe("acme.com", SourceName::HttpProbe, 10).await;
+
+    harness.step(settings(100, 10)).await;
+
+    assert_eq!(harness.calls(), 1);
+    assert_eq!(harness.seen()[0].temperature, None);
+    let results = harness.results(profile, "acme.com").await;
+    assert!(results[0].answers["q"].get("agreement").is_none());
+    assert_eq!(results[0].provenance.samples, 1);
+    assert_eq!(results[0].raw_samples, json!([]));
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn exclusions_read_the_voted_answers(pool: PgPool) {
+    let harness = Harness::new(pool, 10);
+    let provider = harness.provider("model-a", 0).await;
+    harness.script("model-a", vec![Reply::Best, Reply::Worst, Reply::Best]);
+    let profile = harness
+        .profile(vec![sampled(
+            excluding_agent("exclusions", provider, 0.6),
+            3,
+        )])
+        .await;
+    harness.observe("acme.com", SourceName::HttpProbe, 10).await;
+
+    harness.step(settings(100, 10)).await;
+
+    let scoring = harness.scoring(profile, "acme.com").await.unwrap();
+    assert_eq!(scoring.exclusions.len(), 1);
+    assert!((scoring.exclusions[0].probability - 2.0 / 3.0).abs() < 1e-9);
+    assert_eq!(
+        harness.lead(profile, "acme.com").await.verdict,
+        Some(Verdict::Discarded)
+    );
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_minority_exclusion_does_not_exclude(pool: PgPool) {
+    let harness = Harness::new(pool, 10);
+    let provider = harness.provider("model-a", 0).await;
+    harness.script("model-a", vec![Reply::Best, Reply::Worst, Reply::Worst]);
+    let profile = harness
+        .profile(vec![sampled(
+            excluding_agent("exclusions", provider, 0.6),
+            3,
+        )])
+        .await;
+    harness.observe("acme.com", SourceName::HttpProbe, 10).await;
+
+    harness.step(settings(100, 10)).await;
+
+    let scoring = harness.scoring(profile, "acme.com").await.unwrap();
+    assert!(scoring.exclusions.is_empty());
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_grey_zone_lead_is_re_evaluated_by_the_escalation_provider(pool: PgPool) {
+    let harness = Harness::new(pool, 10);
+    let local = harness.provider("model-a", 0).await;
+    let strong = harness.provider("model-b", 0).await;
+    harness.script("model-a", vec![Reply::Middle, Reply::Middle]);
+    harness.script("model-b", vec![Reply::Best, Reply::Best]);
+    let profile = harness
+        .escalating_profile(
+            vec![
+                agent("first", 5, Some(local), "q"),
+                agent("second", 5, Some(local), "q"),
+            ],
+            Some(strong),
+        )
+        .await;
+    harness.observe("acme.com", SourceName::HttpProbe, 10).await;
+
+    let report = harness.step(settings(100, 10)).await;
+
+    assert_eq!((report.leads, report.valid, report.invalid), (1, 2, 0));
+    assert_eq!(harness.calls_to("model-a"), 2);
+    assert_eq!(harness.calls_to("model-b"), 2);
+    for seen in harness.seen().iter().filter(|seen| seen.model == "model-b") {
+        assert_eq!(seen.temperature, Some(0.0));
+    }
+    let results = harness.results(profile, "acme.com").await;
+    assert_eq!(results.len(), 2);
+    for result in &results {
+        assert!(result.escalated);
+        assert_eq!(result.provenance.provider_id, Some(strong));
+        assert_eq!(result.provenance.provider_name, "model-b");
+        assert_eq!(result.provenance.model, "model-b");
+        assert_eq!(result.provenance.samples, 1);
+        assert_eq!(result.provenance.generation.temperature, Some(0.0));
+        assert_eq!(result.answers["q"]["choice"], "forte");
+        assert_eq!(result.status, ResultStatus::Valid);
+    }
+    let lead = harness.lead(profile, "acme.com").await;
+    assert_eq!(lead.confidence, Some(100.0));
+    assert_eq!(lead.verdict, Some(Verdict::Reliable));
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_confident_lead_is_not_escalated(pool: PgPool) {
+    let harness = Harness::new(pool, 10);
+    let local = harness.provider("model-a", 0).await;
+    let strong = harness.provider("model-b", 0).await;
+    let profile = harness
+        .escalating_profile(vec![agent("first", 5, Some(local), "q")], Some(strong))
+        .await;
+    harness.observe("acme.com", SourceName::HttpProbe, 10).await;
+
+    harness.step(settings(100, 10)).await;
+
+    assert_eq!(harness.calls_to("model-b"), 0);
+    let results = harness.results(profile, "acme.com").await;
+    assert!(!results[0].escalated);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_band_is_inclusive_below_and_exclusive_above(pool: PgPool) {
+    let harness = Harness::new(pool, 10);
+    let local = harness.provider("model-a", 0).await;
+    let strong = harness.provider("model-b", 0).await;
+    harness.script("model-a", vec![Reply::Middle, Reply::Middle]);
+    let mut value = definition(vec![agent("first", 5, Some(local), "q")]);
+    value["escalation"]["provider"] = json!(strong.0.to_string());
+    value["escalation"]["band_low"] = json!(10);
+    value["escalation"]["band_high"] = json!(50);
+    let profile = harness
+        .usecase
+        .create_profile(CreateProfileCommand {
+            name: ProfileName::parse("iam").unwrap(),
+            definition: ValidatedProfile::parse(value).unwrap(),
+            created_by: None,
+        })
+        .await
+        .unwrap()
+        .profile
+        .id;
+    harness
+        .usecase
+        .set_profile_active(profile, true)
+        .await
+        .unwrap();
+    harness.observe("acme.com", SourceName::HttpProbe, 10).await;
+
+    harness.step(settings(100, 10)).await;
+
+    assert_eq!(
+        harness.lead(profile, "acme.com").await.confidence,
+        Some(50.0)
+    );
+    assert_eq!(harness.calls_to("model-b"), 0);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn without_an_escalation_provider_a_grey_zone_lead_stays_as_it_is(pool: PgPool) {
+    let harness = Harness::new(pool, 10);
+    let local = harness.provider("model-a", 0).await;
+    harness.script("model-a", vec![Reply::Middle]);
+    let profile = harness
+        .escalating_profile(vec![agent("first", 5, Some(local), "q")], None)
+        .await;
+    harness.observe("acme.com", SourceName::HttpProbe, 10).await;
+
+    harness.step(settings(100, 10)).await;
+
+    assert_eq!(harness.calls(), 1);
+    let lead = harness.lead(profile, "acme.com").await;
+    assert_eq!(lead.confidence, Some(50.0));
+    assert!(!harness.results(profile, "acme.com").await[0].escalated);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_replayed_evaluation_reuses_the_cached_escalation_without_new_calls(pool: PgPool) {
+    let harness = Harness::new(pool.clone(), 10);
+    let local = harness.provider("model-a", 0).await;
+    let strong = harness.provider("model-b", 0).await;
+    harness.script("model-a", vec![Reply::Middle, Reply::Middle, Reply::Middle]);
+    let profile = harness
+        .escalating_profile(vec![agent("first", 5, Some(local), "q")], Some(strong))
+        .await;
+    harness.observe("acme.com", SourceName::HttpProbe, 10).await;
+    harness.step(settings(100, 10)).await;
+    assert_eq!(harness.calls_to("model-b"), 1);
+
+    sqlx::query("DELETE FROM lead_qualification_state")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let report = harness.step(settings(100, 10)).await;
+
+    assert_eq!(report.leads, 1);
+    assert_eq!(harness.calls_to("model-a"), 1);
+    assert_eq!(harness.calls_to("model-b"), 1);
+    assert!(harness.results(profile, "acme.com").await[0].escalated);
+    assert_eq!(
+        harness.lead(profile, "acme.com").await.confidence,
+        Some(100.0)
+    );
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_lead_that_becomes_due_again_and_stays_grey_is_escalated_again(pool: PgPool) {
+    let harness = Harness::new(pool, 10);
+    let local = harness.provider("model-a", 0).await;
+    let strong = harness.provider("model-b", 0).await;
+    harness.script("model-a", vec![Reply::Middle, Reply::Middle]);
+    harness.script("model-b", vec![Reply::Middle, Reply::Middle]);
+    let profile = harness
+        .escalating_profile(vec![agent("first", 5, Some(local), "q")], Some(strong))
+        .await;
+    harness.observe("acme.com", SourceName::HttpProbe, 10).await;
+    harness.step(settings(100, 10)).await;
+    assert_eq!(harness.calls_to("model-b"), 1);
+
+    harness.observe("acme.com", SourceName::Ats, 20).await;
+    let report = harness.step(settings(100, 10)).await;
+
+    assert_eq!(report.leads, 1);
+    assert_eq!(harness.calls_to("model-a"), 2);
+    assert_eq!(harness.calls_to("model-b"), 2);
+    assert!(harness.results(profile, "acme.com").await[0].escalated);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_new_revision_may_escalate_the_lead_again(pool: PgPool) {
+    let harness = Harness::new(pool, 10);
+    let local = harness.provider("model-a", 0).await;
+    let strong = harness.provider("model-b", 0).await;
+    harness.script("model-a", vec![Reply::Middle, Reply::Middle]);
+    let profile = harness
+        .escalating_profile(vec![agent("first", 5, Some(local), "q")], Some(strong))
+        .await;
+    harness.observe("acme.com", SourceName::HttpProbe, 10).await;
+    harness.step(settings(100, 10)).await;
+    assert_eq!(harness.calls_to("model-b"), 1);
+
+    let mut value = definition(vec![agent("first", 5, Some(local), "q")]);
+    value["escalation"]["provider"] = json!(strong.0.to_string());
+    value["identity"]["offer"] = json!("Managed IAM, second revision");
+    harness
+        .usecase
+        .revise_profile(ReviseProfileCommand {
+            profile_id: profile,
+            definition: ValidatedProfile::parse(value).unwrap(),
+            created_by: None,
+        })
+        .await
+        .unwrap();
+    harness.step(settings(100, 10)).await;
+
+    assert_eq!(harness.calls_to("model-b"), 2);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_failed_escalation_keeps_the_original_results(pool: PgPool) {
+    let harness = Harness::new(pool, 10);
+    let local = harness.provider("model-a", 0).await;
+    let strong = harness.provider("model-b", 0).await;
+    harness.script("model-a", vec![Reply::Middle]);
+    harness.script("model-b", vec![Reply::Fail(LlmError::Refused)]);
+    let profile = harness
+        .escalating_profile(vec![agent("first", 5, Some(local), "q")], Some(strong))
+        .await;
+    harness.observe("acme.com", SourceName::HttpProbe, 10).await;
+
+    let report = harness.step(settings(100, 10)).await;
+
+    assert_eq!((report.valid, report.invalid), (1, 0));
+    let results = harness.results(profile, "acme.com").await;
+    assert_eq!(results[0].status, ResultStatus::Valid);
+    assert!(!results[0].escalated);
+    assert_eq!(results[0].provenance.provider_id, Some(local));
+    assert_eq!(
+        harness.lead(profile, "acme.com").await.confidence,
+        Some(50.0)
+    );
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn escalation_spends_the_run_budget_and_a_replay_reuses_the_cached_calls(pool: PgPool) {
+    let harness = Harness::new(pool, 1_000_000);
+    let local = harness.provider("model-a", 100).await;
+    let strong = harness.provider("model-b", 100).await;
+    harness.script("model-a", vec![Reply::Middle, Reply::Middle]);
+    let profile = harness
+        .escalating_profile(vec![agent("first", 5, Some(local), "q")], Some(strong))
+        .await;
+    harness.observe("acme.com", SourceName::HttpProbe, 10).await;
+
+    let report = harness.step(settings(1, 10)).await;
+
+    assert!(report.budget_exhausted);
+    assert_eq!(harness.calls_to("model-a"), 1);
+    assert_eq!(harness.calls_to("model-b"), 0);
+    assert!(
+        harness
+            .lead(profile, "acme.com")
+            .await
+            .qualified_at
+            .is_none()
+    );
+
+    let report = harness.step(settings(10, 10)).await;
+
+    assert!(!report.budget_exhausted);
+    assert_eq!(report.leads, 1);
+    assert_eq!(harness.calls_to("model-a"), 1);
+    assert_eq!(harness.calls_to("model-b"), 1);
+    assert!(harness.results(profile, "acme.com").await[0].escalated);
 }

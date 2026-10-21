@@ -117,6 +117,7 @@ fn request<'a>(documents: &'a [UntrustedDocument<'a>], schema: &'a Value) -> Llm
         schema_name: "verdict",
         schema,
         max_tokens: 256,
+        temperature: None,
     }
 }
 

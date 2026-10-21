@@ -4,7 +4,7 @@ use uuid::Uuid;
 
 use crate::domain::values::SourceName;
 
-pub const PROFILE_SCHEMA_VERSION: u32 = 8;
+pub const PROFILE_SCHEMA_VERSION: u32 = 9;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -13,7 +13,7 @@ pub const PROFILE_SCHEMA_VERSION: u32 = 8;
     description = "Describes one market: what is sold, which agents scan which sources, which qualification agents judge a lead and how an aggregator sums it up, how leads are scored and which contacts to prefer."
 )]
 pub struct ProfileDefinition {
-    #[schemars(description = "Profile format version. Must be 8.")]
+    #[schemars(description = "Profile format version. Must be 9.")]
     pub schema_version: u32,
     pub identity: Identity,
     #[schemars(description = "Detection agents. At least one is required.")]
@@ -23,6 +23,8 @@ pub struct ProfileDefinition {
     )]
     pub qualification_agents: Vec<QualificationAgent>,
     pub aggregator: Aggregator,
+    #[serde(default)]
+    pub escalation: Escalation,
     #[serde(default)]
     pub verdict: VerdictThresholds,
     #[serde(default)]
@@ -122,6 +124,18 @@ pub struct QualificationAgent {
         description = "Probability from 0.5 to 1 at which a grounded answer for an option that excludes the lead excludes it. Default 0.6."
     )]
     pub exclusion_threshold: f64,
+    #[serde(default = "default_samples")]
+    #[schemars(
+        range(min = 1, max = 5),
+        description = "Number of independent model calls per lead, from 1 to 5. The answer of each question is the majority choice. Default 3."
+    )]
+    pub samples: u8,
+    #[serde(default = "default_sampling_temperature")]
+    #[schemars(
+        range(min = 0.0, max = 1.5),
+        description = "Temperature of the calls when samples is above 1, overriding the provider temperature. Default 0.7."
+    )]
+    pub sampling_temperature: f64,
     #[schemars(
         length(min = 1),
         description = "Questions the agent answers. At least one is required."
@@ -147,6 +161,29 @@ fn default_weight() -> u8 {
 
 pub fn default_exclusion_threshold() -> f64 {
     DEFAULT_EXCLUSION_THRESHOLD
+}
+
+pub const DEFAULT_SAMPLES: u8 = 3;
+pub const MAX_SAMPLES: u8 = 5;
+pub const DEFAULT_SAMPLING_TEMPERATURE: f64 = 0.7;
+pub const MAX_SAMPLING_TEMPERATURE: f64 = 1.5;
+pub const DEFAULT_BAND_LOW: u8 = 40;
+pub const DEFAULT_BAND_HIGH: u8 = 70;
+
+pub fn default_samples() -> u8 {
+    DEFAULT_SAMPLES
+}
+
+pub fn default_sampling_temperature() -> f64 {
+    DEFAULT_SAMPLING_TEMPERATURE
+}
+
+fn default_band_low() -> u8 {
+    DEFAULT_BAND_LOW
+}
+
+fn default_band_high() -> u8 {
+    DEFAULT_BAND_HIGH
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -245,6 +282,51 @@ pub struct Aggregator {
         description = "System prompt given to the model."
     )]
     pub system_prompt: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(
+    title = "Escalation",
+    description = "Re-evaluates the leads whose confidence falls in a grey band with a stronger provider."
+)]
+pub struct Escalation {
+    #[serde(default)]
+    #[schemars(
+        with = "Option<String>",
+        description = "Id of a declared LLM provider that re-evaluates the grey-zone leads. Escalation is disabled when null."
+    )]
+    pub provider: Option<Uuid>,
+    #[serde(default = "default_band_low")]
+    #[schemars(
+        range(min = 0, max = 100),
+        description = "A lead is escalated from this confidence percentage. Must be lower than band_high. Default 40."
+    )]
+    pub band_low: u8,
+    #[serde(default = "default_band_high")]
+    #[schemars(
+        range(min = 0, max = 100),
+        description = "A lead is escalated below this confidence percentage. Default 70."
+    )]
+    pub band_high: u8,
+}
+
+impl Default for Escalation {
+    fn default() -> Self {
+        Self {
+            provider: None,
+            band_low: default_band_low(),
+            band_high: default_band_high(),
+        }
+    }
+}
+
+impl Escalation {
+    pub fn triggers(&self, confidence: f64) -> bool {
+        self.provider.is_some()
+            && confidence >= f64::from(self.band_low)
+            && confidence < f64::from(self.band_high)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]

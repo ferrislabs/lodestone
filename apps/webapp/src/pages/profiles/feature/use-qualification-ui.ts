@@ -12,6 +12,7 @@ import {
 	renameQualificationAgent,
 	setAgentField,
 	setAggregatorField,
+	setEscalationField,
 	setEvidenceField,
 	setEvidenceWeight,
 	setOptionField,
@@ -76,6 +77,12 @@ export function useQualificationUi(
 			onChange(
 				setAgentField(value, index, 'exclusion_threshold', toFraction(percent)),
 			),
+		setSamples: (index, samples) =>
+			onChange(setAgentField(value, index, 'samples', samples)),
+		setSamplingTemperature: (index, temperature) =>
+			onChange(
+				setAgentField(value, index, 'sampling_temperature', temperature),
+			),
 		setPrompt: (index, prompt) =>
 			onChange(setAgentField(value, index, 'system_prompt', prompt)),
 		requestRemove: setConfirmingRemove,
@@ -116,6 +123,18 @@ export function useQualificationUi(
 			onChange(
 				setOptionField(value, index, question, option, 'excludes', excludes),
 			),
+		setEscalationProvider: (providerId) =>
+			onChange(
+				setEscalationField(
+					value,
+					'provider',
+					providerId === '' ? null : providerId,
+				),
+			),
+		setBandLow: (percent) =>
+			onChange(setEscalationField(value, 'band_low', percent)),
+		setBandHigh: (percent) =>
+			onChange(setEscalationField(value, 'band_high', percent)),
 		setAggregatorProvider: (providerId) =>
 			onChange(
 				setAggregatorField(

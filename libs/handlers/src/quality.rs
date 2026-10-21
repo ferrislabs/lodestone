@@ -78,6 +78,8 @@ pub struct VersionPrecisionDto {
     pub model: String,
     /// `qualification-agent@<hash>` or `aggregator@<hash>`.
     pub prompt_version: String,
+    /// True for the runs of the escalation provider, counted apart from the original runs.
+    pub escalated: bool,
     pub validated: u64,
     pub rejected: u64,
     /// Number of decided leads, validated plus rejected.
@@ -275,6 +277,7 @@ impl From<&QualityReport> for QualityDto {
                     agent_name: row.agent_name.clone(),
                     model: row.model.clone(),
                     prompt_version: row.prompt_version.clone(),
+                    escalated: row.escalated,
                     validated: row.validated,
                     rejected: row.rejected,
                     n: row.decided(),

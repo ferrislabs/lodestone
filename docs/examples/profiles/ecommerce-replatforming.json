@@ -1,5 +1,5 @@
 {
-  "schema_version": 8,
+  "schema_version": 9,
   "identity": {
     "offer": "Migration of Magento 1 and Magento 2 shops to a modern e-commerce platform, by a web agency",
     "target_customer": "Merchants and organizations running an outdated Magento storefront"
@@ -60,6 +60,8 @@
       "system_prompt": "You judge whether a company is a relevant prospect for the offer, using the relevance criteria. Base your answers only on what the documents state.\n\nRelevance criteria: The organization runs an online shop on Magento, preferably an outdated version, or is hiring or tendering for a rebuild of its merchant site.",
       "weight": 5,
       "exclusion_threshold": 0.6,
+      "samples": 3,
+      "sampling_temperature": 0.7,
       "questions": [
         {
           "id": "pertinence",
@@ -102,6 +104,11 @@
   "aggregator": {
     "provider_id": null,
     "system_prompt": "You write the summary of a lead for a B2B lead detection tool. You receive the lead, its signals, and the answers and scores of every qualification agent. Write a short synthesis, the verdict narrative, an approach angle and a message draft for the operator to review. Quote evidence verbatim from the documents. Never change the computed confidence or the verdict. Base your text only on what is provided and do not invent facts."
+  },
+  "escalation": {
+    "provider": null,
+    "band_low": 40,
+    "band_high": 70
   },
   "verdict": {
     "reliable_from": 70,

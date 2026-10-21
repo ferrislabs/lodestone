@@ -29,6 +29,13 @@ export {
 export const MIN_OPTIONS = 2
 export const MAX_OPTIONS = 11
 export const MIN_EXCLUSION_PERCENT = 50
+export const MIN_SAMPLES = 1
+export const MAX_SAMPLES = 5
+export const DEFAULT_SAMPLES = 3
+export const MAX_SAMPLING_TEMPERATURE = 1.5
+export const DEFAULT_SAMPLING_TEMPERATURE = 0.7
+export const DEFAULT_BAND_LOW = 40
+export const DEFAULT_BAND_HIGH = 70
 export const MAX_EVIDENCE_CHARS = 300
 export const UNKNOWN_VALUE = 'inconnu'
 export const UNKNOWN_LABEL = 'Inconnu'
@@ -134,6 +141,20 @@ export function exclusionThresholdOf(
 	return fraction === null ? null : Math.round(fraction * 100)
 }
 
+export function samplesOf(agent: JsonValue | undefined): number | null {
+	if (!isJsonObject(agent)) return null
+	if (!('samples' in agent)) return DEFAULT_SAMPLES
+	return numberField(agent, 'samples')
+}
+
+export function samplingTemperatureOf(
+	agent: JsonValue | undefined,
+): number | null {
+	if (!isJsonObject(agent)) return null
+	if (!('sampling_temperature' in agent)) return DEFAULT_SAMPLING_TEMPERATURE
+	return numberField(agent, 'sampling_temperature')
+}
+
 export function displayOrder(options: readonly JsonValue[]): number[] {
 	const positions = options.map((_, position) => position)
 	return [
@@ -144,6 +165,83 @@ export function displayOrder(options: readonly JsonValue[]): number[] {
 
 export function aggregatorOf(value: JsonObject): JsonObject {
 	return isJsonObject(value.aggregator) ? value.aggregator : {}
+}
+
+export interface Escalation {
+	provider: string
+	bandLow: number | null
+	bandHigh: number | null
+}
+
+export function escalationOf(value: JsonObject): Escalation {
+	const escalation = value.escalation
+	if (!isJsonObject(escalation)) {
+		return {
+			provider: '',
+			bandLow: DEFAULT_BAND_LOW,
+			bandHigh: DEFAULT_BAND_HIGH,
+		}
+	}
+	const read = (key: string, fallback: number) =>
+		key in escalation ? numberField(escalation, key) : fallback
+	return {
+		provider:
+			typeof escalation.provider === 'string' ? escalation.provider : '',
+		bandLow: read('band_low', DEFAULT_BAND_LOW),
+		bandHigh: read('band_high', DEFAULT_BAND_HIGH),
+	}
+}
+
+export const BAND_ORDER_ERROR =
+	"« Jusqu'à » doit être supérieur à « À partir de »"
+export const SAMPLES_ERROR = `Doit être un entier de ${MIN_SAMPLES} à ${MAX_SAMPLES}`
+export const SAMPLING_TEMPERATURE_ERROR = `Doit être un nombre de 0 à ${MAX_SAMPLING_TEMPERATURE}`
+
+export function escalationProblems(escalation: Escalation): Problem[] {
+	const problems: Problem[] = []
+	if (!isPercent(escalation.bandLow)) {
+		problems.push({ path: 'escalation.band_low', message: PERCENT_ERROR })
+	}
+	if (!isPercent(escalation.bandHigh)) {
+		problems.push({ path: 'escalation.band_high', message: PERCENT_ERROR })
+	}
+	if (
+		problems.length === 0 &&
+		isPercent(escalation.bandLow) &&
+		isPercent(escalation.bandHigh) &&
+		escalation.bandHigh <= escalation.bandLow
+	) {
+		problems.push({ path: 'escalation.band_high', message: BAND_ORDER_ERROR })
+	}
+	return problems
+}
+
+export function samplingProblems(
+	agent: JsonValue | undefined,
+	base: string,
+): Problem[] {
+	const problems: Problem[] = []
+	const samples = samplesOf(agent)
+	if (
+		samples === null ||
+		!Number.isInteger(samples) ||
+		samples < MIN_SAMPLES ||
+		samples > MAX_SAMPLES
+	) {
+		problems.push({ path: `${base}.samples`, message: SAMPLES_ERROR })
+	}
+	const temperature = samplingTemperatureOf(agent)
+	if (
+		temperature === null ||
+		temperature < 0 ||
+		temperature > MAX_SAMPLING_TEMPERATURE
+	) {
+		problems.push({
+			path: `${base}.sampling_temperature`,
+			message: SAMPLING_TEMPERATURE_ERROR,
+		})
+	}
+	return problems
 }
 
 export interface Verdict {
@@ -566,6 +664,15 @@ export function setVerdictField(
 	return { ...value, verdict: { ...current, [key]: next } }
 }
 
+export function setEscalationField(
+	value: JsonObject,
+	key: 'provider' | 'band_low' | 'band_high',
+	next: string | number | null,
+): JsonObject {
+	const current = isJsonObject(value.escalation) ? value.escalation : {}
+	return { ...value, escalation: { ...current, [key]: next } }
+}
+
 export function setEvidenceField(
 	value: JsonObject,
 	key: 'influence' | 'reference_score',
@@ -814,6 +921,7 @@ export function validateQualification(value: JsonObject): Problem[] {
 				problem(`${base}.exclusion_threshold`, EXCLUSION_PERCENT_ERROR),
 			)
 		}
+		problems.push(...samplingProblems(agent, base))
 		checkQuestions(questionsOf(agent), base, problems)
 	})
 	const aggregator = aggregatorOf(value)
@@ -825,6 +933,7 @@ export function validateQualification(value: JsonObject): Problem[] {
 			),
 		)
 	}
+	problems.push(...escalationProblems(escalationOf(value)))
 	problems.push(...verdictProblems(verdictOf(value)))
 	problems.push(...evidenceProblems(evidenceSettingsOf(value)))
 	return problems

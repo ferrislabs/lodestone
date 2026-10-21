@@ -17,6 +17,14 @@
     "contact_ranking": {
       "$ref": "#/$defs/ContactRanking"
     },
+    "escalation": {
+      "$ref": "#/$defs/Escalation",
+      "default": {
+        "band_high": 70,
+        "band_low": 40,
+        "provider": null
+      }
+    },
     "evidence": {
       "$ref": "#/$defs/EvidenceSettings",
       "default": {
@@ -44,7 +52,7 @@
       }
     },
     "schema_version": {
-      "description": "Profile format version. Must be 8.",
+      "description": "Profile format version. Must be 9.",
       "type": "integer",
       "format": "uint32",
       "minimum": 0
@@ -551,6 +559,38 @@
         }
       ]
     },
+    "Escalation": {
+      "title": "Escalation",
+      "description": "Re-evaluates the leads whose confidence falls in a grey band with a stronger provider.",
+      "type": "object",
+      "properties": {
+        "band_high": {
+          "description": "A lead is escalated below this confidence percentage. Default 70.",
+          "type": "integer",
+          "format": "uint8",
+          "default": 70,
+          "maximum": 100,
+          "minimum": 0
+        },
+        "band_low": {
+          "description": "A lead is escalated from this confidence percentage. Must be lower than band_high. Default 40.",
+          "type": "integer",
+          "format": "uint8",
+          "default": 40,
+          "maximum": 100,
+          "minimum": 0
+        },
+        "provider": {
+          "description": "Id of a declared LLM provider that re-evaluates the grey-zone leads. Escalation is disabled when null.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      },
+      "additionalProperties": false
+    },
     "EvidenceSettings": {
       "title": "Evidence settings",
       "description": "How the strength of the evidence behind a lead (signals, sources, hosts) weighs on its confidence.",
@@ -849,6 +889,22 @@
             "$ref": "#/$defs/Question"
           },
           "minItems": 1
+        },
+        "samples": {
+          "description": "Number of independent model calls per lead, from 1 to 5. The answer of each question is the majority choice. Default 3.",
+          "type": "integer",
+          "format": "uint8",
+          "default": 3,
+          "maximum": 5,
+          "minimum": 1
+        },
+        "sampling_temperature": {
+          "description": "Temperature of the calls when samples is above 1, overriding the provider temperature. Default 0.7.",
+          "type": "number",
+          "format": "double",
+          "default": 0.7,
+          "maximum": 1.5,
+          "minimum": 0.0
         },
         "system_prompt": {
           "description": "System prompt given to the model.",

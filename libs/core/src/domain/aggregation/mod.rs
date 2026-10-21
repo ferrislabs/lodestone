@@ -273,6 +273,8 @@ mod tests {
             },
             agent_score: (status == ResultStatus::Valid).then_some(0.95),
             error: (status == ResultStatus::Invalid).then(|| "fournisseur indisponible".to_owned()),
+            escalated: false,
+            raw_samples: json!([]),
             created_at: DateTime::from_timestamp(0, 0).unwrap(),
         }
     }

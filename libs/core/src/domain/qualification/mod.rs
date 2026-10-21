@@ -18,12 +18,14 @@ pub mod confidence;
 pub mod exclusion;
 pub mod ports;
 pub mod prompt;
+pub mod voting;
 
 pub use confidence::{
     AgentOpinion, EXCLUDED_REASON, EvidenceComponents, EvidenceStrength, Judgement, LeadScoring,
     SCORING_VERSION, VerdictCap, VerdictReason, calibrate, judge, verdict_for,
 };
 pub use exclusion::{Exclusion, exclusions};
+pub use voting::{VOTE_SHARE_WEIGHT, sample_record, vote};
 
 uuid_id!(ResultId);
 
@@ -106,6 +108,7 @@ pub struct Answer {
     pub evidence_source: Option<String>,
     pub grounded: bool,
     pub original_choice: Option<String>,
+    pub agreement: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -147,6 +150,9 @@ impl ValidAnswers {
             }
             if let Some(original) = &answer.original_choice {
                 entry["original_choice"] = json!(original);
+            }
+            if let Some(agreement) = answer.agreement {
+                entry["agreement"] = json!(agreement);
             }
             answers.insert(answer.question_id.clone(), entry);
         }
@@ -211,6 +217,7 @@ fn check_question(question: &Question, raw: &Value) -> Result<Answer, Vec<Violat
                     .get("original_choice")
                     .and_then(Value::as_str)
                     .map(str::to_owned),
+                agreement: object.get("agreement").and_then(unit),
             })
         }
         _ => Err(violations),
@@ -307,6 +314,7 @@ fn ground(question: &Question, mut answer: Answer, documents: &[UntrustedDocumen
         .map(|document| document.source.to_owned());
     answer.grounded = true;
     answer.original_choice = None;
+    answer.agreement = None;
     answer.evidence_source = source;
     if answer.evidence_source.is_some() {
         return answer;
@@ -454,6 +462,8 @@ pub struct QualificationResult {
     pub answers: Value,
     pub agent_score: Option<f64>,
     pub error: Option<String>,
+    pub escalated: bool,
+    pub raw_samples: Value,
     pub created_at: DateTime<Utc>,
 }
 
@@ -492,6 +502,7 @@ pub struct Completion {
     pub judgement: Judgement,
     pub scoring_version: i32,
     pub dossier_at: Option<DateTime<Utc>>,
+    pub escalated_revision: Option<RevisionNumber>,
     pub at: DateTime<Utc>,
 }
 
@@ -552,6 +563,8 @@ mod tests {
             system_prompt: "prompt".to_owned(),
             weight: 5,
             exclusion_threshold: 0.6,
+            samples: 1,
+            sampling_temperature: 0.7,
             questions,
         }
     }

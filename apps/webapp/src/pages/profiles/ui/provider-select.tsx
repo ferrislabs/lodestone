@@ -8,6 +8,7 @@ interface ProviderSelectProps {
 	value: string
 	providers: readonly ProviderOption[]
 	invalid?: boolean
+	emptyLabel?: string
 	onChange: (providerId: string) => void
 }
 
@@ -16,6 +17,7 @@ export function ProviderSelect({
 	value,
 	providers,
 	invalid = false,
+	emptyLabel = 'Fournisseur par défaut',
 	onChange,
 }: ProviderSelectProps) {
 	const known = value === '' || providers.some((item) => item.id === value)
@@ -27,7 +29,7 @@ export function ProviderSelect({
 			aria-invalid={invalid}
 			onChange={(event) => onChange(event.target.value)}
 		>
-			<option value="">Fournisseur par défaut</option>
+			<option value="">{emptyLabel}</option>
 			{known ? null : <option value={value}>Fournisseur introuvable</option>}
 			{providers.map((provider) => (
 				<option key={provider.id} value={provider.id}>

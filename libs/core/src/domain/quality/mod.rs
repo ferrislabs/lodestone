@@ -65,6 +65,8 @@ pub struct AgentSnapshot {
     pub score: Option<f64>,
     #[serde(default)]
     pub provenance: Option<RunProvenance>,
+    #[serde(default)]
+    pub escalated: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -103,6 +105,7 @@ impl DecisionSnapshot {
                             status: result.status.as_str().to_owned(),
                             score: result.agent_score,
                             provenance: Some(result.provenance.clone()),
+                            escalated: result.escalated,
                         },
                     )
                 })
@@ -190,6 +193,8 @@ mod tests {
             answers: serde_json::Value::Null,
             agent_score: score,
             error: None,
+            escalated: false,
+            raw_samples: serde_json::json!([]),
             created_at: Utc.timestamp_opt(1_800_000_000, 0).unwrap(),
         }
     }

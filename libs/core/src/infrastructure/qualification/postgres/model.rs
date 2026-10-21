@@ -29,6 +29,8 @@ pub struct ResultRow {
     pub answers: serde_json::Value,
     pub agent_score: Option<f64>,
     pub error: Option<String>,
+    pub escalated: bool,
+    pub raw_samples: serde_json::Value,
     pub created_at: DateTime<Utc>,
 }
 
@@ -67,6 +69,8 @@ impl TryFrom<ResultRow> for QualificationResult {
             answers: row.answers,
             agent_score: row.agent_score,
             error: row.error,
+            escalated: row.escalated,
+            raw_samples: row.raw_samples,
             created_at: row.created_at,
         })
     }

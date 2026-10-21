@@ -1,3 +1,4 @@
+import { Badge } from '#/components/ui/badge'
 import {
 	Card,
 	CardContent,
@@ -29,7 +30,9 @@ export function VersionsCard({ versions }: VersionsCardProps) {
 				<CardDescription>
 					Part de leads validés parmi les leads décidés, selon l'agent, le
 					modèle et la version du prompt qui ont produit la qualification.
-					Comparez deux versions pour savoir si un changement a aidé.
+					Comparez deux versions pour savoir si un changement a aidé. Les
+					exécutions escaladées vers un fournisseur plus puissant sont comptées
+					à part.
 				</CardDescription>
 			</CardHeader>
 			<CardContent>
@@ -52,9 +55,20 @@ export function VersionsCard({ versions }: VersionsCardProps) {
 						<TableBody>
 							{versions.map((row) => (
 								<TableRow
-									key={`${row.agent_id ?? 'aggregator'}|${row.model}|${row.prompt_version}`}
+									key={`${row.agent_id ?? 'aggregator'}|${row.model}|${row.prompt_version}|${row.escalated}`}
 								>
-									<TableCell>{versionAgentLabel(row)}</TableCell>
+									<TableCell>
+										{versionAgentLabel(row)}
+										{row.escalated ? (
+											<Badge
+												variant="outline"
+												className="ml-2"
+												data-part="escalated"
+											>
+												Escaladé
+											</Badge>
+										) : null}
+									</TableCell>
 									<TableCell className="font-mono text-xs">
 										{row.model === '' ? '—' : row.model}
 									</TableCell>

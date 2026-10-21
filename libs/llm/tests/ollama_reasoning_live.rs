@@ -36,6 +36,7 @@ async fn local_ollama_answers_with_reasoning_disabled() {
             schema_name: "connectivity_check",
             schema: &schema,
             max_tokens: 64,
+            temperature: None,
         })
         .await
         .unwrap();

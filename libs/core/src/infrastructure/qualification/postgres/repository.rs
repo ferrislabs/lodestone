@@ -284,9 +284,9 @@ impl<'tx> QualificationRepository for PgQualificationRepository<'tx> {
             INSERT INTO qualification_results (
                 id, lead_id, profile_id, profile_revision, agent_id, provider_id, model,
                 prompt_version, status, summary, answers, agent_score, error, created_at,
-                provider_name, generation, samples
+                provider_name, generation, samples, escalated, raw_samples
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
             ON CONFLICT (lead_id, profile_revision, agent_id) DO UPDATE SET
                 provider_id    = EXCLUDED.provider_id,
                 model          = EXCLUDED.model,
@@ -294,6 +294,8 @@ impl<'tx> QualificationRepository for PgQualificationRepository<'tx> {
                 provider_name  = EXCLUDED.provider_name,
                 generation     = EXCLUDED.generation,
                 samples        = EXCLUDED.samples,
+                escalated      = EXCLUDED.escalated,
+                raw_samples    = EXCLUDED.raw_samples,
                 status      = EXCLUDED.status,
                 summary     = EXCLUDED.summary,
                 answers     = EXCLUDED.answers,
@@ -319,6 +321,8 @@ impl<'tx> QualificationRepository for PgQualificationRepository<'tx> {
         .bind(&result.provenance.provider_name)
         .bind(&generation)
         .bind(samples)
+        .bind(result.escalated)
+        .bind(&result.raw_samples)
         .execute(&mut ***tx)
         .await
         .map_err(map_sqlx_error)?;
@@ -328,14 +332,19 @@ impl<'tx> QualificationRepository for PgQualificationRepository<'tx> {
     #[tracing::instrument(skip(self, completion), fields(db.system = "postgresql", db.operation = "upsert", db.table = "lead_qualification_state", lead.id = %completion.lead_id), err)]
     async fn complete(&mut self, completion: &Completion) -> Result<(), CoreError> {
         let revision = revision_number(completion.profile_revision)?;
+        let escalated_revision = completion
+            .escalated_revision
+            .map(revision_number)
+            .transpose()?;
         let mut tx = self.tx.lock().await;
         sqlx::query(
             r#"
             INSERT INTO lead_qualification_state (
                 lead_id, profile_revision, sources, completed_at,
-                scoring_version, opinion, evidence, verdict_reason, dossier_at, exclusions
+                scoring_version, opinion, evidence, verdict_reason, dossier_at, exclusions,
+                escalated_revision
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
             ON CONFLICT (lead_id) DO UPDATE SET
                 profile_revision = EXCLUDED.profile_revision,
                 sources          = EXCLUDED.sources,
@@ -346,6 +355,7 @@ impl<'tx> QualificationRepository for PgQualificationRepository<'tx> {
                 verdict_reason   = EXCLUDED.verdict_reason,
                 dossier_at       = EXCLUDED.dossier_at,
                 exclusions       = EXCLUDED.exclusions,
+                escalated_revision = EXCLUDED.escalated_revision,
                 summarised_at    = NULL,
                 summary_attempts = 0,
                 summary_next_attempt_at = NULL,
@@ -362,6 +372,7 @@ impl<'tx> QualificationRepository for PgQualificationRepository<'tx> {
         .bind(reason_text(&completion.judgement))
         .bind(completion.dossier_at)
         .bind(exclusions_json(&completion.judgement.exclusions)?)
+        .bind(escalated_revision)
         .execute(&mut ***tx)
         .await
         .map_err(map_sqlx_error)?;
@@ -388,7 +399,8 @@ impl<'tx> QualificationRepository for PgQualificationRepository<'tx> {
             r#"
             SELECT r.id, r.lead_id, r.profile_id, r.profile_revision, r.agent_id, r.provider_id,
                    r.provider_name, r.model, r.prompt_version, r.generation, r.samples,
-                   r.status, r.summary, r.answers, r.agent_score, r.error, r.created_at
+                   r.status, r.summary, r.answers, r.agent_score, r.error, r.escalated,
+                   r.raw_samples, r.created_at
             FROM qualification_results r
             JOIN lead_qualification_state s
               ON s.lead_id = r.lead_id AND s.profile_revision = r.profile_revision

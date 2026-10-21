@@ -66,6 +66,7 @@ pub struct Prompt<'a> {
     pub instruction: &'a str,
     pub documents: &'a [UntrustedDocument<'a>],
     pub max_tokens: u32,
+    pub temperature: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -155,6 +156,7 @@ where
         schema_name: "output",
         schema,
         max_tokens: prompt.max_tokens,
+        temperature: prompt.temperature,
     };
     let mut attempt: u32 = 0;
     loop {
@@ -256,6 +258,14 @@ pub fn cache_key(scope: &CacheScope, prompt: &Prompt<'_>, schema: &serde_json::V
     if let Some(agent) = &scope.agent {
         hash_field(&mut context, b"agent");
         hash_field(&mut context, agent.as_str().as_bytes());
+    }
+    if scope.sample > 0 {
+        hash_field(&mut context, b"sample");
+        hash_field(&mut context, &scope.sample.to_be_bytes());
+    }
+    if let Some(temperature) = prompt.temperature {
+        hash_field(&mut context, b"temperature");
+        hash_field(&mut context, &temperature.to_bits().to_be_bytes());
     }
     hash_field(&mut context, prompt.system.as_bytes());
     hash_field(&mut context, prompt.instruction.as_bytes());
@@ -364,6 +374,7 @@ mod tests {
             prompt: "triage@1".to_owned(),
             domain: crate::domain::NormalizedDomain::from_host("acme.com").unwrap(),
             agent: agent.map(crate::domain::profile::definition::AgentId::new),
+            sample: 0,
         }
     }
 
@@ -374,12 +385,44 @@ mod tests {
             instruction: "instruction",
             documents: &[],
             max_tokens: 1,
+            temperature: None,
         };
         let schema = serde_json::json!({});
         let key = |agent| cache_key(&scope_of(agent), &prompt, &schema);
         assert_ne!(key(Some("ats-fr")), key(Some("ats-en")));
         assert_ne!(key(Some("ats-fr")), key(None));
         assert_eq!(key(Some("ats-fr")), key(Some("ats-fr")));
+    }
+
+    #[test]
+    fn cache_keys_differ_per_sample_and_per_temperature() {
+        let prompt = Prompt {
+            system: "system",
+            instruction: "instruction",
+            documents: &[],
+            max_tokens: 1,
+            temperature: None,
+        };
+        let warm = Prompt {
+            temperature: Some(0.7),
+            ..prompt
+        };
+        let schema = serde_json::json!({});
+        let at = |sample: u32, prompt: &Prompt<'_>| {
+            let scope = CacheScope {
+                sample,
+                ..scope_of(Some("ats-fr"))
+            };
+            cache_key(&scope, prompt, &schema)
+        };
+        assert_eq!(
+            at(0, &prompt),
+            cache_key(&scope_of(Some("ats-fr")), &prompt, &schema)
+        );
+        assert_ne!(at(0, &warm), at(1, &warm));
+        assert_ne!(at(1, &warm), at(2, &warm));
+        assert_ne!(at(0, &prompt), at(0, &warm));
+        assert_eq!(at(2, &warm), at(2, &warm));
     }
 
     #[derive(Debug, PartialEq, Deserialize, JsonSchema)]
@@ -447,6 +490,7 @@ mod tests {
             instruction: "decide",
             documents: &[],
             max_tokens: 256,
+            temperature: None,
         }
     }
 

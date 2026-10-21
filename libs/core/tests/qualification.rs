@@ -228,6 +228,7 @@ fn agent(id: &str, weight: u8, provider: Option<ProviderId>) -> Value {
         "provider_id": provider.map(|provider| provider.0.to_string()),
         "system_prompt": format!("PROMPT-OF-{id}"),
         "weight": weight,
+        "samples": 1,
         "questions": [question("q"), question("q2")]
     })
 }
