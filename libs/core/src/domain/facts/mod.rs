@@ -16,7 +16,7 @@ mod sentence;
 
 pub use country::{Country, country_of};
 pub use environment::{Environment, environment_of};
-pub use sentence::signal_sentence;
+pub use sentence::{signal_excerpts, signal_sentence};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HostFact {

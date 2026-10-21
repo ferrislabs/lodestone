@@ -54,7 +54,7 @@ pub use domain::{
     },
     facts::{
         CompanyFacts, Country, CountryBasis, Environment, HostFact, IndependentSignal, LeadFacts,
-        OfficialFacts, SiblingSignals, environment_of, signal_sentence,
+        OfficialFacts, SiblingSignals, environment_of, signal_excerpts, signal_sentence,
     },
     fetch::{
         FetchError, FetchPurpose, FetchRequest, FetchResponse,

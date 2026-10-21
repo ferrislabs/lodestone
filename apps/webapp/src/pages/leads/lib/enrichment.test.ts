@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { moduleSections, signalTitle } from '#/pages/leads/lib/enrichment'
+import {
+	moduleSections,
+	signalExcerpts,
+	signalTitle,
+} from '#/pages/leads/lib/enrichment'
 import { formatDateTime } from '#/pages/leads/lib/format'
 import type { Signal } from '#/pages/leads/lib/types'
 
@@ -124,5 +128,55 @@ describe('signalTitle', () => {
 	it('keeps the sentence of other signals', () => {
 		expect(signalTitle({ ...base, kind: 'job_offer' })).toBe(base.sentence)
 		expect(signalTitle({ ...base, value: null })).toBe(base.sentence)
+	})
+})
+
+describe('signalExcerpts', () => {
+	const base: Signal = {
+		id: 's1',
+		kind: 'job_offer',
+		value: 'Ingénieur IAM',
+		source: 'france_travail',
+		sentence: "Offre d'emploi : Ingénieur IAM",
+		strength: 0.7,
+		observed_at: WAIT,
+		provenance: 'https://candidat.francetravail.fr/offres/1',
+		raw: {},
+	}
+
+	it('reads the passages stored with the signal, in order', () => {
+		const raw = {
+			excerpts: ['…migration vers Keycloak pour le SSO…', 'annuaire LDAP'],
+		}
+		expect(signalExcerpts({ ...base, raw })).toEqual([
+			'…migration vers Keycloak pour le SSO…',
+			'annuaire LDAP',
+		])
+	})
+
+	it('keeps non-empty strings only', () => {
+		const raw = {
+			excerpts: ['un', 3, null, '', '   ', { a: 1 }, ['x'], 'deux'],
+		}
+		expect(signalExcerpts({ ...base, raw })).toEqual(['un', 'deux'])
+	})
+
+	it('shows a repeated passage once', () => {
+		const raw = { excerpts: ['SSO obligatoire', ' SSO obligatoire ', 'MFA'] }
+		expect(signalExcerpts({ ...base, raw })).toEqual(['SSO obligatoire', 'MFA'])
+	})
+
+	it('is empty for a signal stored without passages', () => {
+		expect(signalExcerpts(base)).toEqual([])
+		expect(signalExcerpts({ ...base, raw: { excerpts: [] } })).toEqual([])
+		expect(signalExcerpts({ ...base, raw: { excerpts: 'texte' } })).toEqual([])
+		expect(signalExcerpts({ ...base, raw: { excerpts: null } })).toEqual([])
+	})
+
+	it('tolerates any raw shape', () => {
+		for (const raw of [undefined, null, 'excerpts', 4, ['excerpts']]) {
+			const signal = { ...base, raw } as unknown as Signal
+			expect(signalExcerpts(signal)).toEqual([])
+		}
 	})
 })

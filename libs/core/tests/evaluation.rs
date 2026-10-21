@@ -535,6 +535,37 @@ impl Harness {
             .unwrap();
     }
 
+    async fn observe_offer(&self, host: &str, excerpts: &[String], seconds: i64) {
+        let active = self.active().await;
+        self.usecase
+            .record_observations_at(
+                &active,
+                SourceName::FranceTravail,
+                &[Observation {
+                    domain: domain(host),
+                    kind: SignalKind::parse("job_offer").unwrap(),
+                    value: Some("Ingénieur IAM".to_owned()),
+                    raw: json!({
+                        "title": "Ingénieur IAM",
+                        "matched": ["keycloak"],
+                        "route": "keywords",
+                        "details": {"company": "Acme"},
+                        "excerpts": excerpts
+                    }),
+                    provenance: Provenance::parse(&format!(
+                        "https://candidat.francetravail.fr/offres/{host}"
+                    ))
+                    .unwrap(),
+                    strength: UnitInterval::new(0.7).unwrap(),
+                    observed_at: at(seconds),
+                    agent: None,
+                }],
+                at(1_000),
+            )
+            .await
+            .unwrap();
+    }
+
     async fn link_company(&self, host: &str, siren: &str) {
         let mut dossier = CompanyDossier::pending(domain(host), at(0));
         dossier.state = DossierState::Complete;
@@ -1571,6 +1602,74 @@ async fn an_ungrounded_answer_is_retried_with_its_axes_and_stored_grounded(pool:
     assert_eq!(answer["evidence"], "lead: acme.com");
     assert_eq!(answer["evidence_source"], "lead");
     assert_eq!(results[0].agent_score, Some(1.0));
+}
+
+const OFFER_QUOTE: &str = "nous migrons notre annuaire vers Keycloak pour déployer le SSO";
+
+fn quoting_answers(quote: &str) -> Value {
+    let mut value = solo_answers();
+    value["answers"]["q"]["evidence"] = json!(quote);
+    value
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_quote_copied_from_an_offer_excerpt_is_grounded_in_its_signal_document(pool: PgPool) {
+    let harness = Harness::new(pool, 10);
+    let provider = harness.provider("model-a", 0).await;
+    harness.script("model-a", vec![Reply::Raw(quoting_answers(OFFER_QUOTE))]);
+    let profile = harness
+        .profile(vec![agent("solo", Some(provider), "q")])
+        .await;
+    harness
+        .observe_offer(
+            "acme.com",
+            &[format!("…Dans ce cadre, {OFFER_QUOTE}, avec MFA…")],
+            10,
+        )
+        .await;
+
+    let report = harness.step(settings(100, 10)).await;
+
+    assert_eq!(report.valid, 1);
+    assert_eq!(harness.calls(), 1);
+    let documents = &harness.seen()[0].documents;
+    assert!(
+        documents
+            .iter()
+            .any(|document| document.contains("\nexcerpt: …Dans ce cadre, nous migrons"))
+    );
+    let results = harness.results(profile, "acme.com").await;
+    let answer = &results[0].answers["q"];
+    assert_eq!(answer["choice"], "forte");
+    assert_eq!(answer["grounded"], true);
+    assert_eq!(answer["evidence"], OFFER_QUOTE);
+    assert_eq!(
+        answer["evidence_source"],
+        "https://candidat.francetravail.fr/offres/acme.com"
+    );
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_same_quote_is_ungrounded_when_the_offer_kept_no_excerpt(pool: PgPool) {
+    let harness = Harness::new(pool, 10);
+    let provider = harness.provider("model-a", 0).await;
+    harness.script(
+        "model-a",
+        vec![
+            Reply::Raw(quoting_answers(OFFER_QUOTE)),
+            Reply::Raw(quoting_answers(OFFER_QUOTE)),
+        ],
+    );
+    let profile = harness
+        .profile(vec![agent("solo", Some(provider), "q")])
+        .await;
+    harness.observe_offer("acme.com", &[], 10).await;
+
+    harness.step(settings(100, 10)).await;
+
+    let results = harness.results(profile, "acme.com").await;
+    assert_eq!(results[0].answers["q"]["grounded"], false);
+    assert_eq!(results[0].answers["q"]["choice"], "inconnu");
 }
 
 #[sqlx::test(migrations = "../../migrations")]

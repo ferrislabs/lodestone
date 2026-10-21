@@ -8,8 +8,10 @@ use crate::domain::{
 };
 
 pub mod countries;
+pub mod excerpt;
 pub mod filters;
 
+pub use excerpt::excerpts;
 pub use filters::passes as passes_filters;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -39,11 +41,11 @@ pub enum Route {
     },
 }
 
-fn is_hyphen(letter: char) -> bool {
+pub(crate) fn is_hyphen(letter: char) -> bool {
     matches!(letter, '-' | '\u{2010}' | '\u{2011}')
 }
 
-fn normalize(text: &str) -> String {
+pub(crate) fn normalize(text: &str) -> String {
     let unhyphenated: String = fold(text)
         .chars()
         .map(|letter| if is_hyphen(letter) { ' ' } else { letter })
@@ -54,15 +56,25 @@ fn normalize(text: &str) -> String {
         .join(" ")
 }
 
+pub(crate) fn phrase_starts<'a>(
+    haystack: &'a str,
+    needle: &'a str,
+) -> impl Iterator<Item = usize> + 'a {
+    let candidates = (!needle.is_empty()).then(|| haystack.match_indices(needle));
+    candidates
+        .into_iter()
+        .flatten()
+        .filter_map(move |(start, found)| {
+            let before = haystack[..start].chars().next_back();
+            let after = haystack[start + found.len()..].chars().next();
+            (!before.is_some_and(char::is_alphanumeric)
+                && !after.is_some_and(char::is_alphanumeric))
+            .then_some(start)
+        })
+}
+
 fn contains_phrase(haystack: &str, needle: &str) -> bool {
-    if needle.is_empty() {
-        return false;
-    }
-    haystack.match_indices(needle).any(|(start, found)| {
-        let before = haystack[..start].chars().next_back();
-        let after = haystack[start + found.len()..].chars().next();
-        !before.is_some_and(char::is_alphanumeric) && !after.is_some_and(char::is_alphanumeric)
-    })
+    phrase_starts(haystack, needle).next().is_some()
 }
 
 fn matching(haystack: &str, terms: &[String]) -> Vec<String> {

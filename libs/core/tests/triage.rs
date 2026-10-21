@@ -57,6 +57,18 @@ fn candidate(host: &str, title: &str) -> Candidate {
     }
 }
 
+fn candidate_with_text(host: &str, title: &str, text: &str) -> Candidate {
+    Candidate {
+        text: text.to_owned(),
+        ..candidate(host, title)
+    }
+}
+
+fn long_body(sentence: &str) -> String {
+    let filler = "Le présent marché porte sur des prestations diverses. ".repeat(40);
+    format!("{filler}{sentence} {filler}")
+}
+
 async fn activate(pool: &PgPool, name: &str, definition: Value) -> ProfileId {
     let usecase = LodestoneUseCase::new(pool.clone());
     let id = usecase
@@ -215,6 +227,86 @@ async fn keywords_match_without_accents_case_or_hyphens(pool: PgPool) {
     assert_eq!(accepted[0].raw["matched"], json!(["identite"]));
     assert_eq!(signals(&pool, profile, "region.fr").await.len(), 1);
     assert!(signals(&pool, profile, "meubles.fr").await.is_empty());
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_kept_candidate_stores_passages_of_its_body_around_the_matched_keywords(pool: PgPool) {
+    let profile = boamp_profile(
+        &pool,
+        vec![boamp_agent(
+            "boamp-fr",
+            true,
+            &["identite", "single sign-on"],
+            1,
+        )],
+    )
+    .await;
+    let body = long_body("Il faut une gestion de l'IDENTITÉ et un single sign on.");
+    let source = FakeSource {
+        candidates: vec![candidate_with_text(
+            "ville.fr",
+            "Marché de services numériques",
+            &body,
+        )],
+    };
+
+    run_triage(&pool, &source).await;
+
+    let stored = signals(&pool, profile, "ville.fr").await;
+    assert_eq!(stored.len(), 1);
+    assert_eq!(stored[0].raw["route"], "keywords");
+    assert_eq!(
+        stored[0].raw["matched"],
+        json!(["identite", "single sign-on"])
+    );
+    let excerpts = stored[0].raw["excerpts"].as_array().unwrap();
+    assert_eq!(excerpts.len(), 1);
+    let passage = excerpts[0].as_str().unwrap();
+    assert!(passage.contains("l'IDENTITÉ et un single sign on"));
+    assert!(passage.starts_with('…'));
+    assert!(passage.ends_with('…'));
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn an_ambiguous_candidate_stores_its_passages_too(pool: PgPool) {
+    let profile = iam_profile(&pool).await;
+    let body = long_body("Le projet IAM concerne tous les agents.");
+    let source = FakeSource {
+        candidates: vec![candidate_with_text(
+            "region.fr",
+            "Marché de services numériques",
+            &body,
+        )],
+    };
+
+    run_triage(&pool, &source).await;
+
+    let stored = signals(&pool, profile, "region.fr").await;
+    assert_eq!(stored.len(), 1);
+    assert_eq!(stored[0].raw["route"], "keywords_ambiguous");
+    let excerpts = stored[0].raw["excerpts"].as_array().unwrap();
+    assert_eq!(excerpts.len(), 1);
+    assert!(
+        excerpts[0]
+            .as_str()
+            .unwrap()
+            .contains("Le projet IAM concerne tous les agents.")
+    );
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_keyword_found_only_in_the_title_stores_no_excerpts(pool: PgPool) {
+    let profile = iam_profile(&pool).await;
+    let source = FakeSource {
+        candidates: vec![candidate("region.fr", "Projet IAM pour la region")],
+    };
+
+    run_triage(&pool, &source).await;
+
+    let stored = signals(&pool, profile, "region.fr").await;
+    assert_eq!(stored.len(), 1);
+    assert_eq!(stored[0].raw["matched"], json!(["IAM"]));
+    assert_eq!(stored[0].raw.get("excerpts"), None);
 }
 
 #[sqlx::test(migrations = "../../migrations")]
