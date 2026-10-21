@@ -14,19 +14,12 @@ use crate::{
 };
 
 pub const LATEST_RUNS_PER_SOURCE: u32 = 5;
-pub const QUALIFICATION_DEDUP_KEY: &str = "llm:qualify";
 
 pub fn schedule_key(source: SourceName) -> String {
-    match source {
-        SourceName::LlmQualification => QUALIFICATION_DEDUP_KEY.to_owned(),
-        other => format!("source:{}", other.as_str()),
-    }
+    format!("source:{}", source.as_str())
 }
 
 pub fn source_of_schedule_key(dedup_key: &str) -> Option<SourceName> {
-    if dedup_key == QUALIFICATION_DEDUP_KEY {
-        return Some(SourceName::LlmQualification);
-    }
     dedup_key
         .strip_prefix("source:")
         .and_then(|name| name.parse().ok())
@@ -67,9 +60,9 @@ mod tests {
     }
 
     #[test]
-    fn qualification_uses_its_own_key() {
-        assert_eq!(schedule_key(SourceName::LlmQualification), "llm:qualify");
+    fn keys_are_prefixed_and_unknown_sources_are_refused() {
         assert_eq!(schedule_key(SourceName::Boamp), "source:boamp");
         assert_eq!(source_of_schedule_key("source:nope"), None);
+        assert_eq!(source_of_schedule_key("llm:qualify"), None);
     }
 }

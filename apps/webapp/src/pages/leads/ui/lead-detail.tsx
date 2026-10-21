@@ -6,6 +6,7 @@ import type { LeadDetailData, LeadStatus } from '#/pages/leads/lib/types'
 import { AssessmentsList } from './assessments-list'
 import { ContactsList } from './contacts-list'
 import { LeadHeader } from './lead-header'
+import { LeadSummary } from './lead-summary'
 import { QualificationResults } from './qualification-results'
 import { ScoreBreakdown } from './score-breakdown'
 import { SignalsList } from './signals-list'
@@ -17,6 +18,10 @@ interface LeadDetailProps {
 	nextStatuses: readonly LeadStatus[]
 	onBack: () => void
 	onChangeStatus: (status: LeadStatus) => void
+	onOpenDraft: (assessmentId: string) => void
+	onRetrySummary: () => void
+	retryingSummary: boolean
+	retrySummaryError: string | null
 	changing: boolean
 	changeError: string | null
 }
@@ -28,6 +33,10 @@ export function LeadDetail({
 	nextStatuses,
 	onBack,
 	onChangeStatus,
+	onOpenDraft,
+	onRetrySummary,
+	retryingSummary,
+	retrySummaryError,
 	changing,
 	changeError,
 }: LeadDetailProps) {
@@ -60,11 +69,21 @@ export function LeadDetail({
 						changing={changing}
 						changeError={changeError}
 					/>
+					<LeadSummary
+						assessment={detail.assessments[0] ?? null}
+						summaryState={detail.summary_state ?? null}
+						onOpenDraft={onOpenDraft}
+						onRetry={onRetrySummary}
+						retrying={retryingSummary}
+						retryError={retrySummaryError}
+					/>
 					<QualificationResults results={detail.qualification_results} />
 					<ScoreBreakdown contributions={detail.score_breakdown} />
 					<SignalsList signals={detail.signals} />
 					<ContactsList contacts={detail.contacts} />
-					<AssessmentsList assessments={detail.assessments} />
+					{detail.assessments.length > 1 ? (
+						<AssessmentsList assessments={detail.assessments.slice(1)} />
+					) : null}
 				</>
 			) : null}
 		</div>

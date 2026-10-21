@@ -6,13 +6,18 @@ import {
 	testErrorHint,
 	testErrorLabel,
 	tierLabel,
+	tierShortLabel,
 } from './labels'
 
 describe('llm labels', () => {
 	it('labels the tiers in french', () => {
-		expect(tierLabel('triage')).toBe('Tri')
-		expect(tierLabel('qualification')).toBe('Qualification')
+		expect(tierLabel('triage')).toBe(
+			'Classification (agents de qualification par défaut)',
+		)
+		expect(tierLabel('qualification')).toBe('Synthèse (agrégateur par défaut)')
 		expect(tierLabel('other')).toBe('other')
+		expect(tierShortLabel('triage')).toBe('Classification')
+		expect(tierShortLabel('qualification')).toBe('Synthèse')
 	})
 
 	it('keeps provider product names', () => {

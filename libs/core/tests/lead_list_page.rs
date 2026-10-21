@@ -3,7 +3,7 @@ mod support;
 use lodestone_core::{
     LeadQuery, LeadRepository, LeadSort, LeadStatus, LodestoneUseCase, ProfileId, Provenance,
     Score, ScoreBreakdown, Signal, SignalId, SignalKind, SignalRepository, SourceName,
-    SuppressionTarget, UnitInterval,
+    SuppressionTarget, UnitInterval, VerdictFilter,
     infrastructure::{
         lead::postgres::PgLeadRepository, postgres::with_tx, signal::postgres::PgSignalRepository,
     },
@@ -304,4 +304,163 @@ async fn profile_summaries_count_visible_leads_and_latest_revision(pool: PgPool)
     assert_eq!(summaries[0].name.as_str(), "alpha");
     assert_eq!(summaries[0].lead_count, 3);
     assert_eq!(summaries[0].revision.map(|r| r.get()), Some(1));
+}
+
+async fn judge(pool: &PgPool, host: &str, confidence: Option<f64>, verdict: Option<&str>) {
+    sqlx::query("UPDATE leads SET confidence = $2, verdict = $3 WHERE domain = $1")
+        .bind(host)
+        .bind(confidence)
+        .bind(verdict)
+        .execute(pool)
+        .await
+        .unwrap();
+}
+
+async fn judged_fixture(pool: &PgPool) -> ProfileId {
+    let profile = create_profile(pool, "alpha").await;
+    seed(pool, profile, "sure.com", 5.0, 10).await;
+    seed(pool, profile, "maybe.com", 50.0, 20).await;
+    seed(pool, profile, "maybe-too.com", 20.0, 30).await;
+    seed(pool, profile, "out.com", 90.0, 40).await;
+    seed(pool, profile, "waiting.com", 70.0, 50).await;
+    judge(pool, "sure.com", Some(92.5), Some("fiable")).await;
+    judge(pool, "maybe.com", Some(55.0), Some("a_verifier")).await;
+    judge(pool, "maybe-too.com", Some(55.0), Some("a_verifier")).await;
+    judge(pool, "out.com", Some(8.0), Some("ecarte")).await;
+    profile
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn confidence_sorts_with_pending_leads_last_and_ties_broken_by_score(pool: PgPool) {
+    let profile = judged_fixture(&pool).await;
+    assert_eq!(LeadSort::default(), LeadSort::ConfidenceDesc);
+
+    let (default, total) = domains(&pool, profile, query()).await;
+    let (again, _) = domains(&pool, profile, query()).await;
+
+    assert_eq!(total, 5);
+    assert_eq!(
+        default,
+        [
+            "sure.com",
+            "maybe.com",
+            "maybe-too.com",
+            "out.com",
+            "waiting.com"
+        ]
+    );
+    assert_eq!(default, again);
+
+    let (ascending, _) = domains(
+        &pool,
+        profile,
+        LeadQuery {
+            sort: LeadSort::ConfidenceAsc,
+            ..query()
+        },
+    )
+    .await;
+    assert_eq!(
+        ascending,
+        [
+            "out.com",
+            "maybe.com",
+            "maybe-too.com",
+            "sure.com",
+            "waiting.com"
+        ]
+    );
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_verdict_filter_keeps_the_chosen_verdicts_and_pending_ones(pool: PgPool) {
+    let profile = judged_fixture(&pool).await;
+    let with = |verdicts: &[VerdictFilter]| LeadQuery {
+        verdicts: verdicts.to_vec(),
+        ..query()
+    };
+
+    let (hidden_discarded, total) = domains(
+        &pool,
+        profile,
+        with(&[
+            VerdictFilter::Reliable,
+            VerdictFilter::ToCheck,
+            VerdictFilter::Pending,
+        ]),
+    )
+    .await;
+    assert_eq!(total, 4);
+    assert_eq!(
+        hidden_discarded,
+        ["sure.com", "maybe.com", "maybe-too.com", "waiting.com"]
+    );
+
+    let (only_discarded, _) = domains(&pool, profile, with(&[VerdictFilter::Discarded])).await;
+    assert_eq!(only_discarded, ["out.com"]);
+
+    let (pending, _) = domains(&pool, profile, with(&[VerdictFilter::Pending])).await;
+    assert_eq!(pending, ["waiting.com"]);
+
+    let (everything, total) = domains(&pool, profile, with(&[])).await;
+    assert_eq!(total, 5);
+    assert_eq!(everything.len(), 5);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_minimum_confidence_leaves_out_lower_and_pending_leads(pool: PgPool) {
+    let profile = judged_fixture(&pool).await;
+
+    let (kept, total) = domains(
+        &pool,
+        profile,
+        LeadQuery {
+            min_confidence: Some(55.0),
+            ..query()
+        },
+    )
+    .await;
+
+    assert_eq!(total, 3);
+    assert_eq!(kept, ["sure.com", "maybe.com", "maybe-too.com"]);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_listing_carries_the_latest_summary_of_each_lead(pool: PgPool) {
+    let profile = judged_fixture(&pool).await;
+    let sure: uuid::Uuid = sqlx::query_scalar("SELECT id FROM leads WHERE domain = 'sure.com'")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    for (age, summary) in [(20, "older"), (5, "latest")] {
+        sqlx::query(
+            "INSERT INTO assessments (id, lead_id, profile_revision, summary, approach_angle, evidence, model, prompt_version, created_at)
+             VALUES ($1, $2, 1, $3, 'angle', '[]'::jsonb, 'm', 'aggregator@x', now() - make_interval(secs => $4))",
+        )
+        .bind(uuid::Uuid::now_v7())
+        .bind(sure)
+        .bind(summary)
+        .bind(f64::from(age))
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    let listing = LodestoneUseCase::new(pool)
+        .list_leads(profile, query())
+        .await
+        .unwrap();
+
+    assert_eq!(listing.summaries.len(), 1);
+    let id = listing
+        .page
+        .items
+        .iter()
+        .find(|lead| lead.domain.as_str() == "sure.com")
+        .unwrap()
+        .id;
+    assert_eq!(
+        listing.summaries.get(&id).map(String::as_str),
+        Some("latest")
+    );
 }

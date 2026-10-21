@@ -19,6 +19,8 @@ const leads: Lead[] = [
 		score: 42,
 		confidence: 72.5,
 		verdict: 'fiable',
+		summary:
+			'Le domaine expose un Keycloak ancien et recrute un ingénieur IAM.',
 		first_seen_at: '2026-01-01T00:00:00Z',
 		last_seen_at: '2026-02-01T00:00:00Z',
 		updated_at: '2026-02-01T00:00:00Z',
@@ -101,6 +103,45 @@ describe('LeadsList', () => {
 		expect(screen.getByText('Verdict')).toBeTruthy()
 		expect(screen.getByText(/^72,5\s%$/)).toBeTruthy()
 		expect(screen.getByText('—')).toBeTruthy()
+	})
+
+	it('shows the confidence bar and the summary excerpt of each lead', () => {
+		const long = `${'Phrase de synthèse. '.repeat(20)}`
+		const { container } = render(
+			<Harness
+				data={[{ ...leads[0], summary: long }, leads[1]]}
+				state="ready"
+			/>,
+		)
+		const bars = Array.from(container.querySelectorAll('[role="progressbar"]'))
+		expect(bars.map((bar) => bar.getAttribute('aria-valuenow'))).toEqual([
+			'73',
+			null,
+		])
+		const fills = container.querySelectorAll('[data-confidence-fill]')
+		expect(Array.from(fills).map((fill) => fill.getAttribute('style'))).toEqual(
+			['width: 73%;', 'width: 0%;'],
+		)
+		const excerpt = screen.getByText(/^Phrase de synthèse\./)
+		expect(excerpt.textContent?.length).toBeLessThanOrEqual(140)
+		expect(excerpt.textContent?.endsWith('…')).toBe(true)
+		expect(screen.getByText('Pas encore de synthèse')).toBeTruthy()
+	})
+
+	it('keeps the score as a secondary column after the verdict', () => {
+		render(<Harness data={leads} state="ready" />)
+		const headers = screen
+			.getAllByRole('columnheader')
+			.map((header) => header.textContent)
+		expect(headers).toEqual([
+			'Domaine',
+			'Verdict',
+			'Confiance',
+			'Synthèse',
+			'Score',
+			'Statut',
+			'Dernière détection',
+		])
 	})
 
 	it('opens a lead when its domain is clicked', () => {

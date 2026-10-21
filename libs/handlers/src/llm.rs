@@ -76,7 +76,7 @@ pub struct ProviderDto {
     pub max_retries: u8,
     pub timeout_seconds: u64,
     pub pricing: PricingDto,
-    /// Tiers (`triage`, `qualification`) this provider is assigned to.
+    /// Defaults this provider is assigned to: `triage` (default of the qualification agents) or `qualification` (default of the aggregator).
     pub tiers: Vec<String>,
     /// Sent to OpenAI-compatible providers only when set; `null` when not sent.
     pub reasoning_effort: Option<ReasoningEffortDto>,
@@ -116,7 +116,7 @@ impl ProviderDto {
 
 #[derive(Debug, Serialize, PartialEq, Eq, ToSchema)]
 pub struct TierDto {
-    /// `triage` or `qualification`.
+    /// `triage` is the default provider of the qualification agents, `qualification` the default provider of the aggregator.
     pub tier: String,
     pub provider_id: Option<String>,
 }
@@ -744,7 +744,7 @@ fn tier_dto(tier: Tier, assignments: &[(Tier, ProviderId)]) -> TierDto {
     path = "/api/v1/llm/tiers/{tier}",
     tag = "llm",
     security(("bearer_auth" = [])),
-    params(("tier" = String, Path, description = "`triage` or `qualification`")),
+    params(("tier" = String, Path, description = "`triage` (default of the qualification agents) or `qualification` (default of the aggregator)")),
     request_body = AssignTierRequest,
     responses(
         (status = 200, description = "The tier with its new provider", body = DataEnvelope<TierDto>),
@@ -800,7 +800,7 @@ pub async fn assign_tier(
     path = "/api/v1/llm/tiers/{tier}",
     tag = "llm",
     security(("bearer_auth" = [])),
-    params(("tier" = String, Path, description = "`triage` or `qualification`")),
+    params(("tier" = String, Path, description = "`triage` (default of the qualification agents) or `qualification` (default of the aggregator)")),
     responses(
         (status = 204, description = "The tier is now unassigned"),
         (status = 400, description = "Unknown tier"),

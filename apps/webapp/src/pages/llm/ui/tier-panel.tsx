@@ -33,7 +33,7 @@ export function TierPanel({
 }: TierPanelProps) {
 	return (
 		<div className="flex flex-col gap-3 rounded-xl border bg-card p-4">
-			<h2 className="text-sm font-semibold">Affectation des niveaux</h2>
+			<h2 className="text-sm font-semibold">Fournisseurs par défaut</h2>
 			<div className="grid gap-3 md:grid-cols-2">
 				{TIERS.map((tier) => (
 					<div key={tier} className="flex flex-col gap-1.5">
@@ -66,7 +66,7 @@ export function TierPanel({
 			) : null}
 			<div>
 				<Button size="sm" disabled={!changed || applying} onClick={onApply}>
-					{applying ? 'Application…' : 'Appliquer les niveaux'}
+					{applying ? 'Application…' : 'Appliquer les fournisseurs par défaut'}
 				</Button>
 			</div>
 		</div>

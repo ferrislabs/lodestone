@@ -13,8 +13,13 @@ const TEST_ERROR_HINTS: Readonly<Record<string, string>> = {
 }
 
 const TIER_LABELS: Readonly<Record<TierName, string>> = {
-	triage: 'Tri',
-	qualification: 'Qualification',
+	triage: 'Classification (agents de qualification par défaut)',
+	qualification: 'Synthèse (agrégateur par défaut)',
+}
+
+const TIER_SHORT_LABELS: Readonly<Record<TierName, string>> = {
+	triage: 'Classification',
+	qualification: 'Synthèse',
 }
 
 const PROVIDER_KIND_LABELS: Readonly<Record<string, string>> = {
@@ -35,6 +40,10 @@ const TEST_ERROR_LABELS: Readonly<Record<string, string>> = {
 
 export function tierLabel(tier: string): string {
 	return TIER_LABELS[tier as TierName] ?? tier
+}
+
+export function tierShortLabel(tier: string): string {
+	return TIER_SHORT_LABELS[tier as TierName] ?? tier
 }
 
 export function providerKindLabel(kind: string): string {

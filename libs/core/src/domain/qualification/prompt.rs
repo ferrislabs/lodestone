@@ -17,11 +17,11 @@ pub struct AgentPrompt {
     pub hash: String,
 }
 
-fn hex(bytes: &[u8]) -> String {
+pub(crate) fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
-fn identity_context(definition: &ProfileDefinition) -> String {
+pub(crate) fn identity_context(definition: &ProfileDefinition) -> String {
     format!(
         "<{CONTEXT_TAG}>\nOffer: {}\nTarget customer: {}\n</{CONTEXT_TAG}>",
         neutralize(definition.identity.offer.trim()),

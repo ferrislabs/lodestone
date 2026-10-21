@@ -283,7 +283,7 @@ describe('SourcesPage', () => {
 			).toBeTruthy()
 			expect(row('Sonde HTTP').getByText('—')).toBeTruthy()
 			expect(
-				row('Qualification des leads').getByText(
+				row('Qualification et synthèse des leads').getByText(
 					'En attente : 7 leads à qualifier',
 				),
 			).toBeTruthy()

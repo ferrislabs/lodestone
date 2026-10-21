@@ -87,7 +87,8 @@ const EXACT_MESSAGES: Readonly<Record<string, string>> = {
 	'source is not scheduled': "La source n'est plus planifiée",
 	'source listens continuously':
 		"La source écoute en continu, il n'y a rien à lancer",
-	'provider is assigned to a tier': 'Le fournisseur est affecté à un niveau',
+	'provider is assigned to a tier':
+		'Le fournisseur est un fournisseur par défaut',
 	'lead status changed concurrently, reload and retry':
 		'Le statut du lead a changé entre-temps, rechargez la page et réessayez',
 	'revision number overflow': 'Nombre de révisions maximal atteint',
@@ -154,8 +155,8 @@ function lowerFirst(text: string): string {
 }
 
 function tierName(raw: string): string {
-	if (raw === 'triage') return 'Tri'
-	if (raw === 'qualification') return 'Qualification'
+	if (raw === 'triage') return 'Classification'
+	if (raw === 'qualification') return 'Synthèse'
 	return raw
 }
 
@@ -203,7 +204,8 @@ const RULES: readonly Rule[] = [
 	],
 	[
 		/^provider is assigned to the (\w+) tier$/,
-		(m) => `Le fournisseur est affecté au niveau « ${tierName(m[1] ?? '')} »`,
+		(m) =>
+			`Le fournisseur est le fournisseur par défaut « ${tierName(m[1] ?? '')} »`,
 	],
 	[
 		/^(\d+) leads match, more than the (\d+) an export holds, narrow the filters$/,

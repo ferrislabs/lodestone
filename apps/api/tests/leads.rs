@@ -287,6 +287,15 @@ async fn invalid_query_parameters_are_rejected_naming_the_field(pool: PgPool) {
         ("min_score=abc", "min_score"),
         ("sort=random", "sort"),
         ("signal=Not-Valid", "signal"),
+        ("verdict=maybe", "verdict"),
+        ("verdict=fiable,nope", "verdict"),
+        (
+            "verdict=fiable%27%3B%20DROP%20TABLE%20leads%3B--",
+            "verdict",
+        ),
+        ("min_confidence=101", "min_confidence"),
+        ("min_confidence=-1", "min_confidence"),
+        ("min_confidence=abc", "min_confidence"),
     ] {
         let (status, body) = api.get(&format!("{base}?{query}")).await;
         assert_eq!(status, StatusCode::BAD_REQUEST, "{query}");
@@ -527,6 +536,235 @@ async fn the_lead_carries_its_confidence_and_verdict(pool: PgPool) {
     assert!(find("pending.com")["confidence"].is_null());
     assert!(find("pending.com")["verdict"].is_null());
     assert!(find("pending.com")["qualified_at"].is_null());
+}
+
+async fn judged_fixture(pool: &PgPool) -> (Seed, String) {
+    let seed = Seed { pool: pool.clone() };
+    let profile = seed.profile("keycloak-ops").await;
+    for (domain, score, judgement) in [
+        ("sure.com", 5.0, Some((92.5, "fiable"))),
+        ("maybe.com", 50.0, Some((55.0, "a_verifier"))),
+        ("out.com", 90.0, Some((8.0, "ecarte"))),
+        ("waiting.com", 70.0, None),
+    ] {
+        let id = seed.lead(&profile, domain, "new", score, 1).await;
+        if let Some((confidence, verdict)) = judgement {
+            sqlx::query("UPDATE leads SET confidence = $2, verdict = $3 WHERE id = $1::uuid")
+                .bind(&id)
+                .bind(confidence)
+                .bind(verdict)
+                .execute(pool)
+                .await
+                .unwrap();
+        }
+    }
+    (seed, profile)
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn leads_are_sorted_by_confidence_by_default_pending_ones_last(pool: PgPool) {
+    let (_seed, profile) = judged_fixture(&pool).await;
+    let api = Api::new(pool).await;
+    let base = format!("/api/v1/profiles/{profile}/leads");
+
+    let (_, default) = api.get(&base).await;
+    assert_eq!(
+        domains(&default),
+        ["sure.com", "maybe.com", "out.com", "waiting.com"]
+    );
+
+    let (_, ascending) = api.get(&format!("{base}?sort=confidence_asc")).await;
+    assert_eq!(
+        domains(&ascending),
+        ["out.com", "maybe.com", "sure.com", "waiting.com"]
+    );
+
+    let (_, by_score) = api.get(&format!("{base}?sort=score_desc")).await;
+    assert_eq!(
+        domains(&by_score),
+        ["out.com", "waiting.com", "maybe.com", "sure.com"]
+    );
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_verdict_and_confidence_filters_narrow_the_list_and_the_total(pool: PgPool) {
+    let (_seed, profile) = judged_fixture(&pool).await;
+    let api = Api::new(pool).await;
+    let base = format!("/api/v1/profiles/{profile}/leads");
+
+    let (_, visible) = api
+        .get(&format!("{base}?verdict=fiable,a_verifier,en_attente"))
+        .await;
+    assert_eq!(domains(&visible), ["sure.com", "maybe.com", "waiting.com"]);
+    assert_eq!(visible["pagination"]["total"], 3);
+
+    let (_, discarded) = api.get(&format!("{base}?verdict=ecarte")).await;
+    assert_eq!(domains(&discarded), ["out.com"]);
+
+    let (_, pending) = api.get(&format!("{base}?verdict=en_attente")).await;
+    assert_eq!(domains(&pending), ["waiting.com"]);
+
+    let (_, confident) = api.get(&format!("{base}?min_confidence=55")).await;
+    assert_eq!(domains(&confident), ["sure.com", "maybe.com"]);
+
+    let (_, combined) = api
+        .get(&format!(
+            "{base}?verdict=a_verifier,ecarte&min_confidence=10"
+        ))
+        .await;
+    assert_eq!(domains(&combined), ["maybe.com"]);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn each_lead_of_the_list_carries_the_latest_summary(pool: PgPool) {
+    let (_seed, profile) = judged_fixture(&pool).await;
+    let sure: uuid::Uuid = sqlx::query_scalar("SELECT id FROM leads WHERE domain = 'sure.com'")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    for (age, summary) in [
+        (20.0_f64, "older"),
+        (5.0, "Le domaine expose un Keycloak ancien."),
+    ] {
+        sqlx::query(
+            "INSERT INTO assessments (id, lead_id, profile_revision, summary, approach_angle, evidence, model, prompt_version, created_at)
+             VALUES ($1, $2, 1, $3, 'angle', '[]'::jsonb, 'm', 'aggregator@x', now() - make_interval(secs => $4))",
+        )
+        .bind(uuid::Uuid::now_v7())
+        .bind(sure)
+        .bind(summary)
+        .bind(age)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+    let api = Api::new(pool).await;
+
+    let (_, body) = api.get(&format!("/api/v1/profiles/{profile}/leads")).await;
+
+    let leads = body["data"].as_array().unwrap();
+    let find = |domain: &str| leads.iter().find(|lead| lead["domain"] == domain).unwrap();
+    assert_eq!(
+        find("sure.com")["summary"],
+        "Le domaine expose un Keycloak ancien."
+    );
+    assert!(find("maybe.com")["summary"].is_null());
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_detail_assessment_exposes_the_narrative_and_the_evidence_flag(pool: PgPool) {
+    let seed = Seed { pool: pool.clone() };
+    let profile = seed.profile("keycloak-ops").await;
+    let lead = seed.lead(&profile, "acme.com", "qualified", 5.0, 1).await;
+    sqlx::query(
+        "INSERT INTO assessments (id, lead_id, profile_revision, summary, verdict_narrative, approach_angle, evidence, evidence_verified, model, prompt_version, created_at)
+         VALUES ($1, $2::uuid, 1, 's', 'Les agents concordent.', 'angle', '[]'::jsonb, false, 'm', 'aggregator@x', now())",
+    )
+    .bind(uuid::Uuid::now_v7())
+    .bind(&lead)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let api = Api::new(pool).await;
+
+    let (_, body) = api.get(&format!("/api/v1/leads/{lead}")).await;
+
+    let assessment = &body["data"]["assessments"][0];
+    assert_eq!(assessment["verdict_narrative"], "Les agents concordent.");
+    assert_eq!(assessment["evidence_verified"], false);
+    assert_eq!(body["data"]["lead"]["summary"], "s");
+}
+
+async fn seed_state(pool: &PgPool, lead: &str, attempts: i32, error: Option<&str>) {
+    sqlx::query(
+        "INSERT INTO lead_qualification_state (lead_id, profile_revision, sources, completed_at, summary_attempts, summary_error, summary_next_attempt_at)
+         VALUES ($1::uuid, 2, ARRAY['http_probe'], now(), $2, $3, now() + interval '6 hours')",
+    )
+    .bind(lead)
+    .bind(attempts)
+    .bind(error)
+    .execute(pool)
+    .await
+    .expect("state");
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_detail_reports_a_failing_summary_and_retry_resets_it(pool: PgPool) {
+    let seed = Seed { pool: pool.clone() };
+    let profile = seed.profile("keycloak-ops").await;
+    let lead = seed.lead(&profile, "acme.com", "new", 5.0, 1).await;
+    seed_state(&pool, &lead, 5, Some("échec de l'appel au modèle")).await;
+    let api = Api::new(pool.clone()).await;
+
+    let (_, body) = api.get(&format!("/api/v1/leads/{lead}")).await;
+    let state = &body["data"]["summary_state"];
+    assert_eq!(state["attempts"], 5);
+    assert_eq!(state["failed"], true);
+    assert_eq!(state["error"], "échec de l'appel au modèle");
+    assert!(state["next_attempt_at"].is_string());
+
+    let uri = format!("/api/v1/leads/{lead}/summary/retry");
+    let (status, _, _) = send(api.app(), Method::POST, &uri, Some(&api.bearer), None).await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (_, after) = api.get(&format!("/api/v1/leads/{lead}")).await;
+    assert!(after["data"]["summary_state"].is_null());
+    let (attempts, next): (i32, Option<chrono::DateTime<chrono::Utc>>) = sqlx::query_as(
+        "SELECT summary_attempts, summary_next_attempt_at FROM lead_qualification_state",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(attempts, 0);
+    assert!(next.is_none());
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_few_failures_are_reported_but_not_as_failed(pool: PgPool) {
+    let seed = Seed { pool: pool.clone() };
+    let profile = seed.profile("keycloak-ops").await;
+    let lead = seed.lead(&profile, "acme.com", "new", 5.0, 1).await;
+    seed_state(&pool, &lead, 2, Some("réponse non conforme au contrat")).await;
+    let api = Api::new(pool).await;
+
+    let (_, body) = api.get(&format!("/api/v1/leads/{lead}")).await;
+
+    assert_eq!(body["data"]["summary_state"]["attempts"], 2);
+    assert_eq!(body["data"]["summary_state"]["failed"], false);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_retry_is_for_users_and_for_qualified_visible_leads_only(pool: PgPool) {
+    let seed = Seed { pool: pool.clone() };
+    let profile = seed.profile("keycloak-ops").await;
+    let lead = seed.lead(&profile, "acme.com", "new", 5.0, 1).await;
+    let unqualified = seed.lead(&profile, "bare.com", "new", 5.0, 1).await;
+    seed_state(&pool, &lead, 5, Some("x")).await;
+    let api = Api::new(pool).await;
+    let client = format!("Bearer {}", api.harness.valid_client_token());
+
+    let uri = format!("/api/v1/leads/{lead}/summary/retry");
+    let (forbidden, _, _) = send(api.app(), Method::POST, &uri, Some(&client), None).await;
+    assert_eq!(forbidden, StatusCode::FORBIDDEN);
+    let (anonymous, _, _) = send(api.app(), Method::POST, &uri, None, None).await;
+    assert_eq!(anonymous, StatusCode::UNAUTHORIZED);
+
+    let uri = format!("/api/v1/leads/{unqualified}/summary/retry");
+    let (conflict, _, _) = send(api.app(), Method::POST, &uri, Some(&api.bearer), None).await;
+    assert_eq!(conflict, StatusCode::CONFLICT);
+
+    let uri = format!("/api/v1/leads/{}/summary/retry", common::generate_uuid_v7());
+    let (missing, _, _) = send(api.app(), Method::POST, &uri, Some(&api.bearer), None).await;
+    assert_eq!(missing, StatusCode::NOT_FOUND);
+    let (malformed, _, _) = send(
+        api.app(),
+        Method::POST,
+        "/api/v1/leads/nope/summary/retry",
+        Some(&api.bearer),
+        None,
+    )
+    .await;
+    assert_eq!(malformed, StatusCode::BAD_REQUEST);
 }
 
 #[sqlx::test(migrations = "../../migrations")]

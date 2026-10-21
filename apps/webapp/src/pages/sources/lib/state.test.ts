@@ -45,7 +45,7 @@ function run(overrides: Partial<SourceRun> = {}): SourceRun {
 describe('groupedSources', () => {
 	it('groups sources like the agent families and drops empty groups', () => {
 		const groups = groupedSources([
-			source('llm_qualification', { kind: 'llm.qualify' }),
+			source('qualification', { kind: 'listener.qualification' }),
 			source('boamp'),
 			source('http_probe'),
 			source('role_guess'),

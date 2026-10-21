@@ -1,6 +1,6 @@
 use std::{num::NonZeroU32, time::Duration};
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, SecondsFormat, Utc};
 use common::{CoreError, generate_uuid_v7};
 use lodestone_macros::transactional;
 use tracing::{info, warn};
@@ -11,7 +11,6 @@ use crate::{
         llm::gateway::{
             CallSettings, LlmCallError, Prompt, RunBudget, SchemaCall, Structured, call_with_schema,
         },
-        qualification::render_signal,
     },
     domain::{
         job::ports::Clock,
@@ -62,12 +61,63 @@ pub struct EvaluationReport {
     pub budget_exhausted: bool,
 }
 
-struct Loaded<P> {
-    provider: P,
-    id: ProviderId,
-    model: String,
-    max_retries: u8,
-    pricing: TokenPricing,
+pub(crate) struct Loaded<P> {
+    pub(crate) provider: P,
+    pub(crate) id: ProviderId,
+    pub(crate) model: String,
+    pub(crate) max_retries: u8,
+    pub(crate) pricing: TokenPricing,
+}
+
+pub(crate) async fn load_provider<B, S>(
+    usecase: &LodestoneUseCase,
+    builder: &B,
+    cipher: &S,
+    wanted: Option<ProviderId>,
+    default_tier: Tier,
+    label: &str,
+) -> Result<Option<Loaded<B::Provider>>, CoreError>
+where
+    B: ProviderBuilder,
+    S: SecretCipher,
+{
+    let resolved = match wanted {
+        Some(id) => usecase.resolve_llm_provider(id, cipher).await?,
+        None => match usecase.resolve_llm_tier(default_tier, cipher).await {
+            Ok(resolved) => Some(resolved),
+            Err(TierError::Storage(message)) => return Err(CoreError::Internal(message)),
+            Err(_) => None,
+        },
+    };
+    Ok(
+        resolved.and_then(|resolved| match builder.build(&resolved.definition) {
+            Ok(provider) => Some(Loaded {
+                provider,
+                id: resolved.id,
+                model: resolved.definition.model.clone(),
+                max_retries: resolved.max_retries,
+                pricing: resolved.pricing,
+            }),
+            Err(error) => {
+                warn!(label, %error, "qualification provider could not be built");
+                None
+            }
+        }),
+    )
+}
+
+pub fn render_signal(signal: &Signal) -> String {
+    let raw = serde_json::to_string_pretty(&signal.raw).unwrap_or_else(|_| signal.raw.to_string());
+    format!(
+        "signal: {}\nvalue: {}\nsource: {}\nobserved: {}\n{}",
+        signal.kind.as_str(),
+        signal.value.as_deref().unwrap_or("-"),
+        signal.source.as_str(),
+        signal
+            .observed_at
+            .to_rfc3339_opts(SecondsFormat::Secs, true),
+        raw,
+    )
 }
 
 struct Providers<P> {
@@ -184,29 +234,15 @@ where
         if let Some(index) = providers.position(wanted) {
             return Ok(providers.entries[index].1.is_some().then_some(index));
         }
-        let resolved = match wanted {
-            Some(id) => usecase.resolve_llm_provider(id, self.cipher).await?,
-            None => match usecase.resolve_llm_tier(Tier::Triage, self.cipher).await {
-                Ok(resolved) => Some(resolved),
-                Err(TierError::Storage(message)) => return Err(CoreError::Internal(message)),
-                Err(_) => None,
-            },
-        };
-        let loaded = resolved.and_then(|resolved| {
-            match self.builder.build(&resolved.definition) {
-                Ok(provider) => Some(Loaded {
-                    provider,
-                    id: resolved.id,
-                    model: resolved.definition.model.clone(),
-                    max_retries: resolved.max_retries,
-                    pricing: resolved.pricing,
-                }),
-                Err(error) => {
-                    warn!(agent = agent.id.as_str(), %error, "qualification provider could not be built");
-                    None
-                }
-            }
-        });
+        let loaded = load_provider(
+            usecase,
+            self.builder,
+            self.cipher,
+            wanted,
+            Tier::Triage,
+            agent.id.as_str(),
+        )
+        .await?;
         let available = loaded.is_some();
         providers.entries.push((wanted, loaded));
         Ok(available.then(|| providers.entries.len() - 1))
@@ -543,5 +579,45 @@ impl LodestoneUseCase {
     ) -> Result<Vec<QualificationResult>, CoreError> {
         let mut repo = qualification_repository;
         repo.current_results(lead_id).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::TimeZone;
+    use serde_json::json;
+
+    use super::*;
+    use crate::domain::{
+        lead::SignalId,
+        values::{Provenance, SignalKind, SourceName, UnitInterval},
+    };
+
+    fn signal(value: Option<&str>) -> Signal {
+        Signal {
+            id: SignalId(uuid::Uuid::nil()),
+            lead_id: LeadId(uuid::Uuid::nil()),
+            kind: SignalKind::parse("product_detected").unwrap(),
+            value: value.map(str::to_owned),
+            source: SourceName::HttpProbe,
+            raw: json!({"version": "21.1"}),
+            provenance: Provenance::parse("https://example.com/realms/master").unwrap(),
+            strength: UnitInterval::new(0.5).unwrap(),
+            observed_at: Utc.timestamp_opt(1_800_000_000, 0).unwrap(),
+            agent: None,
+        }
+    }
+
+    #[test]
+    fn rendering_is_stable_plain_text() {
+        assert_eq!(
+            render_signal(&signal(Some("keycloak"))),
+            "signal: product_detected\nvalue: keycloak\nsource: http_probe\nobserved: 2027-01-15T08:00:00Z\n{\n  \"version\": \"21.1\"\n}"
+        );
+    }
+
+    #[test]
+    fn a_missing_value_renders_a_dash() {
+        assert!(render_signal(&signal(None)).contains("\nvalue: -\n"));
     }
 }

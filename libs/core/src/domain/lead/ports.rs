@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use chrono::{DateTime, Utc};
 use common::CoreError;
 
@@ -6,9 +8,9 @@ use crate::domain::{
     lead::{
         Assessment, AssessmentId, ContactEmail, Lead, LeadId, LeadStatus, Signal,
         draft::{DraftEdit, DraftPage, DraftRecord, DraftReview},
-        query::{LeadPage, LeadQuery, ProfileSummary},
+        query::{LeadPage, LeadQuery, ProfileSummary, VerdictFilter},
     },
-    profile::{ProfileId, RevisionNumber},
+    profile::ProfileId,
     scoring::ScoreBreakdown,
 };
 
@@ -63,15 +65,6 @@ pub trait LeadRepository: Send {
     fn profile_summaries(
         &mut self,
     ) -> impl Future<Output = Result<Vec<ProfileSummary>, CoreError>> + Send;
-
-    fn list_to_qualify(
-        &mut self,
-        profile_id: ProfileId,
-        threshold: f64,
-        revision: RevisionNumber,
-        prompt: &str,
-        limit: u32,
-    ) -> impl Future<Output = Result<Vec<Lead>, CoreError>> + Send;
 }
 
 #[cfg_attr(test, mockall::automock)]
@@ -109,6 +102,11 @@ pub trait AssessmentRepository: Send {
         lead_id: LeadId,
     ) -> impl Future<Output = Result<Vec<Assessment>, CoreError>> + Send;
 
+    fn latest_summaries(
+        &mut self,
+        lead_ids: &[LeadId],
+    ) -> impl Future<Output = Result<HashMap<LeadId, String>, CoreError>> + Send;
+
     fn find_draft(
         &mut self,
         id: AssessmentId,
@@ -117,6 +115,7 @@ pub trait AssessmentRepository: Send {
     fn list_pending_drafts(
         &mut self,
         profile_id: Option<ProfileId>,
+        verdicts: &[VerdictFilter],
         limit: u32,
         offset: u64,
     ) -> impl Future<Output = Result<DraftPage, CoreError>> + Send;

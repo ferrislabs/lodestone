@@ -1,13 +1,17 @@
+use std::collections::HashMap;
+
 use crate::domain::{
-    lead::{Assessment, ContactEmail, Lead, LeadStatus, Signal},
+    lead::{Assessment, ContactEmail, Lead, LeadId, LeadStatus, Signal},
     profile::{Profile, ProfileId, ProfileName, RevisionNumber, definition::QualificationAgent},
-    qualification::QualificationResult,
+    qualification::{QualificationResult, SummaryState, Verdict},
     values::SignalKind,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum LeadSort {
     #[default]
+    ConfidenceDesc,
+    ConfidenceAsc,
     ScoreDesc,
     ScoreAsc,
     LastSeenDesc,
@@ -16,7 +20,9 @@ pub enum LeadSort {
 }
 
 impl LeadSort {
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 7] = [
+        Self::ConfidenceDesc,
+        Self::ConfidenceAsc,
         Self::ScoreDesc,
         Self::ScoreAsc,
         Self::LastSeenDesc,
@@ -26,6 +32,8 @@ impl LeadSort {
 
     pub fn as_str(self) -> &'static str {
         match self {
+            Self::ConfidenceDesc => "confidence_desc",
+            Self::ConfidenceAsc => "confidence_asc",
             Self::ScoreDesc => "score_desc",
             Self::ScoreAsc => "score_asc",
             Self::LastSeenDesc => "last_seen_desc",
@@ -39,9 +47,50 @@ impl LeadSort {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum VerdictFilter {
+    Reliable,
+    ToCheck,
+    Discarded,
+    Pending,
+}
+
+impl VerdictFilter {
+    pub const ALL: [Self; 4] = [
+        Self::Reliable,
+        Self::ToCheck,
+        Self::Discarded,
+        Self::Pending,
+    ];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Reliable => "fiable",
+            Self::ToCheck => "a_verifier",
+            Self::Discarded => "ecarte",
+            Self::Pending => "en_attente",
+        }
+    }
+
+    pub fn parse(raw: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|filter| filter.as_str() == raw)
+    }
+
+    pub fn stored(self) -> Option<Verdict> {
+        match self {
+            Self::Reliable => Some(Verdict::Reliable),
+            Self::ToCheck => Some(Verdict::ToCheck),
+            Self::Discarded => Some(Verdict::Discarded),
+            Self::Pending => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct LeadQuery {
     pub status: Option<LeadStatus>,
+    pub verdicts: Vec<VerdictFilter>,
+    pub min_confidence: Option<f64>,
     pub min_score: Option<f64>,
     pub domain_contains: Option<String>,
     pub signal_kind: Option<SignalKind>,
@@ -60,6 +109,7 @@ pub struct LeadPage {
 pub struct LeadListing {
     pub profile: Profile,
     pub page: LeadPage,
+    pub summaries: HashMap<LeadId, String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -71,6 +121,7 @@ pub struct LeadDetail {
     pub assessments: Vec<Assessment>,
     pub qualification_results: Vec<QualificationResult>,
     pub qualification_agents: Vec<QualificationAgent>,
+    pub summary_state: Option<SummaryState>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -92,6 +143,16 @@ mod tests {
             assert_eq!(LeadSort::parse(sort.as_str()), Some(sort));
         }
         assert_eq!(LeadSort::parse("random"), None);
-        assert_eq!(LeadSort::default(), LeadSort::ScoreDesc);
+        assert_eq!(LeadSort::default(), LeadSort::ConfidenceDesc);
+    }
+
+    #[test]
+    fn verdict_filters_round_trip_through_text() {
+        for filter in VerdictFilter::ALL {
+            assert_eq!(VerdictFilter::parse(filter.as_str()), Some(filter));
+        }
+        assert_eq!(VerdictFilter::parse("maybe"), None);
+        assert_eq!(VerdictFilter::Pending.stored(), None);
+        assert_eq!(VerdictFilter::Discarded.stored(), Some(Verdict::Discarded));
     }
 }

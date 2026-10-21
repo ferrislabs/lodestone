@@ -1,101 +1,90 @@
-use std::num::NonZeroU32;
-
-use chrono::{DateTime, SecondsFormat, Utc};
+use chrono::{DateTime, Utc};
 use common::{CoreError, generate_uuid_v7};
 use lodestone_macros::transactional;
-use tracing::warn;
+use tracing::{info, warn};
 
 use crate::{
     application::{
         LodestoneUseCase,
+        evaluation::{EvaluationSettings, Loaded, ProviderBuilder, load_provider, render_signal},
         llm::gateway::{
-            CallSettings, LlmCallError, Prompt, RunBudget, Structured, call_structured,
-            call_structured_cached, store_cached,
+            CallSettings, LlmCallError, Prompt, RunBudget, SchemaCall, call_with_schema,
         },
-        sources::SourceRunError,
     },
     domain::{
+        aggregation::{
+            AggregatorOutput, EVIDENCE_RETRY, Facts, agent_source, build, instruction,
+            missing_results, render_agent, with_problem,
+        },
         job::ports::Clock,
         lead::{
-            Assessment, AssessmentId, Evidence, Lead, LeadId, LeadStatus, Signal,
-            draft::DraftReview,
+            Assessment, AssessmentId, Evidence, Lead, LeadStatus, Signal,
+            draft::{DraftReview, carry_draft},
             ports::{AssessmentRepository, LeadRepository, SignalRepository},
         },
         llm::{
             LlmProvider, UntrustedDocument,
             cache::{CacheScope, LlmCache},
+            provider::{ProviderId, SecretCipher, Tier},
         },
-        profile::ActiveProfile,
-        prompt::{EvidenceProblem, QUALIFICATION_V1, QualificationOutput, verified_evidence},
-        run::{Run, RunId, RunOutcome, ports::RunRepository},
-        values::SourceName,
+        profile::{ActiveProfile, definition::ProfileDefinition},
+        prompt::check_evidence,
+        qualification::{
+            QualificationResult, ports::QualificationRepository, prompt::lead_document,
+        },
+        suppression::ports::SuppressionRepository,
     },
 };
 
-const BUDGET_EXHAUSTED: &str = "llm budget exhausted";
-const EVIDENCE_RETRY: &str = "Your previous answer cited text that does not appear verbatim in the documents. Quote only exact substrings of the documents.";
+const ATTEMPTS: usize = 2;
+const CONTRACT_RETRY: &str = "Your previous answer broke the contract";
+const REASON_NO_PROVIDER: &str = "fournisseur indisponible";
+const REASON_CALL: &str = "échec de l'appel au modèle";
+const REASON_CONTRACT: &str = "réponse non conforme au contrat";
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct QualificationSettings {
-    pub call: CallSettings,
-    pub max_tokens: u32,
-    pub budget_cents: NonZeroU32,
-    pub batch_size: u32,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct QualificationReport {
-    pub leads_considered: u64,
-    pub qualified: u64,
-    pub uncertain: u64,
-    pub skipped_suppressed: u64,
-    pub failed_calls: u64,
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct AggregationReport {
+    pub leads: u64,
+    pub unverified: u64,
+    pub failed: u64,
+    pub backlog: u64,
     pub budget_exhausted: bool,
 }
 
-impl QualificationReport {
-    fn absorb(&mut self, other: &Self) {
-        self.leads_considered += other.leads_considered;
-        self.qualified += other.qualified;
-        self.uncertain += other.uncertain;
-        self.skipped_suppressed += other.skipped_suppressed;
-        self.failed_calls += other.failed_calls;
-        self.budget_exhausted |= other.budget_exhausted;
-    }
+enum Outcome {
+    Stored { verified: bool },
+    Skipped,
+    Failed(&'static str),
+    BudgetExhausted,
 }
 
-struct QualificationLlm<'a, P, C> {
-    provider: &'a P,
-    cache: &'a C,
-    settings: QualificationSettings,
+struct Candidate {
+    output: AggregatorOutput,
+    model: String,
 }
 
-pub fn render_signal(signal: &Signal) -> String {
-    let raw = serde_json::to_string_pretty(&signal.raw).unwrap_or_else(|_| signal.raw.to_string());
-    format!(
-        "signal: {}\nvalue: {}\nsource: {}\nobserved: {}\n{}",
-        signal.kind.as_str(),
-        signal.value.as_deref().unwrap_or("-"),
-        signal.source.as_str(),
-        signal
-            .observed_at
-            .to_rfc3339_opts(SecondsFormat::Secs, true),
-        raw,
-    )
-}
-
-fn count(value: usize) -> u64 {
-    u64::try_from(value).unwrap_or(u64::MAX)
+fn agent_blocks(
+    definition: &ProfileDefinition,
+    results: &[QualificationResult],
+) -> Vec<(String, String)> {
+    definition
+        .qualification_agents
+        .iter()
+        .filter(|agent| agent.enabled)
+        .map(|agent| {
+            let result = results.iter().find(|result| result.agent_id == agent.id);
+            (agent_source(&agent.id), render_agent(agent, result))
+        })
+        .collect()
 }
 
 fn evidence_of(
-    output: &QualificationOutput,
-    documents: &[UntrustedDocument<'_>],
+    check: &crate::domain::prompt::EvidenceCheck<'_>,
     signals: &[Signal],
-) -> Result<Vec<Evidence>, EvidenceProblem> {
-    let verified = verified_evidence(output, documents)?;
-    Ok(verified
-        .into_iter()
+) -> Vec<Evidence> {
+    check
+        .verified
+        .iter()
         .filter_map(|quote| {
             let index = usize::try_from(quote.document_index).ok()?;
             let signal = signals.get(index)?;
@@ -104,372 +93,396 @@ fn evidence_of(
                 provenance: signal.provenance.clone(),
             })
         })
-        .collect())
+        .collect()
 }
 
-enum Attempt {
-    Done(Structured<QualificationOutput>),
-    Stop,
-    Skip,
+struct Summariser<'a, P, C> {
+    loaded: &'a Loaded<P>,
+    cache: &'a C,
+    settings: EvaluationSettings,
 }
 
-fn classify(
-    result: Result<Structured<QualificationOutput>, LlmCallError>,
-    tally: &mut QualificationReport,
-    domain: &str,
-) -> Attempt {
-    match result {
-        Ok(structured) => Attempt::Done(structured),
-        Err(LlmCallError::BudgetExhausted) => {
-            tally.budget_exhausted = true;
-            Attempt::Stop
+impl<P, C> Summariser<'_, P, C>
+where
+    P: LlmProvider,
+    C: LlmCache,
+{
+    async fn summarise<K: Clock>(
+        &self,
+        usecase: &LodestoneUseCase,
+        active: &ActiveProfile,
+        lead: &Lead,
+        budget: &mut RunBudget,
+        clock: &K,
+    ) -> Result<Outcome, CoreError> {
+        let definition = active.revision.definition.definition();
+        let results = usecase.lead_qualification_results(lead.id).await?;
+        let missing = missing_results(definition, &results);
+        if !missing.is_empty() {
+            warn!(lead_id = %lead.id, missing = missing.len(), "aggregation skipped, agent results are missing");
+            return Ok(Outcome::Skipped);
         }
-        Err(error) => {
-            warn!(%domain, %error, "qualification call failed, lead skipped");
-            tally.failed_calls += 1;
-            Attempt::Skip
+        let signals = usecase.aggregation_signals(lead.id).await?;
+        if signals.is_empty() {
+            return Ok(Outcome::Skipped);
+        }
+        let signal_contents: Vec<String> = signals.iter().map(render_signal).collect();
+        let overview = lead_document(lead.domain.as_str(), lead.first_seen_at);
+        let blocks = agent_blocks(definition, &results);
+        let mut documents: Vec<UntrustedDocument<'_>> = signals
+            .iter()
+            .zip(&signal_contents)
+            .map(|(signal, content)| UntrustedDocument {
+                source: signal.provenance.as_str(),
+                content,
+            })
+            .collect();
+        documents.push(UntrustedDocument {
+            source: "lead",
+            content: &overview,
+        });
+        documents.extend(
+            blocks
+                .iter()
+                .map(|(source, content)| UntrustedDocument { source, content }),
+        );
+        let evidence_documents = &documents[..signals.len()];
+        let schema =
+            AggregatorOutput::schema().map_err(|error| CoreError::Internal(error.to_string()))?;
+        let prompt = build(definition, &definition.aggregator, &schema);
+        let base = instruction(
+            Facts {
+                confidence: lead.confidence,
+                verdict: lead.verdict,
+            },
+            signals.len(),
+        );
+        let scope = CacheScope {
+            profile_id: active.profile.id,
+            revision: active.revision.number,
+            prompt: prompt.tag.clone(),
+            domain: lead.domain.clone(),
+            agent: None,
+        };
+        let mut current = base.clone();
+        let mut candidate: Option<Candidate> = None;
+        let mut sound = false;
+        let mut reason = REASON_CALL;
+        for _ in 0..ATTEMPTS {
+            let call = SchemaCall {
+                scope: &scope,
+                prompt: Prompt {
+                    system: &prompt.system,
+                    instruction: &current,
+                    documents: &documents,
+                    max_tokens: self.settings.max_tokens,
+                },
+                schema: &schema,
+            };
+            let structured = match call_with_schema(
+                &self.loaded.provider,
+                self.cache,
+                call,
+                |value| {
+                    AggregatorOutput::parse(value).is_ok_and(|output| {
+                        check_evidence(&output.evidence, evidence_documents).is_sound()
+                    })
+                },
+                CallSettings {
+                    max_retries: self.loaded.max_retries,
+                    pricing: self.loaded.pricing,
+                    base_delay: self.settings.base_delay,
+                },
+                budget,
+            )
+            .await
+            {
+                Ok(structured) => structured,
+                Err(LlmCallError::BudgetExhausted) => return Ok(Outcome::BudgetExhausted),
+                Err(error) => {
+                    warn!(lead_id = %lead.id, %error, "aggregation call failed");
+                    break;
+                }
+            };
+            match AggregatorOutput::parse(&structured.value) {
+                Err(problem) => {
+                    reason = REASON_CONTRACT;
+                    warn!(lead_id = %lead.id, %problem, "aggregator answer broke the contract");
+                    current = with_problem(
+                        &base,
+                        &format!(
+                            "{CONTRACT_RETRY}: {problem}. Answer again with only the JSON object that follows the contract."
+                        ),
+                    );
+                }
+                Ok(output) => {
+                    sound = check_evidence(&output.evidence, evidence_documents).is_sound();
+                    candidate = Some(Candidate {
+                        output,
+                        model: structured.model,
+                    });
+                    if sound {
+                        break;
+                    }
+                    warn!(lead_id = %lead.id, "aggregator evidence is not verbatim, retrying");
+                    current = with_problem(&base, EVIDENCE_RETRY);
+                }
+            }
+        }
+        let Some(Candidate { output, model }) = candidate else {
+            return Ok(Outcome::Failed(reason));
+        };
+        let check = check_evidence(&output.evidence, evidence_documents);
+        let evidence = evidence_of(&check, &signals);
+        let now = clock.now();
+        let assessment = Assessment {
+            id: AssessmentId(generate_uuid_v7()),
+            lead_id: lead.id,
+            profile_revision: active.revision.number,
+            summary: output.summary,
+            verdict_narrative: output.verdict_narrative,
+            approach_angle: output.approach_angle,
+            evidence,
+            evidence_verified: sound,
+            model,
+            prompt_version: prompt.tag.clone(),
+            draft: Some(output.draft_message),
+            draft_review: Some(DraftReview::pending()),
+            created_at: now,
+        };
+        let Some(qualified_at) = lead.qualified_at else {
+            return Ok(Outcome::Skipped);
+        };
+        match usecase.store_summary(&assessment, qualified_at, now).await {
+            Ok(true) => Ok(Outcome::Stored { verified: sound }),
+            Ok(false) => Ok(Outcome::Skipped),
+            Err(CoreError::Conflict(reason)) => {
+                warn!(lead_id = %lead.id, %reason, "summary dropped, the lead changed meanwhile");
+                Ok(Outcome::Skipped)
+            }
+            Err(error) => Err(error),
         }
     }
 }
 
 impl LodestoneUseCase {
-    pub async fn run_qualification<P, C, K>(
+    pub async fn summarise_due_leads<B, S, C, K>(
         &self,
-        provider: &P,
+        builder: &B,
+        cipher: &S,
         cache: &C,
-        settings: QualificationSettings,
+        settings: EvaluationSettings,
         clock: &K,
-    ) -> Result<QualificationReport, SourceRunError>
+    ) -> Result<AggregationReport, CoreError>
     where
-        P: LlmProvider,
+        B: ProviderBuilder,
+        S: SecretCipher,
         C: LlmCache,
         K: Clock,
     {
-        let profiles = self.list_active_profiles().await?;
-        let llm = QualificationLlm {
-            provider,
-            cache,
-            settings,
-        };
-        let mut report = QualificationReport::default();
-        let mut first_error: Option<CoreError> = None;
-        for active in &profiles {
-            let run = Run::start(
-                RunId(generate_uuid_v7()),
-                active.profile.id,
-                SourceName::LlmQualification,
-                None,
-                clock.now(),
-            );
-            self.insert_qualification_run(&run).await?;
-            let mut tally = QualificationReport::default();
-            let result = self.qualify_profile(active, &llm, clock, &mut tally).await;
-            let outcome = match &result {
-                Ok(()) if tally.budget_exhausted => RunOutcome::Failed {
-                    volume: tally.leads_considered,
-                    signals: tally.qualified,
-                    error: BUDGET_EXHAUSTED.to_owned(),
-                },
-                Ok(()) => RunOutcome::Succeeded {
-                    volume: tally.leads_considered,
-                    signals: tally.qualified,
-                },
-                Err(error) => RunOutcome::Failed {
-                    volume: tally.leads_considered,
-                    signals: tally.qualified,
-                    error: error.to_string(),
-                },
-            };
-            self.finish_qualification_run(run.id, &outcome, clock.now())
-                .await?;
-            report.absorb(&tally);
-            if let Err(error) = result {
-                first_error.get_or_insert(error);
-            }
-        }
-        match first_error {
-            Some(error) => Err(error.into()),
-            None => Ok(report),
-        }
-    }
-
-    async fn qualify_profile<P, C, K>(
-        &self,
-        active: &ActiveProfile,
-        llm: &QualificationLlm<'_, P, C>,
-        clock: &K,
-        tally: &mut QualificationReport,
-    ) -> Result<(), CoreError>
-    where
-        P: LlmProvider,
-        C: LlmCache,
-        K: Clock,
-    {
-        let definition = active.revision.definition.definition();
-        let system = QUALIFICATION_V1.system(definition);
-        let tag = QUALIFICATION_V1.tag();
-        let settings = llm.settings;
-        let leads = self
-            .leads_to_qualify(
-                active,
-                definition.qualification_points(),
-                &tag,
-                settings.batch_size,
-            )
-            .await?;
-        tally.leads_considered = count(leads.len());
+        let profiles: Vec<ActiveProfile> = self
+            .list_active_profiles()
+            .await?
+            .into_iter()
+            .filter(|active| {
+                active
+                    .revision
+                    .definition
+                    .definition()
+                    .qualification_agents
+                    .iter()
+                    .any(|agent| agent.enabled)
+            })
+            .collect();
+        let mut report = AggregationReport::default();
         let mut budget = RunBudget::new(settings.budget_cents);
-        for lead in &leads {
-            if self.is_suppressed(&lead.domain, None).await? {
-                tally.skipped_suppressed += 1;
+        let mut remaining = settings.batch_size;
+        'profiles: for active in &profiles {
+            if remaining == 0 {
+                break;
+            }
+            let definition = active.revision.definition.definition();
+            let leads = self.due_summaries(active, remaining, clock.now()).await?;
+            if leads.is_empty() {
                 continue;
             }
-            let signals = self.signals_of(lead.id).await?;
-            let contents: Vec<String> = signals.iter().map(render_signal).collect();
-            let documents: Vec<UntrustedDocument<'_>> = signals
-                .iter()
-                .zip(&contents)
-                .map(|(signal, content)| UntrustedDocument {
-                    source: signal.provenance.as_str(),
-                    content,
-                })
-                .collect();
-            let scope = CacheScope {
-                profile_id: active.profile.id,
-                revision: active.revision.number,
-                prompt: tag.clone(),
-                domain: lead.domain.clone(),
-                agent: None,
+            let wanted = definition.aggregator.provider_id.map(ProviderId);
+            let Some(loaded) = load_provider(
+                self,
+                builder,
+                cipher,
+                wanted,
+                Tier::Qualification,
+                "aggregator",
+            )
+            .await?
+            else {
+                warn!(profile = %active.profile.id.0, due = leads.len(), "aggregation skipped, the aggregator has no usable provider");
+                report.failed += u64::try_from(leads.len()).unwrap_or(u64::MAX);
+                for lead in &leads {
+                    self.note_summary_failure(lead, REASON_NO_PROVIDER, clock.now())
+                        .await?;
+                }
+                continue;
             };
-            let prompt = Prompt {
-                system: &system,
-                instruction: QUALIFICATION_V1.instruction(),
-                documents: &documents,
-                max_tokens: settings.max_tokens,
+            let summariser = Summariser {
+                loaded: &loaded,
+                cache,
+                settings,
             };
-            let first = match classify(
-                call_structured_cached::<QualificationOutput, _, _>(
-                    llm.provider,
-                    llm.cache,
-                    &scope,
-                    prompt,
-                    settings.call,
-                    &mut budget,
-                )
-                .await,
-                tally,
-                lead.domain.as_str(),
-            ) {
-                Attempt::Done(structured) => structured,
-                Attempt::Stop => return Ok(()),
-                Attempt::Skip => continue,
-            };
-            let (structured, evidence) = match evidence_of(&first.value, &documents, &signals) {
-                Ok(evidence) => (first, evidence),
-                Err(problem) => {
-                    warn!(domain = %lead.domain, %problem, "unverified evidence, retrying once");
-                    let instruction = format!("{}\n\n{EVIDENCE_RETRY}", prompt.instruction);
-                    let retry_prompt = Prompt {
-                        instruction: &instruction,
-                        ..prompt
-                    };
-                    let second = match classify(
-                        call_structured::<QualificationOutput, _>(
-                            llm.provider,
-                            retry_prompt,
-                            settings.call,
-                            &mut budget,
-                        )
-                        .await,
-                        tally,
-                        lead.domain.as_str(),
-                    ) {
-                        Attempt::Done(structured) => structured,
-                        Attempt::Stop => return Ok(()),
-                        Attempt::Skip => continue,
-                    };
-                    match evidence_of(&second.value, &documents, &signals) {
-                        Ok(evidence) => {
-                            store_cached(llm.cache, &scope, &prompt, &second.value, &second.model)
-                                .await;
-                            (second, evidence)
+            for lead in &leads {
+                match summariser
+                    .summarise(self, active, lead, &mut budget, clock)
+                    .await?
+                {
+                    Outcome::Stored { verified } => {
+                        info!(
+                            monotonic_counter.aggregation_summaries = 1u64,
+                            verified, "lead summary recorded"
+                        );
+                        report.leads += 1;
+                        if !verified {
+                            report.unverified += 1;
                         }
-                        Err(problem) => {
-                            warn!(lead_id = %lead.id, domain = %lead.domain, %problem, "evidence still unverified, lead marked uncertain");
-                            if self.mark_uncertain(lead.id, clock.now()).await? {
-                                tally.uncertain += 1;
-                            }
-                            continue;
-                        }
+                        remaining = remaining.saturating_sub(1);
+                    }
+                    Outcome::Skipped => {}
+                    Outcome::Failed(reason) => {
+                        report.failed += 1;
+                        self.note_summary_failure(lead, reason, clock.now()).await?;
+                    }
+                    Outcome::BudgetExhausted => {
+                        report.budget_exhausted = true;
+                        warn!("aggregation stopped, the run budget is exhausted");
+                        break 'profiles;
                     }
                 }
-            };
-            let now = clock.now();
-            let output = structured.value;
-            let assessment = Assessment {
-                id: AssessmentId(generate_uuid_v7()),
-                lead_id: lead.id,
-                profile_revision: active.revision.number,
-                evidence,
-                summary: output.summary,
-                approach_angle: output.approach_angle,
-                model: structured.model,
-                prompt_version: tag.clone(),
-                draft: Some(output.draft_message),
-                draft_review: Some(DraftReview::pending()),
-                created_at: now,
-            };
-            if self.store_assessment(&assessment, now).await? {
-                tally.qualified += 1;
             }
+        }
+        for active in &profiles {
+            report.backlog += self.count_due_summaries(active).await?;
+        }
+        Ok(report)
+    }
+
+    #[transactional(qualification)]
+    async fn due_summaries(
+        &self,
+        active: &ActiveProfile,
+        limit: u32,
+        now: DateTime<Utc>,
+    ) -> Result<Vec<Lead>, CoreError> {
+        let mut repo = qualification_repository;
+        repo.due_summaries(active.profile.id, active.revision.number, limit, now)
+            .await
+    }
+
+    async fn note_summary_failure(
+        &self,
+        lead: &Lead,
+        reason: &str,
+        at: DateTime<Utc>,
+    ) -> Result<(), CoreError> {
+        let Some(qualified_at) = lead.qualified_at else {
+            return Ok(());
+        };
+        if let Some(attempts) = self
+            .record_summary_failure(lead.id, qualified_at, reason, at)
+            .await?
+        {
+            warn!(lead_id = %lead.id, attempts, reason, "aggregation failed, next attempt delayed");
         }
         Ok(())
     }
 
-    #[transactional(lead)]
-    async fn mark_uncertain(&self, lead_id: LeadId, at: DateTime<Utc>) -> Result<bool, CoreError> {
-        let mut repo = lead_repository;
-        let to = LeadStatus::New
-            .move_to(LeadStatus::Uncertain)
-            .map_err(|error| CoreError::Internal(error.to_string()))?;
-        Ok(repo
-            .update_status(lead_id, LeadStatus::New, to, at)
-            .await?
-            .is_some())
+    #[transactional(qualification)]
+    async fn record_summary_failure(
+        &self,
+        lead_id: crate::domain::lead::LeadId,
+        qualified_at: DateTime<Utc>,
+        reason: &str,
+        at: DateTime<Utc>,
+    ) -> Result<Option<u32>, CoreError> {
+        let mut repo = qualification_repository;
+        repo.record_summary_failure(lead_id, qualified_at, reason, at)
+            .await
     }
 
-    #[transactional(lead)]
-    async fn leads_to_qualify(
+    #[transactional(lead, suppression, qualification)]
+    pub async fn retry_lead_summary(
         &self,
-        active: &ActiveProfile,
-        threshold: f64,
-        prompt: &str,
-        limit: u32,
-    ) -> Result<Vec<Lead>, CoreError> {
-        let mut repo = lead_repository;
-        repo.list_to_qualify(
-            active.profile.id,
-            threshold,
-            active.revision.number,
-            prompt,
-            limit,
-        )
-        .await
+        lead_id: crate::domain::lead::LeadId,
+    ) -> Result<Lead, CoreError> {
+        let mut leads = lead_repository;
+        let mut suppression = suppression_repository;
+        let mut qualification = qualification_repository;
+        let lead = leads.find(lead_id).await?.ok_or(CoreError::NotFound)?;
+        if suppression.is_domain_suppressed(&lead.domain).await? {
+            return Err(CoreError::NotFound);
+        }
+        if !qualification.reset_summary(lead_id).await? {
+            return Err(CoreError::Conflict(
+                "lead has not been qualified yet".to_owned(),
+            ));
+        }
+        Ok(lead)
+    }
+
+    #[transactional(qualification)]
+    async fn count_due_summaries(&self, active: &ActiveProfile) -> Result<u64, CoreError> {
+        let mut repo = qualification_repository;
+        repo.count_due_summaries(active.profile.id, active.revision.number)
+            .await
     }
 
     #[transactional(signal)]
-    async fn signals_of(&self, lead_id: LeadId) -> Result<Vec<Signal>, CoreError> {
+    async fn aggregation_signals(
+        &self,
+        lead_id: crate::domain::lead::LeadId,
+    ) -> Result<Vec<Signal>, CoreError> {
         let mut repo = signal_repository;
         repo.list_for_lead(lead_id).await
     }
 
-    #[transactional(lead, assessment)]
-    async fn store_assessment(
+    #[transactional(lead, assessment, qualification)]
+    async fn store_summary(
         &self,
         assessment: &Assessment,
+        qualified_at: DateTime<Utc>,
         at: DateTime<Utc>,
     ) -> Result<bool, CoreError> {
         let mut leads = lead_repository;
         let mut assessments = assessment_repository;
-        let to = LeadStatus::New
-            .move_to(LeadStatus::Qualified)
-            .map_err(|error| CoreError::Internal(error.to_string()))?;
-        if leads
-            .update_status(assessment.lead_id, LeadStatus::New, to, at)
+        let mut qualification = qualification_repository;
+        let Some(current) = leads.find(assessment.lead_id).await? else {
+            return Ok(false);
+        };
+        let previous = assessments.list_for_lead(assessment.lead_id).await?;
+        let assessment = &carry_draft(previous.first(), assessment.clone(), at);
+        if !matches!(current.status, LeadStatus::New | LeadStatus::Qualified) {
+            return Ok(false);
+        }
+        if !qualification
+            .mark_summarised(assessment.lead_id, qualified_at, at)
             .await?
-            .is_none()
         {
             return Ok(false);
         }
+        if current.status == LeadStatus::New {
+            let to = LeadStatus::New
+                .move_to(LeadStatus::Qualified)
+                .map_err(|error| CoreError::Internal(error.to_string()))?;
+            if leads
+                .update_status(assessment.lead_id, LeadStatus::New, to, at)
+                .await?
+                .is_none()
+            {
+                return Err(CoreError::Conflict(
+                    "lead status changed concurrently".to_owned(),
+                ));
+            }
+        }
         assessments.insert(assessment).await?;
         Ok(true)
-    }
-
-    #[transactional(run)]
-    async fn insert_qualification_run(&self, run: &Run) -> Result<(), CoreError> {
-        let mut repo = run_repository;
-        repo.insert(run).await
-    }
-
-    #[transactional(run)]
-    async fn finish_qualification_run(
-        &self,
-        id: RunId,
-        outcome: &RunOutcome,
-        at: DateTime<Utc>,
-    ) -> Result<(), CoreError> {
-        let mut repo = run_repository;
-        repo.finish(id, outcome, at).await?;
-        Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use chrono::TimeZone;
-    use serde_json::json;
-
-    use super::*;
-    use crate::domain::{
-        lead::SignalId,
-        values::{Provenance, SignalKind, UnitInterval},
-    };
-
-    fn signal(value: Option<&str>) -> Signal {
-        Signal {
-            id: SignalId(uuid::Uuid::nil()),
-            lead_id: LeadId(uuid::Uuid::nil()),
-            kind: SignalKind::parse("product_detected").unwrap(),
-            value: value.map(str::to_owned),
-            source: SourceName::HttpProbe,
-            raw: json!({"version": "21.1"}),
-            provenance: Provenance::parse("https://example.com/realms/master").unwrap(),
-            strength: UnitInterval::new(0.5).unwrap(),
-            observed_at: Utc.timestamp_opt(1_800_000_000, 0).unwrap(),
-            agent: None,
-        }
-    }
-
-    #[test]
-    fn rendering_is_stable_plain_text() {
-        assert_eq!(
-            render_signal(&signal(Some("keycloak"))),
-            "signal: product_detected\nvalue: keycloak\nsource: http_probe\nobserved: 2027-01-15T08:00:00Z\n{\n  \"version\": \"21.1\"\n}"
-        );
-    }
-
-    #[test]
-    fn a_missing_value_renders_a_dash() {
-        assert!(render_signal(&signal(None)).contains("\nvalue: -\n"));
-    }
-
-    #[test]
-    fn only_verified_quotes_are_mapped() {
-        use crate::domain::prompt::{DraftMessage, EvidenceQuote};
-        let signals = [signal(None)];
-        let content = render_signal(&signals[0]);
-        let documents = [UntrustedDocument {
-            source: signals[0].provenance.as_str(),
-            content: &content,
-        }];
-        let build = |quotes: Vec<(u32, &str)>| QualificationOutput {
-            summary: String::new(),
-            approach_angle: String::new(),
-            evidence: quotes
-                .into_iter()
-                .map(|(document_index, quote)| EvidenceQuote {
-                    document_index,
-                    quote: quote.to_owned(),
-                })
-                .collect(),
-            draft_message: DraftMessage {
-                subject: String::new(),
-                body: String::new(),
-            },
-        };
-        let evidence = evidence_of(&build(vec![(0, "product_detected")]), &documents, &signals);
-        assert_eq!(evidence.unwrap()[0].quote, "product_detected");
-        assert!(evidence_of(&build(vec![(3, "product_detected")]), &documents, &signals).is_err());
-        assert!(evidence_of(&build(vec![]), &documents, &signals).is_err());
     }
 }

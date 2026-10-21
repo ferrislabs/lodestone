@@ -12,6 +12,8 @@ describe('leads search params', () => {
 	it('maps an empty search to default filters', () => {
 		expect(filtersFromSearch({})).toEqual({
 			status: '',
+			verdicts: ['fiable', 'a_verifier', 'en_attente'],
+			minConfidence: '',
 			minScore: '',
 			domain: '',
 			signal: '',
@@ -22,6 +24,8 @@ describe('leads search params', () => {
 	it('round-trips filters through the search', () => {
 		const filters = {
 			status: 'qualified' as const,
+			verdicts: ['fiable' as const, 'ecarte' as const],
+			minConfidence: '60',
 			minScore: '12.5',
 			domain: 'acme',
 			signal: 'hiring',
@@ -35,6 +39,8 @@ describe('leads search params', () => {
 	it('omits empty and default values and resets the page', () => {
 		const search = searchFromFilters('p1', {
 			status: '',
+			verdicts: ['fiable', 'a_verifier', 'en_attente'],
+			minConfidence: '',
 			minScore: '',
 			domain: '',
 			signal: '',
@@ -43,6 +49,8 @@ describe('leads search params', () => {
 		expect(search).toEqual({
 			profile: 'p1',
 			status: undefined,
+			verdict: undefined,
+			min_confidence: undefined,
 			min_score: undefined,
 			domain: undefined,
 			signal: undefined,
@@ -54,29 +62,96 @@ describe('leads search params', () => {
 	it('drops an invalid min score', () => {
 		const search = searchFromFilters(undefined, {
 			status: '',
+			verdicts: ['fiable'],
+			minConfidence: '120',
 			minScore: 'abc',
 			domain: '',
 			signal: '',
 			sort: DEFAULT_SORT,
 		})
 		expect(search.min_score).toBeUndefined()
+		expect(search.min_confidence).toBeUndefined()
+		expect(search.verdict).toEqual(['fiable'])
+	})
+
+	it('hides discarded leads by default and sorts by confidence', () => {
+		expect(DEFAULT_SORT).toBe('confidence_desc')
+		expect(queryFromSearch({})).toEqual({
+			verdict: 'fiable,a_verifier,en_attente',
+			sort: 'confidence_desc',
+		})
+	})
+
+	it('sends the chosen verdicts in a stable order with the min confidence', () => {
+		expect(
+			queryFromSearch({
+				verdict: ['ecarte', 'fiable'],
+				min_confidence: 40,
+				sort: 'score_desc',
+			}),
+		).toEqual({
+			verdict: 'fiable,ecarte',
+			min_confidence: 40,
+			sort: 'score_desc',
+		})
+	})
+
+	it('falls back to the default verdicts when none is ticked', () => {
+		const form = new FormData()
+		expect(filtersFromForm(form).verdicts).toEqual([
+			'fiable',
+			'a_verifier',
+			'en_attente',
+		])
+		form.append('verdict', 'ecarte')
+		form.append('verdict', 'fiable')
+		form.append('verdict', 'bogus')
+		expect(filtersFromForm(form).verdicts).toEqual(['fiable', 'ecarte'])
+	})
+
+	it('validates the verdict and confidence search params', () => {
+		expect(
+			leadsSearchSchema.safeParse({ verdict: ['fiable'], min_confidence: 50 })
+				.success,
+		).toBe(true)
+		expect(leadsSearchSchema.safeParse({ verdict: ['nope'] }).success).toBe(
+			false,
+		)
+		expect(leadsSearchSchema.safeParse({ verdict: [] }).success).toBe(false)
+		expect(leadsSearchSchema.safeParse({ min_confidence: 101 }).success).toBe(
+			false,
+		)
 	})
 
 	it('builds the api query with a sort and only set filters', () => {
 		expect(
-			queryFromSearch({ status: 'new', min_score: 0, domain: 'x' }),
-		).toEqual({ status: 'new', min_score: 0, domain: 'x', sort: 'score_desc' })
+			queryFromSearch({
+				status: 'new',
+				min_score: 0,
+				domain: 'x',
+				sort: 'score_desc',
+			}),
+		).toEqual({
+			status: 'new',
+			verdict: 'fiable,a_verifier,en_attente',
+			min_score: 0,
+			domain: 'x',
+			sort: 'score_desc',
+		})
 	})
 
 	it('reads filters from a form', () => {
 		const form = new FormData()
 		form.set('status', 'rejected')
+		form.set('min_confidence', ' 55 ')
 		form.set('min_score', ' 3 ')
 		form.set('domain', 'foo')
 		form.set('signal', '')
 		form.set('sort', 'bogus')
 		expect(filtersFromForm(form)).toEqual({
 			status: 'rejected',
+			verdicts: ['fiable', 'a_verifier', 'en_attente'],
+			minConfidence: '55',
 			minScore: '3',
 			domain: 'foo',
 			signal: '',

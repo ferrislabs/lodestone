@@ -64,3 +64,11 @@ Each qualification agent and the aggregator pick their provider. The global tria
 - Company research (#136) becomes a qualification agent kind that also reads the company site and official data before answering.
 - The lead list shows the confidence, the verdict and the summary; the lead page shows every agent's answers.
 - Tiers, the triage step and the old qualification job are removed once the new path is in place.
+
+## Implementation notes (#146)
+
+- The aggregator is a second phase of the `qualification` listener, not a separate listener: after the agents' step it picks the leads whose agent results are complete and whose summary is missing or older than those results (`lead_qualification_state.summarised_at`). A failed aggregation leaves the lead due, so the next loop retries it.
+- The two defaults keep the `triage` and `qualification` tier values in the database and the API; only their names change in the interface: "Classification (agents de qualification par défaut)" and "Synthèse (agrégateur par défaut)".
+- The `llm.qualify` job, the `llm_qualification` source and the fixed prompts (`TRIAGE_V1`, `QUALIFICATION_V1`) are removed. Leads left `uncertain` by the old path are moved back to `new`.
+- A summary whose evidence cannot be verified is kept with `evidence_verified = false` instead of marking the lead uncertain; a lead is never blocked from the list.
+- Leftover: the per-agent `llm.relevance_criteria` of sourcing agents (profile schema) was meant for the removed triage step and is not read anymore. Dropping it needs a schema version.

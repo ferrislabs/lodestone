@@ -129,7 +129,7 @@ async fn source_without_a_job_is_404_with_a_reason(pool: PgPool) {
 }
 
 #[sqlx::test(migrations = "../../migrations")]
-async fn qualification_can_be_run_now(pool: PgPool) {
+async fn the_former_qualification_source_is_gone(pool: PgPool) {
     let api = Api::new(pool).await;
     api.schedule("llm.qualify", "llm:qualify", 6).await;
 
@@ -137,8 +137,13 @@ async fn qualification_can_be_run_now(pool: PgPool) {
         .call(Method::POST, "/api/v1/sources/llm_qualification/run")
         .await;
 
-    assert_eq!(status, StatusCode::ACCEPTED, "{body}");
-    assert_eq!(body["data"]["kind"], "llm.qualify");
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+    let listed = api.list().await;
+    assert!(
+        listed
+            .iter()
+            .all(|source| source["source"] != "llm_qualification")
+    );
 }
 
 #[sqlx::test(migrations = "../../migrations")]
@@ -183,7 +188,6 @@ async fn service_accounts_cannot_run_a_source(pool: PgPool) {
 async fn list_shows_every_source_with_states_and_last_runs(pool: PgPool) {
     let api = Api::new(pool.clone()).await;
     api.schedule("source.run", "source:boamp", 6).await;
-    api.schedule("llm.qualify", "llm:qualify", 1).await;
     let profile = support_profile(&pool).await;
     with_tx(&pool, async |shared| {
         let mut repo = PgRunRepository::new(&shared);
@@ -221,9 +225,6 @@ async fn list_shows_every_source_with_states_and_last_runs(pool: PgPool) {
     assert_eq!(boamp["last_runs"][0]["volume"], 12);
     assert_eq!(boamp["last_runs"][0]["signals"], 3);
     assert_eq!(boamp["last_runs"][0]["error"], "timeout");
-    let qualification = entry(&listed, "llm_qualification");
-    assert_eq!(qualification["status"], "pending");
-    assert_eq!(qualification["kind"], "llm.qualify");
     let france_travail = entry(&listed, "france_travail");
     assert_eq!(france_travail["status"], "unavailable");
     assert_eq!(france_travail["unavailable_reason"], "missing_credentials");
@@ -283,7 +284,6 @@ async fn continuous_sources_report_their_listener_and_refuse_run_now(pool: PgPoo
     let boamp = entry(&listed, "boamp");
     assert_eq!(boamp["mode"], "scheduled");
     assert!(boamp["listener"].is_null());
-    assert_eq!(entry(&listed, "llm_qualification")["mode"], "scheduled");
     assert_eq!(entry(&listed, "qualification")["mode"], "continuous");
 
     for name in ["dns_cname", "certificate_transparency", "role_guess"] {

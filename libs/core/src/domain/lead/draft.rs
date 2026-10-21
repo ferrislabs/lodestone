@@ -74,6 +74,8 @@ pub struct DraftReview {
     pub reviewed_by: Option<UserId>,
     pub reviewed_at: Option<DateTime<Utc>>,
     pub rejection_reason: Option<String>,
+    pub suggestion: Option<DraftMessage>,
+    pub outdated_at: Option<DateTime<Utc>>,
 }
 
 impl DraftReview {
@@ -85,7 +87,13 @@ impl DraftReview {
             reviewed_by: None,
             reviewed_at: None,
             rejection_reason: None,
+            suggestion: None,
+            outdated_at: None,
         }
+    }
+
+    pub fn is_human_owned(&self) -> bool {
+        self.edited_at.is_some() || self.status != DraftStatus::Pending
     }
 
     pub fn approve(&self, by: UserId, at: DateTime<Utc>) -> Result<Self, InvalidDraftTransition> {
@@ -116,6 +124,37 @@ impl DraftReview {
             ..self.clone()
         })
     }
+}
+
+pub fn carry_draft(
+    previous: Option<&Assessment>,
+    mut fresh: Assessment,
+    at: DateTime<Utc>,
+) -> Assessment {
+    let Some((draft, review)) = previous.and_then(|assessment| {
+        Some((
+            assessment.draft.as_ref()?,
+            assessment.draft_review.as_ref()?,
+        ))
+    }) else {
+        return fresh;
+    };
+    if !review.is_human_owned() {
+        return fresh;
+    }
+    let pending = review.status == DraftStatus::Pending;
+    let suggestion = fresh.draft.take();
+    fresh.draft = Some(draft.clone());
+    fresh.draft_review = Some(if pending {
+        DraftReview {
+            outdated_at: suggestion.as_ref().map(|_| at),
+            suggestion,
+            ..review.clone()
+        }
+    } else {
+        review.clone()
+    });
+    fresh
 }
 
 pub fn normalize_reason(reason: Option<&str>) -> Result<Option<String>, DraftProblem> {
@@ -231,6 +270,89 @@ mod tests {
             assert_eq!(DraftStatus::parse(status.as_str()), Some(status));
         }
         assert_eq!(DraftStatus::parse("sent"), None);
+    }
+
+    fn assessment(subject: &str, review: Option<DraftReview>) -> Assessment {
+        Assessment {
+            id: crate::domain::lead::AssessmentId(uuid::Uuid::nil()),
+            lead_id: crate::domain::lead::LeadId(uuid::Uuid::nil()),
+            profile_revision: crate::domain::profile::RevisionNumber::new(1).unwrap(),
+            summary: subject.to_owned(),
+            verdict_narrative: String::new(),
+            approach_angle: String::new(),
+            evidence: Vec::new(),
+            evidence_verified: true,
+            model: String::new(),
+            prompt_version: String::new(),
+            draft: Some(DraftMessage {
+                subject: subject.to_owned(),
+                body: format!("body of {subject}"),
+            }),
+            draft_review: review,
+            created_at: at(),
+        }
+    }
+
+    fn later() -> DateTime<Utc> {
+        at() + chrono::Duration::hours(1)
+    }
+
+    #[test]
+    fn an_unedited_pending_draft_is_replaced() {
+        let previous = assessment("old", Some(DraftReview::pending()));
+        let merged = carry_draft(
+            Some(&previous),
+            assessment("new", Some(DraftReview::pending())),
+            later(),
+        );
+        assert_eq!(merged.draft.unwrap().subject, "new");
+        assert_eq!(merged.draft_review, Some(DraftReview::pending()));
+        let first = carry_draft(
+            None,
+            assessment("new", Some(DraftReview::pending())),
+            later(),
+        );
+        assert_eq!(first.draft.unwrap().subject, "new");
+    }
+
+    #[test]
+    fn an_edited_pending_draft_is_kept_and_the_new_one_becomes_a_suggestion() {
+        let review = DraftReview {
+            edited_at: Some(at()),
+            original: Some(DraftMessage {
+                subject: "model".to_owned(),
+                body: "model body".to_owned(),
+            }),
+            ..DraftReview::pending()
+        };
+        let previous = assessment("edited", Some(review.clone()));
+        let merged = carry_draft(
+            Some(&previous),
+            assessment("new", Some(DraftReview::pending())),
+            later(),
+        );
+        assert_eq!(merged.summary, "new");
+        assert_eq!(merged.draft.unwrap().subject, "edited");
+        let kept = merged.draft_review.unwrap();
+        assert_eq!(kept.status, DraftStatus::Pending);
+        assert_eq!(kept.edited_at, review.edited_at);
+        assert_eq!(kept.original, review.original);
+        assert_eq!(kept.suggestion.unwrap().subject, "new");
+        assert_eq!(kept.outdated_at, Some(later()));
+    }
+
+    #[test]
+    fn a_decided_draft_is_carried_untouched() {
+        let approved = DraftReview::pending().approve(user(), at()).unwrap();
+        let previous = assessment("approved", Some(approved.clone()));
+        let merged = carry_draft(
+            Some(&previous),
+            assessment("new", Some(DraftReview::pending())),
+            later(),
+        );
+        assert_eq!(merged.summary, "new");
+        assert_eq!(merged.draft.unwrap().subject, "approved");
+        assert_eq!(merged.draft_review, Some(approved));
     }
 
     #[test]

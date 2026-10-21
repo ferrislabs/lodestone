@@ -1,9 +1,10 @@
+use chrono::{DateTime, Utc};
 use common::CoreError;
 
 use crate::domain::{
     lead::{Lead, LeadId},
     profile::{ProfileId, RevisionNumber},
-    qualification::{Completion, QualificationResult},
+    qualification::{Completion, QualificationResult, SummaryState},
 };
 
 #[cfg_attr(test, mockall::automock)]
@@ -20,6 +21,45 @@ pub trait QualificationRepository: Send {
         profile_id: ProfileId,
         revision: RevisionNumber,
     ) -> impl Future<Output = Result<u64, CoreError>> + Send;
+
+    fn due_summaries(
+        &mut self,
+        profile_id: ProfileId,
+        revision: RevisionNumber,
+        limit: u32,
+        now: DateTime<Utc>,
+    ) -> impl Future<Output = Result<Vec<Lead>, CoreError>> + Send;
+
+    fn count_due_summaries(
+        &mut self,
+        profile_id: ProfileId,
+        revision: RevisionNumber,
+    ) -> impl Future<Output = Result<u64, CoreError>> + Send;
+
+    fn mark_summarised(
+        &mut self,
+        lead_id: LeadId,
+        qualified_at: DateTime<Utc>,
+        at: DateTime<Utc>,
+    ) -> impl Future<Output = Result<bool, CoreError>> + Send;
+
+    fn record_summary_failure(
+        &mut self,
+        lead_id: LeadId,
+        qualified_at: DateTime<Utc>,
+        reason: &str,
+        at: DateTime<Utc>,
+    ) -> impl Future<Output = Result<Option<u32>, CoreError>> + Send;
+
+    fn reset_summary(
+        &mut self,
+        lead_id: LeadId,
+    ) -> impl Future<Output = Result<bool, CoreError>> + Send;
+
+    fn summary_state(
+        &mut self,
+        lead_id: LeadId,
+    ) -> impl Future<Output = Result<Option<SummaryState>, CoreError>> + Send;
 
     fn store_result(
         &mut self,

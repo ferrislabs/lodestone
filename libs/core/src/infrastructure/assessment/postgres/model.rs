@@ -8,7 +8,7 @@ use crate::{
     RevisionNumber, UserId,
 };
 
-pub const ASSESSMENT_COLUMNS: &str = "assessments.id, assessments.lead_id, assessments.profile_revision, assessments.summary, assessments.approach_angle, assessments.evidence, assessments.model, assessments.prompt_version, assessments.draft_subject, assessments.draft_body, assessments.draft_status, assessments.draft_reviewed_by, assessments.draft_reviewed_at, assessments.draft_edited_at, assessments.draft_rejection_reason, assessments.draft_original_subject, assessments.draft_original_body, assessments.created_at";
+pub const ASSESSMENT_COLUMNS: &str = "assessments.id, assessments.lead_id, assessments.profile_revision, assessments.summary, assessments.verdict_narrative, assessments.approach_angle, assessments.evidence, assessments.evidence_verified, assessments.model, assessments.prompt_version, assessments.draft_subject, assessments.draft_body, assessments.draft_status, assessments.draft_reviewed_by, assessments.draft_reviewed_at, assessments.draft_edited_at, assessments.draft_rejection_reason, assessments.draft_original_subject, assessments.draft_original_body, assessments.draft_suggested_subject, assessments.draft_suggested_body, assessments.draft_outdated_at, assessments.created_at";
 
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct AssessmentRow {
@@ -16,8 +16,10 @@ pub struct AssessmentRow {
     pub lead_id: Uuid,
     pub profile_revision: i32,
     pub summary: String,
+    pub verdict_narrative: String,
     pub approach_angle: String,
     pub evidence: serde_json::Value,
+    pub evidence_verified: bool,
     pub model: String,
     pub prompt_version: String,
     pub draft_subject: Option<String>,
@@ -29,6 +31,9 @@ pub struct AssessmentRow {
     pub draft_rejection_reason: Option<String>,
     pub draft_original_subject: Option<String>,
     pub draft_original_body: Option<String>,
+    pub draft_suggested_subject: Option<String>,
+    pub draft_suggested_body: Option<String>,
+    pub draft_outdated_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -89,6 +94,11 @@ impl TryFrom<AssessmentRow> for Assessment {
                 reviewed_by: row.draft_reviewed_by.map(UserId),
                 reviewed_at: row.draft_reviewed_at,
                 rejection_reason: row.draft_rejection_reason,
+                suggestion: match (row.draft_suggested_subject, row.draft_suggested_body) {
+                    (Some(subject), Some(body)) => Some(DraftMessage { subject, body }),
+                    _ => None,
+                },
+                outdated_at: row.draft_outdated_at,
             }),
             (Some(_), None) => {
                 return Err(CoreError::Internal("stored draft has no status".to_owned()));
@@ -100,8 +110,10 @@ impl TryFrom<AssessmentRow> for Assessment {
             lead_id: LeadId(row.lead_id),
             profile_revision,
             summary: row.summary,
+            verdict_narrative: row.verdict_narrative,
             approach_angle: row.approach_angle,
             evidence: evidence_from_json(row.evidence)?,
+            evidence_verified: row.evidence_verified,
             model: row.model,
             prompt_version: row.prompt_version,
             draft: match (row.draft_subject, row.draft_body) {

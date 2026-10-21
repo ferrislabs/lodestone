@@ -6,11 +6,14 @@ export namespace Schemas {
     edited_at?: (string | null) | undefined;
     original_body?: (string | null) | undefined;
     original_subject?: (string | null) | undefined;
+    outdated_at?: (string | null) | undefined;
     rejection_reason?: (string | null) | undefined;
     reviewed_at?: (string | null) | undefined;
     reviewed_by?: (string | null) | undefined;
     status: DraftStatusDto;
     subject: string;
+    suggested_body?: (string | null) | undefined;
+    suggested_subject?: (string | null) | undefined;
   };
   export type EvidenceDto = { provenance: string; quote: string };
   export type AssessmentDto = {
@@ -18,11 +21,13 @@ export namespace Schemas {
     created_at: string;
     draft?: (null | DraftDto) | undefined;
     evidence: Array<EvidenceDto>;
+    evidence_verified: boolean;
     id: string;
     model: string;
     profile_revision: number;
     prompt_version: string;
     summary: string;
+    verdict_narrative: string;
   };
   export type DraftOutput = { body: string; status: string; subject: string };
   export type EvidenceRecord = { provenance: string; quote: string };
@@ -61,7 +66,15 @@ export namespace Schemas {
   };
   export type DraftContactDto = { address: string; confidence: number; method: string };
   export type ProfileRefDto = { id: string; name: string };
-  export type DraftLeadDto = { domain: string; id: string; profile: ProfileRefDto; score: number };
+  export type VerdictDto = "fiable" | "a_verifier" | "ecarte";
+  export type DraftLeadDto = {
+    confidence?: (number | null) | undefined;
+    domain: string;
+    id: string;
+    profile: ProfileRefDto;
+    score: number;
+    verdict?: (null | VerdictDto) | undefined;
+  };
   export type PaginationMetadata = {
     current_page: number;
     first_page: number;
@@ -80,12 +93,13 @@ export namespace Schemas {
       created_at: string;
       draft: DraftDto;
       evidence: Array<EvidenceDto>;
+      evidence_verified: boolean;
       lead: DraftLeadDto;
       summary: string;
+      verdict_narrative: string;
     };
     pagination?: (null | PaginationMetadata) | undefined;
   };
-  export type VerdictDto = "fiable" | "a_verifier" | "ecarte";
   export type LeadDto = {
     confidence?: (number | null) | undefined;
     domain: string;
@@ -96,6 +110,7 @@ export namespace Schemas {
     qualified_at?: (string | null) | undefined;
     score: number;
     status: LeadStatusDto;
+    summary?: (string | null) | undefined;
     updated_at: string;
     verdict?: (null | VerdictDto) | undefined;
   };
@@ -138,6 +153,12 @@ export namespace Schemas {
     strength: number;
     value?: (string | null) | undefined;
   };
+  export type SummaryStateDto = {
+    attempts: number;
+    error?: (string | null) | undefined;
+    failed: boolean;
+    next_attempt_at?: (string | null) | undefined;
+  };
   export type DataEnvelope_LeadDetailDto = {
     data: {
       assessments: Array<AssessmentDto>;
@@ -146,6 +167,7 @@ export namespace Schemas {
       qualification_results: Array<QualificationResultDto>;
       score_breakdown: Array<ScoreContributionDto>;
       signals: Array<SignalDto>;
+      summary_state?: (null | SummaryStateDto) | undefined;
     };
     pagination?: (null | PaginationMetadata) | undefined;
   };
@@ -160,6 +182,7 @@ export namespace Schemas {
       qualified_at?: (string | null) | undefined;
       score: number;
       status: LeadStatusDto;
+      summary?: (string | null) | undefined;
       updated_at: string;
       verdict?: (null | VerdictDto) | undefined;
     };
@@ -265,8 +288,10 @@ export namespace Schemas {
       created_at: string;
       draft: DraftDto;
       evidence: Array<EvidenceDto>;
+      evidence_verified: boolean;
       lead: DraftLeadDto;
       summary: string;
+      verdict_narrative: string;
     }>;
     pagination?: (null | PaginationMetadata) | undefined;
   };
@@ -281,6 +306,7 @@ export namespace Schemas {
       qualified_at?: (string | null) | undefined;
       score: number;
       status: LeadStatusDto;
+      summary?: (string | null) | undefined;
       updated_at: string;
       verdict?: (null | VerdictDto) | undefined;
     }>;
@@ -348,8 +374,10 @@ export namespace Schemas {
     created_at: string;
     draft: DraftDto;
     evidence: Array<EvidenceDto>;
+    evidence_verified: boolean;
     lead: DraftLeadDto;
     summary: string;
+    verdict_narrative: string;
   };
   export type EditDraftRequest = Partial<{ body: string | null; subject: string | null }>;
   export type ErrorBody = {
@@ -366,6 +394,7 @@ export namespace Schemas {
     qualification_results: Array<QualificationResultDto>;
     score_breakdown: Array<ScoreContributionDto>;
     signals: Array<SignalDto>;
+    summary_state?: (null | SummaryStateDto) | undefined;
   };
   export type ProfileRecord = { id: string; name: string; revision?: (number | null) | undefined };
   export type SignalRecord = {
@@ -461,7 +490,7 @@ export namespace Endpoints {
     path: "/api/v1/drafts";
     requestFormat: "json";
     parameters: {
-      query: Partial<{ profile_id: string; page: number; per_page: number }>;
+      query: Partial<{ profile_id: string; verdict: string; page: number; per_page: number }>;
     };
     responses: { 200: Schemas.DataEnvelope_Vec_DraftEntryDto; 400: unknown; 401: unknown; 404: unknown };
   };
@@ -545,6 +574,22 @@ export namespace Endpoints {
       path: { lead_id: string };
 
       body: Schemas.ChangeLeadStatusRequest;
+    };
+    responses: {
+      200: Schemas.DataEnvelope_LeadDto;
+      400: unknown;
+      401: unknown;
+      403: unknown;
+      404: unknown;
+      409: unknown;
+    };
+  };
+  export type post_Retry_lead_summary = {
+    method: "POST";
+    path: "/api/v1/leads/{lead_id}/summary/retry";
+    requestFormat: "json";
+    parameters: {
+      path: { lead_id: string };
     };
     responses: {
       200: Schemas.DataEnvelope_LeadDto;
@@ -776,6 +821,8 @@ export namespace Endpoints {
     parameters: {
       query: Partial<{
         status: "new" | "qualified" | "validated" | "rejected" | "contacted" | "uncertain";
+        verdict: string;
+        min_confidence: number;
         min_score: number;
         domain: string;
         signal: string;
@@ -795,6 +842,8 @@ export namespace Endpoints {
       query: Partial<{
         format: string;
         status: string;
+        verdict: string;
+        min_confidence: number;
         min_score: number;
         domain: string;
         signal: string;
@@ -876,6 +925,7 @@ export type EndpointByMethod = {
   post: {
     "/api/v1/drafts/{assessment_id}/approve": Endpoints.post_Approve_draft;
     "/api/v1/drafts/{assessment_id}/reject": Endpoints.post_Reject_draft;
+    "/api/v1/leads/{lead_id}/summary/retry": Endpoints.post_Retry_lead_summary;
     "/api/v1/llm/providers": Endpoints.post_Create_provider;
     "/api/v1/llm/providers/{provider_id}/disable": Endpoints.post_Disable_provider;
     "/api/v1/llm/providers/{provider_id}/enable": Endpoints.post_Enable_provider;

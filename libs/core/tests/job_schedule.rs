@@ -89,7 +89,7 @@ async fn run_now_without_a_job_is_not_found(pool: PgPool) {
 }
 
 #[sqlx::test(migrations = "../../migrations")]
-async fn qualification_can_be_run_now(pool: PgPool) {
+async fn the_former_qualification_job_is_neither_listed_nor_runnable(pool: PgPool) {
     let queue = PgJobQueue::new(pool.clone());
     queue
         .enqueue(&job("llm.qualify", "llm:qualify", 4_000_000_000), at(0))
@@ -97,12 +97,18 @@ async fn qualification_can_be_run_now(pool: PgPool) {
         .unwrap();
     let usecase = LodestoneUseCase::new(pool);
 
-    let updated = usecase
-        .run_job_now(&schedule_key(SourceName::LlmQualification))
-        .await
-        .unwrap();
-
-    assert!(updated.run_at <= chrono::Utc::now());
+    assert!(
+        usecase
+            .list_source_schedule()
+            .await
+            .unwrap()
+            .jobs
+            .is_empty()
+    );
+    assert!(matches!(
+        usecase.run_job_now("llm:qualify").await,
+        Err(CoreError::NotFound)
+    ));
 }
 
 #[sqlx::test(migrations = "../../migrations")]

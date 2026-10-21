@@ -14,12 +14,16 @@ const entry: DraftEntry = {
 		id: 'l1',
 		domain: 'acme.test',
 		score: 42,
+		confidence: 66,
+		verdict: 'a_verifier',
 		profile: { id: 'p1', name: 'Fintech' },
 	},
 	draft: { subject: 'Hello Acme', body: 'Body text', status: 'pending' },
 	summary: 'Summary text',
+	verdict_narrative: 'Narrative text',
 	approach_angle: 'Angle text',
 	evidence: [{ quote: 'We are hiring', provenance: 'https://acme.test/jobs' }],
+	evidence_verified: true,
 	contact: { address: 'cto@acme.test', method: 'scraped', confidence: 0.9 },
 	created_at: '2026-02-01T00:00:00Z',
 }
@@ -41,11 +45,47 @@ function renderReview(
 		onOpenLead: vi.fn(),
 		onApprove: vi.fn(),
 		onStartReject: vi.fn(),
+		onCopy: vi.fn(),
 		...overrides,
 	}
 	render(<DraftReview {...props} />)
 	return props
 }
+
+describe('DraftReview suggestion', () => {
+	const suggested: DraftEntry = {
+		...entry,
+		draft: {
+			...entry.draft,
+			suggested_subject: 'Sujet proposé',
+			suggested_body: 'Texte proposé',
+			outdated_at: '2026-02-02T00:00:00Z',
+		},
+	}
+
+	it('says the summary changed after the edit and shows the suggestion read-only', () => {
+		renderReview({ entry: suggested })
+		expect(
+			screen.getByText(/Le bilan a été mis à jour après votre modification/),
+		).toBeTruthy()
+		expect(screen.getByText('Sujet proposé')).toBeTruthy()
+		expect(screen.getByText('Texte proposé')).toBeTruthy()
+		expect(screen.queryAllByRole('textbox')).toHaveLength(0)
+	})
+
+	it('copies the suggested subject and body', () => {
+		const props = renderReview({ entry: suggested })
+		fireEvent.click(screen.getByRole('button', { name: "Copier l'objet" }))
+		expect(props.onCopy).toHaveBeenLastCalledWith('Sujet proposé')
+		fireEvent.click(screen.getByRole('button', { name: 'Copier le corps' }))
+		expect(props.onCopy).toHaveBeenLastCalledWith('Texte proposé')
+	})
+
+	it('shows nothing when no suggestion was made', () => {
+		renderReview()
+		expect(screen.queryByText('Nouvelle suggestion du modèle')).toBeNull()
+	})
+})
 
 describe('DraftReview', () => {
 	it('shows the lead context, evidence link and contact', () => {

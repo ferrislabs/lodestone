@@ -1,4 +1,8 @@
-use std::{num::NonZeroU32, time::Duration};
+use std::{
+    num::NonZeroU32,
+    sync::Mutex,
+    time::{Duration, Instant},
+};
 
 use chrono::{DateTime, Utc};
 use common::CoreError;
@@ -16,6 +20,7 @@ use lodestone_core::{
     jobs::SystemClock,
     listeners::ListenerStep,
     sources::SourceRunError,
+    summary_retry_delay,
 };
 use sources::{
     contact_pages::PublicPageFinder, ct::CtSource, dns_cname::DnsCnameSource,
@@ -155,11 +160,70 @@ impl ProviderBuilder for AnyProviderBuilder {
     }
 }
 
+#[derive(Debug, Default)]
+pub struct Cooldown {
+    consecutive: u32,
+    until: Option<Instant>,
+}
+
+impl Cooldown {
+    pub fn is_active(&self, now: Instant) -> bool {
+        self.until.is_some_and(|until| now < until)
+    }
+
+    pub fn exhausted(&mut self, now: Instant) {
+        self.consecutive = self.consecutive.saturating_add(1);
+        let delay = summary_retry_delay(self.consecutive)
+            .to_std()
+            .unwrap_or(Duration::ZERO);
+        self.until = Some(now + delay);
+    }
+
+    pub fn recovered(&mut self) {
+        self.consecutive = 0;
+        self.until = None;
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct Cooldowns {
+    evaluation: Cooldown,
+    aggregation: Cooldown,
+}
+
 pub struct QualificationStep {
     pub usecase: LodestoneUseCase,
     pub cipher: AesGcmCipher,
     pub cache: PgLlmCache,
     pub budget_cents: NonZeroU32,
+    pub cooldowns: Mutex<Cooldowns>,
+}
+
+impl QualificationStep {
+    fn paused(&self, now: Instant) -> (bool, bool) {
+        self.cooldowns.lock().map_or((false, false), |cooldowns| {
+            (
+                cooldowns.evaluation.is_active(now),
+                cooldowns.aggregation.is_active(now),
+            )
+        })
+    }
+
+    fn settle(&self, evaluation: Option<bool>, aggregation: Option<bool>, now: Instant) {
+        if let Ok(mut guard) = self.cooldowns.lock() {
+            let cooldowns = &mut *guard;
+            for (cooldown, exhausted) in [
+                (&mut cooldowns.evaluation, evaluation),
+                (&mut cooldowns.aggregation, aggregation),
+            ] {
+                match exhausted {
+                    Some(true) => cooldown.exhausted(now),
+                    Some(false) => cooldown.recovered(),
+                    None => {}
+                }
+            }
+        }
+    }
 }
 
 impl ListenerStep for QualificationStep {
@@ -172,25 +236,79 @@ impl ListenerStep for QualificationStep {
     }
 
     async fn run_once(&self) -> Result<StepOutcome, SourceRunError> {
-        let report = self
-            .usecase
-            .qualify_due_leads(
-                &AnyProviderBuilder,
-                &self.cipher,
-                &self.cache,
-                EvaluationSettings {
-                    max_tokens: QUALIFICATION_MAX_TOKENS,
-                    budget_cents: self.budget_cents,
-                    batch_size: QUALIFICATION_BATCH_SIZE,
-                    base_delay: QUALIFICATION_BASE_DELAY,
-                },
-                &SystemClock,
+        let settings = EvaluationSettings {
+            max_tokens: QUALIFICATION_MAX_TOKENS,
+            budget_cents: self.budget_cents,
+            batch_size: QUALIFICATION_BATCH_SIZE,
+            base_delay: QUALIFICATION_BASE_DELAY,
+        };
+        let (skip_evaluation, skip_aggregation) = self.paused(Instant::now());
+        let evaluation = if skip_evaluation {
+            None
+        } else {
+            Some(
+                self.usecase
+                    .qualify_due_leads(
+                        &AnyProviderBuilder,
+                        &self.cipher,
+                        &self.cache,
+                        settings,
+                        &SystemClock,
+                    )
+                    .await?,
             )
-            .await?;
+        };
+        let aggregation = if skip_aggregation {
+            None
+        } else {
+            Some(
+                self.usecase
+                    .summarise_due_leads(
+                        &AnyProviderBuilder,
+                        &self.cipher,
+                        &self.cache,
+                        settings,
+                        &SystemClock,
+                    )
+                    .await?,
+            )
+        };
+        self.settle(
+            evaluation.map(|report| report.budget_exhausted),
+            aggregation.map(|report| report.budget_exhausted),
+            Instant::now(),
+        );
+        let evaluation = evaluation.unwrap_or_default();
+        let aggregation = aggregation.unwrap_or_default();
         Ok(StepOutcome {
-            processed: report.leads,
-            signals: report.valid,
-            backlog: Some(report.backlog),
+            processed: evaluation.leads + aggregation.leads,
+            signals: evaluation.valid,
+            backlog: Some(evaluation.backlog + aggregation.backlog),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_budget_cooldown_grows_along_the_failure_schedule_and_resets() {
+        let start = Instant::now();
+        let mut cooldown = Cooldown::default();
+        assert!(!cooldown.is_active(start));
+        for (round, minutes) in [(1u32, 1u64), (2, 5), (3, 30), (4, 120), (5, 360), (6, 360)] {
+            cooldown.exhausted(start);
+            let wait = Duration::from_secs(minutes * 60);
+            assert!(
+                cooldown.is_active(start + wait - Duration::from_secs(1)),
+                "round {round}"
+            );
+            assert!(!cooldown.is_active(start + wait), "round {round}");
+        }
+        cooldown.recovered();
+        assert!(!cooldown.is_active(start));
+        cooldown.exhausted(start);
+        assert!(!cooldown.is_active(start + Duration::from_secs(60)));
     }
 }

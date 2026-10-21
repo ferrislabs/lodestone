@@ -4,10 +4,10 @@ use lodestone_macros::repository;
 use sqlx::{Postgres, QueryBuilder};
 
 use crate::{
-    Lead, LeadId, LeadStatus, NormalizedDomain, ProfileId, RevisionNumber, ScoreBreakdown,
+    Lead, LeadId, LeadStatus, NormalizedDomain, ProfileId, ScoreBreakdown, Verdict,
     domain::lead::{
         ports::LeadRepository,
-        query::{LeadPage, LeadQuery, LeadSort, ProfileSummary},
+        query::{LeadPage, LeadQuery, LeadSort, ProfileSummary, VerdictFilter},
     },
     infrastructure::{
         lead::postgres::model::{LeadRow, ProfileSummaryRow},
@@ -39,6 +39,27 @@ fn escape_like(raw: &str) -> String {
     escaped
 }
 
+pub(crate) fn push_verdicts<'a>(
+    builder: &mut QueryBuilder<'a, Postgres>,
+    verdicts: &[VerdictFilter],
+) {
+    if verdicts.is_empty() {
+        return;
+    }
+    let stored: Vec<&'static str> = verdicts
+        .iter()
+        .filter_map(|filter| filter.stored().map(Verdict::as_str))
+        .collect();
+    builder
+        .push(" AND (leads.verdict = ANY(")
+        .push_bind(stored)
+        .push(")");
+    if verdicts.contains(&VerdictFilter::Pending) {
+        builder.push(" OR leads.verdict IS NULL");
+    }
+    builder.push(")");
+}
+
 fn push_filters<'a>(
     builder: &mut QueryBuilder<'a, Postgres>,
     profile_id: ProfileId,
@@ -51,6 +72,12 @@ fn push_filters<'a>(
         builder
             .push(" AND leads.status = ")
             .push_bind(status.as_str());
+    }
+    push_verdicts(builder, &query.verdicts);
+    if let Some(min_confidence) = query.min_confidence {
+        builder
+            .push(" AND leads.confidence >= ")
+            .push_bind(min_confidence);
     }
     if let Some(min_score) = query.min_score {
         builder.push(" AND leads.score >= ").push_bind(min_score);
@@ -73,6 +100,12 @@ fn push_filters<'a>(
 
 fn order_by(sort: LeadSort) -> &'static str {
     match sort {
+        LeadSort::ConfidenceDesc => {
+            " ORDER BY leads.confidence DESC NULLS LAST, leads.score DESC, leads.id ASC"
+        }
+        LeadSort::ConfidenceAsc => {
+            " ORDER BY leads.confidence ASC NULLS LAST, leads.score DESC, leads.id ASC"
+        }
         LeadSort::ScoreDesc => " ORDER BY leads.score DESC, leads.id ASC",
         LeadSort::ScoreAsc => " ORDER BY leads.score ASC, leads.id ASC",
         LeadSort::LastSeenDesc => " ORDER BY leads.last_seen_at DESC, leads.id ASC",
@@ -323,47 +356,5 @@ impl<'tx> LeadRepository for PgLeadRepository<'tx> {
         .map_err(map_sqlx_error)?;
 
         rows.into_iter().map(ProfileSummary::try_from).collect()
-    }
-
-    #[tracing::instrument(skip(self), fields(db.system = "postgresql", db.operation = "select", db.table = "leads", profile.id = %profile_id), err)]
-    async fn list_to_qualify(
-        &mut self,
-        profile_id: ProfileId,
-        threshold: f64,
-        revision: RevisionNumber,
-        prompt: &str,
-        limit: u32,
-    ) -> Result<Vec<Lead>, CoreError> {
-        let revision = i32::try_from(revision.get())
-            .map_err(|_| CoreError::Internal("profile revision number out of range".to_owned()))?;
-        let mut tx = self.tx.lock().await;
-        let rows = sqlx::query_as!(
-            LeadRow,
-            r#"
-            SELECT id, profile_id, domain, status, score, score_breakdown, confidence, verdict, qualified_at, first_seen_at, last_seen_at, updated_at
-            FROM leads
-            WHERE profile_id = $1
-              AND score >= $2
-              AND status = 'new'
-              AND NOT EXISTS (
-                  SELECT 1 FROM assessments
-                  WHERE assessments.lead_id = leads.id
-                    AND assessments.profile_revision = $3
-                    AND assessments.prompt_version = $4
-              )
-            ORDER BY score DESC, domain ASC
-            LIMIT $5
-            "#,
-            profile_id.0,
-            threshold,
-            revision,
-            prompt,
-            i64::from(limit),
-        )
-        .fetch_all(&mut ***tx)
-        .await
-        .map_err(map_sqlx_error)?;
-
-        rows.into_iter().map(Lead::try_from).collect()
     }
 }

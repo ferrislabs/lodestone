@@ -1,24 +1,13 @@
-use std::{
-    num::{NonZeroU16, NonZeroU32},
-    sync::Arc,
-    time::Duration,
-};
+use std::{sync::Arc, time::Duration};
 
 use chrono::Utc;
 use common::CoreError;
 use fetch::PoliteFetcher;
-use llm::any::AnyProvider;
 use lodestone_core::{
-    Clock, Job, JobKind, JobQueue, LodestoneUseCase, NewJob, PartnerAward, SourceName, Tier,
-    TierError, WEBHOOK_JOB_KIND,
-    infrastructure::{
-        contact_target::postgres::PgAtsTargets, crypto::AesGcmCipher, job::postgres::PgJobQueue,
-        llm_cache::postgres::PgLlmCache,
-    },
+    Clock, Job, JobQueue, LodestoneUseCase, PartnerAward, SourceName, WEBHOOK_JOB_KIND,
+    infrastructure::{contact_target::postgres::PgAtsTargets, job::postgres::PgJobQueue},
     is_continuous,
     jobs::{JobError, JobHandler, JobOutcome, SystemClock},
-    llm::gateway::CallSettings,
-    qualification::QualificationSettings,
     sources::{SOURCE_JOB_KIND, SourceRunError, source_job, source_of_job},
     triage::{CandidateSource, TriageReport},
 };
@@ -29,7 +18,7 @@ use sources::{
     france_travail::FranceTravailSource,
     ted::TedSource,
 };
-use tracing::{info, warn};
+use tracing::info;
 
 use crate::webhook::{WebhookSink, run_webhook_job};
 
@@ -42,12 +31,7 @@ pub const WIRED_SOURCES: [SourceName; 4] = [
 
 pub const FRANCE_TRAVAIL_SOURCE: SourceName = SourceName::FranceTravail;
 
-pub const QUALIFICATION_JOB_KIND: &str = "llm.qualify";
-pub const QUALIFICATION_DEDUP_KEY: &str = "llm:qualify";
-const QUALIFICATION_MAX_ATTEMPTS: NonZeroU16 = NonZeroU16::new(3).unwrap();
-const QUALIFICATION_MAX_TOKENS: u32 = 4096;
-const QUALIFICATION_BATCH_SIZE: u32 = 20;
-const QUALIFICATION_BASE_DELAY: Duration = Duration::from_secs(2);
+pub const REMOVED_QUALIFICATION_JOB_KIND: &str = "llm.qualify";
 
 pub type Boamp = BoampSource<PoliteFetcher>;
 pub type Decp = DecpSource<PoliteFetcher>;
@@ -68,44 +52,19 @@ pub struct Intervals {
     pub decp: Duration,
 }
 
-pub struct LlmRuntime {
-    pub cipher: AesGcmCipher,
-    pub cache: PgLlmCache,
-    pub budget_cents: NonZeroU32,
-}
-
 pub struct JobRouter {
     usecase: LodestoneUseCase,
     sources: WiredSources,
     intervals: Intervals,
-    llm: LlmRuntime,
     webhook: Option<WebhookSink>,
 }
 
-pub fn qualification_job(run_at: chrono::DateTime<Utc>) -> Result<NewJob, CoreError> {
-    let kind = JobKind::parse(QUALIFICATION_JOB_KIND)
-        .map_err(|_| CoreError::Internal("invalid qualification job kind".to_owned()))?;
-    Ok(NewJob {
-        kind,
-        payload: Default::default(),
-        run_at,
-        max_attempts: QUALIFICATION_MAX_ATTEMPTS,
-        dedup_key: Some(QUALIFICATION_DEDUP_KEY.to_owned()),
-    })
-}
-
 impl JobRouter {
-    pub fn new(
-        usecase: LodestoneUseCase,
-        sources: WiredSources,
-        intervals: Intervals,
-        llm: LlmRuntime,
-    ) -> Self {
+    pub fn new(usecase: LodestoneUseCase, sources: WiredSources, intervals: Intervals) -> Self {
         Self {
             usecase,
             sources,
             intervals,
-            llm,
             webhook: None,
         }
     }
@@ -113,69 +72,6 @@ impl JobRouter {
     pub fn with_webhook(mut self, webhook: Option<WebhookSink>) -> Self {
         self.webhook = webhook;
         self
-    }
-
-    fn next_run(&self) -> chrono::DateTime<Utc> {
-        SystemClock.now()
-            + chrono::Duration::from_std(self.intervals.other_sources)
-                .unwrap_or(chrono::Duration::hours(1))
-    }
-
-    async fn run_qualification(&self, job: &Job) -> Result<JobOutcome, JobError> {
-        let next_run = self.next_run();
-        let resolved = match self
-            .usecase
-            .resolve_llm_tier(Tier::Qualification, &self.llm.cipher)
-            .await
-        {
-            Ok(resolved) => resolved,
-            Err(
-                error @ (TierError::Unassigned(_) | TierError::Disabled(_) | TierError::Cipher(_)),
-            ) => {
-                warn!(%error, "qualification skipped, no usable provider for the tier");
-                return Ok(JobOutcome::RescheduleAt(next_run));
-            }
-            Err(error) => return Err(JobError::Retryable(error.to_string())),
-        };
-        let provider = match AnyProvider::from_definition(&resolved.definition) {
-            Ok(provider) => provider,
-            Err(error) => {
-                warn!(%error, "qualification skipped, provider could not be built");
-                return Ok(JobOutcome::RescheduleAt(next_run));
-            }
-        };
-        let settings = QualificationSettings {
-            call: CallSettings {
-                max_retries: resolved.max_retries,
-                pricing: resolved.pricing,
-                base_delay: QUALIFICATION_BASE_DELAY,
-            },
-            max_tokens: QUALIFICATION_MAX_TOKENS,
-            budget_cents: self.llm.budget_cents,
-            batch_size: QUALIFICATION_BATCH_SIZE,
-        };
-        match self
-            .usecase
-            .run_qualification(&provider, &self.llm.cache, settings, &SystemClock)
-            .await
-        {
-            Ok(report) => {
-                info!(
-                    considered = report.leads_considered,
-                    qualified = report.qualified,
-                    skipped_suppressed = report.skipped_suppressed,
-                    failed_calls = report.failed_calls,
-                    budget_exhausted = report.budget_exhausted,
-                    "qualification run finished"
-                );
-                Ok(JobOutcome::RescheduleAt(next_run))
-            }
-            Err(error) if job.attempts >= job.max_attempts.get() => {
-                info!(%error, "qualification failed on its last attempt, scheduling the next run");
-                Ok(JobOutcome::RescheduleAt(next_run))
-            }
-            Err(error) => Err(error.into()),
-        }
     }
 
     async fn triage_source<S: CandidateSource>(
@@ -296,11 +192,19 @@ impl JobRouter {
     }
 }
 
+pub fn removed_job_reason(kind: &str) -> Option<&'static str> {
+    (kind == REMOVED_QUALIFICATION_JOB_KIND).then_some(
+        "the llm.qualify job is removed, qualification runs in the qualification listener",
+    )
+}
+
 impl JobHandler for JobRouter {
     async fn handle(&self, job: &Job) -> Result<JobOutcome, JobError> {
+        if let Some(reason) = removed_job_reason(job.kind.as_str()) {
+            return Err(JobError::Permanent(reason.to_owned()));
+        }
         match job.kind.as_str() {
             SOURCE_JOB_KIND => self.run_source(job).await,
-            QUALIFICATION_JOB_KIND => self.run_qualification(job).await,
             WEBHOOK_JOB_KIND => run_webhook_job(&self.usecase, self.webhook.as_ref(), job).await,
             other => Err(JobError::Permanent(format!(
                 "no handler for job kind `{other}`"
@@ -336,13 +240,6 @@ pub async fn schedule_wired_sources(
             info!(%source, "scheduled first source run");
         }
     }
-    if queue
-        .enqueue(&qualification_job(now)?, now)
-        .await?
-        .is_some()
-    {
-        info!("scheduled first qualification run");
-    }
     Ok(())
 }
 
@@ -361,11 +258,19 @@ mod tests {
     }
 
     #[test]
-    fn the_qualification_job_is_recurring_and_deduplicated() {
-        let job = qualification_job(Utc::now()).unwrap();
-        assert_eq!(QUALIFICATION_JOB_KIND, "llm.qualify");
-        assert_eq!(job.kind.as_str(), "llm.qualify");
-        assert_eq!(job.dedup_key.as_deref(), Some("llm:qualify"));
+    fn the_former_qualification_job_is_rejected_as_permanent_by_kind() {
+        assert!(removed_job_reason("llm.qualify").is_some());
+        assert!(removed_job_reason(SOURCE_JOB_KIND).is_none());
+        assert!(removed_job_reason(WEBHOOK_JOB_KIND).is_none());
+    }
+
+    #[test]
+    fn no_recurring_qualification_job_is_scheduled() {
+        assert!(
+            !scheduled_sources(true)
+                .iter()
+                .any(|source| source.as_str().contains("qualif"))
+        );
     }
 
     #[test]
