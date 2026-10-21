@@ -22,6 +22,7 @@ use sources::{
     france_travail::FranceTravailSource,
     hacker_news::HackerNewsSource,
     ted::TedSource,
+    welcome_to_the_jungle::WelcomeToTheJungleSource,
 };
 use tracing::info;
 
@@ -30,13 +31,14 @@ use crate::{
     webhook::{WebhookSink, run_webhook_job},
 };
 
-pub const WIRED_SOURCES: [SourceName; 6] = [
+pub const WIRED_SOURCES: [SourceName; 7] = [
     SourceName::Boamp,
     SourceName::Decp,
     SourceName::Ted,
     SourceName::FranceTravail,
     SourceName::Ats,
     SourceName::HackerNewsHiring,
+    SourceName::WelcomeToTheJungle,
 ];
 
 pub const REMOVED_QUALIFICATION_JOB_KIND: &str = "llm.qualify";
@@ -48,6 +50,7 @@ pub type Decp = DecpSource<PoliteFetcher>;
 pub type Ted = TedSource<PoliteFetcher>;
 pub type FranceTravail = FranceTravailSource<PoliteFetcher, CatalogAccess>;
 pub type HackerNews = HackerNewsSource<PoliteFetcher>;
+pub type WelcomeToTheJungle = WelcomeToTheJungleSource<PoliteFetcher>;
 pub type Ats = AtsSource<PoliteFetcher, PgAtsTargets>;
 pub type CompanyPages = CompanyResearch<PoliteFetcher>;
 
@@ -58,6 +61,7 @@ pub struct WiredSources {
     pub france_travail: FranceTravail,
     pub ats: Ats,
     pub hacker_news: HackerNews,
+    pub welcome_to_the_jungle: WelcomeToTheJungle,
 }
 
 pub struct Intervals {
@@ -129,6 +133,11 @@ impl JobRouter {
 
     async fn run_hacker_news(&self) -> Result<TriageReport, SourceRunError> {
         self.triage_source(&self.sources.hacker_news, "hacker_news_hiring")
+            .await
+    }
+
+    async fn run_welcome_to_the_jungle(&self) -> Result<TriageReport, SourceRunError> {
+        self.triage_source(&self.sources.welcome_to_the_jungle, "welcome_to_the_jungle")
             .await
     }
 
@@ -255,6 +264,7 @@ impl JobRouter {
             SourceName::FranceTravail => self.run_france_travail().await,
             SourceName::Ats => self.run_ats().await,
             SourceName::HackerNewsHiring => self.run_hacker_news().await,
+            SourceName::WelcomeToTheJungle => self.run_welcome_to_the_jungle().await,
             other => {
                 return Err(JobError::Permanent(format!(
                     "source `{other}` is not wired"
@@ -376,7 +386,9 @@ pub async fn schedule_page_recheck(
 
 #[cfg(test)]
 mod tests {
-    use lodestone_core::{CONTINUOUS_SOURCES, HACKER_NEWS_HIRING, provider_key_of_source};
+    use lodestone_core::{
+        CONTINUOUS_SOURCES, HACKER_NEWS_HIRING, WELCOME_TO_THE_JUNGLE, provider_key_of_source,
+    };
 
     use super::*;
 
@@ -479,6 +491,21 @@ mod tests {
         assert_eq!(
             provider_key_of_source(SourceName::HackerNewsHiring.as_str()),
             Some(HACKER_NEWS_HIRING)
+        );
+    }
+
+    #[test]
+    fn the_welcome_to_the_jungle_job_is_scheduled_and_gated_by_its_provider() {
+        assert!(WIRED_SOURCES.contains(&SourceName::WelcomeToTheJungle));
+        assert!(scheduled_sources().contains(&SourceName::WelcomeToTheJungle));
+        let job = source_job(SourceName::WelcomeToTheJungle, Utc::now()).unwrap();
+        assert_eq!(
+            job.dedup_key.as_deref(),
+            Some("source:welcome_to_the_jungle")
+        );
+        assert_eq!(
+            provider_key_of_source(SourceName::WelcomeToTheJungle.as_str()),
+            Some(WELCOME_TO_THE_JUNGLE)
         );
     }
 

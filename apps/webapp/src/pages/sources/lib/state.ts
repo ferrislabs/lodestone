@@ -28,7 +28,7 @@ export const SOURCE_GROUPS: readonly {
 	{ title: 'Marchés publics', sources: ['boamp', 'decp', 'ted'] },
 	{
 		title: "Offres d'emploi",
-		sources: ['france_travail', 'hacker_news_hiring'],
+		sources: ['france_travail', 'hacker_news_hiring', 'welcome_to_the_jungle'],
 	},
 	{
 		title: 'Enrichissement',

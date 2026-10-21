@@ -5,7 +5,7 @@ use common::{CoreError, Secret};
 use fetch::PoliteFetcher;
 use lodestone_core::{
     AuthSpec, BODACC, Credential, DECP, FRANCE_TRAVAIL, HACKER_NEWS_HIRING, LodestoneUseCase,
-    ProviderStatus, SourceError, catalog,
+    ProviderStatus, SourceError, SourceProviderDescriptor, catalog,
     infrastructure::crypto::AesGcmCipher,
     provider_descriptor, provider_key_of_source,
     source_providers::{SaveProviderConfiguration, SecretChange},
@@ -153,6 +153,12 @@ impl ProviderSeed {
     }
 }
 
+pub fn needs_operator(descriptor: &SourceProviderDescriptor) -> bool {
+    descriptor
+        .setting_fields()
+        .any(|field| field.required && field.default.is_none())
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Provisioned {
     pub key: &'static str,
@@ -170,10 +176,11 @@ pub async fn provision_providers(
     for descriptor in catalog() {
         let key = descriptor.key;
         let public = matches!(descriptor.auth, AuthSpec::None);
+        let automatic = public && !needs_operator(descriptor);
         let seeded = seed.settings.contains_key(key) || seed.secrets.contains_key(key);
         let existing = usecase.get_provider_configuration(key).await?;
         let created = match &existing {
-            None if public || seeded => {
+            None if automatic || seeded => {
                 if !save_seed(usecase, engine, cipher, seed, key).await {
                     continue;
                 }

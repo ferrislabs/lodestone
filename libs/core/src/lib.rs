@@ -165,8 +165,9 @@ pub use domain::{
         FilterSupport, HACKER_NEWS_HIRING, HACKER_NEWS_THREAD_TITLE, HTTP_PROBE, OAUTH_STATE_TTL,
         OAuthState, ProbeContext, ProbeOutcome, ProviderCategory, ProviderConfiguration,
         ProviderProbe, ProviderStatus, SourceProviderDescriptor, SourceProviderRepository, TED,
-        TOKEN_ACCESS, TOKEN_REFRESH, catalog, descriptor as provider_descriptor, mask_secret,
-        provider_key_of_source, secret_context, validate_settings,
+        TOKEN_ACCESS, TOKEN_REFRESH, WELCOME_TO_THE_JUNGLE, WELCOME_TO_THE_JUNGLE_HOST, catalog,
+        descriptor as provider_descriptor, mask_secret, provider_key_of_source, secret_context,
+        stamp_attestations, validate_settings,
     },
     suppression::{
         SuppressionEntry, SuppressionId, SuppressionTarget, ports::SuppressionRepository,

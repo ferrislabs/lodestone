@@ -2,9 +2,10 @@ use fetch::{ApiFetcher, ApiRequest};
 use lodestone_core::{
     ATS, BODACC, CERTIFICATE_TRANSPARENCY, COMPANY_RESEARCH, CONTACTS, Credential, DECP, DNS_CNAME,
     FetchError, HACKER_NEWS_HIRING, HACKER_NEWS_THREAD_TITLE, HTTP_PROBE, ProbeContext,
-    ProbeOutcome, ProviderProbe, SourceName, TED, provider_descriptor,
+    ProbeOutcome, ProviderProbe, SourceName, TED, WELCOME_TO_THE_JUNGLE, provider_descriptor,
 };
 use serde_json::{Value, from_slice};
+use sources::welcome_to_the_jungle::{Endpoints, check};
 use url::Url;
 
 use crate::error::fetch_reason;
@@ -19,6 +20,7 @@ pub fn fetch_source(key: &str) -> SourceName {
         TED => SourceName::Ted,
         ATS => SourceName::Ats,
         HACKER_NEWS_HIRING => SourceName::HackerNewsHiring,
+        WELCOME_TO_THE_JUNGLE => SourceName::WelcomeToTheJungle,
         CERTIFICATE_TRANSPARENCY => SourceName::CertificateTransparency,
         DNS_CNAME => SourceName::DnsCname,
         HTTP_PROBE => SourceName::HttpProbe,
@@ -179,6 +181,22 @@ impl<F: ApiFetcher> ProviderProbe for HackerNewsProbe<'_, F> {
     }
 }
 
+pub struct WelcomeToTheJungleProbe<'f, F: ApiFetcher> {
+    fetcher: &'f F,
+}
+
+impl<F: ApiFetcher> ProviderProbe for WelcomeToTheJungleProbe<'_, F> {
+    async fn probe(&self, context: &ProbeContext<'_>) -> ProbeOutcome {
+        let Ok(endpoints) = Endpoints::official() else {
+            return ProbeOutcome::failure("L'adresse de Welcome to the Jungle est invalide.");
+        };
+        match check(self.fetcher, &endpoints, context.settings).await {
+            Ok(message) => ProbeOutcome::success(message),
+            Err(message) => ProbeOutcome::failure(message),
+        }
+    }
+}
+
 pub struct EndpointProbe<'f, F: ApiFetcher> {
     fetcher: &'f F,
     provider: &'static str,
@@ -241,6 +259,7 @@ pub enum Probe<'f, F: ApiFetcher> {
     Boamp(BoampProbe<'f, F>),
     FranceTravail(FranceTravailProbe<'f, F>),
     HackerNews(HackerNewsProbe<'f, F>),
+    WelcomeToTheJungle(WelcomeToTheJungleProbe<'f, F>),
     Endpoint(EndpointProbe<'f, F>),
     Offline(OfflineProbe),
 }
@@ -251,6 +270,9 @@ impl<'f, F: ApiFetcher> Probe<'f, F> {
             BOAMP => Some(Self::Boamp(BoampProbe { fetcher })),
             FRANCE_TRAVAIL => Some(Self::FranceTravail(FranceTravailProbe { fetcher })),
             HACKER_NEWS_HIRING => Some(Self::HackerNews(HackerNewsProbe { fetcher })),
+            WELCOME_TO_THE_JUNGLE => Some(Self::WelcomeToTheJungle(WelcomeToTheJungleProbe {
+                fetcher,
+            })),
             DECP => Some(Self::endpoint(
                 fetcher,
                 DECP,
@@ -335,6 +357,7 @@ impl<F: ApiFetcher> ProviderProbe for Probe<'_, F> {
             Self::Boamp(probe) => probe.probe(context).await,
             Self::FranceTravail(probe) => probe.probe(context).await,
             Self::HackerNews(probe) => probe.probe(context).await,
+            Self::WelcomeToTheJungle(probe) => probe.probe(context).await,
             Self::Endpoint(probe) => probe.probe(context).await,
             Self::Offline(probe) => probe.probe(context).await,
         }

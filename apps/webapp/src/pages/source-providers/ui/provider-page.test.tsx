@@ -1,10 +1,20 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 
 import { detail } from '#/pages/source-providers/lib/fixtures'
 import { initialValues } from '#/pages/source-providers/lib/form'
 import type { ProviderDetail } from '#/pages/source-providers/lib/types'
 import { ProviderPage } from './provider-page'
+
+class NoopResizeObserver {
+	observe() {}
+	unobserve() {}
+	disconnect() {}
+}
+
+beforeAll(() => {
+	vi.stubGlobal('ResizeObserver', NoopResizeObserver)
+})
 
 afterEach(cleanup)
 
@@ -73,6 +83,31 @@ describe('ProviderPage', () => {
 		expect(screen.getByText('OAuth2 · compte de service')).toBeTruthy()
 		expect(
 			screen.getByText("Respecter les conditions d'utilisation de l'API."),
+		).toBeTruthy()
+	})
+
+	it('shows when the operator declared an authorisation', () => {
+		renderPage(
+			detail({
+				fields: [
+					{
+						key: 'authorised',
+						label: 'Accès autorisé par Welcome to the Jungle',
+						kind: 'bool',
+						required: true,
+						default: null,
+						help: '',
+						options: [],
+					},
+				],
+				settings: {
+					authorised: true,
+					authorised_at: '2026-10-09T08:00:00+00:00',
+				},
+			}),
+		)
+		expect(
+			screen.getByText(/Accès autorisé par Welcome to the Jungle : déclaré le/),
 		).toBeTruthy()
 	})
 

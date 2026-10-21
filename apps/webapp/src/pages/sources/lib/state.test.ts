@@ -64,8 +64,9 @@ describe('groupedSources', () => {
 		])
 	})
 
-	it('lists Hacker News with the job offer sources', () => {
+	it('lists Hacker News and Welcome to the Jungle with the job offer sources', () => {
 		const groups = groupedSources([
+			source('welcome_to_the_jungle'),
 			source('hacker_news_hiring'),
 			source('france_travail'),
 		])
@@ -73,6 +74,7 @@ describe('groupedSources', () => {
 		expect(groups[0]?.sources.map((item) => item.source)).toEqual([
 			'france_travail',
 			'hacker_news_hiring',
+			'welcome_to_the_jungle',
 		])
 	})
 

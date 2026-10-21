@@ -1,5 +1,7 @@
 import { Button } from '#/components/ui/button'
+import { formatDateTime } from '#/lib/format'
 import {
+	attestations,
 	secretFields,
 	secretState,
 	settingFields,
@@ -82,6 +84,7 @@ export function ProviderPage({
 	const configured = summary.status !== 'not_configured'
 	const authorizationCode = summary.auth_kind === 'oauth2_authorization_code'
 	const hasFields = detail.fields.length > 0
+	const declared = attestations(detail)
 	return (
 		<div className="flex flex-col gap-4 p-4 md:p-8">
 			<div>
@@ -186,6 +189,15 @@ export function ProviderPage({
 							Conditions d'utilisation
 						</h2>
 						<p className="text-sm text-muted-foreground">{detail.terms_note}</p>
+						{declared.map((attestation) => (
+							<p
+								key={attestation.key}
+								className="text-sm text-muted-foreground"
+							>
+								{attestation.label} : déclaré le{' '}
+								{formatDateTime(attestation.at)}
+							</p>
+						))}
 					</section>
 				) : null}
 				{configured ? (
