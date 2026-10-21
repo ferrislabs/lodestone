@@ -1,0 +1,4 @@
+.git/
+ci/
+*.swp
+*.bak

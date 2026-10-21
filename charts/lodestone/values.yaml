@@ -1,0 +1,199 @@
+# Image registry shared by the three images.
+imageRegistry: ghcr.io
+imagePullPolicy: IfNotPresent
+imagePullSecrets: []
+
+nameOverride: ""
+fullnameOverride: ""
+
+# Settings rendered into the ConfigMap. Keys are the exact environment variable
+# names read by the API (see .env.example). Nothing secret belongs here: use
+# `secrets` below. Values are rendered quoted.
+config:
+  DATABASE_HOST: ""          # required
+  DATABASE_PORT: 5432
+  DATABASE_NAME: lodestone
+  DATABASE_USER: lodestone
+  AUTH_ISSUER: ""            # required, OIDC issuer URL
+  AUTH_CLIENT_ID: lodestone
+  OUTBOUND_CONTACT: ""       # required, email or https URL put in the User-Agent
+  SERVER_PORT: 3456
+  SERVER_INTERNAL_PORT: 3457
+  # The internal router defaults to loopback, which kubelet probes and
+  # Prometheus cannot reach. It has no authentication: keep it off any route and
+  # restrict it with networkPolicy.
+  SERVER_INTERNAL_HOST: 0.0.0.0
+  SERVER_ENABLE_API_DOCS: false
+  # Only true behind a proxy or gateway that overwrites X-Forwarded-For.
+  SERVER_TRUST_FORWARDED_HEADERS: false
+  JOBS_WORKERS: 4
+  # A job lease. terminationGracePeriodSeconds is derived from the shutdown
+  # grace and must stay below this value, otherwise the render fails.
+  JOBS_LEASE_SECONDS: 300
+  JOBS_SHUTDOWN_GRACE_SECONDS: 20
+  LOG_FILTER: info
+  LOG_JSON: true
+  ACTIVE_OBSERVABILITY: false
+  # Any other variable of .env.example may be added here, for example
+  # JOBS_MAX_ATTEMPTS, OUTBOUND_*, CT_*, BOAMP_*, TED_*, ATS_*, DECP_*,
+  # CONTACT_*, LLM_RUN_BUDGET_CENTS, WEBHOOK_PROFILE_IDS, OTLP_ENDPOINT.
+
+# References to existing Kubernetes Secrets. Each entry is {name, key}. The
+# chart never holds a value: an entry with a `value` key fails the render.
+secrets:
+  # Required.
+  DATABASE_PASSWORD: {}        # {name: lodestone-db, key: password}
+  AUTH_CLIENT_SECRET: {}       # {name: lodestone-auth, key: client-secret}
+  LLM_SECRETS_ENCRYPTION_KEY: {} # {name: lodestone-llm, key: encryption-key}
+  # Optional, add only the ones in use:
+  #   WEBHOOK_URL, WEBHOOK_SECRET (required with WEBHOOK_URL, 32 bytes or more),
+  #   FRANCE_TRAVAIL_CLIENT_ID, FRANCE_TRAVAIL_CLIENT_SECRET.
+
+# Seconds added to the shutdown grace and the preStop sleep to obtain
+# terminationGracePeriodSeconds.
+terminationMarginSeconds: 10
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+# Applied to every pod of the chart. The webapp overrides readOnlyRootFilesystem
+# because its entrypoint rewrites config.json in place.
+podSecurityContext:
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+
+api:
+  image:
+    repository: ferrislabs/lodestone-api
+    # Defaults to the chart appVersion. Pin to sha-<short-commit> (published by
+    # the docker workflow) or a release version.
+    tag: ""
+  # Job workers run in every replica. The queue claims jobs with
+  # FOR UPDATE SKIP LOCKED and a lease, so several replicas never run the same
+  # job at once.
+  replicas: 1
+  # Seconds the pod keeps serving after SIGTERM so endpoints are removed first.
+  preStopSleepSeconds: 5
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 1Gi
+  securityContext:
+    runAsUser: 1000
+    runAsGroup: 1000
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: [ALL]
+  startupProbe:
+    periodSeconds: 3
+    failureThreshold: 30
+  readinessProbe:
+    periodSeconds: 10
+    failureThreshold: 3
+  livenessProbe:
+    periodSeconds: 20
+    failureThreshold: 3
+  podAnnotations: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  extraEnv: []
+
+migrator:
+  image:
+    repository: ferrislabs/lodestone-migrator
+    tag: ""
+  backoffLimit: 2
+  activeDeadlineSeconds: 600
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      memory: 256Mi
+  securityContext:
+    runAsUser: 1000
+    runAsGroup: 1000
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: [ALL]
+
+webapp:
+  image:
+    repository: ferrislabs/lodestone-webapp
+    tag: ""
+  replicas: 1
+  # Runtime configuration, injected as the environment the image entrypoint
+  # substitutes into /config.json at start.
+  config:
+    # Browser-reachable API origin. Empty means same origin (HTTPRoute on /api).
+    apiUrl: ""
+    issuerUrl: ""            # required, browser-reachable OIDC issuer
+    oidcClientId: lodestone
+    oidcScope: openid profile email
+  resources:
+    requests:
+      cpu: 25m
+      memory: 32Mi
+    limits:
+      memory: 128Mi
+  securityContext:
+    runAsUser: 101
+    runAsGroup: 101
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: false
+    capabilities:
+      drop: [ALL]
+  podAnnotations: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+service:
+  type: ClusterIP
+  port: 80
+
+# Created only when replicas > 1.
+podDisruptionBudget:
+  enabled: true
+  maxUnavailable: 1
+
+# Gateway API. / goes to the webapp, /api to the API. The internal port is
+# never routed.
+httpRoute:
+  enabled: false
+  annotations: {}
+  parentRefs: []             # [{name: gateway, namespace: infra}]
+  hostnames: []              # [lodestone.example.com]
+
+# Alternative to httpRoute.
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts: []                  # [lodestone.example.com]
+  tls: []
+
+# Restricts ingress to the API pods. Port 3456 stays open to all sources, port
+# 3457 (health, metrics, no authentication) only to the selector below.
+networkPolicy:
+  enabled: false
+  metricsFrom:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: monitoring
+
+# Requires the Prometheus Operator CRDs.
+serviceMonitor:
+  enabled: false
+  namespace: ""
+  interval: 30s
+  scrapeTimeout: 10s
+  labels: {}

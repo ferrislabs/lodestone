@@ -1,0 +1,44 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "lodestone.fullname" . }}-api
+  labels:
+    {{- include "lodestone.labels" (dict "ctx" . "component" "api") | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - name: http
+      port: {{ .Values.service.port }}
+      targetPort: http
+  selector:
+    {{- include "lodestone.selectorLabels" (dict "ctx" . "component" "api") | nindent 4 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "lodestone.fullname" . }}-api-internal
+  labels:
+    {{- include "lodestone.labels" (dict "ctx" . "component" "api-internal") | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - name: internal
+      port: {{ int .Values.config.SERVER_INTERNAL_PORT }}
+      targetPort: internal
+  selector:
+    {{- include "lodestone.selectorLabels" (dict "ctx" . "component" "api") | nindent 4 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "lodestone.fullname" . }}-webapp
+  labels:
+    {{- include "lodestone.labels" (dict "ctx" . "component" "webapp") | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - name: http
+      port: {{ .Values.service.port }}
+      targetPort: http
+  selector:
+    {{- include "lodestone.selectorLabels" (dict "ctx" . "component" "webapp") | nindent 4 }}

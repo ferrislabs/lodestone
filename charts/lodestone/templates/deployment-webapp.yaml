@@ -1,0 +1,70 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "lodestone.fullname" . }}-webapp
+  labels:
+    {{- include "lodestone.labels" (dict "ctx" . "component" "webapp") | nindent 4 }}
+spec:
+  replicas: {{ .Values.webapp.replicas }}
+  selector:
+    matchLabels:
+      {{- include "lodestone.selectorLabels" (dict "ctx" . "component" "webapp") | nindent 6 }}
+  template:
+    metadata:
+      {{- with .Values.webapp.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "lodestone.selectorLabels" (dict "ctx" . "component" "webapp") | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "lodestone.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: webapp
+          image: {{ include "lodestone.image" (dict "ctx" . "image" .Values.webapp.image) | quote }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          securityContext:
+            {{- toYaml .Values.webapp.securityContext | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: API_URL
+              value: {{ .Values.webapp.config.apiUrl | quote }}
+            - name: ISSUER_URL
+              value: {{ .Values.webapp.config.issuerUrl | quote }}
+            - name: OIDC_CLIENT_ID
+              value: {{ .Values.webapp.config.oidcClientId | quote }}
+            - name: OIDC_SCOPE
+              value: {{ .Values.webapp.config.oidcScope | quote }}
+          readinessProbe:
+            httpGet:
+              path: /config.json
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /config.json
+              port: http
+            periodSeconds: 20
+          resources:
+            {{- toYaml .Values.webapp.resources | nindent 12 }}
+      {{- with .Values.webapp.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.webapp.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.webapp.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

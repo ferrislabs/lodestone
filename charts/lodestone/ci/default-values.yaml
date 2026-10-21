@@ -1,0 +1,13 @@
+config:
+  DATABASE_HOST: postgres.lodestone-db.svc
+  AUTH_ISSUER: https://auth.example.com/realms/lodestone
+  OUTBOUND_CONTACT: ops@example.com
+
+secrets:
+  DATABASE_PASSWORD: {name: lodestone-db, key: password}
+  AUTH_CLIENT_SECRET: {name: lodestone-auth, key: client-secret}
+  LLM_SECRETS_ENCRYPTION_KEY: {name: lodestone-llm, key: encryption-key}
+
+webapp:
+  config:
+    issuerUrl: https://auth.example.com/realms/lodestone

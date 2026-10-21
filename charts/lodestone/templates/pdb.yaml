@@ -1,0 +1,29 @@
+{{- if .Values.podDisruptionBudget.enabled }}
+{{- if gt (int .Values.api.replicas) 1 }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "lodestone.fullname" . }}-api
+  labels:
+    {{- include "lodestone.labels" (dict "ctx" . "component" "api") | nindent 4 }}
+spec:
+  maxUnavailable: {{ .Values.podDisruptionBudget.maxUnavailable }}
+  selector:
+    matchLabels:
+      {{- include "lodestone.selectorLabels" (dict "ctx" . "component" "api") | nindent 6 }}
+{{- end }}
+{{- if gt (int .Values.webapp.replicas) 1 }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "lodestone.fullname" . }}-webapp
+  labels:
+    {{- include "lodestone.labels" (dict "ctx" . "component" "webapp") | nindent 4 }}
+spec:
+  maxUnavailable: {{ .Values.podDisruptionBudget.maxUnavailable }}
+  selector:
+    matchLabels:
+      {{- include "lodestone.selectorLabels" (dict "ctx" . "component" "webapp") | nindent 6 }}
+{{- end }}
+{{- end }}
