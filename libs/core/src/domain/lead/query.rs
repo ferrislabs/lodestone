@@ -20,6 +20,7 @@ use crate::domain::{
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum LeadSort {
     #[default]
+    RelevanceDesc,
     ConfidenceDesc,
     ConfidenceAsc,
     ScoreDesc,
@@ -32,7 +33,8 @@ pub enum LeadSort {
 }
 
 impl LeadSort {
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 10] = [
+        Self::RelevanceDesc,
         Self::ConfidenceDesc,
         Self::ConfidenceAsc,
         Self::ScoreDesc,
@@ -46,6 +48,7 @@ impl LeadSort {
 
     pub fn as_str(self) -> &'static str {
         match self {
+            Self::RelevanceDesc => "relevance_desc",
             Self::ConfidenceDesc => "confidence_desc",
             Self::ConfidenceAsc => "confidence_asc",
             Self::ScoreDesc => "score_desc",
@@ -176,7 +179,8 @@ mod tests {
             assert_eq!(LeadSort::parse(sort.as_str()), Some(sort));
         }
         assert_eq!(LeadSort::parse("random"), None);
-        assert_eq!(LeadSort::default(), LeadSort::ConfidenceDesc);
+        assert_eq!(LeadSort::default(), LeadSort::RelevanceDesc);
+        assert_eq!(LeadSort::ALL[0], LeadSort::RelevanceDesc);
     }
 
     #[test]

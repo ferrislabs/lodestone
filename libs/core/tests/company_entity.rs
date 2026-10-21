@@ -82,6 +82,15 @@ async fn judged(pool: &PgPool, lead: LeadId, confidence: f64, verdict: &str) {
         .unwrap();
 }
 
+async fn reliable(pool: &PgPool, lead: LeadId, probability: f64) {
+    sqlx::query("UPDATE leads SET reliable_probability = $2 WHERE id = $1")
+        .bind(lead.0)
+        .bind(probability)
+        .execute(pool)
+        .await
+        .unwrap();
+}
+
 struct World {
     alpha: ProfileId,
     beta: ProfileId,
@@ -311,7 +320,7 @@ async fn page(
 }
 
 #[sqlx::test(migrations = "../../migrations")]
-async fn the_grouped_list_has_one_row_per_company_led_by_the_best_confidence(pool: PgPool) {
+async fn the_grouped_list_has_one_row_per_company_led_by_the_most_reliable_lead(pool: PgPool) {
     let world = world(&pool).await;
     let first = lead_id(&pool, world.alpha, "acme.com").await;
     let second = lead_id(&pool, world.alpha, "acme.fr").await;
@@ -321,6 +330,9 @@ async fn the_grouped_list_has_one_row_per_company_led_by_the_best_confidence(poo
     judged(&pool, first, 40.0, "a_verifier").await;
     judged(&pool, second, 85.0, "fiable").await;
     judged(&pool, third, 10.0, "ecarte").await;
+    reliable(&pool, first, 20.0).await;
+    reliable(&pool, second, 85.0).await;
+    reliable(&pool, third, 5.0).await;
 
     let (items, total, members) = page(&pool, world.alpha, grouped()).await;
 
@@ -353,6 +365,9 @@ async fn grouping_applies_after_the_filters_and_keeps_pagination_per_company(poo
     judged(&pool, first, 40.0, "a_verifier").await;
     judged(&pool, second, 85.0, "fiable").await;
     judged(&pool, third, 90.0, "fiable").await;
+    reliable(&pool, first, 20.0).await;
+    reliable(&pool, second, 85.0).await;
+    reliable(&pool, third, 90.0).await;
 
     let reliable = LeadQuery {
         verdicts: vec![VerdictFilter::Reliable],

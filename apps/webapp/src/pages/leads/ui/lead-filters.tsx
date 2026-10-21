@@ -12,6 +12,7 @@ import type { ProfileSummary } from '#/pages/leads/lib/types'
 import { VERDICT_KEYS, verdictKeyLabel } from '#/pages/leads/lib/verdict'
 
 const SORT_LABELS: Record<(typeof LEAD_SORTS)[number], string> = {
+	relevance_desc: 'Pertinence (probabilité « fiable »)',
 	confidence_desc: 'Confiance décroissante',
 	confidence_asc: 'Confiance croissante',
 	llm_score_desc: 'Score décroissant',

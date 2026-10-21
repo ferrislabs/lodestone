@@ -309,6 +309,15 @@ async fn judge(pool: &PgPool, host: &str, confidence: Option<f64>, verdict: Opti
         .unwrap();
 }
 
+async fn reliable(pool: &PgPool, host: &str, probability: f64) {
+    sqlx::query("UPDATE leads SET reliable_probability = $2 WHERE domain = $1")
+        .bind(host)
+        .bind(probability)
+        .execute(pool)
+        .await
+        .unwrap();
+}
+
 async fn judged_fixture(pool: &PgPool) -> ProfileId {
     let profile = create_profile(pool, "alpha").await;
     seed(pool, profile, "sure.com", 5.0, 10).await;
@@ -320,20 +329,27 @@ async fn judged_fixture(pool: &PgPool) -> ProfileId {
     judge(pool, "maybe.com", Some(55.0), Some("a_verifier")).await;
     judge(pool, "maybe-too.com", Some(55.0), Some("a_verifier")).await;
     judge(pool, "out.com", Some(8.0), Some("ecarte")).await;
+    reliable(pool, "sure.com", 92.5).await;
+    reliable(pool, "maybe.com", 30.0).await;
+    reliable(pool, "maybe-too.com", 30.0).await;
+    reliable(pool, "out.com", 4.0).await;
     profile
 }
 
 #[sqlx::test(migrations = "../../migrations")]
 async fn confidence_sorts_with_pending_leads_last_and_ties_broken_by_score(pool: PgPool) {
     let profile = judged_fixture(&pool).await;
-    assert_eq!(LeadSort::default(), LeadSort::ConfidenceDesc);
+    let by_confidence = || LeadQuery {
+        sort: LeadSort::ConfidenceDesc,
+        ..query()
+    };
 
-    let (default, total) = domains(&pool, profile, query()).await;
-    let (again, _) = domains(&pool, profile, query()).await;
+    let (descending, total) = domains(&pool, profile, by_confidence()).await;
+    let (again, _) = domains(&pool, profile, by_confidence()).await;
 
     assert_eq!(total, 5);
     assert_eq!(
-        default,
+        descending,
         [
             "sure.com",
             "maybe.com",
@@ -342,7 +358,7 @@ async fn confidence_sorts_with_pending_leads_last_and_ties_broken_by_score(pool:
             "waiting.com"
         ]
     );
-    assert_eq!(default, again);
+    assert_eq!(descending, again);
 
     let (ascending, _) = domains(
         &pool,

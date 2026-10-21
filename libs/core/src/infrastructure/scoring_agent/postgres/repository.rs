@@ -42,6 +42,8 @@ fn probabilities_json(decision: &Decision) -> Option<serde_json::Value> {
         .map(|probabilities| probabilities.to_json())
 }
 
+const UPDATE_LEAD_DECISION: &str = "UPDATE leads SET confidence = $2, verdict = $3, llm_score = $4, reliable_probability = $5 WHERE id = $1";
+
 const SCORING_DUE: &str = r#"
     FROM leads
     JOIN lead_qualification_state state ON state.lead_id = leads.id
@@ -185,11 +187,12 @@ impl<'tx> ScoringRepository for PgScoringRepository<'tx> {
         if result.rows_affected() != 1 {
             return Ok(false);
         }
-        sqlx::query("UPDATE leads SET confidence = $2, verdict = $3, llm_score = $4 WHERE id = $1")
+        sqlx::query(UPDATE_LEAD_DECISION)
             .bind(completion.lead_id.0)
             .bind(decision.confidence)
             .bind(decision.verdict.map(|verdict| verdict.as_str()))
             .bind(score_value(decision.score))
+            .bind(decision.reliable_probability())
             .execute(&mut ***tx)
             .await
             .map_err(map_sqlx_error)?;
@@ -249,11 +252,12 @@ impl<'tx> ScoringRepository for PgScoringRepository<'tx> {
         .execute(&mut ***tx)
         .await
         .map_err(map_sqlx_error)?;
-        sqlx::query("UPDATE leads SET confidence = $2, verdict = $3, llm_score = $4 WHERE id = $1")
+        sqlx::query(UPDATE_LEAD_DECISION)
             .bind(lead_id.0)
             .bind(decision.confidence)
             .bind(verdict)
             .bind(score_value(decision.score))
+            .bind(decision.reliable_probability())
             .execute(&mut ***tx)
             .await
             .map_err(map_sqlx_error)?;

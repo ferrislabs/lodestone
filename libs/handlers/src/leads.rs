@@ -1334,9 +1334,9 @@ pub struct ListLeadsParams {
     pub(crate) domain: Option<String>,
     /// Only leads having at least one signal of this kind.
     pub(crate) signal: Option<String>,
-    /// `company` to show one row per company, the best-confidence lead standing for its sibling domains; `none` (default) lists every lead.
+    /// `company` to show one row per company, the most reliable lead (see relevance_desc) standing for its sibling domains; `none` (default) lists every lead.
     pub(crate) group_by: Option<String>,
-    /// One of confidence_desc (default), confidence_asc, score_desc, score_asc (signal strength), llm_score_desc, llm_score_asc (score decided by the scoring agents, leads without one last), last_seen_desc, first_seen_desc, domain_asc.
+    /// One of relevance_desc (default, probability that the lead is reliable, leads without a verdict last), confidence_desc, confidence_asc, score_desc, score_asc (signal strength), llm_score_desc, llm_score_asc (score decided by the scoring agents, leads without one last), last_seen_desc, first_seen_desc, domain_asc.
     pub(crate) sort: Option<String>,
     /// Page number, starting at 1.
     #[param(value_type = Option<u64>, minimum = 1)]
@@ -1465,7 +1465,7 @@ impl ListLeadsParams {
             Some(raw) => LeadSort::parse(raw).ok_or_else(|| {
                 invalid(
                     "sort",
-                    "must be one of confidence_desc, confidence_asc, score_desc, score_asc, llm_score_desc, llm_score_asc, last_seen_desc, first_seen_desc, domain_asc",
+                    "must be one of relevance_desc, confidence_desc, confidence_asc, score_desc, score_asc, llm_score_desc, llm_score_asc, last_seen_desc, first_seen_desc, domain_asc",
                 )
             })?,
         };

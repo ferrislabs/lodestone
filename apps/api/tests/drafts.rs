@@ -246,21 +246,22 @@ async fn the_queue_filters_by_profile_and_paginates(pool: PgPool) {
 }
 
 #[sqlx::test(migrations = "../../migrations")]
-async fn the_queue_is_sorted_by_confidence_and_filtered_by_verdict(pool: PgPool) {
+async fn the_queue_is_sorted_by_relevance_and_filtered_by_verdict(pool: PgPool) {
     let seed = Seed { pool: pool.clone() };
     let profile = seed.profile("keycloak-ops").await;
     for (domain, score, judgement) in [
         ("waiting.com", 99.0, None),
-        ("maybe.com", 1.0, Some((55.0, "a_verifier"))),
-        ("sure.com", 1.0, Some((91.0, "fiable"))),
-        ("out.com", 1.0, Some((5.0, "ecarte"))),
+        ("maybe.com", 1.0, Some((95.0, "a_verifier", 3.0))),
+        ("sure.com", 1.0, Some((91.0, "fiable", 91.0))),
+        ("out.com", 1.0, Some((5.0, "ecarte", 1.0))),
     ] {
         let lead = seed.lead(&profile, domain, "qualified", score).await;
-        if let Some((confidence, verdict)) = judgement {
-            sqlx::query("UPDATE leads SET confidence = $2, verdict = $3 WHERE id = $1::uuid")
+        if let Some((confidence, verdict, reliable)) = judgement {
+            sqlx::query("UPDATE leads SET confidence = $2, verdict = $3, reliable_probability = $4 WHERE id = $1::uuid")
                 .bind(&lead)
                 .bind(confidence)
                 .bind(verdict)
+                .bind(reliable)
                 .execute(&pool)
                 .await
                 .unwrap();

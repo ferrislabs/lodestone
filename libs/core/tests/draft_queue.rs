@@ -166,6 +166,13 @@ async fn queue_holds_the_latest_pending_drafts_of_qualified_visible_leads(pool: 
     assert_eq!(total, 4);
 }
 
+fn reliable_share(confidence: f64, verdict: &str) -> f64 {
+    match verdict {
+        "fiable" => confidence,
+        _ => (100.0 - confidence) / 2.0,
+    }
+}
+
 async fn judged(
     pool: &PgPool,
     profile: ProfileId,
@@ -174,13 +181,16 @@ async fn judged(
     judgement: Option<(f64, &str)>,
 ) {
     let lead = lead(pool, profile, host, "qualified", score).await;
-    sqlx::query("UPDATE leads SET confidence = $2, verdict = $3 WHERE id = $1")
-        .bind(lead.0)
-        .bind(judgement.map(|(confidence, _)| confidence))
-        .bind(judgement.map(|(_, verdict)| verdict))
-        .execute(pool)
-        .await
-        .unwrap();
+    sqlx::query(
+        "UPDATE leads SET confidence = $2, verdict = $3, reliable_probability = $4 WHERE id = $1",
+    )
+    .bind(lead.0)
+    .bind(judgement.map(|(confidence, _)| confidence))
+    .bind(judgement.map(|(_, verdict)| verdict))
+    .bind(judgement.map(|(confidence, verdict)| reliable_share(confidence, verdict)))
+    .execute(pool)
+    .await
+    .unwrap();
     assessment(pool, lead, 0, true).await;
 }
 
@@ -196,7 +206,7 @@ async fn filtered_queue(pool: &PgPool, verdicts: &[VerdictFilter]) -> Vec<String
 }
 
 #[sqlx::test(migrations = "../../migrations")]
-async fn the_queue_lists_the_most_confident_leads_first_pending_ones_last(pool: PgPool) {
+async fn the_queue_lists_the_most_relevant_leads_first_pending_ones_last(pool: PgPool) {
     let profile = create_profile(&pool, "alpha").await;
     judged(&pool, profile, "pending.com", 99.0, None).await;
     judged(

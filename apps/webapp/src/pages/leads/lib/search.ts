@@ -13,6 +13,7 @@ import {
 export const PER_PAGE = 25
 
 export const LEAD_SORTS = [
+	'relevance_desc',
 	'confidence_desc',
 	'confidence_asc',
 	'llm_score_desc',
@@ -26,7 +27,7 @@ export const LEAD_SORTS = [
 
 export type LeadSort = (typeof LEAD_SORTS)[number]
 
-export const DEFAULT_SORT: LeadSort = 'confidence_desc'
+export const DEFAULT_SORT: LeadSort = 'relevance_desc'
 
 const text = z.union([z.string(), z.number()]).transform(String)
 

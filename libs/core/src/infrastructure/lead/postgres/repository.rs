@@ -100,8 +100,12 @@ fn push_filters<'a>(
     builder.push(NOT_SUPPRESSED);
 }
 
+const RELEVANCE_ORDER: &str =
+    " ORDER BY leads.reliable_probability DESC NULLS LAST, leads.score DESC, leads.id ASC";
+
 fn order_by(sort: LeadSort) -> &'static str {
     match sort {
+        LeadSort::RelevanceDesc => RELEVANCE_ORDER,
         LeadSort::ConfidenceDesc => {
             " ORDER BY leads.confidence DESC NULLS LAST, leads.score DESC, leads.id ASC"
         }
@@ -138,7 +142,7 @@ impl<'tx> PgLeadRepository<'tx> {
         push_filters(&mut count, profile_id, query);
 
         let mut select = QueryBuilder::<Postgres>::new(format!(
-            "WITH ranked AS (SELECT {LEAD_COLUMNS}, d.company_siren AS siren, ROW_NUMBER() OVER (PARTITION BY {COMPANY_KEY} ORDER BY leads.confidence DESC NULLS LAST, leads.score DESC, leads.id ASC) AS group_rank FROM leads LEFT JOIN company_dossiers d ON d.domain = leads.domain"
+            "WITH ranked AS (SELECT {LEAD_COLUMNS}, leads.reliable_probability, d.company_siren AS siren, ROW_NUMBER() OVER (PARTITION BY {COMPANY_KEY}{RELEVANCE_ORDER}) AS group_rank FROM leads LEFT JOIN company_dossiers d ON d.domain = leads.domain"
         ));
         push_filters(&mut select, profile_id, query);
         select.push(") SELECT leads.id, leads.profile_id, leads.domain, leads.status, leads.score, leads.confidence, leads.verdict, leads.llm_score, leads.qualified_at, leads.first_seen_at, leads.last_seen_at, leads.updated_at, leads.siren FROM ranked AS leads WHERE leads.group_rank = 1");
@@ -179,9 +183,8 @@ impl<'tx> PgLeadRepository<'tx> {
             siblings
                 .push(" AND d.company_siren = ANY(")
                 .push_bind(sirens)
-                .push(
-                    ") ORDER BY leads.confidence DESC NULLS LAST, leads.score DESC, leads.id ASC",
-                );
+                .push(")")
+                .push(RELEVANCE_ORDER);
             let rows = siblings
                 .build_query_as::<GroupedLeadRow>()
                 .fetch_all(&mut ***tx)
