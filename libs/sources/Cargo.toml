@@ -24,7 +24,7 @@ uuid = { workspace = true }
 sqlx = { workspace = true }
 tokio = { workspace = true, features = ["test-util"] }
 tracing-subscriber = { workspace = true }
-httpmock = "0.7.0"
+httpmock = "0.8.3"
 flate2 = "1.1.9"
 divan = { workspace = true }
 
