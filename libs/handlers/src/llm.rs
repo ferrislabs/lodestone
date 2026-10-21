@@ -11,7 +11,7 @@ use http::{HeaderValue, StatusCode, header::LOCATION};
 use llm::any::AnyProvider;
 use lodestone_core::{
     LlmError, LlmProvider, LlmProviderRecord, LlmRequest, ProviderDefinition, ProviderId,
-    ProviderKind, SecretCipher, Tier, TokenPricing,
+    ProviderKind, ReasoningEffort, SecretCipher, Tier, TokenPricing,
     llm::{CreateLlmProvider, KeyChange, UpdateLlmProvider},
 };
 use serde::{Deserialize, Serialize};
@@ -35,6 +35,27 @@ const TEST_TIMEOUT: Duration = Duration::from_secs(20);
 const TEST_MAX_TOKENS: u32 = 64;
 const REDACTED: &str = "[redacted]";
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "lowercase")]
+#[schema(as = ReasoningEffort)]
+pub enum ReasoningEffortDto {
+    None,
+    Low,
+    Medium,
+    High,
+}
+
+impl From<ReasoningEffort> for ReasoningEffortDto {
+    fn from(effort: ReasoningEffort) -> Self {
+        match effort {
+            ReasoningEffort::None => Self::None,
+            ReasoningEffort::Low => Self::Low,
+            ReasoningEffort::Medium => Self::Medium,
+            ReasoningEffort::High => Self::High,
+        }
+    }
+}
+
 #[derive(Debug, Serialize, PartialEq, Eq, ToSchema)]
 pub struct PricingDto {
     pub input_cents_per_mtok: u32,
@@ -57,6 +78,8 @@ pub struct ProviderDto {
     pub pricing: PricingDto,
     /// Tiers (`triage`, `qualification`) this provider is assigned to.
     pub tiers: Vec<String>,
+    /// Sent to OpenAI-compatible providers only when set; `null` when not sent.
+    pub reasoning_effort: Option<ReasoningEffortDto>,
     #[schema(format = DateTime)]
     pub created_at: String,
     #[schema(format = DateTime)]
@@ -84,6 +107,7 @@ impl ProviderDto {
                 .filter(|(_, provider)| *provider == record.id)
                 .map(|(tier, _)| tier.as_str().to_owned())
                 .collect(),
+            reasoning_effort: record.reasoning_effort.map(ReasoningEffortDto::from),
             created_at: record.created_at.to_rfc3339(),
             updated_at: record.updated_at.to_rfc3339(),
         }
@@ -99,7 +123,7 @@ pub struct TierDto {
 
 #[derive(Debug, Serialize, PartialEq, Eq, ToSchema)]
 pub struct TestErrorDto {
-    /// One of `authentication`, `unreachable`, `timeout`, `invalid_response`, `rate_limited`, `other`.
+    /// One of `authentication`, `unreachable`, `timeout`, `invalid_response`, `rate_limited`, `reasoning_exhausted`, `other`.
     pub kind: String,
     pub message: String,
 }
@@ -137,6 +161,8 @@ pub struct CreateProviderRequest {
     pub pricing: Option<PricingRequest>,
     /// 1 to 600, defaults to 30.
     pub timeout_seconds: Option<u64>,
+    /// `none`, `low`, `medium` or `high`. Sent to OpenAI-compatible providers only when set.
+    pub reasoning_effort: Option<ReasoningEffortDto>,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -151,6 +177,9 @@ pub struct UpdateProviderRequest {
     pub max_retries: Option<u8>,
     pub pricing: Option<PricingRequest>,
     pub timeout_seconds: Option<u64>,
+    /// Absent keeps the stored value, `null` stops sending it, a value sets it.
+    #[schema(value_type = Option<ReasoningEffortDto>, nullable)]
+    pub reasoning_effort: Option<Option<ReasoningEffortDto>>,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -177,6 +206,7 @@ struct ProviderInput {
     input_cents: Option<u32>,
     output_cents: Option<u32>,
     timeout: Option<Duration>,
+    reasoning_effort: Option<Option<ReasoningEffort>>,
 }
 
 struct Parser {
@@ -226,6 +256,26 @@ impl Parser {
             }
             _ => {
                 self.problem("kind", "must be a string");
+                None
+            }
+        }
+    }
+
+    fn reasoning_effort(
+        &mut self,
+        map: &mut Map<String, Value>,
+    ) -> Option<Option<ReasoningEffort>> {
+        match map.remove("reasoning_effort")? {
+            Value::Null => Some(None),
+            Value::String(value) => {
+                let effort = ReasoningEffort::parse(&value);
+                if effort.is_none() {
+                    self.problem("reasoning_effort", "must be one of none, low, medium, high");
+                }
+                effort.map(Some)
+            }
+            _ => {
+                self.problem("reasoning_effort", "must be a string or null");
                 None
             }
         }
@@ -328,6 +378,7 @@ fn parse_input(body: &[u8], required: bool) -> Result<ProviderInput, ApiError> {
         .remove("timeout_seconds")
         .and_then(|value| parser.integer("timeout_seconds", value, 1, MAX_TIMEOUT_SECONDS))
         .map(Duration::from_secs);
+    let reasoning_effort = parser.reasoning_effort(&mut map);
 
     if required {
         for (field, present) in [
@@ -357,6 +408,7 @@ fn parse_input(body: &[u8], required: bool) -> Result<ProviderInput, ApiError> {
             input_cents,
             output_cents,
             timeout,
+            reasoning_effort,
         })
     } else {
         Err(ApiError::Rejected(parser.problems))
@@ -500,6 +552,7 @@ pub async fn create_provider(
                     output_cents_per_mtok: input.output_cents.unwrap_or(0),
                 },
                 api_key: key_secret(input.api_key),
+                reasoning_effort: input.reasoning_effort.flatten(),
             },
             state.cipher.as_ref(),
         )
@@ -561,6 +614,7 @@ pub async fn update_provider(
                         .unwrap_or(current.pricing.output_cents_per_mtok),
                 },
                 api_key,
+                reasoning_effort: input.reasoning_effort.unwrap_or(current.reasoning_effort),
             },
             state.cipher.as_ref(),
         )
@@ -806,6 +860,11 @@ fn classify(error: &LlmError, key: Option<&Secret>) -> TestResultDto {
             key,
         ),
         LlmError::Network(_) => failure("unreachable", "The endpoint could not be reached.", key),
+        LlmError::ReasoningExhausted => failure(
+            "reasoning_exhausted",
+            "The model used all its tokens to reason; lower its reasoning effort.",
+            key,
+        ),
         LlmError::InvalidOutput(_) | LlmError::Truncated | LlmError::Refused => failure(
             "invalid_response",
             "The provider answered with an unusable response.",
@@ -839,6 +898,7 @@ async fn run_test(record: &LlmProviderRecord, cipher: &impl SecretCipher) -> Tes
         model: record.model.clone(),
         api_key,
         timeout: record.timeout.min(TEST_TIMEOUT),
+        reasoning_effort: record.reasoning_effort,
     };
     let key = definition.api_key.as_ref();
     let provider = match AnyProvider::from_definition(&definition) {

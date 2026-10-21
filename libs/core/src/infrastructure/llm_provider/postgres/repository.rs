@@ -4,7 +4,10 @@ use lodestone_macros::repository;
 use sqlx::Row;
 
 use crate::{
-    domain::llm::provider::{LlmProviderRecord, LlmProviderRepository, ProviderId, Tier},
+    domain::llm::{
+        ReasoningEffort,
+        provider::{LlmProviderRecord, LlmProviderRepository, ProviderId, Tier},
+    },
     infrastructure::{
         llm_provider::postgres::model::{LlmProviderRow, pricing_cents, timeout_ms},
         postgres::{SharedTx, error::map_sqlx_error},
@@ -54,9 +57,10 @@ impl<'tx> LlmProviderRepository for PgLlmProviderRepository<'tx> {
             INSERT INTO llm_providers (
                 id, name, kind, base_url, model, timeout_ms, max_retries,
                 input_cents_per_mtok, output_cents_per_mtok,
-                api_key_nonce, api_key_ciphertext, enabled, created_at, updated_at
+                api_key_nonce, api_key_ciphertext, enabled, created_at, updated_at,
+                reasoning_effort
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
             "#,
             record.id.0,
             record.name,
@@ -72,6 +76,7 @@ impl<'tx> LlmProviderRepository for PgLlmProviderRepository<'tx> {
             record.enabled,
             record.created_at,
             record.updated_at,
+            record.reasoning_effort.map(ReasoningEffort::as_str),
         )
         .execute(&mut ***tx)
         .await
@@ -89,7 +94,8 @@ impl<'tx> LlmProviderRepository for PgLlmProviderRepository<'tx> {
             UPDATE llm_providers
             SET name = $2, kind = $3, base_url = $4, model = $5, timeout_ms = $6,
                 max_retries = $7, input_cents_per_mtok = $8, output_cents_per_mtok = $9,
-                api_key_nonce = $10, api_key_ciphertext = $11, enabled = $12, updated_at = $13
+                api_key_nonce = $10, api_key_ciphertext = $11, enabled = $12, updated_at = $13,
+                reasoning_effort = $14
             WHERE id = $1
             "#,
             record.id.0,
@@ -105,6 +111,7 @@ impl<'tx> LlmProviderRepository for PgLlmProviderRepository<'tx> {
             params.ciphertext,
             record.enabled,
             record.updated_at,
+            record.reasoning_effort.map(ReasoningEffort::as_str),
         )
         .execute(&mut ***tx)
         .await
@@ -121,7 +128,8 @@ impl<'tx> LlmProviderRepository for PgLlmProviderRepository<'tx> {
             r#"
             SELECT id, name, kind, base_url, model, timeout_ms, max_retries,
                    input_cents_per_mtok, output_cents_per_mtok,
-                   api_key_nonce, api_key_ciphertext, enabled, created_at, updated_at
+                   api_key_nonce, api_key_ciphertext, enabled, created_at, updated_at,
+                   reasoning_effort
             FROM llm_providers
             WHERE id = $1
             "#,
@@ -142,7 +150,8 @@ impl<'tx> LlmProviderRepository for PgLlmProviderRepository<'tx> {
             r#"
             SELECT id, name, kind, base_url, model, timeout_ms, max_retries,
                    input_cents_per_mtok, output_cents_per_mtok,
-                   api_key_nonce, api_key_ciphertext, enabled, created_at, updated_at
+                   api_key_nonce, api_key_ciphertext, enabled, created_at, updated_at,
+                   reasoning_effort
             FROM llm_providers
             ORDER BY name
             "#,
@@ -188,7 +197,8 @@ impl<'tx> LlmProviderRepository for PgLlmProviderRepository<'tx> {
             r#"
             SELECT p.id, p.name, p.kind, p.base_url, p.model, p.timeout_ms, p.max_retries,
                    p.input_cents_per_mtok, p.output_cents_per_mtok,
-                   p.api_key_nonce, p.api_key_ciphertext, p.enabled, p.created_at, p.updated_at
+                   p.api_key_nonce, p.api_key_ciphertext, p.enabled, p.created_at, p.updated_at,
+                   p.reasoning_effort
             FROM llm_tiers t
             JOIN llm_providers p ON p.id = t.provider_id
             WHERE t.tier = $1

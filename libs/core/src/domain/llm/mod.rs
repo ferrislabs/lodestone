@@ -22,6 +22,22 @@ str_enum!(ProviderKind {
     OpenAiCompatible => "openai_compatible",
 });
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ReasoningEffort {
+    None,
+    Low,
+    Medium,
+    High,
+}
+
+str_enum!(ReasoningEffort {
+    None => "none",
+    Low => "low",
+    Medium => "medium",
+    High => "high",
+});
+
 #[derive(Clone)]
 pub struct ProviderDefinition {
     pub kind: ProviderKind,
@@ -29,6 +45,7 @@ pub struct ProviderDefinition {
     pub model: String,
     pub api_key: Option<Secret>,
     pub timeout: Duration,
+    pub reasoning_effort: Option<ReasoningEffort>,
 }
 
 impl fmt::Debug for ProviderDefinition {
@@ -39,6 +56,7 @@ impl fmt::Debug for ProviderDefinition {
             .field("model", &self.model)
             .field("api_key", &self.api_key.as_ref().map(|_| "[redacted]"))
             .field("timeout", &self.timeout)
+            .field("reasoning_effort", &self.reasoning_effort)
             .finish()
     }
 }
@@ -86,6 +104,10 @@ pub enum LlmError {
     Status { status: u16 },
     #[error("llm output is not valid: {0}")]
     InvalidOutput(String),
+    #[error(
+        "the model used all its tokens to reason; lower its reasoning effort or raise max tokens"
+    )]
+    ReasoningExhausted,
     #[error("llm network error: {0}")]
     Network(String),
     #[error("llm provider is misconfigured: {0}")]
@@ -188,8 +210,26 @@ mod tests {
             model: "claude-opus-5-5".to_owned(),
             api_key: Some(Secret::new("sk-ant-secret-value")),
             timeout: Duration::from_secs(30),
+            reasoning_effort: None,
         };
         assert!(!format!("{definition:?}").contains("sk-ant-secret-value"));
+    }
+
+    #[test]
+    fn reasoning_efforts_round_trip() {
+        for effort in [
+            ReasoningEffort::None,
+            ReasoningEffort::Low,
+            ReasoningEffort::Medium,
+            ReasoningEffort::High,
+        ] {
+            assert_eq!(ReasoningEffort::parse(effort.as_str()), Some(effort));
+            assert_eq!(
+                serde_json::to_value(effort).unwrap(),
+                serde_json::json!(effort.as_str())
+            );
+        }
+        assert_eq!(ReasoningEffort::parse("max"), None);
     }
 
     #[test]

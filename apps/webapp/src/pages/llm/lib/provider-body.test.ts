@@ -21,6 +21,7 @@ const provider: Provider = {
 	max_retries: 2,
 	timeout_seconds: 30,
 	pricing: { input_cents_per_mtok: 300, output_cents_per_mtok: 1500 },
+	reasoning_effort: null,
 	tiers: ['triage'],
 	created_at: '2026-01-01T00:00:00Z',
 	updated_at: '2026-01-01T00:00:00Z',
@@ -57,6 +58,44 @@ describe('buildUpdateBody', () => {
 			input_cents_per_mtok: 300,
 			output_cents_per_mtok: 1500,
 		})
+	})
+})
+
+describe('reasoning effort', () => {
+	it('loads the stored value and defaults to empty', () => {
+		expect(valuesFromProvider(provider).reasoning_effort).toBe('')
+		expect(
+			valuesFromProvider({ ...provider, reasoning_effort: 'none' })
+				.reasoning_effort,
+		).toBe('none')
+	})
+
+	it('sends the value on update and null when cleared', () => {
+		const values = valuesFromProvider(provider)
+		expect(
+			buildUpdateBody({ ...values, reasoning_effort: 'high' }, 'keep')
+				.reasoning_effort,
+		).toBe('high')
+		expect(buildUpdateBody(values, 'keep').reasoning_effort).toBeNull()
+		expect(JSON.stringify(buildUpdateBody(values, 'keep'))).toContain(
+			'"reasoning_effort":null',
+		)
+	})
+
+	it('omits it on create unless chosen', () => {
+		expect('reasoning_effort' in buildCreateBody(EMPTY_PROVIDER_VALUES)).toBe(
+			false,
+		)
+		expect(
+			buildCreateBody({ ...EMPTY_PROVIDER_VALUES, reasoning_effort: 'none' })
+				.reasoning_effort,
+		).toBe('none')
+	})
+
+	it('maps the server path to the field', () => {
+		expect(
+			fieldErrorsFromPaths({ reasoning_effort: 'must be one of none' }),
+		).toEqual({ reasoning_effort: 'must be one of none' })
 	})
 })
 

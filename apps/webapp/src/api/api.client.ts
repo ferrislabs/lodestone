@@ -47,6 +47,7 @@ export namespace Schemas {
   export type ContactRecord = { address: string; confidence: number; method: string; provenance: string };
   export type CreateProfileRequest = { definition: Record<string, unknown>; name?: (string | null) | undefined };
   export type PricingRequest = Partial<{ input_cents_per_mtok: number | null; output_cents_per_mtok: number | null }>;
+  export type ReasoningEffort = "none" | "low" | "medium" | "high";
   export type CreateProviderRequest = {
     api_key?: (string | null) | undefined;
     base_url: string;
@@ -55,6 +56,7 @@ export namespace Schemas {
     model: string;
     name: string;
     pricing?: (null | PricingRequest) | undefined;
+    reasoning_effort?: (null | ReasoningEffort) | undefined;
     timeout_seconds?: (number | null) | undefined;
   };
   export type DraftContactDto = { address: string; confidence: number; method: string };
@@ -161,6 +163,7 @@ export namespace Schemas {
       model: string;
       name: string;
       pricing: PricingDto;
+      reasoning_effort?: (null | ReasoningEffort) | undefined;
       tiers: Array<string>;
       timeout_seconds: number;
       updated_at: string;
@@ -273,6 +276,7 @@ export namespace Schemas {
       model: string;
       name: string;
       pricing: PricingDto;
+      reasoning_effort?: (null | ReasoningEffort) | undefined;
       tiers: Array<string>;
       timeout_seconds: number;
       updated_at: string;
@@ -371,6 +375,7 @@ export namespace Schemas {
     model: string;
     name: string;
     pricing: PricingDto;
+    reasoning_effort?: (null | ReasoningEffort) | undefined;
     tiers: Array<string>;
     timeout_seconds: number;
     updated_at: string;
@@ -408,6 +413,7 @@ export namespace Schemas {
     model: string | null;
     name: string | null;
     pricing: null | PricingRequest;
+    reasoning_effort: null | ReasoningEffort;
     timeout_seconds: number | null;
   }>;
 

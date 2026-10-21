@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT p.id, p.name, p.kind, p.base_url, p.model, p.timeout_ms, p.max_retries,\n                   p.input_cents_per_mtok, p.output_cents_per_mtok,\n                   p.api_key_nonce, p.api_key_ciphertext, p.enabled, p.created_at, p.updated_at\n            FROM llm_tiers t\n            JOIN llm_providers p ON p.id = t.provider_id\n            WHERE t.tier = $1\n            ",
+  "query": "\n            SELECT id, name, kind, base_url, model, timeout_ms, max_retries,\n                   input_cents_per_mtok, output_cents_per_mtok,\n                   api_key_nonce, api_key_ciphertext, enabled, created_at, updated_at,\n                   reasoning_effort\n            FROM llm_providers\n            ORDER BY name\n            ",
   "describe": {
     "columns": [
       {
@@ -72,12 +72,15 @@
         "ordinal": 13,
         "name": "updated_at",
         "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 14,
+        "name": "reasoning_effort",
+        "type_info": "Text"
       }
     ],
     "parameters": {
-      "Left": [
-        "Text"
-      ]
+      "Left": []
     },
     "nullable": [
       false,
@@ -93,8 +96,9 @@
       true,
       false,
       false,
-      false
+      false,
+      true
     ]
   },
-  "hash": "f59d1b06dd1e7ee972522ac642a48204c592afd2aa2fcfcc5dc5a33377bb09ae"
+  "hash": "ce81bf3e4728505286e2243ea2310afb668a6811fa6d70ba528072ea7c78e2a7"
 }

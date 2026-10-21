@@ -7,7 +7,7 @@ use url::Url;
 
 use crate::domain::{
     lead::{str_enum, uuid_id},
-    llm::{ProviderDefinition, ProviderKind},
+    llm::{ProviderDefinition, ProviderKind, ReasoningEffort},
 };
 
 uuid_id!(ProviderId);
@@ -47,6 +47,7 @@ pub struct LlmProviderRecord {
     pub pricing: TokenPricing,
     pub api_key: Option<SealedSecret>,
     pub enabled: bool,
+    pub reasoning_effort: Option<ReasoningEffort>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }

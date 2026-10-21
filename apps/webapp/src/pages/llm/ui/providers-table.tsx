@@ -12,6 +12,8 @@ import {
 import { translateApiMessage } from '#/lib/api-errors'
 import {
 	providerKindLabel,
+	reasoningLabel,
+	testErrorHint,
 	testErrorLabel,
 	tierLabel,
 } from '#/pages/llm/lib/labels'
@@ -127,7 +129,15 @@ export function ProvidersTable({
 											</button>
 										</TableCell>
 										<TableCell>{providerKindLabel(provider.kind)}</TableCell>
-										<TableCell>{provider.model}</TableCell>
+										<TableCell>
+											{provider.model}
+											{provider.reasoning_effort ? (
+												<span className="block text-xs text-muted-foreground">
+													Raisonnement :{' '}
+													{reasoningLabel(provider.reasoning_effort)}
+												</span>
+											) : null}
+										</TableCell>
 										<TableCell className="max-w-48 truncate text-muted-foreground">
 											{provider.base_url}
 										</TableCell>
@@ -232,10 +242,13 @@ function TestOutcomeView({ outcome }: { outcome: TestOutcome }) {
 			</output>
 		)
 	}
+	const kind = result?.error?.kind ?? 'other'
+	const hint = testErrorHint(kind)
 	return (
 		<p role="alert" className="text-sm text-destructive">
-			{outcome.providerName} : {testErrorLabel(result?.error?.kind ?? 'other')}{' '}
-			- {translateApiMessage(result?.error?.message ?? 'The test failed')}
+			{outcome.providerName} : {testErrorLabel(kind)} -{' '}
+			{translateApiMessage(result?.error?.message ?? 'The test failed')}
+			{hint ? ` ${hint}` : null}
 		</p>
 	)
 }

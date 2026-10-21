@@ -112,6 +112,8 @@ const EXACT_MESSAGES: Readonly<Record<string, string>> = {
 		'Le fournisseur a renvoyé une réponse inexploitable.',
 	'The provider configuration is not usable.':
 		'La configuration du fournisseur est inutilisable.',
+	'The model used all its tokens to reason; lower its reasoning effort.':
+		'Le modèle a utilisé tous ses tokens pour raisonner.',
 	'The stored API key could not be decrypted; set it again.':
 		'La clé API enregistrée est indéchiffrable, saisissez-la à nouveau.',
 }

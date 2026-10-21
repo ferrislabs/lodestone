@@ -88,6 +88,7 @@ fn definition(server: &MockServer, timeout: Duration) -> ProviderDefinition {
         model: "claude-test".to_owned(),
         api_key: Some(Secret::new(KEY)),
         timeout,
+        reasoning_effort: None,
     }
 }
 

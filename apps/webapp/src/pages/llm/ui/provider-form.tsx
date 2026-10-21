@@ -1,16 +1,20 @@
 import { Button } from '#/components/ui/button'
 import { Input } from '#/components/ui/input'
 import { Label } from '#/components/ui/label'
-import { providerKindLabel } from '#/pages/llm/lib/labels'
+import { providerKindLabel, reasoningLabel } from '#/pages/llm/lib/labels'
 import {
 	type KeyMode,
 	PROVIDER_KINDS,
 	type ProviderFieldName,
 	type ProviderFormValues,
+	REASONING_EFFORTS,
 } from '#/pages/llm/lib/types'
 
 const SELECT_CLASS =
 	'h-9 w-full rounded-md border bg-transparent px-3 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50'
+
+const REASONING_HELP =
+	"Pour les modèles qui raisonnent avant de répondre (Ollama, OpenAI o-series…). « Désactivé » accélère les réponses et évite les réponses vides. La réflexion du modèle n'est jamais affichée ni enregistrée : seule la réponse finale est utilisée."
 
 const KEY_MODES: { mode: KeyMode; label: string }[] = [
 	{ mode: 'keep', label: 'Conserver la clé actuelle' },
@@ -171,6 +175,37 @@ export function ProviderForm({
 						inputMode="numeric"
 						{...common}
 					/>
+				</div>
+				<div className="flex flex-col gap-1.5">
+					<Label htmlFor="provider-reasoning_effort">Raisonnement</Label>
+					<select
+						id="provider-reasoning_effort"
+						className={SELECT_CLASS}
+						value={values.reasoning_effort}
+						aria-invalid={fieldErrors.reasoning_effort !== undefined}
+						aria-describedby="provider-reasoning_effort-help"
+						onChange={(event) =>
+							onChange('reasoning_effort', event.target.value)
+						}
+					>
+						<option value="">Par défaut (non envoyé)</option>
+						{REASONING_EFFORTS.map((effort) => (
+							<option key={effort} value={effort}>
+								{reasoningLabel(effort)}
+							</option>
+						))}
+					</select>
+					<p
+						id="provider-reasoning_effort-help"
+						className="text-xs text-muted-foreground"
+					>
+						{REASONING_HELP}
+					</p>
+					{fieldErrors.reasoning_effort ? (
+						<p role="alert" className="text-sm text-destructive">
+							{fieldErrors.reasoning_effort}
+						</p>
+					) : null}
 				</div>
 				<fieldset className="flex flex-col gap-2 rounded-md border p-3">
 					<legend className="px-1 text-sm font-medium">Clé API</legend>
