@@ -6,11 +6,12 @@ export const PROFILE_HINTS: UiHints = {
 		'identity.offer',
 		'identity.target_customer',
 		'llm.relevance_criteria',
+		'agents.llm.relevance_criteria',
 	],
 	defaults: {
-		schema_version: 1,
+		schema_version: 2,
 		'llm.qualification_threshold': 50,
-		'sources.http_probe.fingerprints.matchers.equals': 200,
+		'agents.source.fingerprints.matchers.equals': 200,
 	},
 	labels: {
 		ats: 'ATS',

@@ -43,15 +43,10 @@ pub struct BoampSource<F: Fetcher> {
 pub fn keyword_union(profiles: &[ActiveProfile]) -> Vec<String> {
     let mut seen: HashSet<String> = HashSet::new();
     let mut union = Vec::new();
-    for rules in profiles.iter().filter_map(|active| {
-        active
-            .revision
-            .definition
-            .definition()
-            .sources
-            .boamp
-            .as_ref()
-    }) {
+    for rules in profiles
+        .iter()
+        .filter_map(|active| active.revision.definition.definition().boamp())
+    {
         for keyword in &rules.keywords {
             let keyword = keyword.trim();
             if !keyword.is_empty() && seen.insert(keyword.to_lowercase()) {
@@ -434,7 +429,7 @@ impl<F: Fetcher> CandidateSource for BoampSource<F> {
     }
 
     fn rules<'a>(&self, profile: &'a ProfileDefinition) -> Option<&'a KeywordSource> {
-        profile.sources.boamp.as_ref()
+        profile.boamp()
     }
 
     async fn collect(

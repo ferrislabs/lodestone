@@ -19,9 +19,9 @@ describe('prepareSave', () => {
 
 	it('accepts a filled definition', () => {
 		const filled = {
-			schema_version: 1,
+			schema_version: 2,
 			identity: { offer: 'o', target_customer: 't' },
-			sources: {},
+			agents: [],
 			scoring: { factors: [] },
 			contact_ranking: { preferred_local_parts: [] },
 			llm: { qualification_threshold: 50, relevance_criteria: 'r' },

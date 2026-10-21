@@ -15,7 +15,7 @@ async fn iam_keywords_against_real_careers_pages_and_boards() {
         return;
     }
     let definition = ValidatedProfile::parse(serde_json::from_str(IAM).unwrap()).unwrap();
-    let rules = definition.definition().sources.ats.clone().unwrap();
+    let rules = definition.definition().ats().cloned().unwrap();
     let contact = std::env::var("LODESTONE_ATS_CONTACT")
         .unwrap_or_else(|_| "https://github.com/ferrislabs/lodestone".to_owned());
     let fetcher = Arc::new(

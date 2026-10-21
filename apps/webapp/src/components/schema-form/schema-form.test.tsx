@@ -89,48 +89,73 @@ describe('SchemaForm', () => {
 	})
 
 	it('toggles optional sections and omits the key when off', () => {
+		const initial = setIn(
+			defaultValue(root, root, PROFILE_HINTS),
+			['agents'],
+			[
+				{
+					id: 'a',
+					name: 'A',
+					enabled: true,
+					source: { kind: 'ats', keywords: ['x'], exclusions: [] },
+				},
+			],
+		)
 		const seen = vi.fn()
-		render(<Harness onValue={seen} />)
-		expect(screen.queryByLabelText('Add Keywords')).toBeNull()
-		fireEvent.click(screen.getByLabelText('Enable BOAMP'))
-		expect(screen.getByLabelText('Add Keywords')).toBeTruthy()
+		render(<Harness initial={initial} onValue={seen} />)
+		const before = screen.getAllByLabelText(/Relevance criteria/).length
+		fireEvent.click(screen.getByLabelText('Enable LLM'))
+		expect(screen.getAllByLabelText(/Relevance criteria/)).toHaveLength(
+			before + 1,
+		)
 		expect(seen.mock.calls.at(-1)?.[0]).toMatchObject({
-			sources: { boamp: { keywords: [], accept_min_keywords: 2 } },
+			agents: [{ llm: {} }],
 		})
-		fireEvent.click(screen.getByLabelText('Enable BOAMP'))
+		fireEvent.click(screen.getByLabelText('Enable LLM'))
 		const last = seen.mock.calls.at(-1)?.[0]
-		expect(last).toHaveProperty('sources', {})
+		expect(last).not.toHaveProperty('agents.0.llm')
+		expect(screen.getAllByLabelText(/Relevance criteria/)).toHaveLength(before)
 	})
 
 	it('switches union variants and resets their fields', () => {
 		const initial = setIn(
 			defaultValue(root, root, PROFILE_HINTS),
-			['sources', 'http_probe'],
-			{
-				fingerprints: [
-					{
-						id: 'a',
-						path: '/',
-						product: 'p',
-						matchers: [{ kind: 'header', name: 'x', pattern: 'y' }],
+			['agents'],
+			[
+				{
+					id: 'a',
+					name: 'A',
+					enabled: true,
+					source: {
+						kind: 'http_probe',
+						fingerprints: [
+							{
+								id: 'a',
+								path: '/',
+								product: 'p',
+								matchers: [{ kind: 'header', name: 'x', pattern: 'y' }],
+							},
+						],
 					},
-				],
-			},
+				},
+			],
 		)
 		const seen = vi.fn()
 		render(<Harness initial={initial} onValue={seen} />)
-		expect(screen.getByLabelText('Name *')).toBeTruthy()
+		expect(screen.getAllByLabelText('Name *')).toHaveLength(2)
 		fireEvent.change(screen.getByLabelText('Matcher type'), {
 			target: { value: '2' },
 		})
-		expect(screen.queryByLabelText('Name *')).toBeNull()
+		expect(screen.getAllByLabelText('Name *')).toHaveLength(1)
 		expect(screen.getByLabelText(/Pattern/)).toHaveProperty('value', '')
 		expect(seen.mock.calls.at(-1)?.[0]).toMatchObject({
-			sources: {
-				http_probe: {
-					fingerprints: [{ matchers: [{ kind: 'body', pattern: '' }] }],
+			agents: [
+				{
+					source: {
+						fingerprints: [{ matchers: [{ kind: 'body', pattern: '' }] }],
+					},
 				},
-			},
+			],
 		})
 	})
 

@@ -216,7 +216,7 @@ impl<F: Fetcher, T: AtsTargets> CandidateSource for AtsSource<F, T> {
     }
 
     fn rules<'a>(&self, profile: &'a ProfileDefinition) -> Option<&'a KeywordSource> {
-        profile.sources.ats.as_ref()
+        profile.ats()
     }
 
     async fn collect(

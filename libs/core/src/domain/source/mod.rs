@@ -56,16 +56,15 @@ pub trait Source: Send + Sync {
 
 impl ProfileDefinition {
     pub fn enables(&self, source: SourceName) -> bool {
-        let sources = &self.sources;
         match source {
-            SourceName::CertificateTransparency => sources.certificate_transparency.is_some(),
-            SourceName::HttpProbe => sources.http_probe.is_some(),
-            SourceName::DnsCname => sources.dns_cname.is_some(),
-            SourceName::Boamp => sources.boamp.is_some(),
-            SourceName::Decp => sources.decp.is_some(),
-            SourceName::Ted => sources.ted.is_some(),
-            SourceName::FranceTravail => sources.france_travail.is_some(),
-            SourceName::Ats => sources.ats.is_some(),
+            SourceName::CertificateTransparency
+            | SourceName::HttpProbe
+            | SourceName::DnsCname
+            | SourceName::Boamp
+            | SourceName::Decp
+            | SourceName::Ted
+            | SourceName::FranceTravail
+            | SourceName::Ats => self.first_enabled(source).is_some(),
             SourceName::PublicPage
             | SourceName::SecurityTxt
             | SourceName::RoleGuess

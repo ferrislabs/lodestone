@@ -47,14 +47,19 @@ describe('resolve', () => {
 })
 
 describe('classify', () => {
-	const unions = ['Matcher', 'VersionExtractor', 'DebtRule']
+	const unions = ['Matcher', 'VersionExtractor', 'DebtRule', 'AgentSource']
 
 	it('classifies every $def of the committed schema', () => {
 		const names = Object.keys(root.$defs ?? {})
-		expect(names.length).toBe(16)
+		expect(names.length).toBe(15)
 		for (const name of names) {
 			const node = classify(root, { $ref: `#/$defs/${name}` })
-			expect(node.kind, name).toBe(unions.includes(name) ? 'union' : 'object')
+			const expected = unions.includes(name)
+				? 'union'
+				: name === 'AgentId'
+					? 'string'
+					: 'object'
+			expect(node.kind, name).toBe(expected)
 		}
 	})
 
@@ -88,8 +93,8 @@ describe('classify', () => {
 	})
 
 	it('treats anyOf null and type arrays as nullable', () => {
-		const boamp = def('Sources').properties?.boamp ?? {}
-		expect(classify(root, boamp).kind).toBe('nullable')
+		const llm = def('Agent').properties?.llm ?? {}
+		expect(classify(root, llm).kind).toBe('nullable')
 		const value = def('ScoringFactor').properties?.value ?? {}
 		const node = classify(root, value)
 		expect(node.kind).toBe('nullable')
@@ -125,9 +130,9 @@ describe('defaultValue', () => {
 	it('builds a new profile with every required key', () => {
 		const value = defaultValue(root, root, PROFILE_HINTS)
 		expect(value).toEqual({
-			schema_version: 1,
+			schema_version: 2,
 			identity: { offer: '', target_customer: '' },
-			sources: {},
+			agents: [],
 			scoring: { factors: [] },
 			contact_ranking: { preferred_local_parts: [], guess_local_parts: [] },
 			llm: { qualification_threshold: 50, relevance_criteria: '' },
@@ -138,10 +143,16 @@ describe('defaultValue', () => {
 	it('fills schema defaults for keyword sources', () => {
 		const source = defaultValue(
 			root,
-			{ $ref: '#/$defs/KeywordSource' },
+			{ $ref: '#/$defs/AgentSource' },
 			PROFILE_HINTS,
 		)
 		expect(source).toEqual({
+			kind: 'certificate_transparency',
+			labels: [],
+		})
+		const boamp = def('AgentSource').oneOf?.[3] ?? {}
+		expect(defaultValue(root, boamp, PROFILE_HINTS)).toEqual({
+			kind: 'boamp',
 			keywords: [],
 			exclusions: [],
 			accept_min_keywords: 2,
@@ -151,8 +162,9 @@ describe('defaultValue', () => {
 	it('starts unions on their first variant with the discriminator set', () => {
 		expect(
 			defaultValue(root, { $ref: '#/$defs/Matcher' }, PROFILE_HINTS, [
-				'sources',
-				'http_probe',
+				'agents',
+				0,
+				'source',
 				'fingerprints',
 				0,
 				'matchers',
@@ -165,14 +177,10 @@ describe('defaultValue', () => {
 	})
 
 	it('gives an optional section its enabled value', () => {
-		const boamp = def('Sources').properties?.boamp ?? {}
+		const llm = def('Agent').properties?.llm ?? {}
 		expect(
-			enabledValue(root, boamp, PROFILE_HINTS, ['sources', 'boamp']),
-		).toEqual({
-			keywords: [],
-			exclusions: [],
-			accept_min_keywords: 2,
-		})
+			enabledValue(root, llm, PROFILE_HINTS, ['agents', 0, 'llm']),
+		).toEqual({})
 	})
 })
 
@@ -185,18 +193,19 @@ describe('paths', () => {
 		)
 		expect(
 			formatPath([
-				'sources',
-				'http_probe',
+				'agents',
+				0,
+				'source',
 				'fingerprints',
 				0,
 				'matchers',
 				1,
 				'pattern',
 			]),
-		).toBe('sources.http_probe.fingerprints[0].matchers[1].pattern')
-		expect(
-			formatPath(['sources', 'certificate_transparency', 'labels', 1]),
-		).toBe('sources.certificate_transparency.labels[1]')
+		).toBe('agents[0].source.fingerprints[0].matchers[1].pattern')
+		expect(formatPath(['agents', 1, 'source', 'labels', 1])).toBe(
+			'agents[1].source.labels[1]',
+		)
 		expect(formatPath(['contact_ranking', 'preferred_local_parts', 1])).toBe(
 			'contact_ranking.preferred_local_parts[1]',
 		)
@@ -257,27 +266,35 @@ describe('validateValue', () => {
 		})
 		const bad = setIn(
 			setIn(value, ['scoring', 'factors'], [{ signal: 's', weight: null }]),
-			['sources', 'http_probe'],
-			{
-				fingerprints: [
-					{
-						id: 'x',
-						path: '/',
-						product: 'p',
-						matchers: [{ kind: 'status', equals: 70000 }],
+			['agents'],
+			[
+				{
+					id: 'x',
+					name: 'n',
+					enabled: true,
+					source: {
+						kind: 'http_probe',
+						fingerprints: [
+							{
+								id: 'x',
+								path: '/',
+								product: 'p',
+								matchers: [{ kind: 'status', equals: 70000 }],
+							},
+						],
 					},
-				],
-			},
+				},
+			],
 		)
 		const paths = validateValue(root, root, bad).map((p) => p.path)
 		expect(paths).toContain('scoring.factors[0].weight')
 		expect(paths).toContain(
-			'sources.http_probe.fingerprints[0].matchers[0].equals',
+			'agents[0].source.fingerprints[0].matchers[0].equals',
 		)
 	})
 
 	it('reports a missing required key', () => {
-		const problems = validateValue(root, root, { schema_version: 1 })
+		const problems = validateValue(root, root, { schema_version: 2 })
 		expect(problems.map((p) => p.path)).toContain('identity')
 	})
 })
@@ -294,7 +311,7 @@ describe('fieldPaths', () => {
 		expect(paths.has('scoring.factors[0].weight')).toBe(true)
 		expect(paths.has('scoring.factors[0].value')).toBe(true)
 		expect(paths.has('identity.offer')).toBe(true)
-		expect(paths.has('sources')).toBe(true)
+		expect(paths.has('agents')).toBe(true)
 		expect(paths.has('$')).toBe(true)
 		expect(paths.has('bogus')).toBe(false)
 	})

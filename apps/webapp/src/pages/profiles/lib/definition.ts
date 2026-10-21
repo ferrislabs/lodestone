@@ -1,10 +1,10 @@
 export const NEW_PROFILE_TEMPLATE = `{
-  "schema_version": 1,
+  "schema_version": 2,
   "identity": {
     "offer": "",
     "target_customer": ""
   },
-  "sources": {},
+  "agents": [],
   "scoring": {
     "factors": []
   },
