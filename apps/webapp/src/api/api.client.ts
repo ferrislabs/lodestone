@@ -40,6 +40,7 @@ export namespace Schemas {
     reason: string;
     stopped_at: string;
   };
+  export type ApproveDraftRequest = Partial<{ expected_revision: number | null }>;
   export type DraftStatusDto = "pending" | "approved" | "rejected";
   export type DraftDto = {
     body: string;
@@ -50,6 +51,7 @@ export namespace Schemas {
     rejection_reason?: (string | null) | undefined;
     reviewed_at?: (string | null) | undefined;
     reviewed_by?: (string | null) | undefined;
+    revision: number;
     status: DraftStatusDto;
     subject: string;
     suggested_body?: (string | null) | undefined;
@@ -997,7 +999,11 @@ export namespace Schemas {
     refresh_days: number;
     stats: ModuleStatsDto;
   };
-  export type EditDraftRequest = Partial<{ body: string | null; subject: string | null }>;
+  export type EditDraftRequest = Partial<{
+    body: string | null;
+    expected_revision: number | null;
+    subject: string | null;
+  }>;
   export type ErrorBody = {
     code: string;
     details?: (Array<ErrorDetail> | null) | undefined;
@@ -1099,7 +1105,11 @@ export namespace Schemas {
     verdicts: Array<VerdictPrecisionDto>;
     versions: Array<VersionPrecisionDto>;
   };
-  export type RejectDraftRequest = Partial<{ note: string | null; reason: null | RejectionReasonDto }>;
+  export type RejectDraftRequest = Partial<{
+    expected_revision: number | null;
+    note: string | null;
+    reason: null | RejectionReasonDto;
+  }>;
   export type RevisionDto = RevisionSummaryDto & { definition: Record<string, unknown> };
   export type SaveProviderRequest = Partial<{ secrets: Record<string, unknown>; settings: Record<string, unknown> }>;
   export type SourceDto = {
@@ -1194,6 +1204,8 @@ export namespace Endpoints {
     requestFormat: "json";
     parameters: {
       path: { assessment_id: string };
+
+      body: null | Schemas.ApproveDraftRequest;
     };
     responses: {
       200: Schemas.DataEnvelope_DraftEntryDto;

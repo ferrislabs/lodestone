@@ -233,7 +233,12 @@ const detail: LeadDetailData = {
 				model: 'model-x',
 				prompt_version: 'v2',
 			},
-			draft: { subject: 'Hello', body: 'Body text', status: 'pending' },
+			draft: {
+				subject: 'Hello',
+				body: 'Body text',
+				status: 'pending',
+				revision: 0,
+			},
 			created_at: '2026-02-01T00:00:00Z',
 		},
 	],
@@ -1347,7 +1352,12 @@ describe('LeadDetail', () => {
 				assessments: [
 					{
 						...first,
-						draft: { subject: 'Hello', body: 'Body text', status: 'approved' },
+						draft: {
+							subject: 'Hello',
+							body: 'Body text',
+							status: 'approved',
+							revision: 0,
+						},
 					},
 				],
 			},
