@@ -637,6 +637,7 @@ fn api_request(server: &MockServer, path: &str) -> ApiRequest {
         url: Url::parse(&server.url(path)).unwrap(),
         source: SourceName::FranceTravail,
         bearer: None,
+        headers: Vec::new(),
         form: None,
     }
 }
@@ -669,6 +670,86 @@ async fn api_get_sends_the_bearer_and_skips_robots() {
     assert_eq!(response.header("content-range"), Some("offres 0-149/300"));
     search.assert_async().await;
     robots.assert_hits_async(0).await;
+}
+
+#[tokio::test]
+async fn api_get_sends_custom_headers() {
+    let server = MockServer::start_async().await;
+    let search = server
+        .mock_async(|when, then| {
+            when.method(GET)
+                .path("/records")
+                .header("x-api-key", "Token abc-123");
+            then.status(200).body("{}");
+        })
+        .await;
+    let mut request = api_request(&server, "/records");
+    request.headers = vec![("x-api-key".to_owned(), Secret::new("Token abc-123"))];
+    let response = fetcher(settings()).call(&request).await.unwrap();
+    assert_eq!(response.status, 200);
+    search.assert_async().await;
+    assert!(!format!("{request:?}").contains("abc-123"));
+}
+
+#[tokio::test]
+async fn credentials_are_dropped_on_a_cross_origin_redirect_and_kept_on_the_same_origin() {
+    let origin = MockServer::start_async().await;
+    let other = MockServer::start_async().await;
+    let landing = other
+        .mock_async(|when, then| {
+            when.method(GET).path("/landing").matches(|req| {
+                req.headers.as_ref().is_some_and(|headers| {
+                    !headers.iter().any(|(name, _)| {
+                        name.eq_ignore_ascii_case("authorization")
+                            || name.eq_ignore_ascii_case("x-api-key")
+                    })
+                })
+            });
+            then.status(200).body("ok");
+        })
+        .await;
+    let away = other.url("/landing");
+    origin
+        .mock_async(|when, then| {
+            when.method(GET).path("/away");
+            then.status(302).header("location", away.as_str());
+        })
+        .await;
+    origin
+        .mock_async(|when, then| {
+            when.method(GET).path("/same");
+            then.status(302).header("location", "/target");
+        })
+        .await;
+    let target = origin
+        .mock_async(|when, then| {
+            when.method(GET)
+                .path("/target")
+                .header("authorization", "Bearer tok")
+                .header("x-api-key", "key-1");
+            then.status(200).body("ok");
+        })
+        .await;
+    let credentials = |path: &str| {
+        let mut request = api_request(&origin, path);
+        request.bearer = Some(Secret::new("tok"));
+        request.headers = vec![("x-api-key".to_owned(), Secret::new("key-1"))];
+        request
+    };
+
+    let crossed = fetcher(settings())
+        .call(&credentials("/away"))
+        .await
+        .unwrap();
+    assert_eq!(crossed.status, 200);
+    landing.assert_async().await;
+
+    let same = fetcher(settings())
+        .call(&credentials("/same"))
+        .await
+        .unwrap();
+    assert_eq!(same.status, 200);
+    target.assert_async().await;
 }
 
 #[tokio::test]

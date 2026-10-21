@@ -120,6 +120,7 @@ dependencies = [
  "serde",
  "serde_json",
  "server",
+ "source-providers",
  "sources",
  "sqlx",
  "thiserror 2.0.18",
@@ -1598,6 +1599,7 @@ dependencies = [
  "chrono",
  "codspeed-divan-compat",
  "common",
+ "fetch",
  "http 1.4.0",
  "httpmock",
  "itoa",
@@ -1608,6 +1610,7 @@ dependencies = [
  "serde",
  "serde_json",
  "server",
+ "source-providers",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -3903,6 +3906,27 @@ checksum = "3a766e1110788c36f4fa1c2b71b387a7815aa65f88ce0229841826633d93723e"
 dependencies = [
  "libc",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "source-providers"
+version = "0.1.0"
+dependencies = [
+ "aws-lc-rs",
+ "base64 0.22.1",
+ "chrono",
+ "common",
+ "fetch",
+ "httpmock",
+ "lodestone-core",
+ "rate-limit",
+ "serde_json",
+ "sqlx",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "url",
+ "uuid",
 ]
 
 [[package]]

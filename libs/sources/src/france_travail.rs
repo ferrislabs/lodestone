@@ -232,6 +232,7 @@ impl<F: ApiFetcher> FranceTravailSource<F> {
             url: self.settings.token_url.clone(),
             source: SourceName::FranceTravail,
             bearer: None,
+            headers: Vec::new(),
             form: Some(vec![
                 ("grant_type".to_owned(), Secret::new("client_credentials")),
                 ("client_id".to_owned(), self.settings.client_id.clone()),
@@ -300,6 +301,7 @@ impl<F: ApiFetcher> FranceTravailSource<F> {
                 url: url.clone(),
                 source: SourceName::FranceTravail,
                 bearer: Some(self.token().await?),
+                headers: Vec::new(),
                 form: None,
             };
             let response = self.call(&request).await?;

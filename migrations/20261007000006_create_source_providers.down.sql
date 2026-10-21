@@ -1,0 +1,3 @@
+DROP TABLE source_provider_oauth_states;
+DROP TABLE source_provider_secrets;
+DROP TABLE source_provider_configurations;

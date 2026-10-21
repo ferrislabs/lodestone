@@ -21,5 +21,6 @@ pub mod registry;
 pub mod run;
 pub mod scoring_agent;
 pub mod signal;
+pub mod source_provider;
 pub mod suppression;
 pub mod user;

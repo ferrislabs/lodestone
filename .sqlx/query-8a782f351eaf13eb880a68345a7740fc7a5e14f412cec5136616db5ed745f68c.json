@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                INSERT INTO source_provider_secrets (provider_key, name, nonce, ciphertext)\n                VALUES ($1, $2, $3, $4)\n                ON CONFLICT (provider_key, name) DO UPDATE\n                SET nonce = EXCLUDED.nonce, ciphertext = EXCLUDED.ciphertext\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Bytea",
+        "Bytea"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "8a782f351eaf13eb880a68345a7740fc7a5e14f412cec5136616db5ed745f68c"
+}

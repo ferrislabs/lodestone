@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use std::{net::SocketAddr, sync::Arc};
+use std::{net::SocketAddr, num::NonZeroU32, sync::Arc, time::Duration};
 
 use api::router::router;
 use args::Args;
@@ -13,6 +13,7 @@ use axum::{
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use clap::Parser;
 use common::{EncryptionKey, Secret};
+use fetch::{FetchSettings, PoliteFetcher};
 use handlers::AppState;
 use http::{
     Method, Request, StatusCode,
@@ -24,6 +25,7 @@ use lodestone_core::{LodestoneUseCase, infrastructure::crypto::AesGcmCipher};
 use rate_limit::{InMemoryRateLimiter, Quota, RateLimitService};
 use rsa::{RsaPrivateKey, pkcs1::EncodeRsaPrivateKey, rand_core::OsRng, traits::PublicKeyParts};
 use serde_json::{Value, json};
+use source_providers::ProviderEngine;
 use sqlx::PgPool;
 use tower::ServiceExt;
 
@@ -125,6 +127,22 @@ impl Harness {
             usecase: LodestoneUseCase::new(pool),
             rate_limit: RateLimitService::new(InMemoryRateLimiter::new()),
             rate_limit_quota: Quota::per_minute(1000),
+            providers: Arc::new(
+                ProviderEngine::new(Arc::new(
+                    PoliteFetcher::new(FetchSettings {
+                        contact: "bot@example.com".to_owned(),
+                        requests_per_host_per_minute: NonZeroU32::MIN.saturating_add(9_999),
+                        request_timeout: Duration::from_secs(5),
+                        max_body_bytes: 64 * 1024,
+                        max_redirects: 3,
+                        robots_ttl: Duration::from_secs(3600),
+                        source_quotas: Vec::new(),
+                        allow_private_targets: true,
+                    })
+                    .expect("fetcher"),
+                ))
+                .with_allow_http(true),
+            ),
             cipher: Arc::new(
                 AesGcmCipher::new(&EncryptionKey::from_base64(&Secret::new(KEY)).expect("key"))
                     .expect("cipher"),

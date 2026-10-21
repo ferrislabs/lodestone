@@ -42,6 +42,7 @@ pub struct ApiRequest {
     pub url: Url,
     pub source: SourceName,
     pub bearer: Option<Secret>,
+    pub headers: Vec<(String, Secret)>,
     pub form: Option<Vec<(String, Secret)>>,
 }
 
@@ -50,6 +51,19 @@ pub trait ApiFetcher: Send + Sync {
         &self,
         request: &ApiRequest,
     ) -> impl Future<Output = Result<FetchResponse, FetchError>> + Send;
+}
+
+#[derive(Clone, Copy)]
+struct Credentials<'a> {
+    bearer: Option<&'a str>,
+    headers: &'a [(&'a str, &'a str)],
+}
+
+impl Credentials<'_> {
+    const NONE: Credentials<'static> = Credentials {
+        bearer: None,
+        headers: &[],
+    };
 }
 
 #[derive(Clone, Copy)]
@@ -161,7 +175,7 @@ impl<L: RateLimiter> PoliteFetcher<L> {
         &self,
         url: &Url,
         payload: Payload<'_>,
-        bearer: Option<&str>,
+        credentials: Credentials<'_>,
     ) -> Result<Response, FetchError> {
         let builder = match payload {
             Payload::Json(body) => self
@@ -178,10 +192,16 @@ impl<L: RateLimiter> PoliteFetcher<L> {
                 .body(body.to_vec()),
             Payload::Empty => self.inner.client.get(url.clone()),
         };
-        let builder = match bearer {
+        let builder = match credentials.bearer {
             Some(token) => builder.bearer_auth(token),
             None => builder,
         };
+        let builder = credentials
+            .headers
+            .iter()
+            .fold(builder, |builder, (name, value)| {
+                builder.header(*name, *value)
+            });
         builder.send().await.map_err(map_error)
     }
 
@@ -225,7 +245,7 @@ impl<L: RateLimiter> PoliteFetcher<L> {
                     Err(error) => return Err(error),
                 }
             }
-            let Ok(response) = self.send(&current, Payload::Empty, None).await else {
+            let Ok(response) = self.send(&current, Payload::Empty, Credentials::NONE).await else {
                 break failure();
             };
             let status = response.status();
@@ -259,10 +279,11 @@ impl<L: RateLimiter> PoliteFetcher<L> {
         &self,
         request: &FetchRequest,
         payload: Payload<'_>,
-        bearer: Option<&str>,
+        credentials: Credentials<'_>,
     ) -> Result<FetchResponse, FetchError> {
         let settings = &self.inner.settings;
         let mut current = request.url.clone();
+        let origin = request.url.origin();
         let mut hops: u8 = 0;
         loop {
             validate(&current)?;
@@ -276,7 +297,12 @@ impl<L: RateLimiter> PoliteFetcher<L> {
                 }
             }
             self.throttle(&current, request.source).await?;
-            let response = self.send(&current, payload, bearer).await?;
+            let hop_credentials = if current.origin() == origin {
+                credentials
+            } else {
+                Credentials::NONE
+            };
+            let response = self.send(&current, payload, hop_credentials).await?;
             if let Some(next) = redirect_target(&response, &current)? {
                 if !payload.is_empty() || hops >= settings.max_redirects {
                     return Err(FetchError::Redirect);
@@ -316,7 +342,7 @@ impl<L: RateLimiter + 'static> Fetcher for PoliteFetcher<L> {
             purpose = ?request.purpose,
             source = %request.source,
         );
-        self.run(request, Payload::Empty, None)
+        self.run(request, Payload::Empty, Credentials::NONE)
             .instrument(span)
             .await
     }
@@ -335,7 +361,7 @@ impl<L: RateLimiter + 'static> PostFetcher for PoliteFetcher<L> {
             purpose: FetchPurpose::Api,
             source: request.source,
         };
-        self.run(&fetch, Payload::Json(&request.body), None)
+        self.run(&fetch, Payload::Json(&request.body), Credentials::NONE)
             .instrument(span)
             .await
     }
@@ -365,8 +391,18 @@ impl<L: RateLimiter + 'static> ApiFetcher for PoliteFetcher<L> {
             Some(body) => Payload::Form(body),
             None => Payload::Empty,
         };
-        let bearer = request.bearer.as_ref().map(Secret::expose);
-        self.run(&fetch, payload, bearer).instrument(span).await
+        let headers: Vec<(&str, &str)> = request
+            .headers
+            .iter()
+            .map(|(name, value)| (name.as_str(), value.expose()))
+            .collect();
+        let credentials = Credentials {
+            bearer: request.bearer.as_ref().map(Secret::expose),
+            headers: &headers,
+        };
+        self.run(&fetch, payload, credentials)
+            .instrument(span)
+            .await
     }
 }
 

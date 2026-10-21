@@ -88,9 +88,12 @@ export namespace Schemas {
     summary: string;
   };
   export type AssignTierRequest = { provider_id: string };
+  export type AuthorizeUrlDto = { authorize_url: string };
   export type ProfileCalibrationDto = { agents: Array<AgentCalibrationDto>; name: string; profile_id: string };
   export type CalibrationDto = { profiles: Array<ProfileCalibrationDto>; required: number; required_per_class: number };
   export type CalibrationRunDto = { queued: boolean };
+  export type FiltersDto = { contract: boolean; countries: boolean; remote: boolean };
+  export type CapabilitiesDto = { filters: FiltersDto; keyword_search: boolean };
   export type RejectionReasonDto =
     | "hors_cible"
     | "deja_client"
@@ -139,6 +142,12 @@ export namespace Schemas {
     state: string;
   };
   export type ConfidenceBucketDto = { from: number; rejected: number; to: number; validated: number };
+  export type ConnectedAccountDto = {
+    account_id?: (string | null) | undefined;
+    display_name: string;
+    expires_at?: (string | null) | undefined;
+    scopes: Array<string>;
+  };
   export type ContactDto = {
     address: string;
     confidence: number;
@@ -178,6 +187,10 @@ export namespace Schemas {
     per_page: number;
     prev_page?: (number | null) | undefined;
     total?: (number | null) | undefined;
+  };
+  export type DataEnvelope_AuthorizeUrlDto = {
+    data: { authorize_url: string };
+    pagination?: (null | PaginationMetadata) | undefined;
   };
   export type DataEnvelope_CalibrationDto = {
     data: { profiles: Array<ProfileCalibrationDto>; required: number; required_per_class: number };
@@ -440,6 +453,40 @@ export namespace Schemas {
     data: { active: boolean; created_at: string; id: string; name: string; updated_at: string };
     pagination?: (null | PaginationMetadata) | undefined;
   };
+  export type FieldDto = {
+    default?: (string | null) | undefined;
+    help: string;
+    key: string;
+    kind: string;
+    label: string;
+    options: Array<string>;
+    required: boolean;
+  };
+  export type SecretStateDto = { hint?: (string | null) | undefined; is_set: boolean; key: string };
+  export type ProviderSummaryDto = {
+    auth_kind: string;
+    capabilities: CapabilitiesDto;
+    category: string;
+    connected_account?: (null | ConnectedAccountDto) | undefined;
+    description: string;
+    key: string;
+    last_test_at?: (string | null) | undefined;
+    name: string;
+    status: string;
+  };
+  export type DataEnvelope_ProviderDetailDto = {
+    data: {
+      fields: Array<FieldDto>;
+      last_test_message?: (string | null) | undefined;
+      oauth_redirect_uri?: (string | null) | undefined;
+      scopes: Array<string>;
+      secrets: Array<SecretStateDto>;
+      settings: Record<string, unknown>;
+      summary: ProviderSummaryDto;
+      terms_note?: (string | null) | undefined;
+    };
+    pagination?: (null | PaginationMetadata) | undefined;
+  };
   export type PricingDto = { input_cents_per_mtok: number; output_cents_per_mtok: number };
   export type DataEnvelope_ProviderDto = {
     data: {
@@ -673,6 +720,20 @@ export namespace Schemas {
     }>;
     pagination?: (null | PaginationMetadata) | undefined;
   };
+  export type DataEnvelope_Vec_ProviderSummaryDto = {
+    data: Array<{
+      auth_kind: string;
+      capabilities: CapabilitiesDto;
+      category: string;
+      connected_account?: (null | ConnectedAccountDto) | undefined;
+      description: string;
+      key: string;
+      last_test_at?: (string | null) | undefined;
+      name: string;
+      status: string;
+    }>;
+    pagination?: (null | PaginationMetadata) | undefined;
+  };
   export type DataEnvelope_Vec_RevisionSummaryDto = {
     data: Array<{ created_at: string; created_by?: (string | null) | undefined; number: number }>;
     pagination?: (null | PaginationMetadata) | undefined;
@@ -760,6 +821,16 @@ export namespace Schemas {
     name: string;
     revision?: (number | null) | undefined;
   };
+  export type ProviderDetailDto = {
+    fields: Array<FieldDto>;
+    last_test_message?: (string | null) | undefined;
+    oauth_redirect_uri?: (string | null) | undefined;
+    scopes: Array<string>;
+    secrets: Array<SecretStateDto>;
+    settings: Record<string, unknown>;
+    summary: ProviderSummaryDto;
+    terms_note?: (string | null) | undefined;
+  };
   export type ProviderDto = {
     base_url: string;
     created_at: string;
@@ -794,6 +865,7 @@ export namespace Schemas {
   };
   export type RejectDraftRequest = Partial<{ note: string | null; reason: null | RejectionReasonDto }>;
   export type RevisionDto = RevisionSummaryDto & { definition: Record<string, unknown> };
+  export type SaveProviderRequest = Partial<{ secrets: Record<string, unknown>; settings: Record<string, unknown> }>;
   export type SourceDto = {
     attempts: number;
     kind: string;
@@ -1269,6 +1341,78 @@ export namespace Endpoints {
     parameters: never;
     responses: { 202: Schemas.DataEnvelope_CalibrationRunDto; 401: unknown; 403: unknown };
   };
+  export type get_List_source_providers = {
+    method: "GET";
+    path: "/api/v1/source-providers";
+    requestFormat: "json";
+    parameters: never;
+    responses: { 200: Schemas.DataEnvelope_Vec_ProviderSummaryDto; 401: unknown; 403: unknown };
+  };
+  export type get_Source_provider_oauth_callback = {
+    method: "GET";
+    path: "/api/v1/source-providers/oauth/callback";
+    requestFormat: "json";
+    parameters: {
+      query: Partial<{ code: string; state: string; error: string }>;
+    };
+    responses: { 303: unknown };
+  };
+  export type get_Get_source_provider = {
+    method: "GET";
+    path: "/api/v1/source-providers/{key}";
+    requestFormat: "json";
+    parameters: {
+      path: { key: string };
+    };
+    responses: { 200: Schemas.DataEnvelope_ProviderDetailDto; 401: unknown; 403: unknown; 404: unknown };
+  };
+  export type put_Put_source_provider = {
+    method: "PUT";
+    path: "/api/v1/source-providers/{key}";
+    requestFormat: "json";
+    parameters: {
+      path: { key: string };
+
+      body: Schemas.SaveProviderRequest;
+    };
+    responses: { 200: Schemas.DataEnvelope_ProviderDetailDto; 401: unknown; 403: unknown; 404: unknown; 422: unknown };
+  };
+  export type delete_Delete_source_provider = {
+    method: "DELETE";
+    path: "/api/v1/source-providers/{key}";
+    requestFormat: "json";
+    parameters: {
+      path: { key: string };
+    };
+    responses: { 204: unknown; 401: unknown; 403: unknown; 404: unknown };
+  };
+  export type post_Disconnect_source_provider = {
+    method: "POST";
+    path: "/api/v1/source-providers/{key}/disconnect";
+    requestFormat: "json";
+    parameters: {
+      path: { key: string };
+    };
+    responses: { 200: Schemas.DataEnvelope_ProviderDetailDto; 401: unknown; 403: unknown; 404: unknown; 409: unknown };
+  };
+  export type post_Start_source_provider_oauth = {
+    method: "POST";
+    path: "/api/v1/source-providers/{key}/oauth/start";
+    requestFormat: "json";
+    parameters: {
+      path: { key: string };
+    };
+    responses: { 200: Schemas.DataEnvelope_AuthorizeUrlDto; 401: unknown; 403: unknown; 404: unknown; 409: unknown };
+  };
+  export type post_Test_source_provider = {
+    method: "POST";
+    path: "/api/v1/source-providers/{key}/test";
+    requestFormat: "json";
+    parameters: {
+      path: { key: string };
+    };
+    responses: { 200: Schemas.DataEnvelope_ProviderDetailDto; 401: unknown; 403: unknown; 404: unknown; 409: unknown };
+  };
   export type get_List_sources = {
     method: "GET";
     path: "/api/v1/sources";
@@ -1315,6 +1459,9 @@ export type EndpointByMethod = {
     "/api/v1/profiles/{profile_id}/revisions/{number}": Endpoints.get_Get_revision;
     "/api/v1/quality": Endpoints.get_Quality;
     "/api/v1/quality/calibration": Endpoints.get_Calibration;
+    "/api/v1/source-providers": Endpoints.get_List_source_providers;
+    "/api/v1/source-providers/oauth/callback": Endpoints.get_Source_provider_oauth_callback;
+    "/api/v1/source-providers/{key}": Endpoints.get_Get_source_provider;
     "/api/v1/sources": Endpoints.get_List_sources;
   };
   patch: {
@@ -1337,15 +1484,20 @@ export type EndpointByMethod = {
     "/api/v1/profiles/{profile_id}/activate": Endpoints.post_Activate_profile;
     "/api/v1/profiles/{profile_id}/deactivate": Endpoints.post_Deactivate_profile;
     "/api/v1/quality/calibration/run": Endpoints.post_Run_calibration;
+    "/api/v1/source-providers/{key}/disconnect": Endpoints.post_Disconnect_source_provider;
+    "/api/v1/source-providers/{key}/oauth/start": Endpoints.post_Start_source_provider_oauth;
+    "/api/v1/source-providers/{key}/test": Endpoints.post_Test_source_provider;
     "/api/v1/sources/{source}/run": Endpoints.post_Run_source;
   };
   delete: {
     "/api/v1/llm/providers/{provider_id}": Endpoints.delete_Delete_provider;
     "/api/v1/llm/tiers/{tier}": Endpoints.delete_Unassign_tier;
+    "/api/v1/source-providers/{key}": Endpoints.delete_Delete_source_provider;
   };
   put: {
     "/api/v1/llm/tiers/{tier}": Endpoints.put_Assign_tier;
     "/api/v1/profiles/{profile_id}": Endpoints.put_Update_profile;
+    "/api/v1/source-providers/{key}": Endpoints.put_Put_source_provider;
   };
 };
 

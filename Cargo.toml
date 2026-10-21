@@ -1,5 +1,5 @@
 [workspace]
-members = ["apps/api", "libs/args", "libs/auth", "libs/authz", "libs/common", "libs/ct", "libs/dns", "libs/fetch", "libs/llm", "libs/core", "libs/handlers", "libs/macros", "libs/pagination", "libs/rate-limit", "libs/server", "libs/sources"]
+members = ["apps/api", "libs/args", "libs/auth", "libs/authz", "libs/common", "libs/ct", "libs/dns", "libs/fetch", "libs/llm", "libs/core", "libs/handlers", "libs/macros", "libs/pagination", "libs/rate-limit", "libs/server", "libs/source-providers", "libs/sources"]
 resolver = "3"
 
 [workspace.package]
@@ -60,6 +60,7 @@ llm = { path = "libs/llm" }
 ct = { path = "libs/ct" }
 dns = { path = "libs/dns" }
 sources = { path = "libs/sources" }
+source-providers = { path = "libs/source-providers" }
 lodestone-core = { path = "libs/core" }
 handlers = { path = "libs/handlers" }
 lodestone-macros = { path = "libs/macros" }

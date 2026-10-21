@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO source_provider_oauth_states (\n                state, provider_key, user_id, code_verifier_nonce, code_verifier_cipher,\n                redirect_uri, created_at, expires_at\n            )\n            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Uuid",
+        "Bytea",
+        "Bytea",
+        "Text",
+        "Timestamptz",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "0ca72def0a1647683af3328437b2e4adbe23622d2cc737a144644d5251e8b0d3"
+}

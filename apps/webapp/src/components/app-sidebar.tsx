@@ -32,7 +32,7 @@ export function AppSidebar(props: React.ComponentProps<typeof Sidebar>) {
 	]
 	const configItems: NavItem[] = [
 		{ title: 'Profils', to: '/profiles', icon: Layers },
-		{ title: 'Sources', to: '/sources', icon: Radar },
+		{ title: 'Catalogue des sources', to: '/sources', icon: Radar },
 		{ title: 'Fournisseurs LLM', to: '/llm', icon: Cpu },
 	]
 	return (

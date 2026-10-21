@@ -130,6 +130,13 @@ pub use domain::{
         round_score, scoring_sample_record, validate_scoring, vote_scoring,
     },
     source::{Observation, Source, SourceError},
+    source_provider::{
+        AuthKind, AuthSpec, Capabilities, ConnectedAccount, Credential, FieldKind, FieldProblem,
+        FieldSpec, FilterSupport, OAUTH_STATE_TTL, OAuthState, ProbeContext, ProbeOutcome,
+        ProviderCategory, ProviderConfiguration, ProviderProbe, ProviderStatus,
+        SourceProviderDescriptor, SourceProviderRepository, TOKEN_ACCESS, TOKEN_REFRESH, catalog,
+        descriptor as provider_descriptor, mask_secret, secret_context, validate_settings,
+    },
     suppression::{
         SuppressionEntry, SuppressionId, SuppressionTarget, ports::SuppressionRepository,
     },

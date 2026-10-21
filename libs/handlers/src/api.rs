@@ -14,7 +14,7 @@ use crate::{
     errors::ApiError,
     exports, leads, llm, profiles, quality,
     response::{DataEnvelope, Response},
-    sources,
+    source_providers, sources,
     state::AppState,
 };
 
@@ -84,6 +84,28 @@ pub fn router(state: AppState) -> Router<AppState> {
             "/llm/tiers/{tier}",
             axum::routing::put(llm::assign_tier).delete(llm::unassign_tier),
         )
+        .route(
+            "/source-providers",
+            get(source_providers::list_source_providers),
+        )
+        .route(
+            "/source-providers/{key}",
+            get(source_providers::get_source_provider)
+                .put(source_providers::put_source_provider)
+                .delete(source_providers::delete_source_provider),
+        )
+        .route(
+            "/source-providers/{key}/test",
+            post(source_providers::test_source_provider),
+        )
+        .route(
+            "/source-providers/{key}/oauth/start",
+            post(source_providers::start_source_provider_oauth),
+        )
+        .route(
+            "/source-providers/{key}/disconnect",
+            post(source_providers::disconnect_source_provider),
+        )
         .route("/sources", get(sources::list_sources))
         .route("/sources/{source}/run", post(sources::run_source))
         .route("/drafts", get(drafts::list_drafts))
@@ -117,9 +139,15 @@ pub fn router(state: AppState) -> Router<AppState> {
             post(company::refresh_company),
         );
 
+    let callback = Router::new().route(
+        "/api/v1/source-providers/oauth/callback",
+        get(source_providers::source_provider_oauth_callback),
+    );
+
     Router::new()
         .nest(API_PREFIX, routes)
         .route_layer(from_fn_with_state(state, auth_middleware))
+        .merge(callback)
 }
 
 #[derive(Debug, Serialize, PartialEq, ToSchema)]
