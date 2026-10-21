@@ -1,6 +1,6 @@
 # Detection profiles
 
-A detection profile describes one market: what is sold, which agents scan which sources, how leads are scored, which contacts to prefer and how the LLM qualifies a lead.
+A detection profile describes one market: what is sold, which agents scan which sources, which qualification agents judge a lead and how an aggregator sums it up, how leads are scored and which contacts to prefer.
 
 ## Storage
 
@@ -8,7 +8,7 @@ Profiles live in Postgres. Each edit creates a new revision; earlier revisions a
 
 ## Schema
 
-The JSON Schema is `docs/schemas/profile.v3.schema.json`. It is generated from `ProfileDefinition` and must not be edited by hand. Regenerate it with:
+The JSON Schema is `docs/schemas/profile.v4.schema.json`. It is generated from `ProfileDefinition` and must not be edited by hand. Regenerate it with:
 
 ```
 UPDATE_SCHEMA=1 cargo test -p lodestone-core --test profile_examples
@@ -23,7 +23,7 @@ Without `UPDATE_SCHEMA=1` the same test fails if the committed file is stale. Th
 
 ## Sections
 
-- `schema_version`: must be 3. See [Older versions](#older-versions).
+- `schema_version`: must be 4. See [Older versions](#older-versions).
 - `identity`: the offer and the target customer, in free text.
 - `agents`: the detection agents; at least one is required. An agent searches one source with its own settings (see ADR 0005). Several agents of the same kind are allowed.
   - `id`: slug matching `^[a-z0-9][a-z0-9-]{0,62}$`, unique in the profile.
@@ -31,6 +31,36 @@ Without `UPDATE_SCHEMA=1` the same test fails if the committed file is stale. Th
   - `enabled`: defaults to `true`. A disabled agent is kept but not run.
   - `source`: an object whose `kind` selects the source; the other fields are that kind's settings (table below).
   - `llm.relevance_criteria`: optional, not empty when present. Criteria for triaging this agent's candidates; the profile's criteria apply without it. Qualification of a lead always uses the profile's criteria.
+- `qualification_agents`: at least one (ADR 0007). Each agent evaluates every lead of the profile, from every source, from one angle.
+  - `id`: slug, unique among all agents of the profile, sourcing and qualification together.
+  - `name`: display name, not empty. `enabled`: defaults to `true`.
+  - `provider_id`: id of a declared LLM provider (`GET /api/v1/llm/providers`), or `null` for the default provider. The reference is not checked by profile validation: the runtime resolves it and treats a missing or disabled provider as an error.
+  - `system_prompt`: not empty, at most 8000 characters.
+  - `weight`: integer from 1 to 10, default 5, the agent's weight in the lead confidence.
+  - `questions`: at least one. A question has an `id` (lowercase letters, digits, `-`, `_`, at most 63 characters, unique in the agent), a `wording`, a `weight` (1 to 10, default 5) and 2 to 10 `options`. An option has a `value` (same identifier rule, unique in the question), a `label` and a `score` from 0 to 1.
+  - Validation paths include the indexes, for example `qualification_agents[1].questions[0].options[2].score`.
+- `aggregator`: `provider_id` (or `null`) and a `system_prompt` (not empty, at most 8000 characters). It writes the lead summary from the agents' results.
+- `verdict`: `reliable_from` (0 to 100, default 70) and `discard_below` (0 to 100, default 30), with `reliable_from > discard_below`. Percentages of the lead confidence: reliable from the first, to check between the two, discarded below the second.
+
+### Contract JSON
+
+A qualification agent answers, and only answers, with one object per question:
+
+```json
+{
+  "answers": {
+    "<question id>": {
+      "type": "choice",
+      "choice": "<option value>",
+      "confidence": 0.0,
+      "probabilities": { "<option value>": 0.0 }
+    }
+  }
+}
+```
+
+`contract_schema(&QualificationAgent)` (`libs/core/src/domain/profile/contract.rs`) builds the JSON Schema of this contract from the agent's questions: every question required, `choice` limited to the option values, `confidence` and every probability a number from 0 to 1, `probabilities` holding exactly the option keys, no additional property. The editor shows it read-only as "Aperçu du JSON contractuel".
+
 - `scoring`: weighted factors, each made of a signal, an optional value and a weight. The weight is an integer from 1 to 10, validated by the server (`scoring.factors[i].weight`). A lead's score is the sum, over factors, of `weight × measure`. For a normal factor the measure is the highest strength (0 to 1) among the lead's signals of that kind, and of that value when one is set; several matching signals count once. The reserved factor `distinct_signals` measures the number of distinct signal kinds on the lead. The score and its per-factor breakdown are recomputed whenever the lead's signals change, and stored on the lead. Scores stay in points.
 
   The maximum possible score is the sum, over factors, of `weight × cap`. The cap is 1 for a normal factor; for `distinct_signals` it is the number of distinct signal kinds among the profile's other factors (values are ignored: two `product_detected` factors count one kind). `ProfileDefinition::max_score()` computes it. Example: the IAM example has weights 10, 5, 3, 8, 7, 2 on six kinds plus `distinct_signals` at 2, so its maximum is 35 + 2 × 6 = 47.- `contact_ranking`: preferred email local parts, most preferred first.
@@ -100,7 +130,7 @@ A host or domain whose lookup, probe or crawl fails is marked checked like a suc
 
 ## Older versions
 
-Stored revisions are never rewritten. Versions 1 and 2 are accepted and upgraded when read; new revisions are written in version 3. Errors on an older document keep that document's paths.
+Stored revisions are never rewritten. Versions 1, 2 and 3 are accepted and upgraded when read; new revisions are written in version 4. Errors on an older document keep that document's paths.
 
 ### Version 1 to 2
 
@@ -114,3 +144,13 @@ Versions 1 and 2 had free number weights and a threshold in points. The upgrade,
 - Threshold: `clamp(round(old threshold / old maximum × 100), 0, 100)`, with the old maximum computed from the old weights by the same formula. When the old maximum is not positive the threshold becomes 50.
 
 For the IAM v1 and v2 examples the weights 30, 15, 10, 25, 20, 5, 5 become 10, 5, 3, 8, 7, 2, 2, and a threshold of 50 points out of 135 becomes 37 %.
+
+### Version 3 to 4
+
+The upgrade adds:
+
+- one qualification agent `pertinence` (name "Pertinence", weight 5, `provider_id` null) whose system prompt is the former triage intent followed by the offer, the target customer and `llm.relevance_criteria` (cut at 8000 characters), with one question `pertinence` ("Ce lead est-il pertinent pour l'offre ?", weight 5) and the options `forte` (1), `moyenne` (0.5), `faible` (0);
+- an aggregator with a null provider and a default English system prompt; the answer language comes from `llm.language` at runtime;
+- `verdict` with 70 and 30.
+
+Sourcing agents, scoring, contact ranking and `llm` are unchanged. A null `provider_id` means the default provider, resolved at runtime.

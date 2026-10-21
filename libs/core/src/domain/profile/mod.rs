@@ -9,6 +9,7 @@ use uuid::Uuid;
 use crate::UserId;
 
 pub mod commands;
+pub mod contract;
 pub mod definition;
 mod legacy;
 pub mod ports;

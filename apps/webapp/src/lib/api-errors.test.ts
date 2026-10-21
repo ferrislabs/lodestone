@@ -106,6 +106,20 @@ describe('translateApiMessage', () => {
 		expect(
 			translateApiMessage('unsupported schema version 9, expected 1, 2 or 3'),
 		).toBe('Version de schéma 9 non prise en charge, attendu : 1, 2 ou 3')
+		expect(
+			translateApiMessage(
+				'unsupported schema version 9, expected 1, 2, 3 or 4',
+			),
+		).toBe('Version de schéma 9 non prise en charge, attendu : 1, 2, 3 ou 4')
+		expect(
+			translateApiMessage('at least one qualification agent is required'),
+		).toBe('Au moins un agent de qualification est requis')
+		expect(translateApiMessage('must have from 2 to 10 options')).toBe(
+			'Doit avoir de 2 à 10 options',
+		)
+		expect(translateApiMessage('must be a number from 0 to 1')).toBe(
+			'Doit être un nombre de 0 à 1',
+		)
 		expect(translateApiMessage('provider is assigned to the triage tier')).toBe(
 			'Le fournisseur est affecté au niveau « Tri »',
 		)

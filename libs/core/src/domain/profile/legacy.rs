@@ -1,9 +1,10 @@
 use serde::Deserialize;
 
 use super::definition::{
-    Agent, AgentId, AgentSource, CertificateTransparency, ContactRanking, DnsCname, HttpProbe,
-    Identity, KeywordSource, Language, LlmSettings, PROFILE_SCHEMA_VERSION, ProfileDefinition,
-    Scoring, ScoringFactor,
+    Agent, AgentId, AgentSource, Aggregator, CertificateTransparency, ContactRanking, DnsCname,
+    HttpProbe, Identity, KeywordSource, Language, LlmSettings, MAX_PROMPT_CHARS,
+    PROFILE_SCHEMA_VERSION, ProfileDefinition, QualificationAgent, Question, QuestionOption,
+    Scoring, ScoringFactor, VerdictThresholds,
 };
 use crate::domain::scoring::max_possible;
 
@@ -110,17 +111,93 @@ fn upgrade_scoring_and_llm(scoring: ScoringV2, llm: LlmV2) -> (Scoring, LlmSetti
     )
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct ProfileDefinitionV3 {
+    #[serde(rename = "schema_version")]
+    _schema_version: u32,
+    identity: Identity,
+    agents: Vec<Agent>,
+    scoring: Scoring,
+    contact_ranking: ContactRanking,
+    llm: LlmSettings,
+}
+
+const TRIAGE_INTENT: &str = "You review public documents about a company for a B2B lead detection tool. Decide whether the documents show that this company is a relevant prospect for the offer below, using the relevance criteria. Base your answers only on what the documents state. Do not assume facts that are not written.";
+
+const AGGREGATOR_PROMPT: &str = "You summarise the evaluation of a lead for a B2B lead detection tool. You receive the lead, its signals and the answers and scores of every qualification agent. Write a short synthesis, the verdict narrative, an approach angle and a message draft. Quote evidence verbatim from the documents. Never change the computed confidence or verdict. Base your text only on what is provided.";
+
+fn pertinence_prompt(identity: &Identity, llm: &LlmSettings) -> String {
+    let full = format!(
+        "{TRIAGE_INTENT}\n\nOffer: {}\nTarget customer: {}\nRelevance criteria: {}",
+        identity.offer.trim(),
+        identity.target_customer.trim(),
+        llm.relevance_criteria.trim()
+    );
+    full.chars().take(MAX_PROMPT_CHARS).collect()
+}
+
+fn option(value: &str, label: &str, score: f64) -> QuestionOption {
+    QuestionOption {
+        value: value.to_owned(),
+        label: label.to_owned(),
+        score,
+    }
+}
+
+fn pertinence_agent(identity: &Identity, llm: &LlmSettings) -> QualificationAgent {
+    QualificationAgent {
+        id: AgentId::new("pertinence"),
+        name: "Pertinence".to_owned(),
+        enabled: true,
+        provider_id: None,
+        system_prompt: pertinence_prompt(identity, llm),
+        weight: 5,
+        questions: vec![Question {
+            id: "pertinence".to_owned(),
+            wording: "Ce lead est-il pertinent pour l'offre ?".to_owned(),
+            weight: 5,
+            options: vec![
+                option("forte", "Forte", 1.0),
+                option("moyenne", "Moyenne", 0.5),
+                option("faible", "Faible", 0.0),
+            ],
+        }],
+    }
+}
+
+impl ProfileDefinitionV3 {
+    pub(super) fn upgrade(self) -> ProfileDefinition {
+        let qualification_agents = vec![pertinence_agent(&self.identity, &self.llm)];
+        ProfileDefinition {
+            schema_version: PROFILE_SCHEMA_VERSION,
+            identity: self.identity,
+            agents: self.agents,
+            qualification_agents,
+            aggregator: Aggregator {
+                provider_id: None,
+                system_prompt: AGGREGATOR_PROMPT.to_owned(),
+            },
+            verdict: VerdictThresholds::default(),
+            scoring: self.scoring,
+            contact_ranking: self.contact_ranking,
+            llm: self.llm,
+        }
+    }
+}
+
 impl ProfileDefinitionV2 {
     pub(super) fn upgrade(self) -> ProfileDefinition {
         let (scoring, llm) = upgrade_scoring_and_llm(self.scoring, self.llm);
-        ProfileDefinition {
-            schema_version: PROFILE_SCHEMA_VERSION,
+        ProfileDefinitionV3 {
+            _schema_version: 3,
             identity: self.identity,
             agents: self.agents,
             scoring,
             contact_ranking: self.contact_ranking,
             llm,
         }
+        .upgrade()
     }
 }
 
@@ -217,13 +294,14 @@ impl SourcesV1 {
 impl ProfileDefinitionV1 {
     pub(super) fn upgrade(self) -> ProfileDefinition {
         let (scoring, llm) = upgrade_scoring_and_llm(self.scoring, self.llm);
-        ProfileDefinition {
-            schema_version: PROFILE_SCHEMA_VERSION,
+        ProfileDefinitionV3 {
+            _schema_version: 3,
             identity: self.identity,
             agents: self.sources.into_agents(),
             scoring,
             contact_ranking: self.contact_ranking,
             llm,
         }
+        .upgrade()
     }
 }

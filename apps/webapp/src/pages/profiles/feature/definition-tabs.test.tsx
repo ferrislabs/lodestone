@@ -129,7 +129,7 @@ describe('definition tabs', () => {
 			screen.getByRole('button', { name: 'Ajouter un facteur' }),
 		).toBeTruthy()
 		expect(screen.queryByLabelText(/Seuil de qualification/)).toBeNull()
-		fireEvent.click(screen.getByRole('tab', { name: TAB_LABELS.agents }))
+		fireEvent.click(screen.getByRole('tab', { name: TAB_LABELS.sourcing }))
 		expect(
 			screen.getByRole('button', { name: 'Ajouter un agent' }),
 		).toBeTruthy()
@@ -149,7 +149,7 @@ describe('definition tabs', () => {
 				]}
 			/>,
 		)
-		const tab = screen.getByRole('tab', { name: /Agents/ })
+		const tab = screen.getByRole('tab', { name: /Sourcing/ })
 		expect(within(tab).getByLabelText('1 problème')).toBeTruthy()
 		expect(
 			within(screen.getByRole('tab', { name: /Identité/ })).queryByRole('img'),
@@ -161,7 +161,7 @@ describe('definition tabs', () => {
 		const source = { ...(agent.source as JsonObject), keywords: [''] }
 		render(
 			<Harness
-				startTab="agents"
+				startTab="sourcing"
 				initial={{ ...blank(), agents: [{ ...agent, source }] }}
 				problems={[
 					{
@@ -180,7 +180,7 @@ describe('definition tabs', () => {
 	})
 
 	it('shows the empty state and blocks creation without agents', () => {
-		render(<Harness startTab="agents" />)
+		render(<Harness startTab="sourcing" />)
 		expect(
 			screen.getByText(
 				'Aucun agent pour le moment. Ajouter un agent pour démarrer la recherche.',
@@ -198,7 +198,7 @@ describe('definition tabs', () => {
 
 	for (const kind of AGENT_KINDS) {
 		it(`adds a ${kind} agent with only its fields`, async () => {
-			render(<Harness startTab="agents" />)
+			render(<Harness startTab="sourcing" />)
 			addAgent(kind)
 			const scoped = sheet()
 			expect(scoped.getByLabelText('Nom')).toHaveProperty(
@@ -233,7 +233,7 @@ describe('definition tabs', () => {
 	}
 
 	it('suffixes ids of agents of the same kind', () => {
-		render(<Harness startTab="agents" />)
+		render(<Harness startTab="sourcing" />)
 		addAgent('ats')
 		closeSheet()
 		addAgent('ats')
@@ -254,7 +254,7 @@ describe('definition tabs', () => {
 		const third = newAgent('ats', [first, second])
 		render(
 			<Harness
-				startTab="agents"
+				startTab="sourcing"
 				initial={{ ...blank(), agents: [first, second, third] }}
 			/>,
 		)
@@ -275,7 +275,7 @@ describe('definition tabs', () => {
 	})
 
 	it('follows the name with the id until the id is edited', () => {
-		render(<Harness startTab="agents" />)
+		render(<Harness startTab="sourcing" />)
 		addAgent('ats')
 		fireEvent.change(screen.getByLabelText('Nom'), {
 			target: { value: 'ATS anglais' },
@@ -292,7 +292,7 @@ describe('definition tabs', () => {
 	})
 
 	it('removes an agent after an inline confirmation', () => {
-		render(<Harness startTab="agents" />)
+		render(<Harness startTab="sourcing" />)
 		addAgent('ats')
 		closeSheet()
 		fireEvent.click(screen.getByRole('button', { name: /Supprimer l'agent/ }))
@@ -309,7 +309,7 @@ describe('definition tabs', () => {
 	it('opens the sheet with the agent name and closes it on Escape or Fermer', () => {
 		const agent = { ...newAgent('ats', []), name: 'ATS français' }
 		render(
-			<Harness startTab="agents" initial={{ ...blank(), agents: [agent] }} />,
+			<Harness startTab="sourcing" initial={{ ...blank(), agents: [agent] }} />,
 		)
 		expect(screen.queryByRole('dialog')).toBeNull()
 		fireEvent.click(
@@ -336,7 +336,7 @@ describe('definition tabs', () => {
 	})
 
 	it('keeps the identifier behind a collapsed advanced section', () => {
-		render(<Harness startTab="agents" />)
+		render(<Harness startTab="sourcing" />)
 		addAgent('ats')
 		const advanced = sheet().getByText('Avancé').closest('details')
 		expect(advanced?.hasAttribute('open')).toBe(false)
@@ -344,7 +344,7 @@ describe('definition tabs', () => {
 	})
 
 	it('lays a keyword agent out with a 1 to 5 choice and two tag inputs', () => {
-		render(<Harness startTab="agents" />)
+		render(<Harness startTab="sourcing" />)
 		addAgent('boamp')
 		const scoped = sheet()
 		const keywords = scoped.getByLabelText('Mots-clés')
@@ -376,7 +376,7 @@ describe('definition tabs', () => {
 	})
 
 	it('lays a dns_cname agent out as compact rows', () => {
-		render(<Harness startTab="agents" />)
+		render(<Harness startTab="sourcing" />)
 		addAgent('dns_cname')
 		const scoped = sheet()
 		fireEvent.click(scoped.getByText('Ajouter un motif'))
@@ -392,7 +392,7 @@ describe('definition tabs', () => {
 	})
 
 	it('switches the variant of an http probe matcher inline', () => {
-		render(<Harness startTab="agents" />)
+		render(<Harness startTab="sourcing" />)
 		addAgent('http_probe')
 		const scoped = sheet()
 		fireEvent.click(scoped.getByLabelText('Ajouter : Empreintes'))
@@ -418,7 +418,7 @@ describe('definition tabs', () => {
 	})
 
 	it('shows the save bar only when dirty and cancel resets after a confirmation', () => {
-		render(<Harness startTab="agents" />)
+		render(<Harness startTab="sourcing" />)
 		expect(screen.queryByTestId('save-bar')).toBeNull()
 		addAgent('ats')
 		closeSheet()
@@ -444,7 +444,7 @@ describe('definition tabs', () => {
 	})
 
 	it('warns when an http probe has no certificate transparency agent', () => {
-		render(<Harness startTab="agents" />)
+		render(<Harness startTab="sourcing" />)
 		addAgent('http_probe')
 		expect(screen.getByRole('alert').textContent).toContain(
 			'Sonde les hôtes trouvés par un agent Transparence des certificats',
@@ -460,7 +460,7 @@ describe('definition tabs', () => {
 	})
 
 	it('stores agent criteria and drops them when emptied', () => {
-		render(<Harness startTab="agents" />)
+		render(<Harness startTab="sourcing" />)
 		addAgent('ats')
 		const field = screen.getByLabelText('Critères LLM propres à cet agent')
 		fireEvent.change(field, { target: { value: 'only devs' } })
@@ -483,10 +483,16 @@ describe('definition tabs', () => {
 	})
 
 	it('never renders a JSON editor', () => {
-		const tabs: EditorTab[] = ['identity', 'agents', 'scoring', 'settings']
+		const tabs: EditorTab[] = [
+			'identity',
+			'sourcing',
+			'qualification',
+			'scoring',
+			'settings',
+		]
 		render(
 			<Harness
-				startTab="agents"
+				startTab="sourcing"
 				initial={{ ...blank(), agents: [newAgent('http_probe', [])] }}
 			/>,
 		)

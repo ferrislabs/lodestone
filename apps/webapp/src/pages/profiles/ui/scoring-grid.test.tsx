@@ -304,7 +304,7 @@ describe('scoring grid', () => {
 
 	it.each([
 		'scoring',
-		'agents',
+		'sourcing',
 	] as const)('puts the help panel in the right column of the %s tab', (tab) => {
 		render(
 			<DefinitionTabContent

@@ -64,6 +64,7 @@ pub use domain::{
         ActiveProfile, Profile, ProfileId, ProfileName, ProfileNameError, ProfileProblem,
         ProfileRevision, ProfileValidationError, Revised, RevisionNumber, ValidatedProfile,
         commands::{CreateProfileCommand, ReviseProfileCommand},
+        contract::contract_schema,
         definition,
         ports::ProfileRepository,
     },

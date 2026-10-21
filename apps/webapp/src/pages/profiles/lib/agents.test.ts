@@ -64,7 +64,7 @@ describe('agents', () => {
 
 	it('refuses to save without agents', () => {
 		const attempt = prepareSave({
-			schema_version: 3,
+			schema_version: 4,
 			identity: { offer: 'o', target_customer: 't' },
 			agents: [],
 			scoring: { factors: [] },
@@ -81,7 +81,13 @@ describe('agents', () => {
 				{ path: 'llm.relevance_criteria', message: 'x' },
 				{ path: '$', message: 'x' },
 			]),
-		).toEqual({ identity: 0, agents: 1, scoring: 0, settings: 1 })
+		).toEqual({
+			identity: 0,
+			sourcing: 1,
+			qualification: 0,
+			scoring: 0,
+			settings: 1,
+		})
 	})
 })
 
