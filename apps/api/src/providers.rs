@@ -4,7 +4,8 @@ use args::Args;
 use common::{CoreError, Secret};
 use fetch::PoliteFetcher;
 use lodestone_core::{
-    AuthSpec, Credential, FRANCE_TRAVAIL, LodestoneUseCase, ProviderStatus, SourceError, catalog,
+    AuthSpec, Credential, FRANCE_TRAVAIL, HACKER_NEWS_HIRING, LodestoneUseCase, ProviderStatus,
+    SourceError, catalog,
     infrastructure::crypto::AesGcmCipher,
     provider_descriptor, provider_key_of_source,
     source_providers::{SaveProviderConfiguration, SecretChange},
@@ -111,6 +112,10 @@ impl ProviderSeed {
         seed.settings.insert(
             "ted",
             Map::from_iter([url_setting("base_url", &args.ted.base_url)]),
+        );
+        seed.settings.insert(
+            HACKER_NEWS_HIRING,
+            Map::from_iter([url_setting("base_url", &args.hacker_news.base_url)]),
         );
         seed.settings.insert(
             "certificate_transparency",

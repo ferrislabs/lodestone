@@ -8,6 +8,7 @@ pub mod decp;
 pub mod dns_cname;
 pub mod endpoint;
 pub mod france_travail;
+pub mod hacker_news;
 pub mod http_probe;
 pub mod role_guess;
 pub mod search;

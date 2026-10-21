@@ -133,11 +133,12 @@ pub use domain::{
     source_provider::{
         ATS, AuthKind, AuthSpec, BOAMP, CERTIFICATE_TRANSPARENCY, COMPANY_RESEARCH, CONTACTS,
         Capabilities, ConnectedAccount, Credential, DECP, DNS_CNAME, FRANCE_TRAVAIL, FieldKind,
-        FieldProblem, FieldSpec, FilterSupport, HTTP_PROBE, OAUTH_STATE_TTL, OAuthState,
-        ProbeContext, ProbeOutcome, ProviderCategory, ProviderConfiguration, ProviderProbe,
-        ProviderStatus, SourceProviderDescriptor, SourceProviderRepository, TED, TOKEN_ACCESS,
-        TOKEN_REFRESH, catalog, descriptor as provider_descriptor, mask_secret,
-        provider_key_of_source, secret_context, validate_settings,
+        FieldProblem, FieldSpec, FilterSupport, HACKER_NEWS_HIRING, HACKER_NEWS_THREAD_TITLE,
+        HTTP_PROBE, OAUTH_STATE_TTL, OAuthState, ProbeContext, ProbeOutcome, ProviderCategory,
+        ProviderConfiguration, ProviderProbe, ProviderStatus, SourceProviderDescriptor,
+        SourceProviderRepository, TED, TOKEN_ACCESS, TOKEN_REFRESH, catalog,
+        descriptor as provider_descriptor, mask_secret, provider_key_of_source, secret_context,
+        validate_settings,
     },
     suppression::{
         SuppressionEntry, SuppressionId, SuppressionTarget, ports::SuppressionRepository,

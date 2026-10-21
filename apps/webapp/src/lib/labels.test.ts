@@ -24,6 +24,9 @@ describe('labels', () => {
 		expect(sourceLabel('http_probe')).toBe('Sonde HTTP')
 		expect(sourceLabel('boamp')).toBe('BOAMP')
 		expect(sourceLabel('france_travail')).toBe('France Travail')
+		expect(sourceLabel('hacker_news_hiring')).toBe(
+			'Hacker News — Who is hiring?',
+		)
 		expect(sourceLabel('other')).toBe('other')
 	})
 

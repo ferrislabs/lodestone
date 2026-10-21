@@ -106,11 +106,11 @@ Common flags / env vars (see `libs/args/src/`):
 
 ## Source providers
 
-Every data source is a provider of the catalog (Sources > Catalogue): BOAMP, DECP, TED, France Travail, career pages, certificate transparency, DNS CNAME, HTTP probe, public contacts and company research. A source only runs while its provider is `ready`, that is configured and successfully tested.
+Every data source is a provider of the catalog (Sources > Catalogue): BOAMP, DECP, TED, France Travail, Hacker News "Who is hiring?", career pages, certificate transparency, DNS CNAME, HTTP probe, public contacts and company research. A source only runs while its provider is `ready`, that is configured and successfully tested.
 
 - **Public providers** (no authentication) are created and tested automatically at startup, so a fresh install works without manual steps. A provider whose test fails is `failing` and its source is skipped (`provider not ready` in the logs, « Provider non prêt » in the Activity view) until a later test passes. Failed public providers are retested at each start, or on demand from the catalog.
 - **France Travail** needs an OAuth2 client id and secret entered in the catalog. `FRANCE_TRAVAIL_CLIENT_ID`, `FRANCE_TRAVAIL_CLIENT_SECRET`, `FRANCE_TRAVAIL_TOKEN_URL` and `FRANCE_TRAVAIL_API_BASE_URL` are an optional seed only: on the first start, when no France Travail configuration exists yet, they create it (the secret is stored encrypted) and the connection is tested. Once the configuration exists the variables are ignored, so edit credentials in the catalog.
-- The URL variables of BOAMP, DECP, TED, certificate transparency and the company registry seed the catalog URL used by the connection test the same way; collections still read the variables.
+- The URL variables of BOAMP, DECP, TED, Hacker News (`HACKER_NEWS_BASE_URL`), certificate transparency and the company registry seed the catalog URL used by the connection test the same way; collections still read the variables.
 - "Lancer maintenant" on a source whose provider is not ready answers `409` with a French message.
 
 ## Database migrations

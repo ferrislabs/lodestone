@@ -18,6 +18,7 @@ use sources::{
     boamp::BoampSource,
     decp::{DecpSource, partner_awards},
     france_travail::FranceTravailSource,
+    hacker_news::HackerNewsSource,
     ted::TedSource,
 };
 use tracing::info;
@@ -27,12 +28,13 @@ use crate::{
     webhook::{WebhookSink, run_webhook_job},
 };
 
-pub const WIRED_SOURCES: [SourceName; 5] = [
+pub const WIRED_SOURCES: [SourceName; 6] = [
     SourceName::Boamp,
     SourceName::Decp,
     SourceName::Ted,
     SourceName::FranceTravail,
     SourceName::Ats,
+    SourceName::HackerNewsHiring,
 ];
 
 pub const REMOVED_QUALIFICATION_JOB_KIND: &str = "llm.qualify";
@@ -41,6 +43,7 @@ pub type Boamp = BoampSource<PoliteFetcher>;
 pub type Decp = DecpSource<PoliteFetcher>;
 pub type Ted = TedSource<PoliteFetcher>;
 pub type FranceTravail = FranceTravailSource<PoliteFetcher, CatalogAccess>;
+pub type HackerNews = HackerNewsSource<PoliteFetcher>;
 pub type Ats = AtsSource<PoliteFetcher, PgAtsTargets>;
 
 pub struct WiredSources {
@@ -49,11 +52,13 @@ pub struct WiredSources {
     pub ted: Ted,
     pub france_travail: FranceTravail,
     pub ats: Ats,
+    pub hacker_news: HackerNews,
 }
 
 pub struct Intervals {
     pub other_sources: Duration,
     pub decp: Duration,
+    pub hacker_news: Duration,
 }
 
 pub struct JobRouter {
@@ -108,6 +113,13 @@ impl JobRouter {
 
     async fn run_ats(&self) -> Result<(u64, u64), SourceRunError> {
         let report = self.triage_source(&self.sources.ats, "ats").await?;
+        Ok((report.candidates, report.accepted()))
+    }
+
+    async fn run_hacker_news(&self) -> Result<(u64, u64), SourceRunError> {
+        let report = self
+            .triage_source(&self.sources.hacker_news, "hacker_news_hiring")
+            .await?;
         Ok((report.candidates, report.accepted()))
     }
 
@@ -191,6 +203,7 @@ impl JobRouter {
         }
         let interval = match source {
             SourceName::Decp => self.intervals.decp,
+            SourceName::HackerNewsHiring => self.intervals.hacker_news,
             _ => self.intervals.other_sources,
         };
         if let Some(provider) = blocking_provider(&self.usecase, source.as_str())
@@ -208,6 +221,7 @@ impl JobRouter {
             SourceName::Ted => self.run_ted().await,
             SourceName::FranceTravail => self.run_france_travail().await,
             SourceName::Ats => self.run_ats().await,
+            SourceName::HackerNewsHiring => self.run_hacker_news().await,
             other => {
                 return Err(JobError::Permanent(format!(
                     "source `{other}` is not wired"
@@ -291,7 +305,7 @@ pub async fn schedule_calibration(queue: &Arc<PgJobQueue>) -> Result<(), CoreErr
 
 #[cfg(test)]
 mod tests {
-    use lodestone_core::CONTINUOUS_SOURCES;
+    use lodestone_core::{CONTINUOUS_SOURCES, HACKER_NEWS_HIRING, provider_key_of_source};
 
     use super::*;
 
@@ -382,6 +396,19 @@ mod tests {
         let job = source_job(SourceName::FranceTravail, Utc::now()).unwrap();
         assert_eq!(job.dedup_key.as_deref(), Some("source:france_travail"));
         assert_eq!(job.payload["source"], "france_travail");
+    }
+
+    #[test]
+    fn the_hacker_news_job_is_scheduled_and_gated_by_its_provider() {
+        assert!(WIRED_SOURCES.contains(&SourceName::HackerNewsHiring));
+        assert!(scheduled_sources().contains(&SourceName::HackerNewsHiring));
+        let job = source_job(SourceName::HackerNewsHiring, Utc::now()).unwrap();
+        assert_eq!(job.dedup_key.as_deref(), Some("source:hacker_news_hiring"));
+        assert_eq!(job.payload["source"], "hacker_news_hiring");
+        assert_eq!(
+            provider_key_of_source(SourceName::HackerNewsHiring.as_str()),
+            Some(HACKER_NEWS_HIRING)
+        );
     }
 
     #[test]

@@ -2,7 +2,7 @@ mod support;
 
 use httpmock::Method::GET;
 use lodestone_core::{Credential, ProviderStatus, SourceProviderDescriptor, provider_descriptor};
-use serde_json::json;
+use serde_json::{Value, json};
 use source_providers::AuthFailure;
 use sqlx::PgPool;
 use support::Rig;
@@ -358,4 +358,96 @@ async fn crawler_style_providers_have_no_external_endpoint_and_always_pass(pool:
             "{key}"
         );
     }
+}
+
+fn hiring_list(title: &str) -> Value {
+    json!({"hits": [{"objectID": "1", "title": title, "created_at_i": 1}]})
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn hacker_news_is_ready_when_the_thread_list_has_a_hiring_thread(pool: PgPool) {
+    let rig = Rig::new(pool).await;
+    rig.save(
+        provider_descriptor("hacker_news_hiring").unwrap(),
+        json!({"base_url": rig.server.url("/api/v1/")}),
+        &[],
+    )
+    .await;
+    let list = rig
+        .server
+        .mock_async(|when, then| {
+            when.method(GET)
+                .path("/api/v1/search_by_date")
+                .query_param("tags", "story,author_whoishiring");
+            then.status(200)
+                .json_body(hiring_list("Ask HN: Who is hiring? (October 2026)"));
+        })
+        .await;
+
+    let configuration = tested(&rig, "hacker_news_hiring").await;
+
+    assert_eq!(configuration.status, ProviderStatus::Ready);
+    assert!(
+        rig.uc
+            .is_provider_usable("hacker_news_hiring")
+            .await
+            .unwrap()
+    );
+    list.assert_async().await;
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn hacker_news_fails_without_a_matching_thread(pool: PgPool) {
+    let rig = Rig::new(pool).await;
+    rig.save(
+        provider_descriptor("hacker_news_hiring").unwrap(),
+        json!({"base_url": rig.server.url("/api/v1/")}),
+        &[],
+    )
+    .await;
+    rig.server
+        .mock_async(|when, then| {
+            when.method(GET).path("/api/v1/search_by_date");
+            then.status(200)
+                .json_body(hiring_list("Ask HN: Who wants to be hired?"));
+        })
+        .await;
+
+    let configuration = tested(&rig, "hacker_news_hiring").await;
+
+    assert_eq!(configuration.status, ProviderStatus::Failing);
+    assert!(
+        configuration
+            .last_test_message
+            .unwrap()
+            .contains("aucun fil")
+    );
+    assert!(
+        !rig.uc
+            .is_provider_usable("hacker_news_hiring")
+            .await
+            .unwrap()
+    );
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn hacker_news_fails_on_an_error_answer(pool: PgPool) {
+    let rig = Rig::new(pool).await;
+    rig.save(
+        provider_descriptor("hacker_news_hiring").unwrap(),
+        json!({"base_url": rig.server.url("/api/v1/")}),
+        &[],
+    )
+    .await;
+    rig.server
+        .mock_async(|when, then| {
+            when.method(GET).path("/api/v1/search_by_date");
+            then.status(503);
+        })
+        .await;
+
+    let configuration = tested(&rig, "hacker_news_hiring").await;
+
+    assert_eq!(configuration.status, ProviderStatus::Failing);
+    assert!(configuration.last_test_message.unwrap().contains("503"));
 }

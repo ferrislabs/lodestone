@@ -27,7 +27,7 @@ Without `UPDATE_SCHEMA=1` the same test fails if the committed file is stale. Th
 - `identity`: the offer and the target customer, in free text.
 - `language`: `fr` or `en`, default `fr` (was `llm.language` before 14). The language of every free-text field the LLM writes: the aggregator's summary, verdict narrative, approach angle, draft subject and body, the qualification summaries and the scoring reasons. The system prompts state it (`Write every free-text field (...) in French. Evidence quotes stay in the language of the document they come from.`), so evidence quotes stay in the source language and the verbatim check is unchanged. Changing the language changes the system prompt, hence the LLM cache key: answers are regenerated.
 - `agents`: the detection agents; at least one is required (see ADR 0005). `type` selects `search` or `signal`. `id` (slug matching `^[a-z0-9][a-z0-9-]{0,62}$`, unique in the profile), `name` (not empty) and `enabled` (default `true`, a disabled agent is kept but not run) are common.
-  - `search` agent: looks for keywords across catalog providers (ADR 0010). `providers`: at least one catalog key that supports keyword search (`boamp`, `decp`, `ted`, `france_travail`, `ats`), no duplicate; an unknown key (`UnknownProvider`) or a provider without keyword search (`ProviderCannotSearch`) is rejected, a provider that is not ready is accepted but skipped at run time. `keywords` (at least one), `exclusions`, `accept_min_keywords` and `filters` are defined once for every provider (see "Search agents").
+  - `search` agent: looks for keywords across catalog providers (ADR 0010). `providers`: at least one catalog key that supports keyword search (`boamp`, `decp`, `ted`, `france_travail`, `hacker_news_hiring`, `ats`), no duplicate; an unknown key (`UnknownProvider`) or a provider without keyword search (`ProviderCannotSearch`) is rejected, a provider that is not ready is accepted but skipped at run time. `keywords` (at least one), `exclusions`, `accept_min_keywords` and `filters` are defined once for every provider (see "Search agents").
   - `signal` agent: reads one technical provider with its own settings. `source.provider` is its catalog key (`certificate_transparency`, `dns_cname`, `http_probe`) and the other fields of `source` are its settings (table in "Signal agents").
 - `qualification_agents`: at least one (ADR 0007). Each agent evaluates every lead of the profile, from every source, from one angle.
   - `id`: slug, unique among all agents of the profile, sourcing and qualification together.
@@ -277,6 +277,7 @@ Each provider filters natively what its API supports (`capabilities.filters` of 
 | --- | --- | --- |
 | `france_travail` | `contracts` as `typeContrat` (`freelance`: `FRA,LIB`; `employee`: `CDD,CDI,MIS,SAI`). Keywords are queried once per distinct native filter. | `remote`, `countries`, and `contracts` again on the offer contract code and text. |
 | `ted` | `countries` as `buyer-country` (alpha-3 code derived from the alpha-2; a country without alpha-3 code is left to the post-filter). Without `countries`, the operator default `TED_BUYER_COUNTRIES` applies. | `remote` (not applicable to notices, they pass), `contracts` (a notice is a `public_contract`). |
+| `hacker_news_hiring` | none | all three filters, on the work mode, contract and country read from the post header (see "Hacker News parsing"). |
 | `boamp`, `decp`, `ats` | none | all three filters. |
 
 Post-filter rules, best effort on the title and text of the candidate, accents ignored:
@@ -286,6 +287,18 @@ Post-filter rules, best effort on the title and text of the candidate, accents i
 - `countries`: the country comes from the provider detail (TED `buyer-country`), the country-code top-level domain of the candidate, or a country name in French or English in the text. A candidate with no country evidence is kept; one whose evidence names only other countries is dropped.
 
 The editor lists, per selected provider, what it filters natively and what is applied after collection.
+
+### Hacker News parsing
+
+`hacker_news_hiring` reads the monthly "Ask HN: Who is hiring?" thread once a day (`HACKER_NEWS_INTERVAL_HOURS`, default 24). The thread is the most recent story of the `whoishiring` account whose title starts with `Ask HN: Who is hiring?`; the first run of a process also reads the previous month's thread, later runs only the current one. Each distinct keyword of the enabled search agents attached to the provider is searched in the thread (`HACKER_NEWS_MAX_PAGES` pages of 100 comments at most per keyword and thread, default 5). Replies to job posts are ignored and a post found by several keywords is kept once (by item id).
+
+- The comment HTML becomes plain text: block tags are line breaks, tags are dropped, entities are decoded, and a link is replaced by its full `href` (the displayed text is truncated by Hacker News).
+- The first line is split on `|`. The first token is the company, the first following token that is neither a work-mode, contract nor URL token is the role, the other such tokens are the location. A line without `|` is a company only. The signal title is `role - company`.
+- Work mode from the tokens after the company: `hybrid`, or both remote and on-site, or `remote-friendly` is hybrid; `remote` is full remote; `onsite` / `on-site` or `no remote` is on-site. The text handed to the post-filters starts with a hint line (`Full remote.`, `Hybrid.`, `On-site only, no remote.`) so the shared remote rules agree with the header.
+- Contract hints from the same tokens: `contract`, `contractor`, `freelance`, `consultant` is freelance; `full-time` is employee; `part-time` is employee. They are written as hint lines (`Freelance contract.`, `Full-time employee.`) for the shared contract rules, and listed in the signal details (`contract_hints`).
+- Country hint from the tokens after the company: `US`, `USA`, `U.S.` is `USA`, `UK` is `GBR` (`details.country`); other countries are found by name in the text, and the domain top-level domain counts too. Ambiguous two-letter codes (`CA`, `DE`) are not read as countries.
+- The company domain is the first URL of the comment (links first, then URLs in the text, `www.` included) whose host is not `news.ycombinator.com`, a job board, an applicant tracking system, a code or social host, or a webmail. A post without such a URL is skipped and counted in `skipped_no_domain`: a company name alone cannot be a lead.
+- The signal is a `job_offer` whose provenance is `https://news.ycombinator.com/item?id=<item id>` and whose observation date is the comment date.
 
 ## Signal agents
 
@@ -299,7 +312,7 @@ Validation paths include the agent index, for example `agents[1].keywords[0]`, `
 
 ## Provider URLs
 
-The URL settings of the catalog (`boamp.base_url`, `decp.dataset_api_url`, `ted.base_url`, `certificate_transparency.log_list_url`, `company_research.entreprises_url`) are read at each run. The environment variables only seed the catalog at startup (ADR 0010). DECP name lookups use `company_research.entreprises_url`.
+The URL settings of the catalog (`boamp.base_url`, `decp.dataset_api_url`, `ted.base_url`, `certificate_transparency.log_list_url`, `company_research.entreprises_url`, `hacker_news_hiring.base_url`) are read at each run. The environment variables only seed the catalog at startup (ADR 0010). DECP name lookups use `company_research.entreprises_url`.
 
 ## Dependencies between kinds
 
@@ -311,7 +324,7 @@ The URL settings of the catalog (`boamp.base_url`, `decp.dataset_api_url`, `ted.
 Sources come in two modes (ADR 0006).
 
 - **Continuous** sources listen around the clock inside the binary: `certificate_transparency`, `dns_cname`, `http_probe`, `security_txt`, `public_page` and `role_guess`. They have no recurring job and nothing to run on demand: an edited agent is picked up on the listener's next loop (a few seconds when idle), and a new certificate or lead flows through the pipeline within minutes. A listener is active while at least one enabled agent of its kind exists in an active profile (contact finders are always active); otherwise it is "Inactif (aucun agent)". With several replicas one holds each listener at a time (Postgres advisory lock); the others show "En veille (autre instance)" and take over when it stops.
-- **Scheduled** sources (`boamp`, `decp`, `ted`, `france_travail`, `ats`) run on a recurring job, so an edited agent otherwise waits for the next interval. "Lancer maintenant" on the Sources screen (Configuration > Sources), or "Lancer la source" on an agent card, moves the pending job to the present.
+- **Scheduled** sources (`boamp`, `decp`, `ted`, `france_travail`, `hacker_news_hiring`, `ats`) run on a recurring job, so an edited agent otherwise waits for the next interval. "Lancer maintenant" on the Sources screen (Configuration > Sources), or "Lancer la source" on an agent card, moves the pending job to the present.
 
 The Sources screen shows continuous sources in their own "Écoute continue" group with the listener state, last activity, backlog (tiles of lag for certificate transparency, hosts to probe, contact targets), totals and last error. Agent cards of continuous kinds show an "En écoute" status line instead of the run button.
 
