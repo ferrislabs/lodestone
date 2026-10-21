@@ -6,7 +6,8 @@ use crate::{
     GenerationSnapshot, LeadId, ProfileId, ProviderId, RevisionNumber, RunProvenance,
     definition::AgentId,
     domain::qualification::{
-        EvidenceStrength, LeadScoring, QualificationResult, ResultId, ResultStatus, VerdictCap,
+        EXCLUDED_REASON, EvidenceStrength, Exclusion, LeadScoring, QualificationResult, ResultId,
+        ResultStatus, VerdictCap,
     },
 };
 
@@ -77,6 +78,7 @@ pub struct ScoringRow {
     pub opinion: Option<f64>,
     pub evidence: Option<serde_json::Value>,
     pub verdict_reason: Option<String>,
+    pub exclusions: serde_json::Value,
 }
 
 impl TryFrom<ScoringRow> for LeadScoring {
@@ -90,9 +92,12 @@ impl TryFrom<ScoringRow> for LeadScoring {
                 serde_json::from_value(value)
                     .map_err(|_| CoreError::Internal("stored evidence is invalid".to_owned()))
             })?;
+        let exclusions: Vec<Exclusion> = serde_json::from_value(row.exclusions)
+            .map_err(|_| CoreError::Internal("stored exclusions are invalid".to_owned()))?;
         let cap = row
             .verdict_reason
             .as_deref()
+            .filter(|raw| *raw != EXCLUDED_REASON)
             .map(|raw| {
                 VerdictCap::parse(raw).ok_or_else(|| {
                     CoreError::Internal("stored verdict reason is invalid".to_owned())
@@ -103,6 +108,7 @@ impl TryFrom<ScoringRow> for LeadScoring {
             opinion: row.opinion,
             evidence,
             cap,
+            exclusions,
         })
     }
 }

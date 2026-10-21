@@ -6,8 +6,8 @@ use uuid::Uuid;
 use crate::{
     LeadId, ProfileId, RevisionNumber, UserId,
     domain::quality::{
-        DecisionKind, DecisionLabel, DecisionSnapshot, LabelFilter, Rejection, RejectionReason,
-        VerdictCounts, ports::DecisionRepository,
+        DecisionKind, DecisionLabel, DecisionSnapshot, ExclusionCount, LabelFilter, Rejection,
+        RejectionReason, VerdictCounts, ports::DecisionRepository,
     },
     infrastructure::{
         lead::postgres::repository::NOT_SUPPRESSED,
@@ -161,5 +161,45 @@ impl<'tx> DecisionRepository for PgDecisionRepository<'tx> {
             to_check: count(to_check),
             discarded: count(discarded),
         })
+    }
+
+    #[tracing::instrument(skip(self), fields(db.system = "postgresql", db.operation = "select", db.table = "lead_qualification_state"), err)]
+    async fn exclusion_counts(
+        &mut self,
+        filter: &LabelFilter,
+    ) -> Result<Vec<ExclusionCount>, CoreError> {
+        let query = format!(
+            "SELECT item->>'agent_id', item->>'agent_name', item->>'question_id', item->>'option', item->>'label', count(*)
+             FROM lead_qualification_state state
+             JOIN leads ON leads.id = state.lead_id
+             CROSS JOIN LATERAL jsonb_array_elements(state.exclusions) AS item
+             WHERE leads.verdict = 'ecarte'
+               AND ($1::timestamptz IS NULL OR leads.qualified_at >= $1)
+               AND ($2::timestamptz IS NULL OR leads.qualified_at <= $2)
+               AND ($3::uuid IS NULL OR leads.profile_id = $3){NOT_SUPPRESSED}
+             GROUP BY 1, 2, 3, 4, 5
+             ORDER BY 6 DESC, 1 ASC, 3 ASC, 4 ASC"
+        );
+        let mut tx = self.tx.lock().await;
+        let rows: Vec<(String, String, String, String, String, i64)> = sqlx::query_as(&query)
+            .bind(filter.from)
+            .bind(filter.to)
+            .bind(filter.profile_id.map(|id| id.0))
+            .fetch_all(&mut ***tx)
+            .await
+            .map_err(map_sqlx_error)?;
+        Ok(rows
+            .into_iter()
+            .map(
+                |(agent_id, agent_name, question_id, option, label, count)| ExclusionCount {
+                    agent_id,
+                    agent_name,
+                    question_id,
+                    option,
+                    label,
+                    count: u64::try_from(count).unwrap_or_default(),
+                },
+            )
+            .collect())
     }
 }

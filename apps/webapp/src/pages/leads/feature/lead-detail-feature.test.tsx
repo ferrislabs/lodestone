@@ -22,6 +22,7 @@ const DETAIL: LeadDetailData = {
 		profile: { id: 'p1', name: 'Fintech' },
 		domain: 'acme.test',
 		status: 'qualified',
+		exclusions: [],
 		score: 42,
 		confidence: 66,
 		verdict: 'a_verifier',

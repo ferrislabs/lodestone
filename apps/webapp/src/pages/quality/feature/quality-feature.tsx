@@ -1,9 +1,11 @@
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate, useSearch } from '@tanstack/react-router'
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 
 import { errorMessage, lodestoneApi } from '#/api/lodestone'
+import { clipboardText } from '#/pages/quality/lib/exclusions'
 import { periodOf, queryFor, searchFor } from '#/pages/quality/lib/period'
+import type { ExclusionCandidate } from '#/pages/quality/lib/types'
 import { QualityPage } from '#/pages/quality/ui/quality-page'
 
 export function QualityFeature() {
@@ -11,6 +13,15 @@ export function QualityFeature() {
 	const navigate = useNavigate()
 	const period = periodOf(search)
 	const profile = search.profile ?? ''
+	const [copiedLeadId, setCopiedLeadId] = useState<string | null>(null)
+	const [copyFailed, setCopyFailed] = useState(false)
+	const copyExclusion = (candidate: ExclusionCandidate) => {
+		setCopyFailed(false)
+		navigator.clipboard
+			.writeText(clipboardText(candidate))
+			.then(() => setCopiedLeadId(candidate.lead_id))
+			.catch(() => setCopyFailed(true))
+	}
 	const query = useMemo(
 		() => queryFor({ period, profile: search.profile }, Date.now()),
 		[period, search.profile],
@@ -44,6 +55,9 @@ export function QualityFeature() {
 			onPeriodChange={(next) =>
 				void navigate({ to: '/quality', search: searchFor(next, profile) })
 			}
+			copiedLeadId={copiedLeadId}
+			copyFailed={copyFailed}
+			onCopyExclusion={copyExclusion}
 			onOpenProfile={(profileId) =>
 				void navigate({
 					to: '/profiles/$profileId',

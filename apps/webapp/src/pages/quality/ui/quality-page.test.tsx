@@ -36,6 +36,8 @@ const EMPTY: Quality = {
 	agents: [],
 	versions: [],
 	profiles: [],
+	exclusions: [],
+	exclusion_candidates: [],
 }
 
 const FILLED: Quality = {
@@ -133,6 +135,8 @@ const FILLED: Quality = {
 			rejection_reasons: [],
 		},
 	],
+	exclusions: [],
+	exclusion_candidates: [],
 }
 
 function renderPage(
@@ -151,6 +155,9 @@ function renderPage(
 		period: '30' as const,
 		onPeriodChange: vi.fn(),
 		onOpenProfile: vi.fn(),
+		copiedLeadId: null,
+		copyFailed: false,
+		onCopyExclusion: vi.fn(),
 		...overrides,
 	}
 	render(<QualityPage {...props} />)
@@ -324,5 +331,116 @@ describe('QualityPage', () => {
 			target: { value: 'p2' },
 		})
 		expect(props.onProfileChange).toHaveBeenCalledWith('p2')
+	})
+
+	it('counts the exclusions per agent and option', () => {
+		renderPage({
+			quality: {
+				...FILLED,
+				exclusions: [
+					{
+						agent_id: 'exclusions',
+						agent_name: 'Exclusions',
+						question_id: 'concurrent',
+						option: 'oui',
+						label: 'Concurrent',
+						count: 7,
+					},
+					{
+						agent_id: 'exclusions',
+						agent_name: 'Exclusions',
+						question_id: 'client_actuel',
+						option: 'oui',
+						label: 'Client actuel',
+						count: 2,
+					},
+				],
+			},
+		})
+		const card = within(screen.getByLabelText('Exclusions'))
+		const rows = card.getAllByRole('listitem')
+		expect(rows.map((row) => row.textContent)).toEqual([
+			'Exclusions : Concurrent7',
+			'Exclusions : Client actuel2',
+		])
+	})
+
+	it('shows the exclusions card without decisions when leads were excluded', () => {
+		renderPage({
+			quality: {
+				...EMPTY,
+				exclusions: [
+					{
+						agent_id: 'exclusions',
+						agent_name: 'Exclusions',
+						question_id: 'concurrent',
+						option: 'oui',
+						label: 'Concurrent',
+						count: 1,
+					},
+				],
+			},
+		})
+		expect(screen.getByText(/Aucune décision enregistrée/)).toBeTruthy()
+		expect(screen.getByLabelText('Exclusions')).toBeTruthy()
+	})
+
+	it('says so when no lead was excluded', () => {
+		renderPage()
+		expect(
+			within(screen.getByLabelText('Exclusions')).getByText(
+				'Aucun lead exclu par un agent sur cette période.',
+			),
+		).toBeTruthy()
+		expect(screen.queryByLabelText("Ajouter à la liste d'exclusion")).toBeNull()
+	})
+
+	it('offers to copy the rejected leads into the exclusion lists', () => {
+		const onCopyExclusion = vi.fn()
+		const candidate = {
+			lead_id: 'l1',
+			domain: 'acme.test',
+			legal_name: 'ACME SAS',
+			reason: 'concurrent' as const,
+			decided_at: '2026-02-01T00:00:00Z',
+		}
+		renderPage({
+			quality: { ...FILLED, exclusion_candidates: [candidate] },
+			onCopyExclusion,
+		})
+		const section = within(
+			screen.getByLabelText("Ajouter à la liste d'exclusion"),
+		)
+		expect(section.getByText('ACME SAS')).toBeTruthy()
+		expect(section.getByText(/Concurrent · liste « Concurrents »/)).toBeTruthy()
+		expect(section.getByText(/Rien n'est modifié automatiquement/)).toBeTruthy()
+		fireEvent.click(
+			section.getByRole('button', {
+				name: "Copier ACME SAS pour la liste d'exclusion",
+			}),
+		)
+		expect(onCopyExclusion).toHaveBeenCalledWith(candidate)
+	})
+
+	it('confirms the copy and reports a clipboard failure', () => {
+		const candidate = {
+			lead_id: 'l1',
+			domain: 'acme.test',
+			legal_name: null,
+			reason: 'deja_client' as const,
+			decided_at: '2026-02-01T00:00:00Z',
+		}
+		renderPage({
+			quality: { ...FILLED, exclusion_candidates: [candidate] },
+			copiedLeadId: 'l1',
+			copyFailed: true,
+		})
+		const section = within(
+			screen.getByLabelText("Ajouter à la liste d'exclusion"),
+		)
+		expect(section.getByText('Copié')).toBeTruthy()
+		expect(section.getByText('acme.test')).toBeTruthy()
+		expect(section.getByText(/liste « Clients actuels »/)).toBeTruthy()
+		expect(section.getByRole('alert').textContent).toContain('presse-papiers')
 	})
 })

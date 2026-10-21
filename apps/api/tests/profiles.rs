@@ -254,7 +254,7 @@ async fn invalid_update_creates_no_revision(pool: PgPool) {
     let api = Api::new(pool).await;
     let id = api.create("iam", iam()).await;
     let mut bad = iam();
-    bad["schema_version"] = json!(8);
+    bad["schema_version"] = json!(9);
 
     let (status, body) = api.update(&id, bad).await;
 

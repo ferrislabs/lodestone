@@ -57,6 +57,11 @@ fn questions_text(agent: &QualificationAgent) -> String {
             .map(|option| {
                 if option.is_unknown {
                     format!("{} ({}, unknown option)", option.value, option.label)
+                } else if option.excludes {
+                    format!(
+                        "{} ({}, exclusion: choose only with explicit evidence)",
+                        option.value, option.label
+                    )
                 } else {
                     format!("{} ({})", option.value, option.label)
                 }
@@ -229,6 +234,23 @@ mod tests {
                 .contains("inconnu (Inconnu, unknown option)")
         );
         assert!(!prompt.instruction.contains("forte (Forte, unknown"));
+    }
+
+    #[test]
+    fn an_excluding_option_is_marked_in_the_option_list() {
+        let mut definition = definition("fr");
+        definition.qualification_agents[0].questions[0].options[2].excludes = true;
+        let agent = &definition.qualification_agents[0];
+        let prompt = build(&definition, agent, &contract_schema(agent));
+        assert!(
+            prompt
+                .instruction
+                .contains("faible (Faible, exclusion: choose only with explicit evidence)")
+        );
+        assert!(prompt.instruction.contains("forte (Forte)"));
+        let (_, plain) = built("fr");
+        assert!(!plain.instruction.contains("exclusion"));
+        assert_ne!(prompt.hash, plain.hash);
     }
 
     #[test]

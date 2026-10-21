@@ -354,6 +354,73 @@ describe('qualification tab', () => {
 		expect(sheet().getByText(/45 \/ 300 caractères/)).toBeTruthy()
 	})
 
+	it('toggles an option as excluding, never the unknown one', () => {
+		const seen = vi.fn()
+		render(<Harness onValue={seen} />)
+		fireEvent.click(screen.getByRole('button', { name: 'Modifier Pertinence' }))
+		const axis = within(sheet().getByLabelText('Axe 1'))
+		const toggles = axis.getAllByRole('switch', { name: /^Exclut le lead/ })
+		expect(toggles).toHaveLength(4)
+		expect(
+			toggles.map((toggle) => (toggle as HTMLButtonElement).disabled),
+		).toEqual([false, false, false, true])
+		fireEvent.click(toggles[2] as HTMLElement)
+		const options = optionsOf(
+			questionsOf(qualificationList(lastValue(seen))[0])[0],
+		)
+		expect(options.map((item) => (item as JsonObject).excludes)).toEqual([
+			false,
+			false,
+			true,
+			false,
+		])
+		expect(
+			axis
+				.getAllByRole('switch', { name: /^Exclut le lead/ })[2]
+				?.getAttribute('aria-checked'),
+		).toBe('true')
+	})
+
+	it('edits the exclusion threshold as a percentage', () => {
+		const seen = vi.fn()
+		render(<Harness onValue={seen} />)
+		fireEvent.click(screen.getByRole('button', { name: 'Modifier Pertinence' }))
+		const field = sheet().getByLabelText(
+			"Seuil d'exclusion",
+		) as HTMLInputElement
+		expect(field.value).toBe('60')
+		expect(field.min).toBe('50')
+		expect(field.max).toBe('100')
+		fireEvent.change(field, { target: { value: '80' } })
+		expect(qualificationList(lastValue(seen))[0]).toMatchObject({
+			exclusion_threshold: 0.8,
+		})
+		fireEvent.change(field, { target: { value: '' } })
+		expect(qualificationList(lastValue(seen))[0]).toMatchObject({
+			exclusion_threshold: null,
+		})
+	})
+
+	it('shows the problem on a threshold outside 50 to 100', () => {
+		render(
+			<Harness
+				problems={[
+					{
+						path: 'qualification_agents[0].exclusion_threshold',
+						message: 'Doit être un pourcentage entier de 50 à 100',
+					},
+				]}
+			/>,
+		)
+		fireEvent.click(screen.getByRole('button', { name: 'Modifier Pertinence' }))
+		expect(
+			sheet().getByText('Doit être un pourcentage entier de 50 à 100'),
+		).toBeTruthy()
+		expect(
+			sheet().getByLabelText("Seuil d'exclusion").getAttribute('aria-invalid'),
+		).toBe('true')
+	})
+
 	it('shows the axis identifier next to its intitulé and edits it', () => {
 		const seen = vi.fn()
 		render(<Harness onValue={seen} />)
@@ -378,7 +445,13 @@ describe('qualification tab', () => {
 		const headers = within(table)
 			.getAllByRole('columnheader')
 			.map((header) => header.textContent)
-		expect(headers).toEqual(['Valeur', 'Libellé', 'Score', 'Actions'])
+		expect(headers).toEqual([
+			'Valeur',
+			'Libellé',
+			'Score',
+			'Exclusion',
+			'Actions',
+		])
 		expect(axis.getAllByText('Valeur')).toHaveLength(1)
 		expect(axis.getAllByText('Score')).toHaveLength(1)
 		const rows = within(table).getAllByRole('row')
@@ -508,6 +581,7 @@ describe('qualification tab', () => {
 			label: 'Élevé',
 			score: 0.7,
 			is_unknown: false,
+			excludes: false,
 		})
 		fireEvent.click(
 			question.getByRole('button', {

@@ -1,13 +1,13 @@
 use serde::{Deserialize, Serialize};
 
-use super::Verdict;
+use super::{Exclusion, Verdict};
 use crate::domain::{
     facts::LeadFacts,
     lead::str_enum,
     profile::definition::{EvidenceSettings, EvidenceWeights, VerdictThresholds},
 };
 
-pub const SCORING_VERSION: i32 = 1;
+pub const SCORING_VERSION: i32 = 2;
 
 const VOLUME_SCALE: f64 = 3.0;
 const SOURCES_FOR_FULL_DIVERSITY: f64 = 2.0;
@@ -156,13 +156,51 @@ pub fn cap_for(
     (!angles).then_some(VerdictCap::SingleAngle)
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Judgement {
     pub opinion: Option<f64>,
     pub evidence: EvidenceStrength,
     pub confidence: Option<f64>,
     pub verdict: Option<Verdict>,
     pub cap: Option<VerdictCap>,
+    pub exclusions: Vec<Exclusion>,
+}
+
+impl Judgement {
+    #[must_use]
+    pub fn excluding(mut self, exclusions: Vec<Exclusion>) -> Self {
+        if !exclusions.is_empty() {
+            self.verdict = Some(Verdict::Discarded);
+            self.cap = None;
+            self.exclusions = exclusions;
+        }
+        self
+    }
+
+    pub fn reason(&self) -> Option<VerdictReason> {
+        if self.exclusions.is_empty() {
+            self.cap.map(VerdictReason::Capped)
+        } else {
+            Some(VerdictReason::Excluded)
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VerdictReason {
+    Capped(VerdictCap),
+    Excluded,
+}
+
+pub const EXCLUDED_REASON: &str = "excluded";
+
+impl VerdictReason {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Capped(cap) => cap.as_str(),
+            Self::Excluded => EXCLUDED_REASON,
+        }
+    }
 }
 
 pub fn judge(
@@ -193,14 +231,26 @@ pub fn judge(
         confidence,
         verdict,
         cap,
+        exclusions: Vec::new(),
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct LeadScoring {
     pub opinion: Option<f64>,
     pub evidence: EvidenceStrength,
     pub cap: Option<VerdictCap>,
+    pub exclusions: Vec<Exclusion>,
+}
+
+impl LeadScoring {
+    pub fn reason(&self) -> Option<VerdictReason> {
+        if self.exclusions.is_empty() {
+            self.cap.map(VerdictReason::Capped)
+        } else {
+            Some(VerdictReason::Excluded)
+        }
+    }
 }
 
 impl From<&Judgement> for LeadScoring {
@@ -209,6 +259,7 @@ impl From<&Judgement> for LeadScoring {
             opinion: judgement.opinion,
             evidence: judgement.evidence,
             cap: judgement.cap,
+            exclusions: judgement.exclusions.clone(),
         }
     }
 }

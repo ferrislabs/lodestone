@@ -1,6 +1,6 @@
 use common::CoreError;
 
-use crate::domain::quality::{DecisionLabel, LabelFilter, VerdictCounts};
+use crate::domain::quality::{DecisionLabel, ExclusionCount, LabelFilter, VerdictCounts};
 
 #[cfg_attr(test, mockall::automock)]
 pub trait DecisionRepository: Send {
@@ -18,4 +18,9 @@ pub trait DecisionRepository: Send {
         &mut self,
         filter: &LabelFilter,
     ) -> impl Future<Output = Result<VerdictCounts, CoreError>> + Send;
+
+    fn exclusion_counts(
+        &mut self,
+        filter: &LabelFilter,
+    ) -> impl Future<Output = Result<Vec<ExclusionCount>, CoreError>> + Send;
 }

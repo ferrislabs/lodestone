@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest'
 import {
 	confidenceBreakdown,
 	evidenceComponentRows,
+	exclusionSummary,
+	exclusionTitle,
 	verdictReasonLabel,
 } from './confidence'
 
@@ -50,5 +52,38 @@ describe('evidenceComponentRows', () => {
 			{ key: 'environment', label: 'Environnement', value: 0 },
 			{ key: 'strength', label: 'Force des signaux', value: 24.2 },
 		])
+	})
+})
+
+const exclusion = {
+	agent_id: 'exclusions',
+	agent_name: 'Exclusions',
+	question_id: 'concurrent',
+	option: 'oui',
+	label: 'Concurrent',
+	probability: 85,
+	evidence: 'Nous sommes un concurrent.',
+	evidence_source: 'lead',
+}
+
+describe('exclusions', () => {
+	it('titles an exclusion with the agent, the option and the probability', () => {
+		expect(exclusionTitle(exclusion)).toMatch(
+			/^Exclu par l'agent « Exclusions » : Concurrent \(85\s%\)$/,
+		)
+	})
+
+	it('summarises the exclusions of a lead for the list', () => {
+		expect(exclusionSummary([])).toBeNull()
+		expect(exclusionSummary([exclusion])).toBe('Exclu : Concurrent')
+		expect(
+			exclusionSummary([exclusion, { ...exclusion, label: 'Client actuel' }]),
+		).toBe('Exclu : Concurrent (+1)')
+	})
+
+	it('labels the excluded verdict reason', () => {
+		expect(verdictReasonLabel('excluded')).toBe(
+			'Écarté : un agent de qualification a exclu le lead',
+		)
 	})
 })

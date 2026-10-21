@@ -1,5 +1,5 @@
 {
-  "schema_version": 7,
+  "schema_version": 8,
   "identity": {
     "offer": "Migration of Magento 1 and Magento 2 shops to a modern e-commerce platform, by a web agency",
     "target_customer": "Merchants and organizations running an outdated Magento storefront"
@@ -59,6 +59,7 @@
       "provider_id": null,
       "system_prompt": "You judge whether a company is a relevant prospect for the offer, using the relevance criteria. Base your answers only on what the documents state.\n\nRelevance criteria: The organization runs an online shop on Magento, preferably an outdated version, or is hiring or tendering for a rebuild of its merchant site.",
       "weight": 5,
+      "exclusion_threshold": 0.6,
       "questions": [
         {
           "id": "pertinence",
@@ -69,25 +70,29 @@
               "value": "forte",
               "label": "Forte",
               "score": 1.0,
-              "is_unknown": false
+              "is_unknown": false,
+              "excludes": false
             },
             {
               "value": "moyenne",
               "label": "Moyenne",
               "score": 0.5,
-              "is_unknown": false
+              "is_unknown": false,
+              "excludes": false
             },
             {
               "value": "faible",
               "label": "Faible",
               "score": 0.0,
-              "is_unknown": false
+              "is_unknown": false,
+              "excludes": false
             },
             {
               "value": "inconnu",
               "label": "Inconnu",
               "score": 0.5,
-              "is_unknown": true
+              "is_unknown": true,
+              "excludes": false
             }
           ]
         }

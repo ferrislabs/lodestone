@@ -12,6 +12,7 @@ export interface QualificationActions {
 	setId: (index: number, id: string) => void
 	setProvider: (index: number, providerId: string) => void
 	setWeight: (index: number, weight: number) => void
+	setExclusionThreshold: (index: number, percent: number | null) => void
 	setPrompt: (index: number, prompt: string) => void
 	requestRemove: (index: number) => void
 	confirmRemove: (index: number) => void
@@ -41,6 +42,12 @@ export interface QualificationActions {
 		question: number,
 		option: number,
 		score: number | null,
+	) => void
+	setOptionExcludes: (
+		index: number,
+		question: number,
+		option: number,
+		excludes: boolean,
 	) => void
 	setAggregatorProvider: (providerId: string) => void
 	setAggregatorPrompt: (prompt: string) => void

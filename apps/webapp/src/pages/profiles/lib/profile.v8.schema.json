@@ -44,7 +44,7 @@
 			}
 		},
 		"schema_version": {
-			"description": "Profile format version. Must be 7.",
+			"description": "Profile format version. Must be 8.",
 			"type": "integer",
 			"format": "uint32",
 			"minimum": 0
@@ -744,6 +744,14 @@
 					"type": "boolean",
 					"default": true
 				},
+				"exclusion_threshold": {
+					"description": "Probability from 0.5 to 1 at which a grounded answer for an option that excludes the lead excludes it. Default 0.6.",
+					"type": "number",
+					"format": "double",
+					"default": 0.6,
+					"maximum": 1.0,
+					"minimum": 0.5
+				},
 				"id": {
 					"description": "Unique slug among all agents of the profile, sourcing and qualification, for example maturite-technique.",
 					"$ref": "#/$defs/AgentId"
@@ -825,6 +833,11 @@
 			"description": "One possible answer to a question and the score it is worth.",
 			"type": "object",
 			"properties": {
+				"excludes": {
+					"description": "When true, a grounded answer for this option at or above the agent's exclusion threshold excludes the lead. Never set on the unknown option.",
+					"type": "boolean",
+					"default": false
+				},
 				"is_unknown": {
 					"description": "Marks the unknown option, chosen when nothing in the documents supports an answer. Exactly one option per question carries it.",
 					"type": "boolean",

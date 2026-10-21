@@ -15,13 +15,15 @@ use crate::domain::{
 };
 
 pub mod confidence;
+pub mod exclusion;
 pub mod ports;
 pub mod prompt;
 
 pub use confidence::{
-    AgentOpinion, EvidenceComponents, EvidenceStrength, Judgement, LeadScoring, SCORING_VERSION,
-    VerdictCap, calibrate, judge, verdict_for,
+    AgentOpinion, EXCLUDED_REASON, EvidenceComponents, EvidenceStrength, Judgement, LeadScoring,
+    SCORING_VERSION, VerdictCap, VerdictReason, calibrate, judge, verdict_for,
 };
+pub use exclusion::{Exclusion, exclusions};
 
 uuid_id!(ResultId);
 
@@ -522,6 +524,7 @@ mod tests {
             label: value.to_uppercase(),
             score,
             is_unknown: value == "inconnu",
+            excludes: false,
         }
     }
 
@@ -548,6 +551,7 @@ mod tests {
             provider_id: None,
             system_prompt: "prompt".to_owned(),
             weight: 5,
+            exclusion_threshold: 0.6,
             questions,
         }
     }

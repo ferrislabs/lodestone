@@ -220,6 +220,11 @@ export const FIELD_COPY: Readonly<Record<string, FieldCopy>> = {
 		description:
 			'Poids entier de 1 à 10 de cet agent dans la confiance du lead.',
 	},
+	'qualification_agents[].exclusion_threshold': {
+		label: "Seuil d'exclusion",
+		description:
+			"Probabilité minimale, de 0,5 à 1, d'une option qui exclut le lead pour l'écarter. 0,6 par défaut.",
+	},
 	'qualification_agents[].questions': {
 		label: "Axes d'analyse",
 		description:
@@ -268,6 +273,11 @@ export const FIELD_COPY: Readonly<Record<string, FieldCopy>> = {
 		label: 'Option « inconnu »',
 		description:
 			"Marque l'option choisie quand rien dans les documents n'étaye une réponse. Chaque axe en a exactement une.",
+	},
+	'qualification_agents[].questions[].options[].excludes': {
+		label: 'Exclut le lead',
+		description:
+			"Quand l'agent choisit cette option avec une preuve vérifiée et une probabilité au moins égale au seuil d'exclusion, le lead est écarté. Jamais sur l'option « inconnu ».",
 	},
 	aggregator: {
 		label: 'Agrégateur',

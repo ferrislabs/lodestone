@@ -19,9 +19,10 @@ pub mod ports;
 pub mod rejection;
 
 pub use metrics::{
-    AgentSeparation, ConfidenceBucket, DecisionCounts, DiscardedShare, MIN_LABELLED_LEADS,
-    ProfileInfo, ProfileQuality, QualityReport, ReasonCount, Suggestion, VerdictCounts,
-    VerdictPrecision, VersionPrecision,
+    AgentSeparation, ConfidenceBucket, DecisionCounts, DiscardedShare, EXCLUSION_REASONS,
+    ExclusionCandidate, ExclusionCount, ExclusionTarget, MAX_EXCLUSION_CANDIDATES,
+    MIN_LABELLED_LEADS, ProfileInfo, ProfileQuality, QualityReport, ReasonCount, Suggestion,
+    VerdictCounts, VerdictPrecision, VersionPrecision, exclusion_targets,
 };
 pub use rejection::{MAX_NOTE_CHARS, Rejection, RejectionProblem, RejectionReason};
 
@@ -91,8 +92,8 @@ impl DecisionSnapshot {
             evidence: scoring.map(|scoring| scoring.evidence),
             verdict: lead.verdict.map(|verdict| verdict.as_str().to_owned()),
             verdict_reason: scoring
-                .and_then(|scoring| scoring.cap)
-                .map(|cap| cap.as_str().to_owned()),
+                .and_then(LeadScoring::reason)
+                .map(|reason| reason.as_str().to_owned()),
             agents: results
                 .iter()
                 .map(|result| {
@@ -225,6 +226,7 @@ mod tests {
             opinion: Some(0.8),
             evidence: evidence(),
             cap: Some(VerdictCap::WeakEvidence),
+            exclusions: Vec::new(),
         };
         let results = [
             result("fit", ResultStatus::Valid, Some(0.9)),
@@ -260,6 +262,7 @@ mod tests {
             opinion: Some(0.8),
             evidence: evidence(),
             cap: None,
+            exclusions: Vec::new(),
         };
         let snapshot = DecisionSnapshot::capture(&lead(), Some(&scoring), &[], None);
         let json = serde_json::to_value(&snapshot).unwrap();

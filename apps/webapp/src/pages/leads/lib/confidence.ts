@@ -1,4 +1,4 @@
-import type { Lead } from '#/pages/leads/lib/types'
+import type { Exclusion, Lead } from '#/pages/leads/lib/types'
 import { formatConfidence } from '#/pages/leads/lib/verdict'
 
 type Evidence = NonNullable<Lead['evidence']>
@@ -10,10 +10,26 @@ const VERDICT_REASON_LABELS: Readonly<Record<VerdictReason, string>> = {
 	single_angle: `${CAP_PREFIX}un seul angle d'analyse`,
 	weak_evidence: `${CAP_PREFIX}preuves insuffisantes`,
 	non_production: `${CAP_PREFIX}uniquement des hôtes hors production`,
+	excluded: 'Écarté : un agent de qualification a exclu le lead',
 }
 
 export function verdictReasonLabel(reason: VerdictReason): string {
 	return VERDICT_REASON_LABELS[reason]
+}
+
+export function exclusionTitle(exclusion: Exclusion): string {
+	return `Exclu par l'agent « ${exclusion.agent_name} » : ${exclusion.label} (${formatConfidence(exclusion.probability)})`
+}
+
+export function exclusionSummary(
+	exclusions: readonly Exclusion[],
+): string | null {
+	const [first] = exclusions
+	if (!first) return null
+	const more = exclusions.length - 1
+	return more > 0
+		? `Exclu : ${first.label} (+${more})`
+		: `Exclu : ${first.label}`
 }
 
 export function confidenceBreakdown(

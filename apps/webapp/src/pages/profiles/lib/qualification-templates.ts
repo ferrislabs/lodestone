@@ -1,8 +1,11 @@
 import type { JsonObject } from '#/lib/schema-form'
 
 export const DEFAULT_WEIGHT = 5
+export const DEFAULT_EXCLUSION_THRESHOLD = 0.6
 
-export type TemplateOption = readonly [string, string, number, boolean?]
+export type TemplateFlag = 'unknown' | 'excludes'
+
+export type TemplateOption = readonly [string, string, number, TemplateFlag?]
 
 export interface QualificationAxis {
 	id: string
@@ -18,6 +21,7 @@ export interface QualificationTemplate {
 	name: string
 	evaluates: string
 	prompt: string
+	weight?: number
 	axes: readonly QualificationAxis[]
 }
 
@@ -36,7 +40,7 @@ const BLANK_TEMPLATE: QualificationTemplate = {
 			options: [
 				['option-1', 'Option 1', 1],
 				['option-2', 'Option 2', 0],
-				['inconnu', 'Inconnu', 0.5, true],
+				['inconnu', 'Inconnu', 0.5, 'unknown'],
 			],
 		},
 	],
@@ -59,7 +63,7 @@ export const QUALIFICATION_TEMPLATES: readonly QualificationTemplate[] = [
 					['forte', 'Forte', 1],
 					['moyenne', 'Moyenne', 0.5],
 					['faible', 'Faible', 0],
-					['inconnu', 'Inconnu', 0.5, true],
+					['inconnu', 'Inconnu', 0.5, 'unknown'],
 				],
 			},
 		],
@@ -82,7 +86,7 @@ export const QUALIFICATION_TEMPLATES: readonly QualificationTemplate[] = [
 				options: [
 					['legacy_auto_heberge', 'Ancien, auto-hébergé', 1],
 					['saas', 'SaaS', 0.7],
-					['inconnu', 'Inconnue', 0.3, true],
+					['inconnu', 'Inconnue', 0.3, 'unknown'],
 				],
 			},
 		],
@@ -106,7 +110,7 @@ export const QUALIFICATION_TEMPLATES: readonly QualificationTemplate[] = [
 					['production', 'Production', 1],
 					['mixte', 'Mixte', 0.6],
 					['hors_production', 'Hors production', 0],
-					['inconnu', 'Inconnu', 0.3, true],
+					['inconnu', 'Inconnu', 0.3, 'unknown'],
 				],
 			},
 			{
@@ -115,7 +119,7 @@ export const QUALIFICATION_TEMPLATES: readonly QualificationTemplate[] = [
 				options: [
 					['usage_reel', 'Usage réel', 1],
 					['experimentation', 'Expérimentation', 0.4],
-					['inconnu', 'Inconnu', 0.3, true],
+					['inconnu', 'Inconnu', 0.3, 'unknown'],
 				],
 			},
 		],
@@ -140,7 +144,7 @@ export const QUALIFICATION_TEMPLATES: readonly QualificationTemplate[] = [
 					['eti', 'ETI', 0.8],
 					['pme', 'PME', 0.5],
 					['startup', 'Startup', 0.4],
-					['inconnu', 'Inconnu', 0.3, true],
+					['inconnu', 'Inconnu', 0.3, 'unknown'],
 				],
 			},
 			{
@@ -150,7 +154,7 @@ export const QUALIFICATION_TEMPLATES: readonly QualificationTemplate[] = [
 					['grande', 'Grande', 1],
 					['moyenne', 'Moyenne', 0.6],
 					['petite', 'Petite', 0.3],
-					['inconnue', 'Inconnue', 0.3, true],
+					['inconnue', 'Inconnue', 0.3, 'unknown'],
 				],
 			},
 		],
@@ -173,7 +177,7 @@ export const QUALIFICATION_TEMPLATES: readonly QualificationTemplate[] = [
 					['dans_la_zone', 'Dans la zone', 1],
 					['proche', 'Proche de la zone', 0.5],
 					['hors_zone', 'Hors zone', 0],
-					['inconnu', 'Inconnu', 0.3, true],
+					['inconnu', 'Inconnu', 0.3, 'unknown'],
 				],
 			},
 			{
@@ -182,7 +186,7 @@ export const QUALIFICATION_TEMPLATES: readonly QualificationTemplate[] = [
 				options: [
 					['francais', 'Français', 1],
 					['autre', 'Autre langue', 0.3],
-					['inconnu', 'Inconnue', 0.3, true],
+					['inconnu', 'Inconnue', 0.3, 'unknown'],
 				],
 			},
 		],
@@ -205,7 +209,7 @@ export const QUALIFICATION_TEMPLATES: readonly QualificationTemplate[] = [
 					['en_cours', 'En cours', 1],
 					['probable', 'Probable', 0.7],
 					['improbable', 'Improbable', 0],
-					['inconnu', 'Inconnue', 0.3, true],
+					['inconnu', 'Inconnue', 0.3, 'unknown'],
 				],
 			},
 			{
@@ -215,7 +219,7 @@ export const QUALIFICATION_TEMPLATES: readonly QualificationTemplate[] = [
 					['fort', 'Fort', 1],
 					['moyen', 'Moyen', 0.5],
 					['aucun', 'Aucun', 0],
-					['inconnu', 'Inconnu', 0.5, true],
+					['inconnu', 'Inconnu', 0.5, 'unknown'],
 				],
 			},
 		],
@@ -239,7 +243,7 @@ export const QUALIFICATION_TEMPLATES: readonly QualificationTemplate[] = [
 					['oui', 'Oui', 1],
 					['partiellement', 'Partiellement', 0.5],
 					['non', 'Non', 0],
-					['inconnu', 'Inconnue', 0.3, true],
+					['inconnu', 'Inconnue', 0.3, 'unknown'],
 				],
 			},
 			{
@@ -249,7 +253,7 @@ export const QUALIFICATION_TEMPLATES: readonly QualificationTemplate[] = [
 				options: [
 					['dans_la_cible', 'Dans la cible', 1],
 					['hors_cible', 'Hors cible', 0],
-					['inconnu', 'Inconnue', 0.3, true],
+					['inconnu', 'Inconnue', 0.3, 'unknown'],
 				],
 			},
 			{
@@ -259,7 +263,68 @@ export const QUALIFICATION_TEMPLATES: readonly QualificationTemplate[] = [
 					['forts', 'Forts', 1],
 					['moyens', 'Moyens', 0.5],
 					['faibles', 'Faibles', 0],
-					['inconnu', 'Inconnus', 0.3, true],
+					['inconnu', 'Inconnus', 0.3, 'unknown'],
+				],
+			},
+		],
+	},
+	{
+		id: 'exclusions',
+		label: 'Exclusions',
+		description:
+			'Écarte un lead pour une raison explicite : éditeur ou intégrateur, hébergeur ou agence, domaine inactif, client actuel, concurrent.',
+		name: 'Exclusions',
+		evaluates:
+			"Les raisons d'écarter le lead : éditeur ou intégrateur du domaine, hébergeur ou agence, domaine parqué ou inactif, client actuel, concurrent.",
+		prompt:
+			"Tu décides si une entreprise doit être écartée des prospects. Tu n'évalues pas son intérêt : tu cherches uniquement une raison explicite de l'exclure. Choisis une option qui exclut seulement quand une phrase des documents le dit explicitement et copie cette phrase mot pour mot comme preuve. Un nom proche d'une entreprise de la liste, une simple ressemblance ou une impression ne suffisent pas : réponds alors « non » ou « inconnu ». Quand rien dans les documents ne permet de trancher, réponds « inconnu ».\n\nLes listes suivantes sont maintenues par l'opérateur. Modifie-les pour adapter l'agent à ton marché.\n\nClients actuels : (liste à compléter)\nConcurrents : Okta, Auth0, Ping Identity, ForgeRock, Microsoft Entra, Keycloak, Red Hat\nÉditeurs et intégrateurs du domaine : Thales, Wallix, Ilex, Inwebo, Ubble, IDnow, Evidian, Eviden, Atos, Capgemini, Sopra Steria, Wavestone\n\nPour « hébergeur ou agence », exclus seulement quand le signal détecté concerne un client de l'entreprise (elle héberge ou opère le site d'un tiers) et non l'entreprise elle-même. Pour « domaine parqué ou inactif », exclus seulement quand les documents montrent une page de parking, un site en vente ou un domaine sans activité.",
+		weight: 1,
+		axes: [
+			{
+				id: 'editeur_integrateur',
+				wording:
+					"L'entreprise est-elle un éditeur ou un intégrateur du domaine ?",
+				options: [
+					['oui', 'Éditeur ou intégrateur du domaine', 0, 'excludes'],
+					['non', 'Non', 1],
+					['inconnu', 'Inconnu', 0.5, 'unknown'],
+				],
+			},
+			{
+				id: 'hebergeur_agence',
+				wording:
+					"Le signal concerne-t-il un client de l'entreprise (hébergeur ou agence) plutôt que l'entreprise elle-même ?",
+				options: [
+					['oui', "Hébergeur ou agence (signal d'un client)", 0, 'excludes'],
+					['non', 'Non', 1],
+					['inconnu', 'Inconnu', 0.5, 'unknown'],
+				],
+			},
+			{
+				id: 'domaine_inactif',
+				wording: 'Le domaine est-il parqué ou inactif ?',
+				options: [
+					['parque_ou_inactif', 'Domaine parqué ou inactif', 0, 'excludes'],
+					['actif', 'Actif', 1],
+					['inconnu', 'Inconnu', 0.5, 'unknown'],
+				],
+			},
+			{
+				id: 'client_actuel',
+				wording: "L'entreprise est-elle déjà cliente ?",
+				options: [
+					['oui', 'Client actuel', 0, 'excludes'],
+					['non', 'Non', 1],
+					['inconnu', 'Inconnu', 0.5, 'unknown'],
+				],
+			},
+			{
+				id: 'concurrent',
+				wording: "L'entreprise est-elle un concurrent ?",
+				options: [
+					['oui', 'Concurrent', 0, 'excludes'],
+					['non', 'Non', 1],
+					['inconnu', 'Inconnu', 0.5, 'unknown'],
 				],
 			},
 		],
@@ -288,16 +353,18 @@ export function templateAgent(
 		enabled: true,
 		provider_id: null,
 		system_prompt: template.prompt,
-		weight: DEFAULT_WEIGHT,
+		weight: template.weight ?? DEFAULT_WEIGHT,
+		exclusion_threshold: DEFAULT_EXCLUSION_THRESHOLD,
 		questions: template.axes.map((axis) => ({
 			id: axis.id,
 			wording: axis.wording,
 			weight: axis.weight ?? DEFAULT_WEIGHT,
-			options: axis.options.map(([value, label, score, unknown]) => ({
+			options: axis.options.map(([value, label, score, flag]) => ({
 				value,
 				label,
 				score,
-				is_unknown: unknown === true,
+				is_unknown: flag === 'unknown',
+				excludes: flag === 'excludes',
 			})),
 		})),
 	}

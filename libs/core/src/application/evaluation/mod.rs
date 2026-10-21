@@ -31,7 +31,7 @@ use crate::{
         },
         qualification::{
             AgentOpinion, Completion, EvidenceStrength, QualificationResult, ResultId,
-            ResultStatus, SCORING_VERSION, ValidOutput, Violations, agent_score, judge,
+            ResultStatus, SCORING_VERSION, ValidOutput, Violations, agent_score, exclusions, judge,
             ports::QualificationRepository,
             prompt::{AgentPrompt, build, lead_document, with_ungrounded, with_violations},
             validate_answers,
@@ -509,7 +509,8 @@ where
                 EvidenceStrength::compute(&facts, lead.score.get(), &definition.evidence),
                 definition.verdict,
                 &definition.evidence,
-            ),
+            )
+            .excluding(exclusions(&results, &definition.qualification_agents)),
             scoring_version: SCORING_VERSION,
             dossier_at: dossier.as_ref().and_then(|dossier| dossier.content_at),
             at,

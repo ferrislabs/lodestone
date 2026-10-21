@@ -12,7 +12,9 @@ import {
 	EVIDENCE_WEIGHT_KEYS,
 	evidenceProblems,
 	evidenceSettingsOf,
+	exclusionThresholdOf,
 	FLOOR_ERROR,
+	isExcludingOption,
 	isUnknownOption,
 	NO_WEIGHT_ERROR,
 	newQualificationAgent,
@@ -59,11 +61,12 @@ describe('templates', () => {
 			'Marché',
 			'Opportunité',
 			'Recherche entreprise',
+			'Exclusions',
 			'Vide',
 		])
 	})
 
-	it('builds templates that pass the v7 validation', () => {
+	it('builds templates that pass the v8 validation', () => {
 		for (const template of QUALIFICATION_TEMPLATES) {
 			if (template.id === 'vide') continue
 			const agent = newQualificationAgent(template.id, new Set(['ats']))
@@ -129,11 +132,120 @@ describe('templates', () => {
 			weight: 5,
 		})
 		expect(optionsOf(question)).toEqual([
-			{ value: 'forte', label: 'Forte', score: 1, is_unknown: false },
-			{ value: 'moyenne', label: 'Moyenne', score: 0.5, is_unknown: false },
-			{ value: 'faible', label: 'Faible', score: 0, is_unknown: false },
-			{ value: 'inconnu', label: 'Inconnu', score: 0.5, is_unknown: true },
+			{
+				value: 'forte',
+				label: 'Forte',
+				score: 1,
+				is_unknown: false,
+				excludes: false,
+			},
+			{
+				value: 'moyenne',
+				label: 'Moyenne',
+				score: 0.5,
+				is_unknown: false,
+				excludes: false,
+			},
+			{
+				value: 'faible',
+				label: 'Faible',
+				score: 0,
+				is_unknown: false,
+				excludes: false,
+			},
+			{
+				value: 'inconnu',
+				label: 'Inconnu',
+				score: 0.5,
+				is_unknown: true,
+				excludes: false,
+			},
 		])
+	})
+
+	it('builds the exclusions agent with excluding options and a low weight', () => {
+		const agent = newQualificationAgent('exclusions', new Set())
+		expect(agent).toMatchObject({
+			id: 'exclusions',
+			name: 'Exclusions',
+			enabled: true,
+			weight: 1,
+			exclusion_threshold: 0.6,
+		})
+		expect(String(agent.system_prompt)).toContain('Clients actuels :')
+		expect(String(agent.system_prompt)).toContain('Concurrents :')
+		expect(String(agent.system_prompt)).toContain(
+			'Éditeurs et intégrateurs du domaine :',
+		)
+		expect(String(agent.system_prompt)).toContain('Okta')
+		expect(String(agent.system_prompt)).toContain('Wavestone')
+		const axes = questionsOf(agent).map((question) => [
+			(question as JsonObject).id,
+			optionsOf(question).map((item) => [
+				(item as JsonObject).value,
+				(item as JsonObject).score,
+				(item as JsonObject).is_unknown,
+				(item as JsonObject).excludes,
+			]),
+		])
+		expect(axes).toEqual([
+			[
+				'editeur_integrateur',
+				[
+					['oui', 0, false, true],
+					['non', 1, false, false],
+					['inconnu', 0.5, true, false],
+				],
+			],
+			[
+				'hebergeur_agence',
+				[
+					['oui', 0, false, true],
+					['non', 1, false, false],
+					['inconnu', 0.5, true, false],
+				],
+			],
+			[
+				'domaine_inactif',
+				[
+					['parque_ou_inactif', 0, false, true],
+					['actif', 1, false, false],
+					['inconnu', 0.5, true, false],
+				],
+			],
+			[
+				'client_actuel',
+				[
+					['oui', 0, false, true],
+					['non', 1, false, false],
+					['inconnu', 0.5, true, false],
+				],
+			],
+			[
+				'concurrent',
+				[
+					['oui', 0, false, true],
+					['non', 1, false, false],
+					['inconnu', 0.5, true, false],
+				],
+			],
+		])
+		expect(
+			validateQualification(withQualification(profile(), [agent])),
+		).toEqual([])
+	})
+
+	it('leaves every other template without an excluding option', () => {
+		for (const template of QUALIFICATION_TEMPLATES) {
+			if (template.id === 'exclusions') continue
+			const agent = newQualificationAgent(template.id, new Set())
+			expect(agent.exclusion_threshold).toBe(0.6)
+			for (const question of questionsOf(agent)) {
+				expect(
+					optionsOf(question).some((item) => isExcludingOption(item)),
+				).toBe(false)
+			}
+		}
 	})
 
 	it('builds the technical maturity and organization options', () => {
@@ -144,9 +256,22 @@ describe('templates', () => {
 				label: 'Ancien, auto-hébergé',
 				score: 1,
 				is_unknown: false,
+				excludes: false,
 			},
-			{ value: 'saas', label: 'SaaS', score: 0.7, is_unknown: false },
-			{ value: 'inconnu', label: 'Inconnue', score: 0.3, is_unknown: true },
+			{
+				value: 'saas',
+				label: 'SaaS',
+				score: 0.7,
+				is_unknown: false,
+				excludes: false,
+			},
+			{
+				value: 'inconnu',
+				label: 'Inconnue',
+				score: 0.3,
+				is_unknown: true,
+				excludes: false,
+			},
 		])
 		const kind = newQualificationAgent('type-taille-organisation', new Set())
 		expect(
@@ -585,8 +710,8 @@ describe('validateQualification', () => {
 				{ ...base, questions: [{ ...question, options }] },
 			])
 		const known = [
-			{ value: 'a', label: 'A', score: 1, is_unknown: false },
-			{ value: 'b', label: 'B', score: 0, is_unknown: false },
+			{ value: 'a', label: 'A', score: 1, is_unknown: false, excludes: false },
+			{ value: 'b', label: 'B', score: 0, is_unknown: false, excludes: false },
 		]
 		const unknown = (value: string) => ({
 			value,
@@ -648,5 +773,68 @@ describe('validateQualification', () => {
 			verdict: { reliable_from: 10, discard_below: 30 },
 		}
 		expect(paths(value)).toEqual(['verdict.reliable_from'])
+	})
+
+	it('validates the exclusion threshold as a percentage from 50 to 100', () => {
+		const agent = newQualificationAgent('exclusions', new Set())
+		const path = 'qualification_agents[0].exclusion_threshold'
+		for (const bad of [0.49, 1.01, 0, null]) {
+			const problems = validateQualification(
+				withQualification(profile(), [{ ...agent, exclusion_threshold: bad }]),
+			)
+			expect(
+				problems.filter((problem) => problem.path === path),
+				String(bad),
+			).toEqual([
+				{ path, message: 'Doit être un pourcentage entier de 50 à 100' },
+			])
+		}
+		for (const good of [0.5, 0.6, 1]) {
+			const problems = validateQualification(
+				withQualification(profile(), [{ ...agent, exclusion_threshold: good }]),
+			)
+			expect(problems).toEqual([])
+		}
+	})
+
+	it('reads the threshold as a percentage with its default', () => {
+		expect(exclusionThresholdOf({ exclusion_threshold: 0.75 })).toBe(75)
+		expect(exclusionThresholdOf({})).toBe(60)
+		expect(exclusionThresholdOf({ exclusion_threshold: null })).toBeNull()
+	})
+
+	it('rejects an unknown option that excludes', () => {
+		const base = newQualificationAgent('exclusions', new Set())
+		const question = questionsOf(base)[0] as JsonObject
+		const options = optionsOf(question).map((item) =>
+			isUnknownOption(item)
+				? { ...(item as JsonObject), excludes: true }
+				: item,
+		)
+		const problems = validateQualification(
+			withQualification(profile(), [
+				{ ...base, questions: [{ ...question, options }] },
+			]),
+		)
+		expect(problems).toEqual([
+			{
+				path: 'qualification_agents[0].questions[0].options[2].excludes',
+				message: "L'option « inconnu » ne peut pas exclure le lead",
+			},
+		])
+	})
+
+	it('toggles the excluding flag of an option', () => {
+		const value = withQualification(profile(), [
+			newQualificationAgent('pertinence', new Set()),
+		])
+		const next = setOptionField(value, 0, 0, 2, 'excludes', true)
+		const options = optionsOf(questionsOf(qualificationList(next)[0])[0])
+		expect(options.map((item) => isExcludingOption(item))).toEqual([
+			false,
+			false,
+			true,
+			false,
+		])
 	})
 })

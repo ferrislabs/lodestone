@@ -16,6 +16,7 @@ const leads: Lead[] = [
 		profile,
 		domain: 'acme.test',
 		status: 'qualified',
+		exclusions: [],
 		score: 42,
 		confidence: 72.5,
 		verdict: 'fiable',
@@ -30,6 +31,7 @@ const leads: Lead[] = [
 		profile,
 		domain: 'globex.test',
 		status: 'new',
+		exclusions: [],
 		score: 10,
 		first_seen_at: '2026-01-01T00:00:00Z',
 		last_seen_at: '2026-02-02T00:00:00Z',
@@ -203,5 +205,49 @@ describe('LeadsList', () => {
 	it('shows skeleton rows while loading', () => {
 		const { container } = render(<Harness data={[]} state="loading" />)
 		expect(container.querySelectorAll('[data-slot="skeleton"]').length).toBe(6)
+	})
+
+	it('shows why a lead was excluded under its discarded badge', () => {
+		const excluded: Lead = {
+			...leads[0],
+			verdict: 'ecarte',
+			verdict_reason: 'excluded',
+			exclusions: [
+				{
+					agent_id: 'exclusions',
+					agent_name: 'Exclusions',
+					question_id: 'concurrent',
+					option: 'oui',
+					label: 'Concurrent',
+					probability: 85,
+					evidence: 'Nous sommes un concurrent.',
+					evidence_source: 'lead',
+				},
+				{
+					agent_id: 'exclusions',
+					agent_name: 'Exclusions',
+					question_id: 'client_actuel',
+					option: 'oui',
+					label: 'Client actuel',
+					probability: 70,
+					evidence: 'Client depuis 2024.',
+					evidence_source: 'lead',
+				},
+			],
+		}
+		const { container } = render(
+			<Harness data={[excluded, leads[1]]} state="ready" />,
+		)
+		const badges = Array.from(container.querySelectorAll('[data-verdict]'))
+		expect(badges.map((badge) => badge.textContent)).toEqual([
+			'Écarté',
+			'En attente',
+		])
+		const hints = container.querySelectorAll('[data-part="exclusion"]')
+		expect(hints).toHaveLength(1)
+		expect(hints[0]?.textContent).toBe('Exclu : Concurrent (+1)')
+		expect(hints[0]?.parentElement?.getAttribute('title')).toBe(
+			"Exclu par l'agent « Exclusions » : Concurrent (85 %)\nExclu par l'agent « Exclusions » : Client actuel (70 %)",
+		)
 	})
 })

@@ -8,12 +8,16 @@ use crate::{
     UserId,
     application::LodestoneUseCase,
     domain::{
-        lead::{Lead, ports::AssessmentRepository},
+        company::ports::CompanyRepository,
+        lead::{
+            Lead,
+            ports::{AssessmentRepository, LeadRepository},
+        },
         profile::{ProfileId, RevisionNumber, ports::ProfileRepository},
         qualification::ports::QualificationRepository,
         quality::{
-            DecisionKind, DecisionLabel, DecisionSnapshot, LabelFilter, ProfileInfo, QualityReport,
-            Rejection, ports::DecisionRepository,
+            DecisionKind, DecisionLabel, DecisionSnapshot, ExclusionCandidate, LabelFilter,
+            ProfileInfo, QualityReport, Rejection, exclusion_targets, ports::DecisionRepository,
         },
     },
 };
@@ -64,7 +68,7 @@ pub(crate) async fn record_decisions(
 }
 
 impl LodestoneUseCase {
-    #[transactional(decision, profile)]
+    #[transactional(decision, profile, lead, company)]
     pub async fn quality_report(
         &self,
         from: Option<DateTime<Utc>>,
@@ -73,6 +77,8 @@ impl LodestoneUseCase {
     ) -> Result<QualityReport, CoreError> {
         let mut decisions = decision_repository;
         let mut profiles = profile_repository;
+        let mut leads = lead_repository;
+        let mut companies = company_repository;
 
         if let Some(profile_id) = profile_id
             && profiles.find(profile_id).await?.is_none()
@@ -108,12 +114,25 @@ impl LodestoneUseCase {
                 thresholds,
             });
         }
-        Ok(QualityReport::compute(
-            &labels,
-            verdicts,
-            &infos,
-            profile_id,
-            &agent_names,
-        ))
+        let mut report =
+            QualityReport::compute(&labels, verdicts, &infos, profile_id, &agent_names);
+        report.exclusions = decisions.exclusion_counts(&filter).await?;
+        for target in exclusion_targets(&labels) {
+            let Some(lead) = leads.find(target.lead_id).await? else {
+                continue;
+            };
+            let legal_name = companies
+                .find(&lead.domain)
+                .await?
+                .and_then(|dossier| dossier.official.map(|official| official.legal_name));
+            report.exclusion_candidates.push(ExclusionCandidate {
+                lead_id: lead.id,
+                domain: lead.domain.as_str().to_owned(),
+                legal_name,
+                reason: target.reason,
+                decided_at: target.decided_at,
+            });
+        }
+        Ok(report)
     }
 }

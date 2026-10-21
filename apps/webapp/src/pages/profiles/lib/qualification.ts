@@ -15,6 +15,7 @@ import {
 	uniqueId,
 } from '#/pages/profiles/lib/agents'
 import {
+	DEFAULT_EXCLUSION_THRESHOLD,
 	DEFAULT_WEIGHT,
 	findTemplate,
 	templateAgent,
@@ -27,6 +28,7 @@ export {
 
 export const MIN_OPTIONS = 2
 export const MAX_OPTIONS = 11
+export const MIN_EXCLUSION_PERCENT = 50
 export const MAX_EVIDENCE_CHARS = 300
 export const UNKNOWN_VALUE = 'inconnu'
 export const UNKNOWN_LABEL = 'Inconnu'
@@ -115,6 +117,21 @@ export function optionsOf(question: JsonValue | undefined): JsonValue[] {
 
 export function isUnknownOption(option: JsonValue | undefined): boolean {
 	return isJsonObject(option) && option.is_unknown === true
+}
+
+export function isExcludingOption(option: JsonValue | undefined): boolean {
+	return isJsonObject(option) && option.excludes === true
+}
+
+export function exclusionThresholdOf(
+	agent: JsonValue | undefined,
+): number | null {
+	if (!isJsonObject(agent)) return null
+	if (!('exclusion_threshold' in agent)) {
+		return Math.round(DEFAULT_EXCLUSION_THRESHOLD * 100)
+	}
+	const fraction = numberField(agent, 'exclusion_threshold')
+	return fraction === null ? null : Math.round(fraction * 100)
 }
 
 export function displayOrder(options: readonly JsonValue[]): number[] {
@@ -263,6 +280,10 @@ export function isPercent(value: number | null): value is number {
 export const VERDICT_ORDER_ERROR =
 	'« Fiable à partir de » doit être supérieur à « Écarté sous »'
 export const PERCENT_ERROR = 'Doit être un pourcentage entier de 0 à 100'
+export const EXCLUSION_PERCENT_ERROR =
+	'Doit être un pourcentage entier de 50 à 100'
+export const UNKNOWN_EXCLUDES_ERROR =
+	"L'option « inconnu » ne peut pas exclure le lead"
 
 export function verdictProblems(verdict: Verdict): Problem[] {
 	const problems: Problem[] = []
@@ -309,7 +330,7 @@ function option(
 	score: number,
 	unknown = false,
 ): JsonObject {
-	return { value, label, score, is_unknown: unknown }
+	return { value, label, score, is_unknown: unknown, excludes: false }
 }
 
 function unknownOption(): JsonObject {
@@ -689,6 +710,9 @@ function checkOptions(
 			problems.push(problem(`${itemPath}.value`, "Doit être unique dans l'axe"))
 		}
 		seen.add(optionValue)
+		if (isExcludingOption(item) && isUnknownOption(item)) {
+			problems.push(problem(`${itemPath}.excludes`, UNKNOWN_EXCLUDES_ERROR))
+		}
 		const score = numberField(item, 'score')
 		if (score !== null && (score < 0 || score > 1)) {
 			problems.push(
@@ -777,6 +801,17 @@ export function validateQualification(value: JsonObject): Problem[] {
 					`${base}.system_prompt`,
 					`Doit contenir au maximum ${MAX_PROMPT_CHARS} caractères`,
 				),
+			)
+		}
+		const threshold = exclusionThresholdOf(agent)
+		if (
+			threshold === null ||
+			!Number.isInteger(threshold) ||
+			threshold < MIN_EXCLUSION_PERCENT ||
+			threshold > 100
+		) {
+			problems.push(
+				problem(`${base}.exclusion_threshold`, EXCLUSION_PERCENT_ERROR),
 			)
 		}
 		checkQuestions(questionsOf(agent), base, problems)

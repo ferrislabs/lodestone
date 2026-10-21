@@ -13,8 +13,10 @@ import {
 	agentProvider,
 	agentWeight,
 	contractSchema,
+	exclusionThresholdOf,
 	MAX_DESCRIPTION_CHARS,
 	MAX_PROMPT_CHARS,
+	MIN_EXCLUSION_PERCENT,
 	type ProviderOption,
 	questionsOf,
 } from '#/pages/profiles/lib/qualification'
@@ -78,6 +80,8 @@ export function QualificationForm({
 	const descriptionProblems = at(problems, `${base}.description`)
 	const providerProblems = at(problems, `${base}.provider_id`)
 	const weightProblems = at(problems, `${base}.weight`)
+	const exclusionProblems = at(problems, `${base}.exclusion_threshold`)
+	const exclusionThreshold = exclusionThresholdOf(agent)
 	const promptProblems = at(problems, `${base}.system_prompt`)
 	const questionsProblems = at(problems, `${base}.questions`)
 	const PreviewIcon = previewing ? ChevronDownIcon : ChevronRightIcon
@@ -171,6 +175,44 @@ export function QualificationForm({
 						onChange={(weight) => actions.setWeight(index, weight)}
 					/>
 					<FieldErrors id={`${key}-weight`} problems={weightProblems} />
+				</div>
+				<div className="flex max-w-56 flex-col gap-1.5">
+					<Label htmlFor={`${key}-exclusion`}>Seuil d'exclusion</Label>
+					<div className="relative max-w-40">
+						<Input
+							id={`${key}-exclusion`}
+							type="number"
+							min={MIN_EXCLUSION_PERCENT}
+							max={100}
+							step={1}
+							inputMode="numeric"
+							className="pr-8"
+							aria-invalid={exclusionProblems.length > 0}
+							aria-describedby={`${key}-exclusion-help`}
+							value={exclusionThreshold ?? ''}
+							onChange={(event) => {
+								const parsed = event.currentTarget.valueAsNumber
+								actions.setExclusionThreshold(
+									index,
+									Number.isNaN(parsed) ? null : parsed,
+								)
+							}}
+						/>
+						<span
+							aria-hidden="true"
+							className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-sm text-muted-foreground"
+						>
+							%
+						</span>
+					</div>
+					<p
+						id={`${key}-exclusion-help`}
+						className="text-xs text-muted-foreground"
+					>
+						Probabilité minimale, de 50 à 100 %, d'une option qui exclut le lead
+						pour l'écarter.
+					</p>
+					<FieldErrors id={`${key}-exclusion`} problems={exclusionProblems} />
 				</div>
 			</FormSection>
 			<FormSection

@@ -59,6 +59,16 @@ const QUALITY: Quality = {
 			rejection_reasons: [],
 		},
 	],
+	exclusions: [],
+	exclusion_candidates: [
+		{
+			lead_id: 'l1',
+			domain: 'acme.test',
+			legal_name: 'ACME SAS',
+			reason: 'deja_client',
+			decided_at: '2026-02-01T00:00:00Z',
+		},
+	],
 }
 
 let qualityCalls: URL[]
@@ -178,5 +188,32 @@ describe('QualityFeature', () => {
 		renderFeature()
 		await waitFor(() => expect(screen.getByRole('alert')).toBeTruthy())
 		expect(screen.getByRole('alert').textContent).toContain('Boom')
+	})
+
+	it('copies the legal name and the domain of a rejected lead', async () => {
+		const writeText = vi.fn().mockResolvedValue(undefined)
+		vi.stubGlobal('navigator', { clipboard: { writeText } })
+		renderFeature()
+		fireEvent.click(
+			await screen.findByRole('button', {
+				name: "Copier ACME SAS pour la liste d'exclusion",
+			}),
+		)
+		await waitFor(() => expect(screen.getByText('Copié')).toBeTruthy())
+		expect(writeText).toHaveBeenCalledWith('ACME SAS, acme.test')
+	})
+
+	it('reports a refused clipboard', async () => {
+		const writeText = vi.fn().mockRejectedValue(new Error('denied'))
+		vi.stubGlobal('navigator', { clipboard: { writeText } })
+		renderFeature()
+		fireEvent.click(
+			await screen.findByRole('button', {
+				name: "Copier ACME SAS pour la liste d'exclusion",
+			}),
+		)
+		await waitFor(() =>
+			expect(screen.getByRole('alert').textContent).toContain('presse-papiers'),
+		)
 	})
 })

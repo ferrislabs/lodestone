@@ -5,11 +5,11 @@ use axum::{
     extract::{Path, Query, State, rejection::JsonRejection},
 };
 use lodestone_core::{
-    Assessment, ContactEmail, DraftMessage, DraftReview, DraftStatus, Lead, LeadDetail, LeadFacts,
-    LeadId, LeadQuery, LeadScoring, LeadSort, LeadStatus, LlmProviderRecord, Profile, ProfileId,
-    QualificationResult, Rejection, RejectionProblem, ResultStatus, RunProvenance,
+    Assessment, ContactEmail, DraftMessage, DraftReview, DraftStatus, Exclusion, Lead, LeadDetail,
+    LeadFacts, LeadId, LeadQuery, LeadScoring, LeadSort, LeadStatus, LlmProviderRecord, Profile,
+    ProfileId, QualificationResult, Rejection, RejectionProblem, ResultStatus, RunProvenance,
     SUMMARY_FAILED_AFTER, ScoreContribution, Signal, SignalKind, SummaryState, Verdict, VerdictCap,
-    VerdictFilter, definition::QualificationAgent, signal_sentence,
+    VerdictFilter, VerdictReason, definition::QualificationAgent, signal_sentence,
 };
 use pagination::{MAX_PAGE, MAX_PER_PAGE, Page, PaginationMetadata, PaginationParams};
 use serde::{Deserialize, Serialize};
@@ -89,14 +89,48 @@ pub enum VerdictReasonDto {
     SingleAngle,
     WeakEvidence,
     NonProduction,
+    Excluded,
 }
 
-impl From<VerdictCap> for VerdictReasonDto {
-    fn from(cap: VerdictCap) -> Self {
-        match cap {
-            VerdictCap::SingleAngle => Self::SingleAngle,
-            VerdictCap::WeakEvidence => Self::WeakEvidence,
-            VerdictCap::NonProduction => Self::NonProduction,
+impl From<VerdictReason> for VerdictReasonDto {
+    fn from(reason: VerdictReason) -> Self {
+        match reason {
+            VerdictReason::Capped(VerdictCap::SingleAngle) => Self::SingleAngle,
+            VerdictReason::Capped(VerdictCap::WeakEvidence) => Self::WeakEvidence,
+            VerdictReason::Capped(VerdictCap::NonProduction) => Self::NonProduction,
+            VerdictReason::Excluded => Self::Excluded,
+        }
+    }
+}
+
+/// A qualification agent excluded the lead: a grounded answer picked an option that excludes at or above the agent's threshold.
+#[derive(Debug, Serialize, PartialEq, ToSchema)]
+pub struct ExclusionDto {
+    pub agent_id: String,
+    pub agent_name: String,
+    pub question_id: String,
+    /// Value of the excluding option the agent answered.
+    pub option: String,
+    pub label: String,
+    /// Probability the agent gave to the option, in percent from 0 to 100.
+    pub probability: f64,
+    /// Sentence of the documents quoted by the agent.
+    pub evidence: String,
+    /// Document the quote was found in.
+    pub evidence_source: Option<String>,
+}
+
+impl From<&Exclusion> for ExclusionDto {
+    fn from(exclusion: &Exclusion) -> Self {
+        Self {
+            agent_id: exclusion.agent_id.as_str().to_owned(),
+            agent_name: exclusion.agent_name.clone(),
+            question_id: exclusion.question_id.clone(),
+            option: exclusion.option.clone(),
+            label: exclusion.label.clone(),
+            probability: percent(exclusion.probability),
+            evidence: exclusion.evidence.clone(),
+            evidence_source: exclusion.evidence_source.clone(),
         }
     }
 }
@@ -162,8 +196,10 @@ pub struct LeadDto {
     pub opinion: Option<f64>,
     /// Strength of the evidence behind the lead; absent until the lead has been scored.
     pub evidence: Option<EvidenceStrengthDto>,
-    /// Rule that capped a confident lead at `a_verifier`: `single_angle`, `weak_evidence` or `non_production`; absent when no rule applied.
+    /// Rule that capped a confident lead at `a_verifier` (`single_angle`, `weak_evidence` or `non_production`), or `excluded` when a qualification agent excluded the lead; absent when no rule applied.
     pub verdict_reason: Option<VerdictReasonDto>,
+    /// Exclusions decided by qualification agents; the verdict is `ecarte` when there is at least one.
+    pub exclusions: Vec<ExclusionDto>,
     /// Summary written by the aggregator; absent until the lead has been summarised.
     pub summary: Option<String>,
     #[schema(format = DateTime)]
@@ -194,8 +230,11 @@ impl LeadDto {
             opinion: scoring.and_then(|scoring| scoring.opinion).map(percent),
             evidence: scoring.map(EvidenceStrengthDto::from),
             verdict_reason: scoring
-                .and_then(|scoring| scoring.cap)
+                .and_then(LeadScoring::reason)
                 .map(VerdictReasonDto::from),
+            exclusions: scoring
+                .map(|scoring| scoring.exclusions.iter().map(ExclusionDto::from).collect())
+                .unwrap_or_default(),
             summary: summary.map(str::to_owned),
             qualified_at: lead.qualified_at.map(|at| at.to_rfc3339()),
             first_seen_at: lead.first_seen_at.to_rfc3339(),
