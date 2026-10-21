@@ -6,8 +6,8 @@ use url::Url;
 use uuid::Uuid;
 
 use crate::domain::llm::{
-    ProviderKind,
-    provider::{LlmProviderRecord, ProviderId, SealedSecret, TokenPricing},
+    GenerationParams, ProviderKind, ReasoningEffort,
+    provider::{LlmProviderRecord, MaxConcurrency, ProviderId, SealedSecret, TokenPricing},
 };
 
 #[derive(Debug, Clone)]
@@ -19,11 +19,18 @@ pub struct LlmProviderRow {
     pub model: String,
     pub timeout_ms: i32,
     pub max_retries: i16,
+    pub max_concurrency: i16,
     pub input_cents_per_mtok: i32,
     pub output_cents_per_mtok: i32,
     pub api_key_nonce: Option<Vec<u8>>,
     pub api_key_ciphertext: Option<Vec<u8>>,
     pub enabled: bool,
+    pub reasoning_effort: Option<String>,
+    pub max_tokens: Option<i32>,
+    pub temperature: Option<f64>,
+    pub frequency_penalty: Option<f64>,
+    pub presence_penalty: Option<f64>,
+    pub repeat_penalty: Option<f64>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -47,6 +54,12 @@ impl TryFrom<LlmProviderRow> for LlmProviderRecord {
         let max_retries = u8::try_from(row.max_retries).map_err(|_| {
             CoreError::Internal("stored llm provider retry count is invalid".to_owned())
         })?;
+        let max_concurrency = u8::try_from(row.max_concurrency)
+            .ok()
+            .and_then(MaxConcurrency::new)
+            .ok_or_else(|| {
+                CoreError::Internal("stored llm provider concurrency is invalid".to_owned())
+            })?;
         let api_key = match (row.api_key_nonce, row.api_key_ciphertext) {
             (Some(nonce), Some(ciphertext)) => Some(SealedSecret { nonce, ciphertext }),
             (None, None) => None,
@@ -56,6 +69,17 @@ impl TryFrom<LlmProviderRow> for LlmProviderRecord {
                 ));
             }
         };
+        let reasoning_effort = row
+            .reasoning_effort
+            .as_deref()
+            .map(|raw| {
+                ReasoningEffort::parse(raw).ok_or_else(|| {
+                    CoreError::Internal(
+                        "stored llm provider reasoning effort is invalid".to_owned(),
+                    )
+                })
+            })
+            .transpose()?;
         Ok(Self {
             id: ProviderId(row.id),
             name: row.name,
@@ -64,12 +88,23 @@ impl TryFrom<LlmProviderRow> for LlmProviderRecord {
             model: row.model,
             timeout: Duration::from_millis(timeout_ms),
             max_retries,
+            max_concurrency,
             pricing: TokenPricing {
                 input_cents_per_mtok: pricing_value(row.input_cents_per_mtok)?,
                 output_cents_per_mtok: pricing_value(row.output_cents_per_mtok)?,
             },
             api_key,
             enabled: row.enabled,
+            reasoning_effort,
+            generation: GenerationParams {
+                max_tokens: row.max_tokens.map(u32::try_from).transpose().map_err(|_| {
+                    CoreError::Internal("stored llm provider max tokens is invalid".to_owned())
+                })?,
+                temperature: row.temperature,
+                frequency_penalty: row.frequency_penalty,
+                presence_penalty: row.presence_penalty,
+                repeat_penalty: row.repeat_penalty,
+            },
             created_at: row.created_at,
             updated_at: row.updated_at,
         })

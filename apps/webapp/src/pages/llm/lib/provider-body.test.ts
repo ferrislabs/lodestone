@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
 	buildCreateBody,
 	buildUpdateBody,
+	defaultConcurrency,
 	EMPTY_PROVIDER_VALUES,
 	fieldErrorsFromPaths,
 	numericErrors,
@@ -19,8 +20,16 @@ const provider: Provider = {
 	enabled: true,
 	has_api_key: true,
 	max_retries: 2,
+	max_concurrency: 4,
+	in_flight: 0,
 	timeout_seconds: 30,
 	pricing: { input_cents_per_mtok: 300, output_cents_per_mtok: 1500 },
+	reasoning_effort: null,
+	max_tokens: null,
+	temperature: null,
+	frequency_penalty: null,
+	presence_penalty: null,
+	repeat_penalty: null,
 	tiers: ['triage'],
 	created_at: '2026-01-01T00:00:00Z',
 	updated_at: '2026-01-01T00:00:00Z',
@@ -56,6 +65,130 @@ describe('buildUpdateBody', () => {
 		expect(buildUpdateBody(values, 'keep').pricing).toEqual({
 			input_cents_per_mtok: 300,
 			output_cents_per_mtok: 1500,
+		})
+	})
+})
+
+describe('reasoning effort', () => {
+	it('loads the stored value and defaults to empty', () => {
+		expect(valuesFromProvider(provider).reasoning_effort).toBe('')
+		expect(
+			valuesFromProvider({ ...provider, reasoning_effort: 'none' })
+				.reasoning_effort,
+		).toBe('none')
+	})
+
+	it('sends the value on update and null when cleared', () => {
+		const values = valuesFromProvider(provider)
+		expect(
+			buildUpdateBody({ ...values, reasoning_effort: 'high' }, 'keep')
+				.reasoning_effort,
+		).toBe('high')
+		expect(buildUpdateBody(values, 'keep').reasoning_effort).toBeNull()
+		expect(JSON.stringify(buildUpdateBody(values, 'keep'))).toContain(
+			'"reasoning_effort":null',
+		)
+	})
+
+	it('omits it on create unless chosen', () => {
+		expect('reasoning_effort' in buildCreateBody(EMPTY_PROVIDER_VALUES)).toBe(
+			false,
+		)
+		expect(
+			buildCreateBody({ ...EMPTY_PROVIDER_VALUES, reasoning_effort: 'none' })
+				.reasoning_effort,
+		).toBe('none')
+	})
+
+	it('maps the server path to the field', () => {
+		expect(
+			fieldErrorsFromPaths({ reasoning_effort: 'must be one of none' }),
+		).toEqual({ reasoning_effort: 'must be one of none' })
+	})
+})
+
+describe('generation parameters', () => {
+	const tuned: Provider = {
+		...provider,
+		max_tokens: 900,
+		temperature: 0.2,
+		frequency_penalty: 0.4,
+		presence_penalty: -0.5,
+		repeat_penalty: 1.3,
+	}
+
+	it('loads stored values as text and absent ones as empty', () => {
+		const values = valuesFromProvider(tuned)
+		expect(values.max_tokens).toBe('900')
+		expect(values.temperature).toBe('0.2')
+		expect(values.presence_penalty).toBe('-0.5')
+		expect(values.repeat_penalty).toBe('1.3')
+		expect(valuesFromProvider(provider).max_tokens).toBe('')
+		expect(valuesFromProvider(provider).temperature).toBe('')
+	})
+
+	it('omits blank values on create', () => {
+		const body = buildCreateBody(EMPTY_PROVIDER_VALUES)
+		for (const field of [
+			'max_tokens',
+			'temperature',
+			'frequency_penalty',
+			'presence_penalty',
+			'repeat_penalty',
+		]) {
+			expect(field in body).toBe(false)
+		}
+	})
+
+	it('sends numbers on create, accepting a decimal comma', () => {
+		const body = buildCreateBody({
+			...EMPTY_PROVIDER_VALUES,
+			max_tokens: '900',
+			temperature: '0,2',
+			repeat_penalty: '1.3',
+		})
+		expect(body.max_tokens).toBe(900)
+		expect(body.temperature).toBe(0.2)
+		expect(body.repeat_penalty).toBe(1.3)
+		expect('presence_penalty' in body).toBe(false)
+	})
+
+	it('sends the values on update and null for cleared ones', () => {
+		const kept = buildUpdateBody(valuesFromProvider(tuned), 'keep')
+		expect(kept.max_tokens).toBe(900)
+		expect(kept.presence_penalty).toBe(-0.5)
+		const cleared = buildUpdateBody(
+			{ ...valuesFromProvider(tuned), max_tokens: '', temperature: '0' },
+			'keep',
+		)
+		expect(cleared.max_tokens).toBeNull()
+		expect(cleared.temperature).toBe(0)
+		expect(JSON.stringify(cleared)).toContain('"max_tokens":null')
+	})
+
+	it('maps the server paths to the fields', () => {
+		expect(
+			fieldErrorsFromPaths({
+				temperature: 'must be between 0 and 2',
+				repeat_penalty: 'must be between 1 and 2',
+			}),
+		).toEqual({
+			temperature: 'must be between 0 and 2',
+			repeat_penalty: 'must be between 1 and 2',
+		})
+	})
+
+	it('flags non numeric input in French', () => {
+		expect(
+			numericErrors({
+				...EMPTY_PROVIDER_VALUES,
+				max_tokens: '1.5',
+				temperature: 'chaud',
+				frequency_penalty: '-0,5',
+			}),
+		).toEqual({
+			max_tokens: 'Doit être un entier positif ou nul',
+			temperature: 'Doit être un nombre',
 		})
 	})
 })
@@ -102,5 +235,51 @@ describe('field mapping', () => {
 			numericErrors({ ...EMPTY_PROVIDER_VALUES, max_retries: '2x' }),
 		).toEqual({ max_retries: 'Doit être un entier positif ou nul' })
 		expect(numericErrors(EMPTY_PROVIDER_VALUES)).toEqual({})
+	})
+})
+
+describe('max concurrency', () => {
+	it('loads the stored limit and sends it on create and update', () => {
+		const values = valuesFromProvider({ ...provider, max_concurrency: 6 })
+		expect(values.max_concurrency).toBe('6')
+		expect(buildUpdateBody(values, 'keep').max_concurrency).toBe(6)
+		expect(
+			buildCreateBody({ ...EMPTY_PROVIDER_VALUES, max_concurrency: '3' })
+				.max_concurrency,
+		).toBe(3)
+	})
+
+	it('leaves the server default when the field is empty', () => {
+		expect('max_concurrency' in buildCreateBody(EMPTY_PROVIDER_VALUES)).toBe(
+			false,
+		)
+	})
+
+	it('maps the server path and rejects a non integer', () => {
+		expect(
+			fieldErrorsFromPaths({ max_concurrency: 'doit être entre 1 et 32' })
+				.max_concurrency,
+		).toBe('doit être entre 1 et 32')
+		expect(
+			numericErrors({ ...EMPTY_PROVIDER_VALUES, max_concurrency: '2,5' })
+				.max_concurrency,
+		).toBeDefined()
+	})
+
+	it('defaults to 2 for a local OpenAI-compatible server and 4 otherwise', () => {
+		expect(
+			defaultConcurrency('openai_compatible', 'http://localhost:11434'),
+		).toBe(2)
+		expect(
+			defaultConcurrency('openai_compatible', 'http://127.0.0.1:11434/v1'),
+		).toBe(2)
+		expect(defaultConcurrency('openai_compatible', 'http://[::1]:11434')).toBe(
+			2,
+		)
+		expect(
+			defaultConcurrency('openai_compatible', 'https://llm.example/v1'),
+		).toBe(4)
+		expect(defaultConcurrency('mistral', 'http://localhost:11434')).toBe(4)
+		expect(defaultConcurrency('openai_compatible', 'pas une url')).toBe(4)
 	})
 })

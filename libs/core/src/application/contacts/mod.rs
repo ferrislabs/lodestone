@@ -10,10 +10,12 @@ use crate::{
     application::{
         LodestoneUseCase,
         sources::{SourceRunError, rescore},
+        timeline::record_signal,
     },
     domain::{
         NormalizedDomain,
         contact::{ContactFinder, ContactTargets, FoundAddress, select_for_profile},
+        host::transient_checked_at,
         job::ports::Clock,
         lead::{
             ContactEmail, ContactId, ContactKind, ContactMethod, Lead, Signal, SignalId,
@@ -61,6 +63,39 @@ impl LodestoneUseCase {
         T: ContactTargets,
         C: Clock,
     {
+        self.run_contact_batch(finder, targets, settings, clock, true)
+            .await
+    }
+
+    pub async fn listen_contact_finder<F, T, C>(
+        &self,
+        finder: &F,
+        targets: &T,
+        settings: ContactRunSettings,
+        clock: &C,
+    ) -> Result<ContactRunReport, SourceRunError>
+    where
+        F: ContactFinder,
+        T: ContactTargets,
+        C: Clock,
+    {
+        self.run_contact_batch(finder, targets, settings, clock, false)
+            .await
+    }
+
+    async fn run_contact_batch<F, T, C>(
+        &self,
+        finder: &F,
+        targets: &T,
+        settings: ContactRunSettings,
+        clock: &C,
+        record_empty: bool,
+    ) -> Result<ContactRunReport, SourceRunError>
+    where
+        F: ContactFinder,
+        T: ContactTargets,
+        C: Clock,
+    {
         let name = finder.name();
         let profiles = self.list_active_profiles().await?;
         if profiles.is_empty() {
@@ -72,6 +107,9 @@ impl LodestoneUseCase {
         let domains = targets
             .list_due(name, now - revisit, settings.batch_size, finder.requires())
             .await?;
+        if domains.is_empty() && !record_empty {
+            return Ok(ContactRunReport::default());
+        }
 
         let runs: Vec<Run> = profiles
             .iter()
@@ -85,8 +123,10 @@ impl LodestoneUseCase {
                 )
             })
             .collect();
-        for run in &runs {
-            self.start_contact_run(run).await?;
+        if record_empty {
+            for run in &runs {
+                self.start_contact_run(run).await?;
+            }
         }
 
         let mut report = ContactRunReport::default();
@@ -97,10 +137,20 @@ impl LodestoneUseCase {
                 Ok(found) => found,
                 Err(SourceError::RateLimited { .. }) => {
                     report.rate_limited = true;
+                    targets
+                        .mark_checked(
+                            std::slice::from_ref(domain),
+                            name,
+                            transient_checked_at(now, settings.revisit_interval),
+                        )
+                        .await?;
                     break;
                 }
                 Err(error) => {
                     debug!(%domain, %error, "contact finder skipped a domain");
+                    targets
+                        .mark_checked(std::slice::from_ref(domain), name, clock.now())
+                        .await?;
                     continue;
                 }
             };
@@ -120,6 +170,15 @@ impl LodestoneUseCase {
             }
         }
         report.domains = count(checked.len());
+
+        if !record_empty && report.domains == 0 {
+            return Ok(report);
+        }
+        if !record_empty {
+            for run in &runs {
+                self.start_contact_run(run).await?;
+            }
+        }
 
         for (run, contacts) in runs.iter().zip(per_profile) {
             let outcome = RunOutcome::Succeeded {
@@ -151,7 +210,7 @@ impl LodestoneUseCase {
         Ok(())
     }
 
-    #[transactional(lead, contact, signal, suppression)]
+    #[transactional(lead, contact, signal, suppression, timeline)]
     pub(crate) async fn record_contacts(
         &self,
         active: &ActiveProfile,
@@ -164,6 +223,7 @@ impl LodestoneUseCase {
         let mut contacts = contact_repository;
         let mut signals = signal_repository;
         let mut suppressions = suppression_repository;
+        let mut timeline = timeline_repository;
         if suppressions.is_domain_suppressed(domain).await? {
             return Ok(0);
         }
@@ -213,20 +273,21 @@ impl LodestoneUseCase {
                 ContactMethod::PublicPage | ContactMethod::LlmExtraction => CONTACT_SIGNAL,
             })
             .map_err(|_| CoreError::Internal("invalid contact signal kind".to_owned()))?;
-            signals
-                .record(&Signal {
-                    id: SignalId(generate_uuid_v7()),
-                    lead_id: lead.id,
-                    kind,
-                    value: Some(candidate.address.local_part().to_owned()),
-                    source,
-                    raw: json!({ "address": candidate.address.as_str(), "method": candidate.method.as_str() }),
-                    provenance: candidate.provenance.clone(),
-                    strength: candidate.confidence,
-                    observed_at: now,
-                    agent: None,
-                })
-                .await?;
+            let signal = Signal {
+                id: SignalId(generate_uuid_v7()),
+                lead_id: lead.id,
+                kind,
+                value: Some(candidate.address.local_part().to_owned()),
+                source,
+                raw: json!({ "address": candidate.address.as_str(), "method": candidate.method.as_str() }),
+                provenance: candidate.provenance.clone(),
+                strength: candidate.confidence,
+                observed_at: now,
+                agent: None,
+            };
+            if signals.record(&signal).await? {
+                record_signal(&mut timeline, &signal, now).await?;
+            }
             stored += 1;
         }
         if stored > 0 {
@@ -234,7 +295,7 @@ impl LodestoneUseCase {
                 &mut leads,
                 &mut signals,
                 lead.id,
-                &active.revision.definition.definition().scoring,
+                &active.revision.definition.definition().evidence,
                 now,
             )
             .await?;

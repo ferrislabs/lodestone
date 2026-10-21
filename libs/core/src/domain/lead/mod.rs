@@ -5,6 +5,7 @@ use thiserror::Error;
 
 use crate::domain::{
     NormalizedDomain,
+    llm::RunProvenance,
     profile::{ProfileId, RevisionNumber, definition::AgentId},
     prompt::DraftMessage,
     values::{EmailAddress, Provenance, SignalKind, SourceName, UnitInterval},
@@ -16,7 +17,10 @@ pub mod query;
 
 macro_rules! uuid_id {
     ($name:ident) => {
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+        #[derive(
+            Debug, Clone, Copy, PartialEq, Eq, Hash, ::serde::Serialize, ::serde::Deserialize,
+        )]
+        #[serde(transparent)]
         pub struct $name(pub ::uuid::Uuid);
 
         impl ::std::str::FromStr for $name {
@@ -150,7 +154,10 @@ pub struct Lead {
     pub domain: NormalizedDomain,
     pub status: LeadStatus,
     pub score: Score,
-    pub score_breakdown: Vec<crate::domain::scoring::ScoreContribution>,
+    pub confidence: Option<f64>,
+    pub verdict: Option<crate::domain::qualification::Verdict>,
+    pub llm_score: Option<u8>,
+    pub qualified_at: Option<DateTime<Utc>>,
     pub first_seen_at: DateTime<Utc>,
     pub last_seen_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
@@ -229,13 +236,23 @@ pub struct Assessment {
     pub lead_id: LeadId,
     pub profile_revision: RevisionNumber,
     pub summary: String,
+    pub verdict_narrative: String,
     pub approach_angle: String,
     pub evidence: Vec<Evidence>,
-    pub model: String,
-    pub prompt_version: String,
+    pub evidence_verified: bool,
+    pub quality_warnings: Vec<QualityWarning>,
+    pub provenance: RunProvenance,
     pub draft: Option<DraftMessage>,
     pub draft_review: Option<draft::DraftReview>,
     pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum QualityWarning {
+    Repetition,
+    TooLong,
+    RestatedFigures,
+    DroppedQuotes,
 }
 
 macro_rules! str_enum {
@@ -258,6 +275,13 @@ macro_rules! str_enum {
 }
 
 pub(crate) use str_enum;
+
+str_enum!(QualityWarning {
+    Repetition => "repetition",
+    TooLong => "too_long",
+    RestatedFigures => "restated_figures",
+    DroppedQuotes => "dropped_quotes",
+});
 
 str_enum!(ContactMethod {
     PublicPage => "public_page",

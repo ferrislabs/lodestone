@@ -15,9 +15,11 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 chrono = { workspace = true }
 regex = { workspace = true }
+thiserror = { workspace = true }
 url = { workspace = true }
 
 [dev-dependencies]
+dns = { workspace = true }
 uuid = { workspace = true }
 sqlx = { workspace = true }
 tokio = { workspace = true, features = ["test-util"] }

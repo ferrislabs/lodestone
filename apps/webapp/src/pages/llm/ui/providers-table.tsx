@@ -11,9 +11,12 @@ import {
 } from '#/components/ui/table'
 import { translateApiMessage } from '#/lib/api-errors'
 import {
+	inFlightLabel,
 	providerKindLabel,
+	reasoningLabel,
+	testErrorHint,
 	testErrorLabel,
-	tierLabel,
+	tierShortLabel,
 } from '#/pages/llm/lib/labels'
 import { keyLabel } from '#/pages/llm/lib/tiers'
 import type { Provider, TestResult } from '#/pages/llm/lib/types'
@@ -79,7 +82,7 @@ export function ProvidersTable({
 							<TableHead>URL de base</TableHead>
 							<TableHead>Statut</TableHead>
 							<TableHead>Clé API</TableHead>
-							<TableHead>Niveaux</TableHead>
+							<TableHead>Par défaut pour</TableHead>
 							<TableHead className="text-right">Actions</TableHead>
 						</TableRow>
 					</TableHeader>
@@ -127,7 +130,15 @@ export function ProvidersTable({
 											</button>
 										</TableCell>
 										<TableCell>{providerKindLabel(provider.kind)}</TableCell>
-										<TableCell>{provider.model}</TableCell>
+										<TableCell>
+											{provider.model}
+											{provider.reasoning_effort ? (
+												<span className="block text-xs text-muted-foreground">
+													Raisonnement :{' '}
+													{reasoningLabel(provider.reasoning_effort)}
+												</span>
+											) : null}
+										</TableCell>
 										<TableCell className="max-w-48 truncate text-muted-foreground">
 											{provider.base_url}
 										</TableCell>
@@ -137,6 +148,12 @@ export function ProvidersTable({
 											>
 												{provider.enabled ? 'Activé' : 'Désactivé'}
 											</Badge>
+											<span className="block text-xs text-muted-foreground">
+												{inFlightLabel(
+													provider.in_flight,
+													provider.max_concurrency,
+												)}
+											</span>
 										</TableCell>
 										<TableCell>
 											<Badge
@@ -149,7 +166,7 @@ export function ProvidersTable({
 											<div className="flex flex-wrap gap-1">
 												{provider.tiers.map((tier) => (
 													<Badge key={tier} variant="secondary">
-														{tierLabel(tier)}
+														{tierShortLabel(tier)}
 													</Badge>
 												))}
 											</div>
@@ -232,10 +249,13 @@ function TestOutcomeView({ outcome }: { outcome: TestOutcome }) {
 			</output>
 		)
 	}
+	const kind = result?.error?.kind ?? 'other'
+	const hint = testErrorHint(kind)
 	return (
 		<p role="alert" className="text-sm text-destructive">
-			{outcome.providerName} : {testErrorLabel(result?.error?.kind ?? 'other')}{' '}
-			- {translateApiMessage(result?.error?.message ?? 'The test failed')}
+			{outcome.providerName} : {testErrorLabel(kind)} -{' '}
+			{translateApiMessage(result?.error?.message ?? 'The test failed')}
+			{hint ? ` ${hint}` : null}
 		</p>
 	)
 }

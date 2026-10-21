@@ -8,9 +8,12 @@ use tokio::{
 };
 use tracing::{Instrument, info_span, warn};
 
-use crate::domain::job::{
-    ClaimedJob, FailureDecision, Job, RetryPolicy,
-    ports::{Clock, JobFailure, JobQueue},
+use crate::domain::{
+    agent_work::CancelReason,
+    job::{
+        ClaimedJob, FailureDecision, Job, RetryPolicy,
+        ports::{Clock, JobFailure, JobQueue},
+    },
 };
 
 #[cfg(test)]
@@ -28,6 +31,7 @@ pub enum JobError {
 pub enum JobOutcome {
     Done,
     RescheduleAt(chrono::DateTime<chrono::Utc>),
+    Cancelled(CancelReason),
 }
 
 pub trait JobHandler: Send + Sync {
@@ -181,6 +185,13 @@ where
                     .reschedule(job.id, claimed.token, at, self.clock.now())
                     .await;
                 report("reschedule", result);
+            }
+            Outcome::Finished(Ok(JobOutcome::Cancelled(reason))) => {
+                let result = self
+                    .queue
+                    .cancel(job.id, claimed.token, reason, self.clock.now())
+                    .await;
+                report("cancel", result);
             }
             Outcome::Finished(Err(error)) => {
                 let failure = self.failure(job, error);

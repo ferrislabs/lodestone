@@ -3,6 +3,7 @@ import { Input } from '#/components/ui/input'
 import { Label } from '#/components/ui/label'
 import { Textarea } from '#/components/ui/textarea'
 import type { DraftValues } from '#/pages/drafts/lib/types'
+import { DraftActions } from './draft-actions'
 
 interface DraftEditorProps {
 	values: DraftValues
@@ -10,8 +11,10 @@ interface DraftEditorProps {
 	formError: string | null
 	dirty: boolean
 	saving: boolean
+	contactAddress: string | null
 	onChange: (field: keyof DraftValues, value: string) => void
 	onSave: () => void
+	onCopy: (text: string) => void
 }
 
 export function DraftEditor({
@@ -20,8 +23,10 @@ export function DraftEditor({
 	formError,
 	dirty,
 	saving,
+	contactAddress,
 	onChange,
 	onSave,
+	onCopy,
 }: DraftEditorProps) {
 	return (
 		<form
@@ -72,6 +77,12 @@ export function DraftEditor({
 					</p>
 				) : null}
 			</div>
+			<DraftActions
+				subject={values.subject}
+				body={values.body}
+				contactAddress={contactAddress}
+				onCopy={onCopy}
+			/>
 			{formError ? (
 				<p role="alert" className="text-sm text-destructive">
 					{formError}

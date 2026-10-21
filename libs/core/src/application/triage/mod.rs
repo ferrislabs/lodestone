@@ -1,42 +1,33 @@
-use std::num::NonZeroU32;
+use std::borrow::Cow;
 
 use chrono::{DateTime, Utc};
 use common::{CoreError, generate_uuid_v7};
 use lodestone_macros::transactional;
 use serde_json::json;
-use tracing::{debug, warn};
 
 use crate::{
     application::{
         LodestoneUseCase,
-        llm::gateway::{CallSettings, LlmCallError, Prompt, RunBudget, call_structured_cached},
-        sources::SourceRunError,
+        sources::{Collected, LeadCreation, SourceRunError, collect_until},
     },
     domain::{
-        contact::FoundAddress,
+        agent_work::{AgentWork, CancelReason, WorkKind, WorkTarget},
+        enrichment::EnrichmentStep,
         job::ports::Clock,
-        lead::ContactMethod,
-        llm::{
-            LlmProvider, UntrustedDocument,
-            cache::{CacheScope, LlmCache},
-        },
         profile::{
             ActiveProfile,
-            definition::{Agent, KeywordSource},
+            definition::{AgentId, ProfileDefinition, SearchAgent},
         },
-        prompt::{TRIAGE_V1, TriageVerdict},
         run::{Run, RunId, RunOutcome, ports::RunRepository},
         source::{Observation, SourceError},
-        triage::{Candidate, Route, route},
-        values::{EmailAddress, SourceName, UnitInterval},
+        triage::{Candidate, Route, passes_filters, route},
+        values::{SourceName, UnitInterval},
     },
 };
 
 const TITLE_MAX_CHARS: usize = 200;
 const RULES_STRENGTH: f64 = 0.7;
-const LLM_STRENGTH: f64 = 0.6;
-const CONTACT_CONFIDENCE: f64 = 0.5;
-const BUDGET_EXHAUSTED: &str = "llm budget exhausted";
+const AMBIGUOUS_STRENGTH: f64 = 0.5;
 
 pub trait CandidateSource: Send + Sync {
     fn name(&self) -> SourceName;
@@ -48,28 +39,29 @@ pub trait CandidateSource: Send + Sync {
     ) -> impl Future<Output = Result<Vec<Candidate>, SourceError>> + Send;
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct TriageSettings {
-    pub call: CallSettings,
-    pub max_tokens: u32,
-    pub budget_cents: NonZeroU32,
-}
-
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TriageReport {
     pub candidates: u64,
     pub accepted_by_rules: u64,
+    pub accepted_ambiguous: u64,
     pub rejected_by_rules: u64,
-    pub sent_to_llm: u64,
-    pub accepted_by_llm: u64,
-    pub deferred: u64,
-    pub budget_exhausted: bool,
+    pub rejected_by_filters: u64,
+    pub skipped_no_lead: u64,
+    pub runs: u64,
+    pub cancelled: u64,
+    pub cancel_reason: Option<CancelReason>,
 }
 
-struct Decided {
-    observations: Vec<Observation>,
-    contacts: Vec<(crate::domain::NormalizedDomain, FoundAddress)>,
-    budget_exhausted: bool,
+impl TriageReport {
+    pub fn accepted(&self) -> u64 {
+        self.accepted_by_rules + self.accepted_ambiguous
+    }
+
+    pub fn all_cancelled(&self) -> Option<CancelReason> {
+        (self.runs > 0 && self.cancelled == self.runs)
+            .then_some(self.cancel_reason)
+            .flatten()
+    }
 }
 
 fn count(value: usize) -> u64 {
@@ -88,78 +80,180 @@ fn candidate_text(candidate: &Candidate) -> String {
     format!("{}\n\n{}", candidate.title, candidate.text)
 }
 
-struct TriageLlm<'a, P, C> {
-    provider: Option<&'a P>,
-    cache: &'a C,
-    settings: TriageSettings,
+struct KeywordTarget<'a> {
+    agent: Option<&'a AgentId>,
+    rules: Cow<'a, SearchAgent>,
+}
+
+impl KeywordTarget<'_> {
+    fn work_target(&self) -> WorkTarget {
+        match self.agent {
+            Some(agent) => WorkTarget::new(WorkKind::Sourcing, agent),
+            None => WorkTarget::enrichment(EnrichmentStep::CompanyJobs),
+        }
+    }
+}
+
+fn keyword_targets(definition: &ProfileDefinition, source: SourceName) -> Vec<KeywordTarget<'_>> {
+    let mut targets: Vec<KeywordTarget<'_>> = definition
+        .enabled_search_agents(source)
+        .map(|agent| KeywordTarget {
+            agent: Some(&agent.id),
+            rules: Cow::Borrowed(agent),
+        })
+        .collect();
+    if source == SourceName::Ats
+        && let Some(rules) = definition.company_jobs_rules()
+    {
+        targets.push(KeywordTarget {
+            agent: None,
+            rules: Cow::Owned(rules),
+        });
+    }
+    targets
+}
+
+fn observation(
+    candidate: &Candidate,
+    agent: Option<&AgentId>,
+    matched: &[String],
+    excluded: Option<&[String]>,
+    route: &str,
+    strength: f64,
+) -> Result<Observation, CoreError> {
+    let mut raw = json!({
+        "title": candidate.title,
+        "matched": matched,
+        "route": route,
+        "details": candidate.details,
+    });
+    if let Some(excluded) = excluded {
+        raw["excluded"] = json!(excluded);
+    }
+    Ok(Observation {
+        domain: candidate.domain.clone(),
+        kind: candidate.kind.clone(),
+        value: Some(short_title(candidate)),
+        raw,
+        provenance: candidate.provenance.clone(),
+        strength: self::strength(strength)?,
+        observed_at: candidate.observed_at,
+        agent: agent.cloned(),
+    })
+}
+
+fn decide(
+    target: &KeywordTarget<'_>,
+    candidates: &[Candidate],
+    report: &mut TriageReport,
+) -> Result<Vec<Observation>, CoreError> {
+    let agent = target.rules.as_ref();
+    let mut observations = Vec::new();
+    for candidate in candidates {
+        if !passes_filters(&agent.filters, candidate) {
+            report.rejected_by_filters += 1;
+            continue;
+        }
+        match route(&candidate_text(candidate), agent) {
+            Route::Reject => report.rejected_by_rules += 1,
+            Route::Accept { matched } => {
+                report.accepted_by_rules += 1;
+                observations.push(observation(
+                    candidate,
+                    target.agent,
+                    &matched,
+                    None,
+                    "keywords",
+                    RULES_STRENGTH,
+                )?);
+            }
+            Route::Ambiguous { matched, excluded } => {
+                report.accepted_ambiguous += 1;
+                observations.push(observation(
+                    candidate,
+                    target.agent,
+                    &matched,
+                    Some(&excluded),
+                    "keywords_ambiguous",
+                    AMBIGUOUS_STRENGTH,
+                )?);
+            }
+        }
+    }
+    Ok(observations)
 }
 
 impl LodestoneUseCase {
-    pub async fn run_triage<S, P, C, K>(
+    pub async fn run_triage<S, K>(
         &self,
         source: &S,
-        provider: Option<&P>,
-        cache: &C,
-        settings: TriageSettings,
         clock: &K,
     ) -> Result<TriageReport, SourceRunError>
     where
         S: CandidateSource,
-        P: LlmProvider,
-        C: LlmCache,
         K: Clock,
     {
         let name = source.name();
         let profiles: Vec<ActiveProfile> = self
-            .list_active_profiles()
+            .refreshed_active_profiles()
             .await?
             .into_iter()
             .filter(|active| {
-                active
-                    .revision
-                    .definition
-                    .definition()
-                    .enabled_keyword_rules(name)
-                    .next()
-                    .is_some()
+                !keyword_targets(active.revision.definition.definition(), name).is_empty()
             })
             .collect();
-        let targets: Vec<(&ActiveProfile, &Agent, &KeywordSource)> = profiles
+        let targets: Vec<(&ActiveProfile, KeywordTarget<'_>)> = profiles
             .iter()
             .flat_map(|active| {
-                active
-                    .revision
-                    .definition
-                    .definition()
-                    .enabled_agents(name)
-                    .filter_map(move |agent| {
-                        agent
-                            .source
-                            .keyword_rules()
-                            .map(|rules| (active, agent, rules))
-                    })
+                keyword_targets(active.revision.definition.definition(), name)
+                    .into_iter()
+                    .map(move |target| (active, target))
             })
             .collect();
         if targets.is_empty() {
             return Ok(TriageReport::default());
         }
+        let works: Vec<AgentWork> = targets
+            .iter()
+            .map(|(active, target)| self.agent_work(active, target.work_target()))
+            .collect();
 
         let started_at = clock.now();
         let runs: Vec<Run> = targets
             .iter()
-            .map(|(active, agent, _)| {
+            .map(|(active, target)| {
                 Run::start(
                     RunId(generate_uuid_v7()),
                     active.profile.id,
                     name,
-                    Some(agent.id.clone()),
+                    target.agent.cloned(),
                     started_at,
                 )
             })
             .collect();
         self.insert_triage_runs(&runs).await?;
 
-        let candidates = match source.collect(&profiles, started_at).await {
+        let collected = match collect_until(&works, source.collect(&profiles, started_at)).await {
+            Collected::Items(collected) => collected,
+            Collected::Stopped(reason) => {
+                for (run, work) in runs.iter().zip(&works) {
+                    let outcome = RunOutcome::Cancelled {
+                        volume: 0,
+                        signals: 0,
+                        reason: work.stop_reason().unwrap_or(reason),
+                    };
+                    self.finish_triage_run(run.id, &outcome, clock.now())
+                        .await?;
+                }
+                return Ok(TriageReport {
+                    runs: count(runs.len()),
+                    cancelled: count(runs.len()),
+                    cancel_reason: Some(reason),
+                    ..TriageReport::default()
+                });
+            }
+        };
+        let candidates = match collected {
             Ok(candidates) => candidates,
             Err(error) => {
                 let outcome = RunOutcome::Failed {
@@ -178,20 +272,13 @@ impl LodestoneUseCase {
         let volume = count(candidates.len());
         let mut report = TriageReport {
             candidates: volume,
+            runs: count(runs.len()),
             ..TriageReport::default()
         };
-        let llm = TriageLlm {
-            provider,
-            cache,
-            settings,
-        };
         let mut first_error: Option<CoreError> = None;
-        for ((active, agent, rules), run) in targets.iter().zip(&runs) {
-            let decided = match self
-                .decide(active, agent, rules, &candidates, &llm, &mut report)
-                .await
-            {
-                Ok(decided) => decided,
+        for (((active, target), run), work) in targets.iter().zip(&runs).zip(&works) {
+            let observations = match decide(target, &candidates, &mut report) {
+                Ok(observations) => observations,
                 Err(error) => {
                     let outcome = RunOutcome::Failed {
                         volume,
@@ -204,15 +291,24 @@ impl LodestoneUseCase {
                     continue;
                 }
             };
-            let signals = count(decided.observations.len());
-            let recorded = self.record_decided(active, name, &decided, clock).await;
+            let creation = match target.agent {
+                Some(_) => LeadCreation::Create,
+                None => LeadCreation::ExistingOnly,
+            };
+            let recorded = self
+                .record_until_stopped(
+                    active,
+                    name,
+                    observations
+                        .into_iter()
+                        .map(|observation| vec![observation]),
+                    work,
+                    creation,
+                    clock,
+                )
+                .await;
             let outcome = match &recorded {
-                Ok(()) if decided.budget_exhausted => RunOutcome::Failed {
-                    volume,
-                    signals,
-                    error: BUDGET_EXHAUSTED.to_owned(),
-                },
-                Ok(()) => RunOutcome::Succeeded { volume, signals },
+                Ok(recorded) => recorded.outcome(volume),
                 Err(error) => RunOutcome::Failed {
                     volume,
                     signals: 0,
@@ -221,189 +317,23 @@ impl LodestoneUseCase {
             };
             self.finish_triage_run(run.id, &outcome, clock.now())
                 .await?;
-            if let Err(error) = recorded {
-                first_error.get_or_insert(error);
+            match recorded {
+                Ok(recorded) => {
+                    report.skipped_no_lead += recorded.skipped.no_lead;
+                    if let Some(reason) = recorded.stopped {
+                        report.cancelled += 1;
+                        report.cancel_reason.get_or_insert(reason);
+                    }
+                }
+                Err(error) => {
+                    first_error.get_or_insert(error);
+                }
             }
-            report.budget_exhausted |= decided.budget_exhausted;
         }
         match first_error {
             Some(error) => Err(error.into()),
             None => Ok(report),
         }
-    }
-
-    async fn record_decided<K: Clock>(
-        &self,
-        active: &ActiveProfile,
-        name: SourceName,
-        decided: &Decided,
-        clock: &K,
-    ) -> Result<(), CoreError> {
-        self.record_observations(active, name, &decided.observations)
-            .await?;
-        for (domain, address) in &decided.contacts {
-            self.record_contacts(
-                active,
-                domain,
-                std::slice::from_ref(address),
-                name,
-                clock.now(),
-            )
-            .await?;
-        }
-        Ok(())
-    }
-
-    async fn decide<P, C>(
-        &self,
-        active: &ActiveProfile,
-        agent: &Agent,
-        rules: &KeywordSource,
-        candidates: &[Candidate],
-        llm: &TriageLlm<'_, P, C>,
-        report: &mut TriageReport,
-    ) -> Result<Decided, CoreError>
-    where
-        P: LlmProvider,
-        C: LlmCache,
-    {
-        let definition = active.revision.definition.definition();
-        let system = TRIAGE_V1.system_with(definition, agent.relevance_criteria());
-        let tag = TRIAGE_V1.tag();
-        let settings = llm.settings;
-        let mut budget = RunBudget::new(settings.budget_cents);
-        let mut decided = Decided {
-            observations: Vec::new(),
-            contacts: Vec::new(),
-            budget_exhausted: false,
-        };
-        for candidate in candidates {
-            let content = candidate_text(candidate);
-            match route(&content, rules) {
-                Route::Reject => report.rejected_by_rules += 1,
-                Route::Accept { matched } => {
-                    report.accepted_by_rules += 1;
-                    decided.observations.push(Observation {
-                        domain: candidate.domain.clone(),
-                        kind: candidate.kind.clone(),
-                        value: Some(short_title(candidate)),
-                        raw: json!({
-                            "title": candidate.title,
-                            "matched": matched,
-                            "route": "keywords",
-                            "details": candidate.details,
-                        }),
-                        provenance: candidate.provenance.clone(),
-                        strength: strength(RULES_STRENGTH)?,
-                        observed_at: candidate.observed_at,
-                        agent: Some(agent.id.clone()),
-                    });
-                }
-                Route::Ambiguous { matched, .. } => {
-                    if decided.budget_exhausted
-                        || self.is_suppressed(&candidate.domain, None).await?
-                    {
-                        continue;
-                    }
-                    let Some(provider) = llm.provider else {
-                        report.deferred += 1;
-                        continue;
-                    };
-                    let documents = [UntrustedDocument {
-                        source: candidate.provenance.as_str(),
-                        content: &content,
-                    }];
-                    let scope = CacheScope {
-                        profile_id: active.profile.id,
-                        revision: active.revision.number,
-                        prompt: tag.clone(),
-                        domain: candidate.domain.clone(),
-                        agent: Some(agent.id.clone()),
-                    };
-                    let prompt = Prompt {
-                        system: &system,
-                        instruction: TRIAGE_V1.instruction(),
-                        documents: &documents,
-                        max_tokens: settings.max_tokens,
-                    };
-                    report.sent_to_llm += 1;
-                    let verdict = match call_structured_cached::<TriageVerdict, _, _>(
-                        provider,
-                        llm.cache,
-                        &scope,
-                        prompt,
-                        settings.call,
-                        &mut budget,
-                    )
-                    .await
-                    {
-                        Ok(verdict) => verdict,
-                        Err(LlmCallError::BudgetExhausted) => {
-                            report.sent_to_llm -= 1;
-                            decided.budget_exhausted = true;
-                            continue;
-                        }
-                        Err(error) => {
-                            warn!(domain = %candidate.domain, %error, "triage call failed, candidate skipped");
-                            continue;
-                        }
-                    };
-                    if !verdict.value.is_supported_relevance(&documents) {
-                        debug!(domain = %candidate.domain, "candidate judged not relevant");
-                        continue;
-                    }
-                    report.accepted_by_llm += 1;
-                    let evidence: Vec<serde_json::Value> = verdict
-                        .value
-                        .evidence
-                        .iter()
-                        .map(|quote| {
-                            json!({ "document_index": quote.document_index, "quote": quote.quote })
-                        })
-                        .collect();
-                    decided.observations.push(Observation {
-                        domain: candidate.domain.clone(),
-                        kind: candidate.kind.clone(),
-                        value: Some(short_title(candidate)),
-                        raw: json!({
-                            "title": candidate.title,
-                            "matched": matched,
-                            "route": "llm",
-                            "reason": verdict.value.reason,
-                            "evidence": evidence,
-                            "model": verdict.model,
-                            "prompt": tag,
-                            "from_cache": verdict.from_cache,
-                            "details": candidate.details,
-                        }),
-                        provenance: candidate.provenance.clone(),
-                        strength: strength(LLM_STRENGTH)?,
-                        observed_at: candidate.observed_at,
-                        agent: Some(agent.id.clone()),
-                    });
-                    if let Some(address) = verdict
-                        .value
-                        .contact_email
-                        .as_deref()
-                        .and_then(|raw| EmailAddress::parse(raw).ok())
-                        && !self
-                            .is_suppressed(&candidate.domain, Some(&address))
-                            .await?
-                    {
-                        decided.contacts.push((
-                            candidate.domain.clone(),
-                            FoundAddress {
-                                address,
-                                provenance: candidate.provenance.clone(),
-                                method: ContactMethod::LlmExtraction,
-                                confidence: strength(CONTACT_CONFIDENCE)?,
-                            },
-                        ));
-                    }
-                }
-            }
-        }
-        Ok(decided)
     }
 
     #[transactional(run)]

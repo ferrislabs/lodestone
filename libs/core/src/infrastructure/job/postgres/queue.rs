@@ -2,10 +2,10 @@ use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use common::CoreError;
-use sqlx::PgPool;
+use sqlx::{PgPool, query};
 
 use crate::{
-    ClaimedJob, Job, JobFailure, JobId, JobQueue, LeaseToken, NewJob,
+    CancelReason, ClaimedJob, Job, JobFailure, JobId, JobQueue, LeaseToken, NewJob,
     infrastructure::{job::postgres::model::JobRow, postgres::error::map_sqlx_error},
     new_lease_token,
 };
@@ -220,6 +220,32 @@ impl JobQueue for PgJobQueue {
             id.0,
             token.0,
             run_at,
+            now,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+        Ok(result.rows_affected() == 1)
+    }
+
+    #[tracing::instrument(skip(self), fields(db.system = "postgresql", db.operation = "update", db.table = "jobs", job.id = %id), err)]
+    async fn cancel(
+        &self,
+        id: JobId,
+        token: LeaseToken,
+        reason: CancelReason,
+        now: DateTime<Utc>,
+    ) -> Result<bool, CoreError> {
+        let result = query!(
+            r#"
+            UPDATE jobs
+            SET status = 'cancelled', lease_token = NULL, lease_until = NULL,
+                last_error = $3, updated_at = $4
+            WHERE id = $1 AND status = 'running' AND lease_token = $2
+            "#,
+            id.0,
+            token.0,
+            reason.as_str(),
             now,
         )
         .execute(&self.pool)

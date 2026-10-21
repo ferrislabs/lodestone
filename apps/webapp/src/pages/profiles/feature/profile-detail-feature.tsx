@@ -10,8 +10,12 @@ import {
 } from '#/pages/profiles/feature/definition-form'
 import { invalidateProfiles } from '#/pages/profiles/feature/invalidate'
 import { downloadProfileExport } from '#/pages/profiles/feature/profile-export'
+import { useAgentCalibration } from '#/pages/profiles/feature/use-agent-calibration'
 import { useDefinitionEditor } from '#/pages/profiles/feature/use-definition-editor'
+import { useEcosystemUi } from '#/pages/profiles/feature/use-ecosystem-ui'
 import { useProfileActivation } from '#/pages/profiles/feature/use-profile-activation'
+import { useProviderOptions } from '#/pages/profiles/feature/use-provider-options'
+import { useSourceCatalog } from '#/pages/profiles/feature/use-source-catalog'
 import {
 	prettyDefinition,
 	saveResultMessage,
@@ -29,14 +33,27 @@ import { ProfileActivation } from '#/pages/profiles/ui/profile-activation'
 import { ProfileDetail } from '#/pages/profiles/ui/profile-detail'
 import { ProfileEditor } from '#/pages/profiles/ui/profile-editor'
 import { RevisionHistory } from '#/pages/profiles/ui/revision-history'
+import { useSourceTrigger } from '#/pages/sources/feature/use-source-trigger'
+import { listenerSummaries } from '#/pages/sources/lib/listener'
 
 const NO_REVISIONS: RevisionSummary[] = []
+const LISTENER_REFRESH_MS = 15_000
 
 export function ProfileDetailFeature() {
 	const { profileId } = useParams({ from: '/_app/profiles/$profileId' })
 	const navigate = useNavigate()
 	const queryClient = useQueryClient()
 	const activation = useProfileActivation()
+	const sourceTrigger = useSourceTrigger()
+	const providers = useProviderOptions()
+	const catalog = useSourceCatalog()
+	const calibration = useAgentCalibration(profileId)
+	const ecosystem = useEcosystemUi(profileId)
+	const sourcesQuery = useQuery({
+		...lodestoneApi().get('/api/v1/sources').queryOptions,
+		refetchInterval: LISTENER_REFRESH_MS,
+	})
+	const listeners = listenerSummaries(sourcesQuery.data?.data ?? [])
 	const search = useSearch({ from: '/_app/profiles/$profileId' })
 	const tab = search.tab ?? 'identity'
 	const setTab = (next: ProfileTab) =>
@@ -45,6 +62,13 @@ export function ProfileDetailFeature() {
 			params: { profileId },
 			search: { tab: next },
 			replace: true,
+		})
+	const setAgent = (agent: string | null, replace: boolean) =>
+		void navigate({
+			to: '/profiles/$profileId',
+			params: { profileId },
+			search: agent === null ? { tab: 'sourcing' } : { tab: 'sourcing', agent },
+			replace,
 		})
 	const [localProblems, setLocalProblems] = useState<Problem[]>([])
 	const [notice, setNotice] = useState<string | null>(null)
@@ -125,7 +149,18 @@ export function ProfileDetailFeature() {
 						tab={tab}
 						value={editor.value}
 						problems={problems}
-						onNavigate={setTab}
+						sourceTrigger={sourceTrigger}
+						listeners={listeners}
+						providers={providers}
+						catalog={catalog}
+						onOpenProvider={(key) =>
+							void navigate({ to: '/sources/providers/$key', params: { key } })
+						}
+						calibration={calibration}
+						ecosystem={ecosystem}
+						agentId={search.agent ?? null}
+						onAgentChange={setAgent}
+						now={Date.now()}
 						onChange={(next) => {
 							if (update.isError) update.reset()
 							setLocalProblems([])

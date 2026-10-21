@@ -1,21 +1,31 @@
 use std::{
     collections::{BTreeSet, HashSet},
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicU64, Ordering},
+    },
     time::Duration,
 };
 
 use chrono::{DateTime, Utc};
 use ct::{CtError, CtLog, TILE_WIDTH, fetch_data_tile, fetch_log_list, fetch_tree_size};
 use lodestone_core::{
-    ActiveProfile, CandidateHost, CandidateHosts, CtCursors, FetchError, Fetcher, HostOrigin,
-    Hostname, Observation, Source, SourceError, SourceName, definition::Agent,
+    ActiveProfile, CERTIFICATE_SEEN_KIND, CandidateHost, CandidateHosts, CtCursors, FetchError,
+    Fetcher, HostOrigin, Hostname, Observation, Provenance, SignalKind, Source, SourceError,
+    SourceName, UnitInterval, definition::SourceTarget,
 };
+use serde_json::json;
 use tracing::{info, warn};
 use url::Url;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+use crate::endpoint::Endpoint;
+
+pub const CERTIFICATE_STRENGTH: f64 = 0.3;
+const CERTIFICATE_SEARCH_URL: &str = "https://crt.sh/";
+
+#[derive(Debug, Clone)]
 pub struct CtSettings {
-    pub log_list_url: Url,
+    pub log_list_url: Endpoint,
     pub log_list_ttl: Duration,
     pub max_logs: usize,
     pub tiles_per_log: u64,
@@ -30,8 +40,27 @@ pub struct CtRunStats {
     pub skipped_tiles: u64,
 }
 
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+struct LogPass {
+    tiles: u64,
+    entries: u64,
+    matched: BTreeSet<Hostname>,
+    lag_tiles: u64,
+}
+
+fn log_summary(name: &str, pass: &LogPass) -> String {
+    format!(
+        "{name}: tiles={} certificates={} matched={} lag={}",
+        pass.tiles,
+        pass.entries,
+        pass.matched.len(),
+        pass.lag_tiles
+    )
+}
+
 struct CachedLogs {
     fetched_at: DateTime<Utc>,
+    url: Url,
     logs: Arc<[CtLog]>,
 }
 
@@ -41,6 +70,14 @@ pub struct CtSource<F: Fetcher, H: CandidateHosts, C: CtCursors> {
     cursors: Arc<C>,
     settings: CtSettings,
     logs: Mutex<Option<CachedLogs>>,
+    tiles_read: AtomicU64,
+    lag_tiles: AtomicU64,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct CtPass {
+    pub tiles_read: u64,
+    pub lag_tiles: u64,
 }
 
 pub fn label_filter(profiles: &[ActiveProfile]) -> HashSet<String> {
@@ -51,10 +88,28 @@ pub fn label_filter(profiles: &[ActiveProfile]) -> HashSet<String> {
                 .revision
                 .definition
                 .definition()
-                .enabled_agents(SourceName::CertificateTransparency)
+                .targets(SourceName::CertificateTransparency)
         })
-        .filter_map(|agent| agent.source.certificate_transparency())
-        .flat_map(|ct| ct.labels.iter().cloned())
+        .filter_map(|target| target.certificates())
+        .flat_map(|agent| agent.labels.iter().cloned())
+        .collect()
+}
+
+pub fn matched_labels<'a>(host: &Hostname, labels: &'a [String]) -> Vec<&'a str> {
+    let Some(domain) = host.registrable_domain() else {
+        return Vec::new();
+    };
+    let Some(subdomain) = host
+        .as_str()
+        .strip_suffix(domain.as_str())
+        .and_then(|rest| rest.strip_suffix('.'))
+    else {
+        return Vec::new();
+    };
+    labels
+        .iter()
+        .map(String::as_str)
+        .filter(|label| subdomain.split('.').any(|part| part == *label))
         .collect()
 }
 
@@ -89,19 +144,30 @@ where
             cursors,
             settings,
             logs: Mutex::new(None),
+            tiles_read: AtomicU64::new(0),
+            lag_tiles: AtomicU64::new(0),
+        }
+    }
+
+    pub fn last_pass(&self) -> CtPass {
+        CtPass {
+            tiles_read: self.tiles_read.load(Ordering::Relaxed),
+            lag_tiles: self.lag_tiles.load(Ordering::Relaxed),
         }
     }
 
     async fn logs(&self, now: DateTime<Utc>) -> Result<Arc<[CtLog]>, SourceError> {
         let ttl = chrono::Duration::from_std(self.settings.log_list_ttl)
             .unwrap_or(chrono::Duration::hours(6));
+        let url = self.settings.log_list_url.resolve().await?;
         if let Ok(guard) = self.logs.lock()
             && let Some(cached) = guard.as_ref()
+            && cached.url == url
             && now - cached.fetched_at < ttl
         {
             return Ok(Arc::clone(&cached.logs));
         }
-        let mut logs = fetch_log_list(self.fetcher.as_ref(), &self.settings.log_list_url)
+        let mut logs = fetch_log_list(self.fetcher.as_ref(), &url)
             .await
             .map_err(upstream)?;
         logs.sort_by(|a, b| a.description.cmp(&b.description));
@@ -110,6 +176,7 @@ where
         if let Ok(mut guard) = self.logs.lock() {
             *guard = Some(CachedLogs {
                 fetched_at: now,
+                url,
                 logs: Arc::clone(&logs),
             });
         }
@@ -121,7 +188,7 @@ where
         log: &CtLog,
         labels: &HashSet<String>,
         now: DateTime<Utc>,
-        found: &mut BTreeSet<Hostname>,
+        pass: &mut LogPass,
         stats: &mut CtRunStats,
     ) -> Result<(), CtError> {
         let full_tiles = fetch_tree_size(self.fetcher.as_ref(), log).await? / TILE_WIDTH;
@@ -144,18 +211,25 @@ where
             next_tile += skipped;
         }
         let end = full_tiles.min(next_tile + self.settings.tiles_per_log);
+        pass.lag_tiles = full_tiles.saturating_sub(next_tile);
+        self.lag_tiles.fetch_add(pass.lag_tiles, Ordering::Relaxed);
         for tile in next_tile..end {
             let entries = fetch_data_tile(self.fetcher.as_ref(), log, tile).await?;
             for entry in &entries {
                 stats.entries += 1;
+                pass.entries += 1;
                 for name in &entry.dns_names {
                     stats.names += 1;
                     if let Some(host) = matching_host(name, labels) {
-                        found.insert(host);
+                        pass.matched.insert(host);
                     }
                 }
             }
             self.advance(log, tile + 1, now).await?;
+            pass.tiles += 1;
+            pass.lag_tiles = pass.lag_tiles.saturating_sub(1);
+            self.tiles_read.fetch_add(1, Ordering::Relaxed);
+            self.lag_tiles.fetch_sub(1, Ordering::Relaxed);
         }
         Ok(())
     }
@@ -185,6 +259,8 @@ where
         profiles: &[ActiveProfile],
         now: DateTime<Utc>,
     ) -> Result<Vec<CandidateHost>, SourceError> {
+        self.tiles_read.store(0, Ordering::Relaxed);
+        self.lag_tiles.store(0, Ordering::Relaxed);
         let labels = label_filter(profiles);
         if labels.is_empty() {
             return Ok(Vec::new());
@@ -192,11 +268,19 @@ where
         let logs = self.logs(now).await?;
         let mut found = BTreeSet::new();
         let mut stats = CtRunStats::default();
+        let mut summaries = Vec::with_capacity(logs.len());
+        let mut tiles = 0u64;
+        let mut lag = 0u64;
         for log in logs.iter() {
-            match self
-                .read_log(log, &labels, now, &mut found, &mut stats)
-                .await
-            {
+            let mut pass = LogPass::default();
+            let result = self
+                .read_log(log, &labels, now, &mut pass, &mut stats)
+                .await;
+            tiles += pass.tiles;
+            lag += pass.lag_tiles;
+            summaries.push(log_summary(&log.description, &pass));
+            found.extend(pass.matched);
+            match result {
                 Ok(()) => {}
                 Err(CtError::Fetch(FetchError::RateLimited { .. })) => {
                     info!(log = %log.description, "ct log rate limited, resuming next run");
@@ -213,10 +297,13 @@ where
         stats.matched = u64::try_from(hosts.len()).unwrap_or(u64::MAX);
         info!(
             logs = logs.len(),
-            entries = stats.entries,
+            tiles_read = tiles,
+            certificates = stats.entries,
             names = stats.names,
             matched = stats.matched,
+            lag_tiles = lag,
             skipped_tiles = stats.skipped_tiles,
+            per_log = %summaries.join("; "),
             "ct ingestion pass"
         );
         if !hosts.is_empty() {
@@ -225,20 +312,53 @@ where
         Ok(hosts)
     }
 
-    fn serves(&self, item: &CandidateHost, agent: &Agent) -> bool {
-        agent.source.certificate_transparency().is_some_and(|ct| {
-            let labels: HashSet<String> = ct.labels.iter().cloned().collect();
-            matching_host(item.host.as_str(), &labels).is_some()
-        })
+    fn serves(&self, item: &CandidateHost, target: &SourceTarget<'_>) -> bool {
+        target
+            .certificates()
+            .is_some_and(|agent| !matched_labels(&item.host, &agent.labels).is_empty())
     }
 
     fn evaluate(
         &self,
-        _item: &CandidateHost,
+        item: &CandidateHost,
         _profile: &ActiveProfile,
-        _agent: &Agent,
+        target: &SourceTarget<'_>,
     ) -> Vec<Observation> {
-        Vec::new()
+        let Some(agent) = target.certificates() else {
+            return Vec::new();
+        };
+        let matched = matched_labels(&item.host, &agent.labels);
+        if matched.is_empty() {
+            return Vec::new();
+        }
+        let (Ok(kind), Ok(strength)) = (
+            SignalKind::parse(CERTIFICATE_SEEN_KIND),
+            UnitInterval::new(CERTIFICATE_STRENGTH),
+        ) else {
+            return Vec::new();
+        };
+        let Ok(mut search) = Url::parse(CERTIFICATE_SEARCH_URL) else {
+            return Vec::new();
+        };
+        search
+            .query_pairs_mut()
+            .append_pair("q", item.host.as_str());
+        let Ok(provenance) = Provenance::parse(search.as_str()) else {
+            return Vec::new();
+        };
+        vec![Observation {
+            domain: item.domain.clone(),
+            kind,
+            value: Some(item.host.as_str().to_owned()),
+            raw: json!({
+                "host": item.host.as_str(),
+                "labels": matched,
+            }),
+            provenance,
+            strength,
+            observed_at: item.last_seen_at,
+            agent: None,
+        }]
     }
 }
 

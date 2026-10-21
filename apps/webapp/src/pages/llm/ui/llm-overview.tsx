@@ -21,8 +21,10 @@ export function LlmOverview({
 						Fournisseurs LLM
 					</h1>
 					<p className="text-sm text-muted-foreground">
-						Les fournisseurs alimentent les niveaux Tri et Qualification. Les
-						clés API sont en écriture seule et ne sont jamais affichées.
+						Les fournisseurs par défaut servent aux agents de qualification
+						(Classification) et à l'agrégateur (Synthèse) qui n'en choisissent
+						pas. Les clés API sont en écriture seule et ne sont jamais
+						affichées.
 					</p>
 				</div>
 				<Button onClick={onCreate}>Nouveau fournisseur</Button>

@@ -1,9 +1,12 @@
+use std::iter;
+
 use chrono::{DateTime, Utc};
 use common::CoreError;
-use sqlx::PgPool;
+use sqlx::{PgPool, query};
 
 use crate::{
-    CandidateHost, CandidateHosts, Hostname, SourceName,
+    CandidateHost, CandidateHosts, HostOrigin, Hostname, ProfileId, SourceName,
+    domain::enrichment::EnrichmentStep,
     infrastructure::{
         candidate_host::postgres::model::CandidateHostRow, postgres::error::map_sqlx_error,
     },
@@ -17,6 +20,34 @@ pub struct PgCandidateHosts {
 impl PgCandidateHosts {
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
+    }
+}
+
+impl PgCandidateHosts {
+    #[tracing::instrument(skip(self), fields(db.system = "postgresql", db.operation = "select", db.table = "candidate_hosts"), err)]
+    pub async fn count_due(
+        &self,
+        source: SourceName,
+        checked_before: DateTime<Utc>,
+    ) -> Result<u64, CoreError> {
+        let count = sqlx::query_scalar!(
+            r#"
+            SELECT COUNT(*) AS "count!"
+            FROM candidate_hosts h
+            LEFT JOIN host_source_checks c ON c.host = h.host AND c.source = $1
+            WHERE (c.checked_at IS NULL OR c.checked_at < $2)
+              AND NOT EXISTS (
+                  SELECT 1 FROM suppression_list s WHERE s.kind = 'domain' AND s.value = h.domain
+              )
+            "#,
+            source.as_str(),
+            checked_before,
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+        u64::try_from(count)
+            .map_err(|_| CoreError::Internal("due host count is out of range".to_owned()))
     }
 }
 
@@ -109,6 +140,105 @@ impl CandidateHosts for PgCandidateHosts {
         .execute(&self.pool)
         .await
         .map_err(map_sqlx_error)?;
+        if source == SourceName::HttpProbe {
+            query!(
+                r#"
+                UPDATE lead_enrichments e SET ran_at = $2
+                FROM leads
+                WHERE e.lead_id = leads.id
+                  AND e.step = $3
+                  AND leads.domain IN (
+                      SELECT domain FROM candidate_hosts WHERE host = ANY($1::text[])
+                  )
+                  AND NOT EXISTS (
+                      SELECT 1 FROM candidate_hosts h
+                      LEFT JOIN host_source_checks c ON c.host = h.host AND c.source = $4
+                      WHERE h.domain = leads.domain AND c.checked_at IS NULL
+                  )
+                "#,
+                &names as &[&str],
+                at,
+                EnrichmentStep::HttpProbe.as_str(),
+                SourceName::HttpProbe.as_str(),
+            )
+            .execute(&self.pool)
+            .await
+            .map_err(map_sqlx_error)?;
+        }
         Ok(())
+    }
+
+    #[tracing::instrument(skip(self, subdomains), fields(db.system = "postgresql", db.operation = "insert", db.table = "candidate_hosts", profile.id = %profile), err)]
+    async fn seed_lead_hosts(
+        &self,
+        profile: ProfileId,
+        subdomains: &[String],
+        at: DateTime<Utc>,
+        limit: u32,
+    ) -> Result<u64, CoreError> {
+        let labels: Vec<&str> = iter::once("")
+            .chain(subdomains.iter().map(String::as_str))
+            .collect();
+        let seeded = query!(
+            r#"
+            WITH pending AS (
+                SELECT leads.id, leads.domain
+                FROM leads
+                WHERE leads.profile_id = $1
+                  AND NOT EXISTS (
+                      SELECT 1 FROM lead_enrichments e
+                      WHERE e.lead_id = leads.id AND e.step = $5
+                  )
+                  AND NOT EXISTS (
+                      SELECT 1 FROM suppression_list s WHERE s.kind = 'domain' AND s.value = leads.domain
+                  )
+                ORDER BY leads.created_at, leads.id
+                LIMIT $4
+            ), hosts AS (
+                INSERT INTO candidate_hosts (host, domain, origin, first_seen_at, last_seen_at)
+                SELECT DISTINCT
+                    CASE WHEN label = '' THEN pending.domain ELSE label || '.' || pending.domain END,
+                    pending.domain, $6, $3::timestamptz, $3::timestamptz
+                FROM pending CROSS JOIN UNNEST($2::text[]) AS label
+                ON CONFLICT (host) DO NOTHING
+                RETURNING host
+            )
+            INSERT INTO lead_enrichments (lead_id, step, ran_at)
+            SELECT id, $5, NULL FROM pending
+            ON CONFLICT (lead_id, step) DO NOTHING
+            "#,
+            profile.0,
+            &labels as &[&str],
+            at,
+            i64::from(limit),
+            EnrichmentStep::HttpProbe.as_str(),
+            HostOrigin::Lead.as_str(),
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+        query!(
+            r#"
+            UPDATE lead_enrichments e SET ran_at = $2
+            FROM leads
+            WHERE e.lead_id = leads.id
+              AND e.step = $3
+              AND e.ran_at IS NULL
+              AND leads.profile_id = $1
+              AND NOT EXISTS (
+                  SELECT 1 FROM candidate_hosts h
+                  LEFT JOIN host_source_checks c ON c.host = h.host AND c.source = $4
+                  WHERE h.domain = leads.domain AND c.checked_at IS NULL
+              )
+            "#,
+            profile.0,
+            at,
+            EnrichmentStep::HttpProbe.as_str(),
+            SourceName::HttpProbe.as_str(),
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+        Ok(seeded.rows_affected())
     }
 }

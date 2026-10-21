@@ -207,7 +207,7 @@ async fn checked_domains_wait_for_the_revisit_interval_and_never_duplicate(pool:
 }
 
 #[sqlx::test(migrations = "../../migrations")]
-async fn rate_limited_domains_are_not_marked(pool: PgPool) {
+async fn rate_limited_domains_retry_after_a_short_delay(pool: PgPool) {
     let iam = active_profile(&pool, "iam", &["security"]).await;
     seen_lead(&pool, iam, "acme.com").await;
     let usecase = LodestoneUseCase::new(pool.clone());
@@ -225,8 +225,13 @@ async fn rate_limited_domains_are_not_marked(pool: PgPool) {
     assert_eq!(report.domains, 0);
 
     let healthy = FakeFinder::new();
-    let retry = usecase
+    let too_early = usecase
         .run_contact_finder(&healthy, &targets, settings(), &FixedClock)
+        .await
+        .unwrap();
+    assert_eq!(too_early.domains, 0);
+    let retry = usecase
+        .run_contact_finder(&healthy, &targets, settings(), &LaterClock)
         .await
         .unwrap();
     assert_eq!(retry.domains, 1);
@@ -244,4 +249,56 @@ async fn inactive_profiles_get_nothing(pool: PgPool) {
         .unwrap();
     assert_eq!(report.domains, 0);
     assert_eq!(finder.calls.load(Ordering::SeqCst), 0);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn listening_records_a_run_only_when_a_domain_was_checked(pool: PgPool) {
+    let profile = active_profile(&pool, "iam", &["security"]).await;
+    let usecase = LodestoneUseCase::new(pool.clone());
+    let targets = PgContactTargets::new(pool.clone());
+    let finder = FakeFinder::new();
+
+    let empty = usecase
+        .listen_contact_finder(&finder, &targets, settings(), &FixedClock)
+        .await
+        .unwrap();
+    assert_eq!(empty.domains, 0);
+    assert!(
+        usecase
+            .list_source_schedule()
+            .await
+            .unwrap()
+            .runs
+            .is_empty()
+    );
+
+    seen_lead(&pool, profile, "acme.com").await;
+    let due_before = at(100) - chrono::Duration::hours(1);
+    assert_eq!(
+        targets
+            .count_due(SourceName::PublicPage, due_before, None)
+            .await
+            .unwrap(),
+        1
+    );
+    let busy = usecase
+        .listen_contact_finder(&finder, &targets, settings(), &FixedClock)
+        .await
+        .unwrap();
+    assert_eq!(busy.domains, 1);
+    assert_eq!(usecase.list_source_schedule().await.unwrap().runs.len(), 1);
+    assert_eq!(
+        targets
+            .count_due(SourceName::PublicPage, due_before, None)
+            .await
+            .unwrap(),
+        0
+    );
+
+    let again = usecase
+        .listen_contact_finder(&finder, &targets, settings(), &FixedClock)
+        .await
+        .unwrap();
+    assert_eq!(again.domains, 0);
+    assert_eq!(usecase.list_source_schedule().await.unwrap().runs.len(), 1);
 }

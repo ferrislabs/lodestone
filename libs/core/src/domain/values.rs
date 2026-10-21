@@ -127,11 +127,12 @@ pub enum SourceName {
     Ted,
     FranceTravail,
     Ats,
-    LlmQualification,
+    HackerNewsHiring,
+    WelcomeToTheJungle,
 }
 
 impl SourceName {
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 13] = [
         Self::CertificateTransparency,
         Self::HttpProbe,
         Self::DnsCname,
@@ -143,7 +144,8 @@ impl SourceName {
         Self::Ted,
         Self::FranceTravail,
         Self::Ats,
-        Self::LlmQualification,
+        Self::HackerNewsHiring,
+        Self::WelcomeToTheJungle,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -159,7 +161,8 @@ impl SourceName {
             Self::Ted => "ted",
             Self::FranceTravail => "france_travail",
             Self::Ats => "ats",
-            Self::LlmQualification => "llm_qualification",
+            Self::HackerNewsHiring => "hacker_news_hiring",
+            Self::WelcomeToTheJungle => "welcome_to_the_jungle",
         }
     }
 }

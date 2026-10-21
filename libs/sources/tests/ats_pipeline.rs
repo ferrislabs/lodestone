@@ -1,6 +1,5 @@
 use std::{
     collections::HashMap,
-    num::NonZeroU32,
     sync::{Arc, Mutex},
     time::Duration,
 };
@@ -8,15 +7,12 @@ use std::{
 use chrono::{DateTime, TimeZone, Utc};
 use lodestone_core::{
     Clock, CreateProfileCommand, FetchError, FetchRequest, FetchResponse, Fetcher, LeadRepository,
-    LlmError, LlmProvider, LlmRequest, LlmResponse, LodestoneUseCase, NormalizedDomain,
-    Observation, ProfileId, ProfileName, Provenance, SignalKind, SignalRepository, SourceName,
-    SuppressionTarget, TokenPricing, UnitInterval, ValidatedProfile,
+    LodestoneUseCase, NormalizedDomain, Observation, ProfileId, ProfileName, Provenance,
+    SignalKind, SignalRepository, SourceName, SuppressionTarget, UnitInterval, ValidatedProfile,
     infrastructure::{
         contact_target::postgres::PgAtsTargets, lead::postgres::PgLeadRepository,
-        llm_cache::postgres::PgLlmCache, postgres::with_tx, signal::postgres::PgSignalRepository,
+        postgres::with_tx, signal::postgres::PgSignalRepository,
     },
-    llm::gateway::CallSettings,
-    triage::TriageSettings,
 };
 use serde_json::json;
 use sources::ats::{AtsSettings, AtsSource};
@@ -110,29 +106,6 @@ fn site() -> Arc<SiteFetcher> {
     ])
 }
 
-struct NoProvider;
-
-impl LlmProvider for NoProvider {
-    async fn complete(&self, _request: &LlmRequest<'_>) -> Result<LlmResponse, LlmError> {
-        Err(LlmError::Refused)
-    }
-}
-
-fn triage_settings() -> TriageSettings {
-    TriageSettings {
-        call: CallSettings {
-            max_retries: 0,
-            pricing: TokenPricing {
-                input_cents_per_mtok: 0,
-                output_cents_per_mtok: 0,
-            },
-            base_delay: Duration::ZERO,
-        },
-        max_tokens: 512,
-        budget_cents: NonZeroU32::new(10).unwrap(),
-    }
-}
-
 fn ats_settings() -> AtsSettings {
     AtsSettings {
         batch_size: 20,
@@ -171,7 +144,7 @@ async fn observe(pool: &PgPool, source: SourceName, host: &str, kind: &str, valu
                 value: Some(value.to_owned()),
                 raw: json!({}),
                 provenance: Provenance::parse(&format!("https://{host}/probe")).unwrap(),
-                strength: UnitInterval::new(0.8).unwrap(),
+                strength: UnitInterval::new(0.1).unwrap(),
                 observed_at: at(0),
                 agent: None,
             }],
@@ -220,13 +193,7 @@ async fn run(
         ats_settings(),
     );
     LodestoneUseCase::new(pool.clone())
-        .run_triage(
-            &source,
-            None::<&NoProvider>,
-            &PgLlmCache::new(pool.clone()),
-            triage_settings(),
-            clock,
-        )
+        .run_triage(&source, clock)
         .await
         .unwrap()
 }
@@ -258,8 +225,8 @@ async fn an_accepted_job_offer_raises_the_score_of_a_passively_detected_lead(poo
     let report = run(&pool, &fetcher, &FixedClock(100)).await;
 
     assert_eq!(report.candidates, 2);
-    assert_eq!(report.accepted_by_rules, 2);
-    assert_eq!(report.rejected_by_rules, 2);
+    assert_eq!(report.accepted_by_rules, 1);
+    assert_eq!(report.rejected_by_rules, 1);
     let offers: Vec<_> = signals(&pool, profile, "keycloakco.fr")
         .await
         .into_iter()
@@ -267,10 +234,7 @@ async fn an_accepted_job_offer_raises_the_score_of_a_passively_detected_lead(poo
         .collect();
     assert_eq!(offers.len(), 1);
     assert_eq!(offers[0].source, SourceName::Ats);
-    assert_eq!(
-        offers[0].agent,
-        Some(lodestone_core::definition::AgentId::new("ats-fr"))
-    );
+    assert_eq!(offers[0].agent, None);
     assert_eq!(offers[0].raw["route"], "keywords");
     assert_eq!(offers[0].raw["details"]["ats"], "lever");
     assert_eq!(offers[0].raw["details"]["board"], "keycloakco");
@@ -292,7 +256,7 @@ async fn an_accepted_job_offer_raises_the_score_of_a_passively_detected_lead(poo
 }
 
 #[sqlx::test(migrations = "../../migrations")]
-async fn only_passively_detected_unsuppressed_leads_are_scanned(pool: PgPool) {
+async fn every_unsuppressed_lead_is_scanned_whatever_its_source(pool: PgPool) {
     let profile = iam_profile(&pool).await;
     observe(
         &pool,
@@ -332,13 +296,17 @@ async fn only_passively_detected_unsuppressed_leads_are_scanned(pool: PgPool) {
             .iter()
             .any(|url| url.starts_with("https://keycloakco.fr/"))
     );
-    assert!(requested.iter().all(|url| !url.contains("tender.fr")));
+    assert!(
+        requested
+            .iter()
+            .any(|url| url.starts_with("https://tender.fr/"))
+    );
     assert!(requested.iter().all(|url| !url.contains("optout.io")));
     assert!(
         signals(&pool, profile, "tender.fr")
             .await
             .iter()
-            .all(|signal| signal.kind.as_str() != "job_offer")
+            .any(|signal| signal.kind.as_str() == "job_offer")
     );
     assert!(
         signals(&pool, profile, "optout.io")
@@ -386,8 +354,5 @@ async fn a_rerun_is_idempotent_and_waits_for_the_revisit_interval(pool: PgPool) 
         .filter(|signal| signal.kind.as_str() == "job_offer")
         .count();
     assert_eq!(offers, 1);
-    assert_eq!(
-        lead_score(&pool, profile, "keycloakco.fr").await,
-        first_score
-    );
+    assert!(lead_score(&pool, profile, "keycloakco.fr").await <= first_score);
 }

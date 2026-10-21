@@ -1,0 +1,332 @@
+use serde_json::{Map, Value, json};
+
+use super::definition::{EVIDENCE_MAX_CHARS, QualificationAgent, Question, ScoringAgent};
+
+const DIALECT: &str = "https://json-schema.org/draft/2020-12/schema";
+
+pub const VERDICT_VALUES: [&str; 3] = ["fiable", "a_verifier", "ecarte"];
+pub const MAX_REASONS: usize = 5;
+pub const REASON_MAX_CHARS: usize = 200;
+pub const MAX_SCORE: u8 = 100;
+
+pub fn scoring_contract_schema(agent: &ScoringAgent) -> Value {
+    let properties: Map<String, Value> = agent
+        .criteria
+        .iter()
+        .map(|criterion| (criterion.id.clone(), question_schema(criterion)))
+        .collect();
+    let required: Vec<&str> = agent
+        .criteria
+        .iter()
+        .map(|criterion| criterion.id.as_str())
+        .collect();
+    let verdict_probabilities: Map<String, Value> = VERDICT_VALUES
+        .iter()
+        .map(|value| ((*value).to_owned(), probability()))
+        .collect();
+    json!({
+        "$schema": DIALECT,
+        "title": format!("Score and verdict of {}", agent.name),
+        "type": "object",
+        "properties": {
+            "criteria": {
+                "type": "object",
+                "properties": properties,
+                "required": required,
+                "additionalProperties": false
+            },
+            "score": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": MAX_SCORE,
+                "description": "Score of the lead from 0 (not worth contacting) to 100 (contact first)."
+            },
+            "verdict": {
+                "type": "object",
+                "properties": {
+                    "choice": {"type": "string", "enum": VERDICT_VALUES},
+                    "confidence": probability(),
+                    "probabilities": {
+                        "type": "object",
+                        "properties": verdict_probabilities,
+                        "required": VERDICT_VALUES,
+                        "additionalProperties": false
+                    }
+                },
+                "required": ["choice", "confidence", "probabilities"],
+                "additionalProperties": false
+            },
+            "reasons": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": MAX_REASONS,
+                "items": {"type": "string", "minLength": 1, "maxLength": REASON_MAX_CHARS}
+            }
+        },
+        "required": ["criteria", "score", "verdict", "reasons"],
+        "additionalProperties": false
+    })
+}
+
+pub fn contract_schema(agent: &QualificationAgent) -> Value {
+    let properties: Map<String, Value> = agent
+        .questions
+        .iter()
+        .map(|question| (question.id.clone(), question_schema(question)))
+        .collect();
+    let required: Vec<&str> = agent
+        .questions
+        .iter()
+        .map(|question| question.id.as_str())
+        .collect();
+    json!({
+        "$schema": DIALECT,
+        "title": format!("Answers of {}", agent.name),
+        "type": "object",
+        "properties": {
+            "summary": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 600
+            },
+            "answers": {
+                "type": "object",
+                "properties": properties,
+                "required": required,
+                "additionalProperties": false
+            }
+        },
+        "required": ["summary", "answers"],
+        "additionalProperties": false
+    })
+}
+
+fn probability() -> Value {
+    json!({"type": "number", "minimum": 0, "maximum": 1})
+}
+
+fn question_schema(question: &Question) -> Value {
+    let values: Vec<&str> = question
+        .options
+        .iter()
+        .map(|option| option.value.as_str())
+        .collect();
+    let probabilities: Map<String, Value> = values
+        .iter()
+        .map(|value| ((*value).to_owned(), probability()))
+        .collect();
+    json!({
+        "description": question.wording,
+        "type": "object",
+        "properties": {
+            "type": {"type": "string", "const": "choice"},
+            "choice": {"type": "string", "enum": values},
+            "evidence": {
+                "type": "string",
+                "maxLength": EVIDENCE_MAX_CHARS,
+                "description": "Sentence copied verbatim from the documents that justifies the choice. May be empty only when the choice is the unknown option."
+            },
+            "confidence": probability(),
+            "probabilities": {
+                "type": "object",
+                "properties": probabilities,
+                "required": values,
+                "additionalProperties": false
+            }
+        },
+        "required": ["type", "choice", "evidence", "confidence", "probabilities"],
+        "additionalProperties": false
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::profile::ValidatedProfile;
+
+    fn scoring_agent() -> ScoringAgent {
+        let value = json!({
+            "schema_version": 3,
+            "identity": {"offer": "o", "target_customer": "t"},
+            "agents": [{"id": "ats", "name": "ATS", "source": {"kind": "ats", "keywords": ["sso"]}}],
+            "scoring": {"factors": [{"signal": "a", "weight": 1}]},
+            "contact_ranking": {"preferred_local_parts": []},
+            "llm": {"qualification_threshold": 50, "relevance_criteria": "c"}
+        });
+        let mut definition = ValidatedProfile::parse(value).unwrap().definition().clone();
+        definition.scoring_agents.remove(0)
+    }
+
+    #[test]
+    fn the_scoring_schema_imposes_score_verdict_and_reasons() {
+        let schema = scoring_contract_schema(&scoring_agent());
+        assert_eq!(
+            schema["required"],
+            json!(["criteria", "score", "verdict", "reasons"])
+        );
+        assert_eq!(schema["additionalProperties"], json!(false));
+        assert_eq!(schema["properties"]["score"]["type"], "integer");
+        assert_eq!(schema["properties"]["score"]["minimum"], 0);
+        assert_eq!(schema["properties"]["score"]["maximum"], 100);
+        let verdict = &schema["properties"]["verdict"];
+        assert_eq!(
+            verdict["properties"]["choice"]["enum"],
+            json!(["fiable", "a_verifier", "ecarte"])
+        );
+        assert_eq!(
+            verdict["properties"]["probabilities"]["required"],
+            json!(["fiable", "a_verifier", "ecarte"])
+        );
+        assert_eq!(
+            verdict["properties"]["probabilities"]["additionalProperties"],
+            json!(false)
+        );
+        assert_eq!(
+            verdict["required"],
+            json!(["choice", "confidence", "probabilities"])
+        );
+        let reasons = &schema["properties"]["reasons"];
+        assert_eq!(reasons["minItems"], 1);
+        assert_eq!(reasons["maxItems"], 5);
+        assert_eq!(reasons["items"]["maxLength"], 200);
+    }
+
+    #[test]
+    fn the_scoring_schema_describes_every_criterion_like_a_question() {
+        let agent = scoring_agent();
+        let schema = scoring_contract_schema(&agent);
+        let criteria = &schema["properties"]["criteria"];
+        assert_eq!(
+            criteria["required"],
+            json!([
+                "adequation_offre",
+                "solidite_preuves",
+                "priorite_commerciale"
+            ])
+        );
+        let criterion = &criteria["properties"]["adequation_offre"];
+        assert_eq!(criterion["properties"]["type"]["const"], "choice");
+        assert_eq!(
+            criterion["properties"]["choice"]["enum"],
+            json!(["forte", "moyenne", "faible", "inconnu"])
+        );
+        assert_eq!(
+            criterion["required"],
+            json!(["type", "choice", "evidence", "confidence", "probabilities"])
+        );
+        assert_eq!(criterion["properties"]["evidence"]["maxLength"], 300);
+        assert_eq!(criterion["description"], agent.criteria[0].wording);
+    }
+
+    fn agent() -> QualificationAgent {
+        let value = json!({
+            "schema_version": 3,
+            "identity": {"offer": "o", "target_customer": "t"},
+            "agents": [{"id": "ats", "name": "ATS", "source": {"kind": "ats", "keywords": ["sso"]}}],
+            "scoring": {"factors": [{"signal": "a", "weight": 1}]},
+            "contact_ranking": {"preferred_local_parts": []},
+            "llm": {"qualification_threshold": 50, "relevance_criteria": "c"}
+        });
+        let mut definition = ValidatedProfile::parse(value).unwrap().definition().clone();
+        let mut agent = definition.qualification_agents.remove(0);
+        agent.questions[0].id = "q-one".to_owned();
+        agent
+    }
+
+    #[test]
+    fn schema_describes_every_question_with_its_options() {
+        let schema = contract_schema(&agent());
+        let answers = &schema["properties"]["answers"];
+        assert_eq!(schema["required"], json!(["summary", "answers"]));
+        assert_eq!(schema["additionalProperties"], json!(false));
+        assert_eq!(answers["required"], json!(["q-one"]));
+        assert_eq!(answers["additionalProperties"], json!(false));
+        let question = &answers["properties"]["q-one"];
+        assert_eq!(question["properties"]["type"]["const"], "choice");
+        assert_eq!(
+            question["properties"]["choice"]["enum"],
+            json!(["forte", "moyenne", "faible", "inconnu"])
+        );
+        assert_eq!(
+            question["required"],
+            json!(["type", "choice", "evidence", "confidence", "probabilities"])
+        );
+        assert_eq!(question["additionalProperties"], json!(false));
+        assert_eq!(
+            question["description"],
+            "Ce lead est-il pertinent pour l'offre ?"
+        );
+    }
+
+    #[test]
+    fn the_summary_is_a_required_bounded_string() {
+        let schema = contract_schema(&agent());
+        assert_eq!(
+            schema["properties"]["summary"],
+            json!({"type": "string", "minLength": 1, "maxLength": 600})
+        );
+        assert_eq!(schema["required"][0], "summary");
+    }
+
+    #[test]
+    fn confidence_and_probabilities_are_bounded_numbers() {
+        let schema = contract_schema(&agent());
+        let question = &schema["properties"]["answers"]["properties"]["q-one"];
+        let bounded = json!({"type": "number", "minimum": 0, "maximum": 1});
+        assert_eq!(question["properties"]["confidence"], bounded);
+        let probabilities = &question["properties"]["probabilities"];
+        assert_eq!(
+            probabilities["required"],
+            json!(["forte", "moyenne", "faible", "inconnu"])
+        );
+        assert_eq!(probabilities["additionalProperties"], json!(false));
+        for key in ["forte", "moyenne", "faible", "inconnu"] {
+            assert_eq!(probabilities["properties"][key], bounded);
+        }
+        assert_eq!(probabilities["properties"].as_object().unwrap().len(), 4);
+    }
+
+    #[test]
+    fn schema_covers_several_questions_independently() {
+        let mut agent = agent();
+        let mut second = agent.questions[0].clone();
+        second.id = "second".to_owned();
+        second.options.truncate(2);
+        agent.questions.push(second);
+        let schema = contract_schema(&agent);
+        let answers = &schema["properties"]["answers"];
+        assert_eq!(answers["required"], json!(["q-one", "second"]));
+        assert_eq!(
+            answers["properties"]["second"]["properties"]["choice"]["enum"],
+            json!(["forte", "moyenne"])
+        );
+        assert_eq!(
+            answers["properties"]["q-one"]["properties"]["choice"]["enum"]
+                .as_array()
+                .unwrap()
+                .len(),
+            4
+        );
+    }
+
+    #[test]
+    fn every_answer_carries_a_required_bounded_evidence_string() {
+        let schema = contract_schema(&agent());
+        let question = &schema["properties"]["answers"]["properties"]["q-one"];
+        let evidence = &question["properties"]["evidence"];
+        assert_eq!(evidence["type"], "string");
+        assert_eq!(evidence["maxLength"], 300);
+        assert!(
+            evidence["description"]
+                .as_str()
+                .unwrap()
+                .contains("verbatim")
+        );
+        assert!(
+            question["required"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("evidence"))
+        );
+    }
+}

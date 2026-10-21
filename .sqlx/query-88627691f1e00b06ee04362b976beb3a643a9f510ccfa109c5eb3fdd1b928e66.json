@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                INSERT INTO lead_ecosystem (domain, module, finding_key, kind, label, value, source_url, observed_at, details)\n                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)\n                ON CONFLICT (domain, module, finding_key) DO UPDATE SET\n                    kind = EXCLUDED.kind,\n                    label = EXCLUDED.label,\n                    value = EXCLUDED.value,\n                    source_url = EXCLUDED.source_url,\n                    observed_at = EXCLUDED.observed_at,\n                    details = EXCLUDED.details\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Timestamptz",
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "88627691f1e00b06ee04362b976beb3a643a9f510ccfa109c5eb3fdd1b928e66"
+}

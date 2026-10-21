@@ -1,7 +1,8 @@
 mod support;
 
 use lodestone_core::{
-    Assessment, AssessmentId, AssessmentRepository, Evidence, Provenance, RevisionNumber,
+    Assessment, AssessmentId, AssessmentRepository, Evidence, GenerationSnapshot, Provenance,
+    ProviderId, ReasoningEffort, RevisionNumber, RunProvenance,
     infrastructure::{assessment::postgres::PgAssessmentRepository, postgres::with_tx},
 };
 use sqlx::PgPool;
@@ -13,10 +14,12 @@ fn assessment(lead: lodestone_core::LeadId, created: i64, evidence: Vec<Evidence
         lead_id: lead,
         profile_revision: RevisionNumber::new(1).unwrap(),
         summary: "Runs Keycloak 21".to_owned(),
+        verdict_narrative: "Reliable".to_owned(),
         approach_angle: "Offer a managed migration".to_owned(),
         evidence,
-        model: "model-x".to_owned(),
-        prompt_version: "v1".to_owned(),
+        evidence_verified: true,
+        quality_warnings: Vec::new(),
+        provenance: RunProvenance::legacy("model-x".to_owned(), "v1".to_owned()),
         draft: None,
         draft_review: None,
         created_at: at(created),
@@ -96,4 +99,71 @@ async fn a_stored_draft_comes_back_pending(pool: PgPool) {
     .unwrap();
 
     assert_eq!(listed, [stored]);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn provenance_round_trips(pool: PgPool) {
+    let profile = create_profile(&pool, "alpha").await;
+    let lead = lead_id(&pool, profile, "example.com").await;
+    let mut stored = assessment(lead, 0, Vec::new());
+    stored.provenance = RunProvenance {
+        provider_id: Some(ProviderId(uuid::Uuid::now_v7())),
+        provider_name: "cloud".to_owned(),
+        model: "big-model".to_owned(),
+        prompt_version: "aggregator@abc".to_owned(),
+        generation: GenerationSnapshot {
+            temperature: Some(0.1),
+            max_tokens: Some(4096),
+            frequency_penalty: Some(0.2),
+            presence_penalty: None,
+            repeat_penalty: Some(1.1),
+            reasoning_effort: Some(ReasoningEffort::High),
+        },
+        samples: 3,
+    };
+
+    let listed = with_tx(&pool, async |shared| {
+        let mut repo = PgAssessmentRepository::new(&shared);
+        repo.insert(&stored).await?;
+        repo.list_for_lead(lead).await
+    })
+    .await
+    .unwrap();
+
+    assert_eq!(listed, [stored]);
+    let (name, samples): (String, i32) =
+        sqlx::query_as("SELECT provider_name, samples FROM assessments")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!((name.as_str(), samples), ("cloud", 3));
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn rows_written_without_provenance_read_with_defaults(pool: PgPool) {
+    let profile = create_profile(&pool, "alpha").await;
+    let lead = lead_id(&pool, profile, "example.com").await;
+    sqlx::query(
+        "INSERT INTO assessments (id, lead_id, profile_revision, summary, approach_angle, evidence, model, prompt_version, created_at)
+         VALUES ($1, $2, 1, 's', 'a', '[]'::jsonb, 'm', 'aggregator@x', now())",
+    )
+    .bind(uuid::Uuid::now_v7())
+    .bind(lead.0)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let listed = with_tx(&pool, async |shared| {
+        PgAssessmentRepository::new(&shared)
+            .list_for_lead(lead)
+            .await
+    })
+    .await
+    .unwrap();
+
+    let provenance = &listed[0].provenance;
+    assert_eq!(provenance.provider_id, None);
+    assert_eq!(provenance.provider_name, "");
+    assert_eq!(provenance.generation, GenerationSnapshot::default());
+    assert_eq!(provenance.samples, 1);
 }

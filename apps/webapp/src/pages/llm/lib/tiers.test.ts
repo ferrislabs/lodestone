@@ -54,10 +54,10 @@ describe('tierDiff', () => {
 describe('labels', () => {
 	it('names the assigned tiers in the conflict message', () => {
 		expect(deleteConflictMessage(['triage'])).toBe(
-			'Suppression impossible : affecté au niveau Tri',
+			'Suppression impossible : fournisseur par défaut pour Classification',
 		)
 		expect(deleteConflictMessage(['triage', 'qualification'])).toBe(
-			'Suppression impossible : affecté aux niveaux Tri et Qualification',
+			'Suppression impossible : fournisseur par défaut pour Classification et Synthèse',
 		)
 		expect(deleteConflictMessage([])).toBe(
 			'Suppression impossible : le fournisseur est utilisé',

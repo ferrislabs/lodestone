@@ -97,6 +97,9 @@ pub enum ApiError {
     #[error("{0} with id `{1}` not found")]
     ResourceNotFound(&'static str, String),
 
+    #[error("{0}")]
+    NotFoundBecause(String),
+
     // 409
     #[error("Conflict: {0}")]
     Conflict(String),
@@ -147,7 +150,9 @@ impl ApiError {
                 StatusCode::UNAUTHORIZED
             }
             Self::Forbidden | Self::InsufficientScope(_) => StatusCode::FORBIDDEN,
-            Self::NotFound | Self::ResourceNotFound(_, _) => StatusCode::NOT_FOUND,
+            Self::NotFound | Self::ResourceNotFound(_, _) | Self::NotFoundBecause(_) => {
+                StatusCode::NOT_FOUND
+            }
             Self::Conflict(_) => StatusCode::CONFLICT,
             Self::UnprocessableEntity(_) | Self::Rejected(_) => StatusCode::UNPROCESSABLE_ENTITY,
             Self::TooManyRequests => StatusCode::TOO_MANY_REQUESTS,
@@ -167,7 +172,7 @@ impl ApiError {
             Self::InvalidToken => "E_INVALID_TOKEN",
             Self::Forbidden => "E_FORBIDDEN",
             Self::InsufficientScope(_) => "E_INSUFFICIENT_SCOPE",
-            Self::NotFound => "E_NOT_FOUND",
+            Self::NotFound | Self::NotFoundBecause(_) => "E_NOT_FOUND",
             Self::ResourceNotFound(_, _) => "E_RESOURCE_NOT_FOUND",
             Self::Conflict(_) => "E_CONFLICT",
             Self::UnprocessableEntity(_) | Self::Rejected(_) => "E_UNPROCESSABLE_ENTITY",
@@ -326,6 +331,17 @@ mod tests {
         assert_eq!(json["status"], 404);
         assert!(json["message"].as_str().unwrap().contains("Customer"));
         assert!(json["message"].as_str().unwrap().contains("42"));
+    }
+
+    #[tokio::test]
+    async fn test_404_not_found_because_keeps_its_message() {
+        let (status, json) = parse_response(ApiError::NotFoundBecause(
+            "source has no scheduled job".into(),
+        ))
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert_eq!(json["code"], "E_NOT_FOUND");
+        assert_eq!(json["message"], "source has no scheduled job");
     }
 
     #[tokio::test]

@@ -3,7 +3,9 @@ use common::CoreError;
 use thiserror::Error;
 
 use crate::domain::{
+    NormalizedDomain,
     host::{CandidateHost, Hostname},
+    profile::ProfileId,
     values::SourceName,
 };
 
@@ -26,6 +28,22 @@ pub trait CandidateHosts: Send + Sync {
         source: SourceName,
         at: DateTime<Utc>,
     ) -> impl Future<Output = Result<(), CoreError>> + Send;
+
+    fn seed_lead_hosts(
+        &self,
+        profile: ProfileId,
+        subdomains: &[String],
+        at: DateTime<Utc>,
+        limit: u32,
+    ) -> impl Future<Output = Result<u64, CoreError>> + Send;
+}
+
+#[cfg_attr(test, mockall::automock)]
+pub trait KnownHostRepository: Send {
+    fn list_for_domain(
+        &mut self,
+        domain: &NormalizedDomain,
+    ) -> impl Future<Output = Result<Vec<CandidateHost>, CoreError>> + Send;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -41,6 +59,16 @@ pub trait DnsResolver: Send + Sync {
         &self,
         host: &Hostname,
     ) -> impl Future<Output = Result<Vec<Hostname>, DnsError>> + Send;
+}
+
+pub trait DnsRecords: Send + Sync {
+    fn mx_hosts(
+        &self,
+        domain: &NormalizedDomain,
+    ) -> impl Future<Output = Result<Vec<Hostname>, DnsError>> + Send;
+
+    fn txt_records(&self, name: &str)
+    -> impl Future<Output = Result<Vec<String>, DnsError>> + Send;
 }
 
 pub trait CtCursors: Send + Sync {

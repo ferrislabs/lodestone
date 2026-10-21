@@ -1,3 +1,3 @@
 pub mod postgres;
 
-pub use postgres::PgCandidateHosts;
+pub use postgres::{PgCandidateHosts, PgKnownHostRepository};

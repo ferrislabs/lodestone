@@ -1,11 +1,16 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { useNavigate, useSearch } from '@tanstack/react-router'
 import { getCoreRowModel, useReactTable } from '@tanstack/react-table'
-import { useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 
 import { errorMessage, lodestoneApi } from '#/api/lodestone'
 import {
+	EVALUATION_POLL_MS,
+	evaluationMoves,
+} from '#/pages/leads/lib/evaluation'
+import {
 	filtersFromSearch,
+	groupingFromSearch,
 	type LeadFilters,
 	PER_PAGE,
 	queryFromSearch,
@@ -35,27 +40,37 @@ export function LeadsListFeature() {
 	const leadsQuery = useQuery({
 		...lodestoneApi().get('/api/v1/profiles/{profile_id}/leads', {
 			path: { profile_id: profileId ?? '' },
-			query: { ...query, page: search.page ?? 1, per_page: PER_PAGE },
+			query: {
+				...query,
+				group_by: groupingFromSearch(search),
+				page: search.page ?? 1,
+				per_page: PER_PAGE,
+			},
 		}).queryOptions,
 		enabled: profileId !== undefined,
 		placeholderData: keepPreviousData,
+		refetchInterval: (current) =>
+			current.state.data?.data.some((lead) => evaluationMoves(lead.evaluation))
+				? EVALUATION_POLL_MS
+				: false,
 	})
 
 	const leads = leadsQuery.data?.data ?? NO_LEADS
-	const maxScore = leads.reduce((max, lead) => Math.max(max, lead.score), 0)
 
-	const columns = useMemo(
-		() =>
-			buildLeadColumns(maxScore, (leadId) => {
-				void navigate({ to: '/leads/$leadId', params: { leadId } })
-			}),
-		[maxScore, navigate],
+	const openLead = useCallback(
+		(leadId: string) => {
+			void navigate({ to: '/leads/$leadId', params: { leadId } })
+		},
+		[navigate],
 	)
+
+	const columns = useMemo(() => buildLeadColumns(openLead), [openLead])
 
 	const table = useReactTable({
 		data: leads,
 		columns,
 		getCoreRowModel: getCoreRowModel(),
+		getRowCanExpand: (row) => row.original.grouped_leads.length > 0,
 		manualPagination: true,
 		manualSorting: true,
 		getRowId: (lead) => lead.id,
@@ -110,6 +125,7 @@ export function LeadsListFeature() {
 			exporting={exporting}
 			exportError={exportError}
 			columnCount={columns.length}
+			onOpenLead={openLead}
 			noProfile={profileId === undefined}
 		/>
 	)

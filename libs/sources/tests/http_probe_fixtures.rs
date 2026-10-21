@@ -137,6 +137,16 @@ impl CandidateHosts for NoHosts {
     ) -> Result<(), CoreError> {
         Ok(())
     }
+
+    async fn seed_lead_hosts(
+        &self,
+        _profile: ProfileId,
+        _subdomains: &[String],
+        _at: DateTime<Utc>,
+        _limit: u32,
+    ) -> Result<u64, CoreError> {
+        Ok(0)
+    }
 }
 
 struct AllowAll;
@@ -184,12 +194,8 @@ fn probe_paths(profile: &ActiveProfile) -> Vec<String> {
         .revision
         .definition
         .definition()
-        .enabled_agents(SourceName::HttpProbe)
-        .next()
-        .unwrap()
-        .source
-        .http_probe()
-        .unwrap()
+        .enrichment
+        .custom
         .fingerprints
         .iter()
         .map(|fingerprint| fingerprint.path.clone())
@@ -249,13 +255,11 @@ fn observed(files: &[&str]) -> Vec<(String, String)> {
     let found: Vec<Observation> = source.evaluate(
         &item,
         &profile,
-        profile
+        &profile
             .revision
             .definition
             .definition()
-            .enabled_agents(SourceName::HttpProbe)
-            .next()
-            .unwrap(),
+            .targets(SourceName::HttpProbe)[0],
     );
     found
         .into_iter()

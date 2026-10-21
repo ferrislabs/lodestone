@@ -10,11 +10,13 @@ use utoipa::ToSchema;
 
 use crate::{
     auth::{AuthenticatedUser, auth_middleware},
-    drafts,
+    calibration, company, drafts, ecosystem,
     errors::ApiError,
-    exports, leads, llm, profiles,
+    exports, leads, llm, profiles, quality,
     response::{DataEnvelope, Response},
+    settings, source_providers, sources,
     state::AppState,
+    timeline,
 };
 
 pub const API_PREFIX: &str = "/api/v1";
@@ -29,7 +31,9 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route("/profiles/import", post(profiles::import_profile))
         .route(
             "/profiles/{profile_id}",
-            get(profiles::get_profile).put(profiles::update_profile),
+            get(profiles::get_profile)
+                .put(profiles::update_profile)
+                .delete(profiles::delete_profile),
         )
         .route(
             "/profiles/{profile_id}/revisions",
@@ -83,6 +87,34 @@ pub fn router(state: AppState) -> Router<AppState> {
             "/llm/tiers/{tier}",
             axum::routing::put(llm::assign_tier).delete(llm::unassign_tier),
         )
+        .route(
+            "/source-providers",
+            get(source_providers::list_source_providers),
+        )
+        .route(
+            "/source-providers/{key}",
+            get(source_providers::get_source_provider)
+                .put(source_providers::put_source_provider)
+                .delete(source_providers::delete_source_provider),
+        )
+        .route(
+            "/source-providers/{key}/test",
+            post(source_providers::test_source_provider),
+        )
+        .route(
+            "/source-providers/{key}/oauth/start",
+            post(source_providers::start_source_provider_oauth),
+        )
+        .route(
+            "/source-providers/{key}/disconnect",
+            post(source_providers::disconnect_source_provider),
+        )
+        .route(
+            "/settings/crawl",
+            get(settings::get_crawl_settings).put(settings::put_crawl_settings),
+        )
+        .route("/sources", get(sources::list_sources))
+        .route("/sources/{source}/run", post(sources::run_source))
         .route("/drafts", get(drafts::list_drafts))
         .route(
             "/drafts/{assessment_id}",
@@ -93,12 +125,43 @@ pub fn router(state: AppState) -> Router<AppState> {
             post(drafts::approve_draft),
         )
         .route("/drafts/{assessment_id}/reject", post(drafts::reject_draft))
+        .route("/quality", get(quality::quality))
+        .route("/quality/calibration", get(calibration::calibration))
+        .route(
+            "/quality/calibration/run",
+            post(calibration::run_calibration),
+        )
         .route("/leads/{lead_id}", get(leads::lead_detail))
-        .route("/leads/{lead_id}/status", patch(leads::change_lead_status));
+        .route("/leads/{lead_id}/status", patch(leads::change_lead_status))
+        .route(
+            "/leads/{lead_id}/summary/retry",
+            post(leads::retry_lead_summary),
+        )
+        .route(
+            "/leads/{lead_id}/agents/retry",
+            post(leads::retry_lead_agents),
+        )
+        .route("/leads/{lead_id}/reevaluate", post(leads::reevaluate_lead))
+        .route("/leads/{lead_id}/timeline", get(timeline::lead_timeline))
+        .route(
+            "/leads/{lead_id}/company/refresh",
+            post(company::refresh_company),
+        )
+        .route(
+            "/leads/{lead_id}/ecosystem/dry-run",
+            post(ecosystem::dry_run_ecosystem_module),
+        )
+        .route("/ecosystem/modules", get(ecosystem::list_ecosystem_modules));
+
+    let callback = Router::new().route(
+        "/api/v1/source-providers/oauth/callback",
+        get(source_providers::source_provider_oauth_callback),
+    );
 
     Router::new()
         .nest(API_PREFIX, routes)
         .route_layer(from_fn_with_state(state, auth_middleware))
+        .merge(callback)
 }
 
 #[derive(Debug, Serialize, PartialEq, ToSchema)]

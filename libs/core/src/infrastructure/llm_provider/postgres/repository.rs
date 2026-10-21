@@ -4,7 +4,10 @@ use lodestone_macros::repository;
 use sqlx::Row;
 
 use crate::{
-    domain::llm::provider::{LlmProviderRecord, LlmProviderRepository, ProviderId, Tier},
+    domain::llm::{
+        ReasoningEffort,
+        provider::{LlmProviderRecord, LlmProviderRepository, ProviderId, Tier},
+    },
     infrastructure::{
         llm_provider::postgres::model::{LlmProviderRow, pricing_cents, timeout_ms},
         postgres::{SharedTx, error::map_sqlx_error},
@@ -29,6 +32,7 @@ struct Params<'a> {
     output: i32,
     nonce: Option<&'a [u8]>,
     ciphertext: Option<&'a [u8]>,
+    max_tokens: Option<i32>,
 }
 
 impl<'a> Params<'a> {
@@ -40,6 +44,14 @@ impl<'a> Params<'a> {
             output: pricing_cents(record.pricing.output_cents_per_mtok)?,
             nonce: record.api_key.as_ref().map(|key| key.nonce.as_slice()),
             ciphertext: record.api_key.as_ref().map(|key| key.ciphertext.as_slice()),
+            max_tokens: record
+                .generation
+                .max_tokens
+                .map(i32::try_from)
+                .transpose()
+                .map_err(|_| {
+                    CoreError::Internal("llm provider max tokens out of range".to_owned())
+                })?,
         })
     }
 }
@@ -54,9 +66,11 @@ impl<'tx> LlmProviderRepository for PgLlmProviderRepository<'tx> {
             INSERT INTO llm_providers (
                 id, name, kind, base_url, model, timeout_ms, max_retries,
                 input_cents_per_mtok, output_cents_per_mtok,
-                api_key_nonce, api_key_ciphertext, enabled, created_at, updated_at
+                api_key_nonce, api_key_ciphertext, enabled, created_at, updated_at,
+                reasoning_effort, max_tokens, temperature, frequency_penalty, presence_penalty,
+                repeat_penalty, max_concurrency
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
             "#,
             record.id.0,
             record.name,
@@ -72,6 +86,13 @@ impl<'tx> LlmProviderRepository for PgLlmProviderRepository<'tx> {
             record.enabled,
             record.created_at,
             record.updated_at,
+            record.reasoning_effort.map(ReasoningEffort::as_str),
+            params.max_tokens,
+            record.generation.temperature,
+            record.generation.frequency_penalty,
+            record.generation.presence_penalty,
+            record.generation.repeat_penalty,
+            i16::from(record.max_concurrency.get()),
         )
         .execute(&mut ***tx)
         .await
@@ -89,7 +110,10 @@ impl<'tx> LlmProviderRepository for PgLlmProviderRepository<'tx> {
             UPDATE llm_providers
             SET name = $2, kind = $3, base_url = $4, model = $5, timeout_ms = $6,
                 max_retries = $7, input_cents_per_mtok = $8, output_cents_per_mtok = $9,
-                api_key_nonce = $10, api_key_ciphertext = $11, enabled = $12, updated_at = $13
+                api_key_nonce = $10, api_key_ciphertext = $11, enabled = $12, updated_at = $13,
+                reasoning_effort = $14, max_tokens = $15, temperature = $16,
+                frequency_penalty = $17, presence_penalty = $18, repeat_penalty = $19,
+                max_concurrency = $20
             WHERE id = $1
             "#,
             record.id.0,
@@ -105,6 +129,13 @@ impl<'tx> LlmProviderRepository for PgLlmProviderRepository<'tx> {
             params.ciphertext,
             record.enabled,
             record.updated_at,
+            record.reasoning_effort.map(ReasoningEffort::as_str),
+            params.max_tokens,
+            record.generation.temperature,
+            record.generation.frequency_penalty,
+            record.generation.presence_penalty,
+            record.generation.repeat_penalty,
+            i16::from(record.max_concurrency.get()),
         )
         .execute(&mut ***tx)
         .await
@@ -121,7 +152,9 @@ impl<'tx> LlmProviderRepository for PgLlmProviderRepository<'tx> {
             r#"
             SELECT id, name, kind, base_url, model, timeout_ms, max_retries,
                    input_cents_per_mtok, output_cents_per_mtok,
-                   api_key_nonce, api_key_ciphertext, enabled, created_at, updated_at
+                   api_key_nonce, api_key_ciphertext, enabled, created_at, updated_at,
+                   reasoning_effort, max_tokens, temperature, frequency_penalty,
+                   presence_penalty, repeat_penalty, max_concurrency
             FROM llm_providers
             WHERE id = $1
             "#,
@@ -142,7 +175,9 @@ impl<'tx> LlmProviderRepository for PgLlmProviderRepository<'tx> {
             r#"
             SELECT id, name, kind, base_url, model, timeout_ms, max_retries,
                    input_cents_per_mtok, output_cents_per_mtok,
-                   api_key_nonce, api_key_ciphertext, enabled, created_at, updated_at
+                   api_key_nonce, api_key_ciphertext, enabled, created_at, updated_at,
+                   reasoning_effort, max_tokens, temperature, frequency_penalty,
+                   presence_penalty, repeat_penalty, max_concurrency
             FROM llm_providers
             ORDER BY name
             "#,
@@ -188,7 +223,9 @@ impl<'tx> LlmProviderRepository for PgLlmProviderRepository<'tx> {
             r#"
             SELECT p.id, p.name, p.kind, p.base_url, p.model, p.timeout_ms, p.max_retries,
                    p.input_cents_per_mtok, p.output_cents_per_mtok,
-                   p.api_key_nonce, p.api_key_ciphertext, p.enabled, p.created_at, p.updated_at
+                   p.api_key_nonce, p.api_key_ciphertext, p.enabled, p.created_at, p.updated_at,
+                   p.reasoning_effort, p.max_tokens, p.temperature, p.frequency_penalty,
+                   p.presence_penalty, p.repeat_penalty, p.max_concurrency
             FROM llm_tiers t
             JOIN llm_providers p ON p.id = t.provider_id
             WHERE t.tier = $1

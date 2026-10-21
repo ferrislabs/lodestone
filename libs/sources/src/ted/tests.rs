@@ -10,6 +10,7 @@ use httpmock::{Method::POST, MockServer};
 use lodestone_core::{
     ActiveProfile, FetchError, FetchResponse, Profile, ProfileId, ProfileName, ProfileRevision,
     RevisionNumber, SourceName, ValidatedProfile,
+    definition::{AgentId, CountryCode},
 };
 use serde_json::{Value, json};
 use url::Url;
@@ -294,7 +295,9 @@ impl PostFetcher for PagedPoster {
 
 fn settings(max_pages: u32) -> TedSettings {
     TedSettings {
-        base_url: Url::parse("https://example.test/v3/notices/search").unwrap(),
+        base_url: Url::parse("https://example.test/v3/notices/search")
+            .unwrap()
+            .into(),
         lookback_days: 7,
         max_pages,
         buyer_countries: keywords(&["FRA"]),
@@ -485,7 +488,9 @@ async fn pages_are_posted_as_json_through_the_polite_fetcher() {
     let source = TedSource::new(
         fetcher,
         TedSettings {
-            base_url: Url::parse(&server.url("/v3/notices/search")).unwrap(),
+            base_url: Url::parse(&server.url("/v3/notices/search"))
+                .unwrap()
+                .into(),
             lookback_days: 7,
             max_pages: 10,
             buyer_countries: keywords(&["FRA"]),
@@ -499,4 +504,34 @@ async fn pages_are_posted_as_json_through_the_polite_fetcher() {
     assert_eq!(stats.pages, 2);
     first.assert_hits_async(1).await;
     second.assert_hits_async(1).await;
+}
+
+fn agent_in(countries: &[&str]) -> SearchAgent {
+    let mut agent = SearchAgent::new(AgentId::new("marches"), "Marchés", &["ted"], &["iam"], &[]);
+    agent.filters.countries = countries
+        .iter()
+        .map(|code| CountryCode::new(*code))
+        .collect();
+    agent
+}
+
+#[test]
+fn agent_countries_become_alpha_three_buyer_countries() {
+    assert_eq!(
+        native_countries(&agent_in(&["FR", "BE"]), &[]),
+        ["BEL", "FRA"]
+    );
+    assert_eq!(native_countries(&agent_in(&["FR", "FR"]), &[]), ["FRA"]);
+}
+
+#[test]
+fn an_agent_without_countries_uses_the_configured_default() {
+    let defaults = vec!["DEU".to_owned()];
+    assert_eq!(native_countries(&agent_in(&[]), &defaults), ["DEU"]);
+    assert_eq!(native_countries(&agent_in(&["FR"]), &defaults), ["FRA"]);
+}
+
+#[test]
+fn a_country_without_an_alpha_three_code_is_left_to_the_post_filter() {
+    assert!(native_countries(&agent_in(&["FR", "ZZ"]), &["DEU".to_owned()]).is_empty());
 }

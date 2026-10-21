@@ -9,6 +9,7 @@ import { invalidateLlm } from '#/pages/llm/feature/invalidate'
 import {
 	buildCreateBody,
 	buildUpdateBody,
+	defaultConcurrency,
 	EMPTY_PROVIDER_VALUES,
 	fieldErrorsFromPaths,
 	numericErrors,
@@ -126,6 +127,7 @@ function ProviderFormFeature({ provider }: ProviderFormFeatureProps) {
 	return (
 		<ProviderForm
 			title={provider ? `Modifier ${provider.name}` : 'Nouveau fournisseur'}
+			defaultConcurrency={defaultConcurrency(values.kind, values.base_url)}
 			editing={editing}
 			hasApiKey={provider?.has_api_key ?? false}
 			values={values}
@@ -157,6 +159,7 @@ function sameValues(a: ProviderFormValues, b: ProviderFormValues): boolean {
 		a.model === b.model &&
 		a.max_retries === b.max_retries &&
 		a.timeout_seconds === b.timeout_seconds &&
+		a.reasoning_effort === b.reasoning_effort &&
 		a.input_cents_per_mtok === b.input_cents_per_mtok &&
 		a.output_cents_per_mtok === b.output_cents_per_mtok
 	)

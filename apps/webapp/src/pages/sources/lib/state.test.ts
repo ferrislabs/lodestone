@@ -1,0 +1,263 @@
+import { describe, expect, it } from 'vitest'
+
+import type { Source, SourceRun } from '#/pages/sources/lib/types'
+import {
+	activeTriggers,
+	canRun,
+	groupedSources,
+	isSettled,
+	providerReady,
+	runDisabledReason,
+	runSummary,
+	shortError,
+	shouldPoll,
+	sourceState,
+	stateLabel,
+	TRIGGER_TTL_MS,
+} from './state'
+
+const NOW = Date.parse('2026-10-05T12:00:00Z')
+
+function source(name: string, overrides: Partial<Source> = {}): Source {
+	return {
+		source: name,
+		kind: 'source.run',
+		label_key: `source.${name}`,
+		status: 'pending',
+		mode: 'scheduled',
+		attempts: 0,
+		next_run_at: '2026-10-05T18:00:00Z',
+		last_runs: [],
+		...overrides,
+	}
+}
+
+function run(overrides: Partial<SourceRun> = {}): SourceRun {
+	return {
+		profile_id: 'p1',
+		profile_name: 'Fintech',
+		status: 'succeeded',
+		volume: 12,
+		signals: 1,
+		started_at: '2026-10-05T11:55:00Z',
+		finished_at: '2026-10-05T11:56:00Z',
+		...overrides,
+	}
+}
+
+describe('groupedSources', () => {
+	it('groups sources like the agent families and drops empty groups', () => {
+		const groups = groupedSources([
+			source('qualification', { kind: 'listener.qualification' }),
+			source('boamp'),
+			source('http_probe'),
+			source('role_guess'),
+		])
+		expect(groups.map((group) => group.title)).toEqual([
+			'Marchés publics',
+			'Enrichissement',
+			'Contacts',
+			'Qualification',
+		])
+		expect(groups[1]?.sources.map((item) => item.source)).toEqual([
+			'http_probe',
+		])
+	})
+
+	it('lists Hacker News and Welcome to the Jungle with the job offer sources', () => {
+		const groups = groupedSources([
+			source('welcome_to_the_jungle'),
+			source('hacker_news_hiring'),
+			source('france_travail'),
+		])
+		expect(groups.map((group) => group.title)).toEqual(["Offres d'emploi"])
+		expect(groups[0]?.sources.map((item) => item.source)).toEqual([
+			'france_travail',
+			'hacker_news_hiring',
+			'welcome_to_the_jungle',
+		])
+	})
+
+	it('groups the inspection, the company job offers and the HTTP probe under Enrichissement', () => {
+		const groups = groupedSources([
+			source('ats'),
+			source('france_travail'),
+			source('http_probe'),
+			source('certificate_transparency'),
+			source('ecosystem_inspection', {
+				kind: 'listener.ecosystem_inspection',
+			}),
+		])
+		expect(groups.map((group) => group.title)).toEqual([
+			'Infrastructure',
+			"Offres d'emploi",
+			'Enrichissement',
+		])
+		expect(groups[2]?.sources.map((item) => item.source)).toEqual([
+			'ecosystem_inspection',
+			'http_probe',
+			'ats',
+		])
+	})
+
+	it('keeps an unknown source in a trailing group', () => {
+		const groups = groupedSources([source('mystery')])
+		expect(groups).toEqual([
+			{ title: 'Autres', continuous: false, sources: [source('mystery')] },
+		])
+	})
+})
+
+describe('continuous sources', () => {
+	const listening = (name: string) =>
+		source(name, {
+			mode: 'continuous',
+			status: 'listening',
+			next_run_at: null,
+		})
+
+	it('collects them first in their own group and out of the families', () => {
+		const groups = groupedSources([
+			source('boamp'),
+			listening('dns_cname'),
+			listening('role_guess'),
+			listening('certificate_transparency'),
+		])
+		expect(groups.map((group) => group.title)).toEqual([
+			'Écoute continue',
+			'Marchés publics',
+		])
+		expect(groups[0]?.continuous).toBe(true)
+		expect(groups[0]?.sources.map((item) => item.source)).toEqual([
+			'certificate_transparency',
+			'dns_cname',
+			'role_guess',
+		])
+	})
+
+	it('keeps polling while a listener is shown', () => {
+		expect(shouldPoll([listening('dns_cname')], {}, NOW)).toBe(true)
+		expect(shouldPoll([source('boamp')], {}, NOW)).toBe(false)
+	})
+})
+
+describe('run availability', () => {
+	it('only a pending source can be run', () => {
+		expect(canRun(source('boamp'))).toBe(true)
+		for (const status of ['running', 'failed', 'succeeded', 'unavailable']) {
+			expect(canRun(source('boamp', { status }))).toBe(false)
+			expect(runDisabledReason(source('boamp', { status }))).not.toBeNull()
+		}
+		expect(runDisabledReason(source('boamp'))).toBeNull()
+	})
+
+	it('a source whose job was stopped is shown stopped and cannot be run', () => {
+		const stopped = source('boamp', { status: 'cancelled' })
+		expect(sourceState(stopped)).toBe('cancelled')
+		expect(stateLabel('cancelled')).toBe('Arrêté')
+		expect(canRun(stopped)).toBe(false)
+		expect(runDisabledReason(stopped)).toBe(
+			"La tâche a été arrêtée : plus aucun agent actif n'utilise cette source",
+		)
+	})
+
+	it('a source whose provider is not ready cannot be run', () => {
+		for (const status of ['not_configured', 'untested', 'failing']) {
+			const blocked = source('boamp', {
+				provider: { key: 'boamp', name: 'BOAMP', status },
+			})
+			expect(providerReady(blocked)).toBe(false)
+			expect(canRun(blocked)).toBe(false)
+			expect(runDisabledReason(blocked)).toBe(
+				'Le fournisseur doit être prêt dans le catalogue',
+			)
+		}
+		const ready = source('boamp', {
+			provider: { key: 'boamp', name: 'BOAMP', status: 'ready' },
+		})
+		expect(providerReady(ready)).toBe(true)
+		expect(canRun(ready)).toBe(true)
+		expect(providerReady(source('qualification'))).toBe(true)
+	})
+})
+
+describe('polling', () => {
+	const triggeredAt = NOW - 1_000
+
+	it('polls while a source is running', () => {
+		expect(shouldPoll([source('boamp', { status: 'running' })], {}, NOW)).toBe(
+			true,
+		)
+		expect(shouldPoll([source('boamp')], {}, NOW)).toBe(false)
+	})
+
+	it('polls while a triggered source is still due', () => {
+		const due = source('boamp', { next_run_at: '2026-10-05T11:59:59Z' })
+		expect(shouldPoll([due], { boamp: triggeredAt }, NOW)).toBe(true)
+		expect([...activeTriggers([due], { boamp: triggeredAt }, NOW)]).toEqual([
+			'boamp',
+		])
+	})
+
+	it('settles once the job is rescheduled after the trigger', () => {
+		const later = source('boamp', { next_run_at: '2026-10-05T18:00:00Z' })
+		expect(isSettled(later, triggeredAt, NOW)).toBe(true)
+		expect(shouldPoll([later], { boamp: triggeredAt }, NOW)).toBe(false)
+	})
+
+	it('settles on failure and after the time to live', () => {
+		expect(
+			isSettled(source('boamp', { status: 'failed' }), triggeredAt, NOW),
+		).toBe(true)
+		const due = source('boamp', { next_run_at: '2026-10-05T11:59:59Z' })
+		expect(isSettled(due, NOW - TRIGGER_TTL_MS - 1, NOW)).toBe(true)
+	})
+})
+
+describe('runSummary', () => {
+	it('summarises a finished run', () => {
+		const summary = runSummary(run(), NOW)
+		expect(summary.statusLabel).toBe('Réussi')
+		expect(summary.counts).toBe('12 éléments, 1 signal')
+		expect(summary.error).toBeNull()
+		expect(summary.when).toBe('il y a 4 minutes')
+		expect(summary.profile).toBe('Fintech')
+	})
+
+	it('shortens the error of a failed run', () => {
+		const summary = runSummary(
+			run({ status: 'failed', error: `${'x'.repeat(200)}` }),
+			NOW,
+		)
+		expect(summary.failed).toBe(true)
+		expect(summary.statusLabel).toBe('Échec')
+		expect(summary.error?.length).toBe(80)
+		expect(summary.error?.endsWith('…')).toBe(true)
+		expect(shortError('a\n b')).toBe('a b')
+	})
+
+	it('says why a cancelled run stopped', () => {
+		const summary = runSummary(
+			run({ status: 'cancelled', cancel_reason: 'agent_removed', volume: 2 }),
+			NOW,
+		)
+		expect(summary.statusLabel).toBe('Arrêté : agent supprimé')
+		expect(summary.failed).toBe(false)
+		expect(summary.counts).toBe('2 éléments, 1 signal')
+		expect(
+			runSummary(
+				run({ status: 'cancelled', cancel_reason: 'profile_deactivated' }),
+				NOW,
+			).statusLabel,
+		).toBe('Arrêté : profil désactivé')
+	})
+
+	it('has no counts while running', () => {
+		const summary = runSummary(
+			run({ status: 'running', finished_at: null }),
+			NOW,
+		)
+		expect(summary.counts).toBeNull()
+		expect(summary.statusLabel).toBe('En cours')
+	})
+})

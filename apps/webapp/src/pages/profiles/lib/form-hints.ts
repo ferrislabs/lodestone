@@ -4,28 +4,29 @@ import {
 	FORM_MESSAGES,
 	VARIANT_TITLES,
 } from '#/pages/profiles/lib/field-copy'
+import { DEFAULT_AGGREGATOR_PROMPT } from '#/pages/profiles/lib/qualification-templates'
 
 export const PROFILE_HINTS: UiHints = {
 	hidden: ['schema_version'],
 	textarea: [
 		'identity.offer',
 		'identity.target_customer',
-		'llm.relevance_criteria',
-		'agents.llm.relevance_criteria',
+		'qualification_agents.system_prompt',
+		'scoring_agents.system_prompt',
+		'aggregator.system_prompt',
 	],
 	defaults: {
-		schema_version: 3,
-		'llm.qualification_threshold': 50,
-		'scoring.factors.weight': 5,
-		'agents.source.fingerprints.matchers.equals': 200,
+		schema_version: 6,
+		'aggregator.system_prompt': DEFAULT_AGGREGATOR_PROMPT,
+		'enrichment.custom.fingerprints.matchers.equals': 200,
 	},
 	labels: {
 		ats: 'ATS',
 		boamp: 'BOAMP',
 		decp: 'DECP',
 		ted: 'TED',
-		llm: 'LLM',
 		dns_cname: 'DNS CNAME',
+		dns: 'DNS',
 		http_probe: 'Sonde HTTP',
 		cname: 'CNAME',
 	},
@@ -33,8 +34,8 @@ export const PROFILE_HINTS: UiHints = {
 	variants: VARIANT_TITLES,
 	messages: FORM_MESSAGES,
 	layout: {
-		'agents.source': { row: ['keywords', 'exclusions'] },
-		'agents.source.fingerprints': {
+		agents: { row: ['keywords', 'exclusions'] },
+		'enrichment.custom.fingerprints': {
 			row: ['id', 'path', 'product'],
 			collapsed: {
 				title: 'Version et dette technique',
@@ -42,7 +43,10 @@ export const PROFILE_HINTS: UiHints = {
 			},
 		},
 	},
+	optionLabels: {
+		language: { fr: 'Français', en: 'English' },
+	},
 	choices: {
-		'agents.source.accept_min_keywords': { min: 1, max: 5 },
+		'agents.accept_min_keywords': { min: 1, max: 5 },
 	},
 }

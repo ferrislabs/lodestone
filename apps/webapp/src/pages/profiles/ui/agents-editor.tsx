@@ -1,59 +1,53 @@
 import { PlusIcon } from 'lucide-react'
 
-import type { FormContext } from '#/components/schema-form/context'
 import { FieldErrors } from '#/components/schema-form/field-frame'
 import type { JsonValue, Problem } from '#/lib/schema-form'
+import { agentRunState, runAgent } from '#/pages/profiles/lib/agent-run'
 import {
-	type AgentKind,
+	agentField,
 	agentKind,
+	agentProviders,
 	dependencyNote,
+	SIGNAL_PROVIDERS,
 } from '#/pages/profiles/lib/agents'
 import { AgentCard } from '#/pages/profiles/ui/agent-card'
-import { AgentPicker } from '#/pages/profiles/ui/agent-picker'
-import { AgentSheet } from '#/pages/profiles/ui/agent-sheet'
+import type { ProviderSummary } from '#/pages/source-providers/lib/types'
+import type { SourceTrigger } from '#/pages/sources/feature/use-source-trigger'
+import type { ListenerSummary } from '#/pages/sources/lib/types'
 
 interface AgentsEditorProps {
-	context: FormContext
 	agents: readonly JsonValue[]
 	problems: readonly Problem[]
-	editing: number | null
+	highlighted: string | null
 	confirmingRemove: number | null
-	picking: boolean
-	onOpenPicker: () => void
-	onClosePicker: () => void
-	onAdd: (kind: AgentKind) => void
+	catalog: readonly ProviderSummary[]
+	sourceTrigger?: SourceTrigger
+	listeners?: Readonly<Record<string, ListenerSummary>>
+	now?: number
+	onAdd: () => void
 	onEdit: (index: number) => void
-	onCloseEdit: () => void
 	onEnabled: (index: number, enabled: boolean) => void
-	onName: (index: number, name: string) => void
-	onId: (index: number, id: string) => void
-	onCriteria: (index: number, criteria: string) => void
 	onRequestRemove: (index: number) => void
 	onConfirmRemove: (index: number) => void
 	onCancelRemove: () => void
 }
 
 export function AgentsEditor({
-	context,
 	agents,
 	problems,
-	editing,
+	highlighted,
 	confirmingRemove,
-	picking,
-	onOpenPicker,
-	onClosePicker,
+	catalog,
+	sourceTrigger,
+	listeners,
+	now,
 	onAdd,
 	onEdit,
-	onCloseEdit,
 	onEnabled,
-	onName,
-	onId,
-	onCriteria,
 	onRequestRemove,
 	onConfirmRemove,
 	onCancelRemove,
 }: AgentsEditorProps) {
-	const editingAgent = editing === null ? undefined : agents[editing]
 	return (
 		<div className="flex flex-col gap-3">
 			<FieldErrors
@@ -70,15 +64,41 @@ export function AgentsEditor({
 				{Object.keys(agents).map((slot) => {
 					const index = Number(slot)
 					const agent = agents[index]
+					const kind = agentKind(agent)
+					const providers = agentProviders(agent)
 					return (
 						<AgentCard
 							key={slot}
 							agent={agent ?? null}
 							index={index}
 							problems={problems}
-							note={dependencyNote(agentKind(agent), agents)}
-							editing={editing === index}
+							note={dependencyNote(agent, agents)}
+							highlighted={
+								highlighted !== null && agentField(agent, 'id') === highlighted
+							}
 							confirmingRemove={confirmingRemove === index}
+							catalog={catalog}
+							run={
+								sourceTrigger
+									? agentRunState(
+											providers,
+											sourceTrigger.pending,
+											sourceTrigger.results,
+											catalog,
+										)
+									: undefined
+							}
+							onRunAgent={
+								sourceTrigger
+									? () => runAgent(providers, sourceTrigger.trigger)
+									: undefined
+							}
+							listener={
+								kind && kind !== 'search'
+									? listeners?.[SIGNAL_PROVIDERS[kind]]
+									: undefined
+							}
+							now={now}
 							onEdit={() => onEdit(index)}
 							onEnabled={(enabled) => onEnabled(index, enabled)}
 							onRequestRemove={() => onRequestRemove(index)}
@@ -91,29 +111,13 @@ export function AgentsEditor({
 					<button
 						type="button"
 						className="flex h-full min-h-32 w-full flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed text-sm text-muted-foreground hover:border-primary hover:text-foreground"
-						onClick={onOpenPicker}
+						onClick={onAdd}
 					>
 						<PlusIcon className="size-5" />
 						Ajouter un agent
 					</button>
 				</li>
 			</ul>
-			{picking ? <AgentPicker onPick={onAdd} onCancel={onClosePicker} /> : null}
-			{editingAgent !== undefined && editing !== null ? (
-				<AgentSheet
-					key={editing}
-					context={context}
-					agent={editingAgent}
-					index={editing}
-					problems={problems}
-					note={dependencyNote(agentKind(editingAgent), agents)}
-					onClose={onCloseEdit}
-					onEnabled={(enabled) => onEnabled(editing, enabled)}
-					onName={(name) => onName(editing, name)}
-					onId={(id) => onId(editing, id)}
-					onCriteria={(criteria) => onCriteria(editing, criteria)}
-				/>
-			) : null}
 		</div>
 	)
 }

@@ -8,12 +8,19 @@ use std::{
 
 use lodestone_core::{
     CacheScope, LlmError, LlmProvider, LlmRequest, LlmResponse, NormalizedDomain, ProfileId,
-    RevisionNumber, TokenPricing, TokenUsage, TriageVerdict, UntrustedDocument,
+    RevisionNumber, TokenPricing, TokenUsage, UntrustedDocument,
     infrastructure::llm_cache::postgres::PgLlmCache,
     llm::gateway::{CallSettings, Prompt, RunBudget, call_structured_cached},
 };
 use sqlx::PgPool;
 use support::create_profile;
+
+#[derive(serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct Verdict {
+    relevant: bool,
+    reason: String,
+}
 
 struct Counting {
     calls: AtomicU32,
@@ -24,7 +31,7 @@ impl LlmProvider for Counting {
         self.calls.fetch_add(1, Ordering::SeqCst);
         Ok(LlmResponse {
             output: serde_json::json!({
-                "relevant": false, "reason": "nothing about identity", "evidence": [], "contact_email": null
+                "relevant": false, "reason": "nothing about identity"
             }),
             model: "test-model".to_owned(),
             usage: TokenUsage {
@@ -39,9 +46,11 @@ fn scope(profile: ProfileId, revision: u32) -> CacheScope {
     CacheScope {
         profile_id: profile,
         revision: RevisionNumber::new(revision).unwrap(),
-        prompt: "triage@1".to_owned(),
+        prompt: "verdict@1".to_owned(),
         domain: NormalizedDomain::from_host("acme.com").unwrap(),
         agent: None,
+        sample: 0,
+        fresh: false,
     }
 }
 
@@ -66,19 +75,13 @@ async fn ask(provider: &Counting, cache: &PgLlmCache, scope: &CacheScope, conten
         instruction: "decide",
         documents: &documents,
         max_tokens: 256,
+        temperature: None,
     };
-    let mut budget = RunBudget::new(NonZeroU32::new(10).unwrap());
-    call_structured_cached::<TriageVerdict, _, _>(
-        provider,
-        cache,
-        scope,
-        prompt,
-        settings(),
-        &mut budget,
-    )
-    .await
-    .unwrap()
-    .from_cache
+    let budget = RunBudget::new(NonZeroU32::new(10).unwrap());
+    call_structured_cached::<Verdict, _, _>(provider, cache, scope, prompt, settings(), &budget)
+        .await
+        .unwrap()
+        .from_cache
 }
 
 #[sqlx::test(migrations = "../../migrations")]

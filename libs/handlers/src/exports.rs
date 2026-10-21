@@ -269,14 +269,19 @@ pub struct ExportLeadsParams {
     format: Option<String>,
     /// One of new, qualified, validated, rejected, contacted, uncertain.
     status: Option<String>,
-    /// Minimum score, inclusive. Must be a non-negative number.
+    /// Comma-separated verdicts to keep: fiable, a_verifier, ecarte, en_attente. All leads when absent.
+    verdict: Option<String>,
+    /// Minimum confidence in percent, inclusive. Leads without a confidence are left out.
+    #[param(value_type = Option<f64>, minimum = 0, maximum = 100)]
+    min_confidence: Option<String>,
+    /// Minimum signal strength from 0 to 100, inclusive. Must be a non-negative number.
     #[param(value_type = Option<f64>, minimum = 0)]
     min_score: Option<String>,
     /// Case-insensitive substring of the lead domain.
     domain: Option<String>,
     /// Only leads having at least one signal of this kind.
     signal: Option<String>,
-    /// One of score_desc (default), score_asc, last_seen_desc, first_seen_desc, domain_asc.
+    /// One of confidence_desc (default), confidence_asc, score_desc, score_asc (signal strength), llm_score_desc, llm_score_asc, last_seen_desc, first_seen_desc, domain_asc.
     sort: Option<String>,
 }
 
@@ -313,9 +318,12 @@ pub async fn export_leads(
     let format = ExportFormat::parse(params.format.as_deref())?;
     let query = ListLeadsParams {
         status: params.status,
+        verdict: params.verdict,
+        min_confidence: params.min_confidence,
         min_score: params.min_score,
         domain: params.domain,
         signal: params.signal,
+        group_by: None,
         sort: params.sort,
         page: None,
         per_page: None,
@@ -444,7 +452,6 @@ mod tests {
             domain: domain.to_owned(),
             status: "validated".to_owned(),
             score: 12.5,
-            score_breakdown: vec![],
             first_seen_at: at,
             last_seen_at: at,
             contact: Some(ContactRecord {

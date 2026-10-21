@@ -5,14 +5,17 @@ use std::{
 };
 
 use chrono::TimeZone;
+use lodestone_core::FetchResponse;
 
 use super::*;
+use crate::link_check::BASELINE_PATH_PREFIX;
 
 type Reply = Result<(u16, Option<&'static str>, String), FetchError>;
 
 struct FakeFetcher {
     script: HashMap<String, Reply>,
     final_urls: HashMap<String, String>,
+    missing: Option<String>,
     limited_once: Mutex<HashSet<String>>,
     requests: Mutex<Vec<(String, FetchPurpose, SourceName)>>,
 }
@@ -25,6 +28,7 @@ impl FakeFetcher {
                 .map(|(url, reply)| (url.to_owned(), reply))
                 .collect(),
             final_urls: HashMap::new(),
+            missing: None,
             limited_once: Mutex::new(HashSet::new()),
             requests: Mutex::new(Vec::new()),
         }
@@ -36,7 +40,17 @@ impl FakeFetcher {
             .unwrap()
             .iter()
             .map(|(url, _, _)| url.clone())
+            .filter(|url| !url.contains(BASELINE_PATH_PREFIX))
             .collect()
+    }
+
+    fn probes(&self) -> usize {
+        self.requests
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(url, _, _)| url.contains(BASELINE_PATH_PREFIX))
+            .count()
     }
 }
 
@@ -50,6 +64,17 @@ impl Fetcher for FakeFetcher {
         if self.limited_once.lock().unwrap().remove(&key) {
             return Err(FetchError::RateLimited {
                 retry_after: Duration::from_secs(20),
+            });
+        }
+        if let Some(body) = &self.missing
+            && key.contains(BASELINE_PATH_PREFIX)
+        {
+            return Ok(FetchResponse {
+                status: 200,
+                headers: vec![("content-type".to_owned(), "text/html".to_owned())],
+                body: body.clone().into_bytes(),
+                final_url: request.url.clone(),
+                truncated: false,
             });
         }
         let final_url = self.final_urls.get(&key).unwrap_or(&key);
@@ -76,8 +101,14 @@ impl Fetcher for FakeFetcher {
     }
 }
 
+const FRAME: &str = "<h1>Contactez la société Acme</h1>";
+
 fn html(body: &str) -> Reply {
-    Ok((200, Some("text/html; charset=utf-8"), body.to_owned()))
+    Ok((
+        200,
+        Some("text/html; charset=utf-8"),
+        format!("{FRAME}{body}"),
+    ))
 }
 
 fn domain() -> NormalizedDomain {
@@ -169,6 +200,7 @@ async fn failing_pages_are_skipped() {
     );
     let found = finder.find(&domain(), &[], now()).await.unwrap();
     assert_eq!(fetcher.urls().len(), 8);
+    assert_eq!(fetcher.probes(), 1);
     assert_eq!(found.len(), 1);
     assert_eq!(found[0].address.as_str(), "ok@acme.fr");
 }
@@ -204,9 +236,12 @@ async fn non_text_content_is_ignored() {
         ),
         (
             "https://acme.fr/b",
-            Ok((200, Some("text/plain"), "b@acme.fr".to_owned())),
+            Ok((200, Some("text/plain"), format!("{FRAME} b@acme.fr"))),
         ),
-        ("https://acme.fr/c", Ok((200, None, "c@acme.fr".to_owned()))),
+        (
+            "https://acme.fr/c",
+            Ok((200, None, format!("{FRAME} c@acme.fr"))),
+        ),
         (
             "https://acme.fr/d",
             Ok((200, Some("image/png"), "d@acme.fr".to_owned())),
@@ -307,4 +342,75 @@ async fn long_rate_limit_is_not_waited_for() {
         Err(SourceError::RateLimited { .. })
     ));
     assert_eq!(fetcher.urls().len(), 1);
+}
+
+const PARKED: &str = "<h1>Oups</h1><p>Le contenu demandé a peut-être été déplacé, écrivez à oops@acme.fr pour continuer.</p>";
+
+#[tokio::test]
+async fn addresses_of_unconfirmed_contact_pages_are_not_kept() {
+    let script = vec![
+        ("https://acme.fr/", html("<p>Bienvenue chez Acme.</p>")),
+        (
+            "https://acme.fr/contact",
+            Ok((
+                200,
+                Some("text/html"),
+                "<title>Page introuvable</title><p>Écrivez à lost@acme.fr</p>".to_owned(),
+            )),
+        ),
+        (
+            "https://acme.fr/mentions-legales",
+            Ok((200, Some("text/html"), PARKED.to_owned())),
+        ),
+        (
+            "https://acme.fr/a-propos",
+            Ok((
+                200,
+                Some("text/html"),
+                r#"<div id="root"></div><noscript>shell@acme.fr</noscript>"#.to_owned(),
+            )),
+        ),
+        (
+            "https://acme.fr/equipe",
+            html("<p>Notre équipe : team@acme.fr</p>"),
+        ),
+        (
+            "https://acme.fr/nous-ecrire",
+            html("<p>Ecrire à home@acme.fr</p>"),
+        ),
+        (
+            "https://acme.fr/presse",
+            html("<p>Presse : press@acme.fr</p>"),
+        ),
+    ];
+    let mut fetcher = FakeFetcher::new(script);
+    fetcher.missing = Some(PARKED.to_owned());
+    fetcher.final_urls.insert(
+        "https://acme.fr/nous-ecrire".to_owned(),
+        "https://acme.fr/".to_owned(),
+    );
+    fetcher.final_urls.insert(
+        "https://acme.fr/presse".to_owned(),
+        "https://press.acme.fr/presse".to_owned(),
+    );
+    let (finder, fetcher) = finder(
+        fetcher,
+        &[
+            "/",
+            "/contact",
+            "/mentions-legales",
+            "/a-propos",
+            "/equipe",
+            "/nous-ecrire",
+            "/presse",
+        ],
+        10,
+    );
+    let found = finder.find(&domain(), &[], now()).await.unwrap();
+    let addresses: Vec<(&str, &str)> = found
+        .iter()
+        .map(|item| (item.address.as_str(), item.provenance.as_str()))
+        .collect();
+    assert_eq!(addresses, [("team@acme.fr", "https://acme.fr/equipe")]);
+    assert_eq!(fetcher.probes(), 1);
 }

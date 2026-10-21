@@ -20,16 +20,8 @@ fn at(seconds: i64) -> DateTime<Utc> {
     Utc.timestamp_opt(1_800_000_000 + seconds, 0).unwrap()
 }
 
-fn agent_of(profile: &ActiveProfile, kind: SourceName) -> Agent {
-    profile
-        .revision
-        .definition
-        .definition()
-        .agents
-        .iter()
-        .find(|agent| agent.source.source_name() == kind)
-        .cloned()
-        .unwrap()
+fn target_of(profile: &ActiveProfile, kind: SourceName) -> SourceTarget<'_> {
+    profile.revision.definition.definition().targets(kind)[0]
 }
 
 fn host(name: &str) -> Hostname {
@@ -188,6 +180,16 @@ impl CandidateHosts for FakeHosts {
         ));
         Ok(())
     }
+
+    async fn seed_lead_hosts(
+        &self,
+        _profile: ProfileId,
+        _subdomains: &[String],
+        _at: DateTime<Utc>,
+        _limit: u32,
+    ) -> Result<u64, CoreError> {
+        Ok(0)
+    }
 }
 
 fn settings(concurrency: usize) -> DnsCnameSettings {
@@ -232,7 +234,7 @@ fn suffix_matches_on_label_boundary_only() {
         let found = evaluator.evaluate(
             &resolved("sso.acme.com", &[chain]),
             &profile,
-            &agent_of(&profile, SourceName::DnsCname),
+            &target_of(&profile, SourceName::DnsCname),
         );
         assert_eq!(found.len(), 1, "{chain}");
         assert_eq!(found[0].value.as_deref(), Some("auth0"));
@@ -241,7 +243,7 @@ fn suffix_matches_on_label_boundary_only() {
         let found = evaluator.evaluate(
             &resolved("sso.acme.com", &[chain]),
             &profile,
-            &agent_of(&profile, SourceName::DnsCname),
+            &target_of(&profile, SourceName::DnsCname),
         );
         assert!(found.is_empty(), "{chain}");
     }
@@ -253,7 +255,7 @@ fn observation_carries_evidence() {
     let found = evaluator().evaluate(
         &resolved("sso.acme.com", &["lb.example.net", "acme.eu.auth0.com"]),
         &profile,
-        &agent_of(&profile, SourceName::DnsCname),
+        &target_of(&profile, SourceName::DnsCname),
     );
     assert_eq!(found.len(), 1);
     let observation = &found[0];
@@ -284,7 +286,7 @@ fn several_providers_match_and_are_deduplicated() {
             &["a.auth0.com", "b.edge.auth0.com", "c.okta.com"],
         ),
         &profile,
-        &agent_of(&profile, SourceName::DnsCname),
+        &target_of(&profile, SourceName::DnsCname),
     );
     let values: Vec<_> = found.iter().filter_map(|o| o.value.as_deref()).collect();
     assert_eq!(values, vec!["auth0", "okta"]);
@@ -296,13 +298,13 @@ fn profile_without_dns_cname_yields_nothing() {
     let found = evaluator().evaluate(
         &resolved("sso.acme.com", &["a.auth0.com"]),
         &profile,
-        &agent_of(&profile, SourceName::HttpProbe),
+        &target_of(&profile, SourceName::HttpProbe),
     );
     assert!(found.is_empty());
 }
 
 #[tokio::test]
-async fn errored_lookups_are_skipped_and_not_marked() {
+async fn failed_lookups_are_skipped_but_marked_so_they_wait_for_the_revisit() {
     let resolver = FakeResolver::with(&[
         ("ok.acme.com", Ok(vec!["t.auth0.com"])),
         ("empty.acme.com", Ok(vec![])),
@@ -328,10 +330,47 @@ async fn errored_lookups_are_skipped_and_not_marked() {
     assert!(items[1].chain.is_empty());
     assert_eq!(items[0].resolved_at, at(100));
     let marked = hosts.marked.lock().unwrap();
-    assert_eq!(marked.len(), 1);
-    assert_eq!(marked[0].0, vec!["ok.acme.com", "empty.acme.com"]);
+    assert_eq!(marked.len(), 2);
+    assert_eq!(
+        marked[0].0,
+        vec!["ok.acme.com", "empty.acme.com", "bad.acme.com"]
+    );
     assert_eq!(marked[0].1, SourceName::DnsCname);
     assert_eq!(marked[0].2, at(100));
+    assert_eq!(marked[1].0, vec!["slow.acme.com"]);
+}
+
+#[tokio::test]
+async fn timeouts_retry_after_an_hour_while_other_failures_wait_the_full_revisit() {
+    let resolver = Arc::new(FakeResolver::with(&[
+        ("slow.acme.com", Err(DnsError::Timeout)),
+        (
+            "bad.acme.com",
+            Err(DnsError::Failure("nxdomain".to_owned())),
+        ),
+    ]));
+    let hosts = Arc::new(FakeHosts {
+        due: vec![candidate("slow.acme.com"), candidate("bad.acme.com")],
+        ..FakeHosts::default()
+    });
+    let revisit = Duration::from_secs(720 * 3600);
+    let source = DnsCnameSource::new(
+        resolver,
+        Arc::clone(&hosts),
+        DnsCnameSettings {
+            batch_size: 10,
+            concurrency: 2,
+            revisit_interval: revisit,
+        },
+    );
+
+    source.collect(&[], at(0)).await.unwrap();
+
+    let marked = hosts.marked.lock().unwrap();
+    assert_eq!(marked[0].0, vec!["bad.acme.com"]);
+    assert_eq!(marked[0].2, at(0));
+    assert_eq!(marked[1].0, vec!["slow.acme.com"]);
+    assert_eq!(marked[1].2, at(0) - chrono::Duration::hours(719));
 }
 
 #[tokio::test]

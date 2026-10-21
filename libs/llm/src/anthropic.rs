@@ -1,14 +1,16 @@
 use std::time::Duration;
 
 use lodestone_core::{
-    LlmError, LlmProvider, LlmRequest, LlmResponse, ProviderDefinition, ProviderKind, TokenUsage,
-    render_user_content,
+    GenerationParams, LlmError, LlmProvider, LlmRequest, LlmResponse, ProviderDefinition,
+    ProviderKind, TokenUsage, render_user_content,
 };
 use reqwest::{Client, StatusCode, header::RETRY_AFTER};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tracing::{Instrument, Span, field, info_span};
 use url::Url;
+
+use crate::provider_message;
 
 const API_VERSION: &str = "2023-06-01";
 
@@ -17,6 +19,7 @@ pub struct AnthropicProvider {
     endpoint: Url,
     model: String,
     api_key: common::Secret,
+    generation: GenerationParams,
 }
 
 #[derive(Serialize)]
@@ -26,6 +29,8 @@ struct WireRequest<'a> {
     system: &'a str,
     messages: [WireMessage<'a>; 1],
     output_config: OutputConfig<'a>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    temperature: Option<f64>,
 }
 
 #[derive(Serialize)]
@@ -91,6 +96,7 @@ impl AnthropicProvider {
             endpoint,
             model: definition.model,
             api_key,
+            generation: definition.generation,
         })
     }
 
@@ -98,7 +104,7 @@ impl AnthropicProvider {
         let content = render_user_content(request);
         let body = WireRequest {
             model: &self.model,
-            max_tokens: request.max_tokens,
+            max_tokens: self.generation.max_tokens_or(request.max_tokens),
             system: request.system,
             messages: [WireMessage {
                 role: "user",
@@ -110,6 +116,7 @@ impl AnthropicProvider {
                     schema: request.schema,
                 },
             },
+            temperature: request.temperature.or(self.generation.temperature),
         };
         let response = self
             .client
@@ -122,7 +129,7 @@ impl AnthropicProvider {
             .map_err(transport_error)?;
         let status = response.status();
         if !status.is_success() {
-            return Err(status_error(status, &response));
+            return Err(status_error(status, response, self.api_key.expose()).await);
         }
         let bytes = response.bytes().await.map_err(transport_error)?;
         let wire: WireResponse = serde_json::from_slice(&bytes)
@@ -153,7 +160,7 @@ impl AnthropicProvider {
     }
 }
 
-fn status_error(status: StatusCode, response: &reqwest::Response) -> LlmError {
+async fn status_error(status: StatusCode, response: reqwest::Response, key: &str) -> LlmError {
     match status.as_u16() {
         429 => LlmError::RateLimited {
             retry_after: response
@@ -164,7 +171,10 @@ fn status_error(status: StatusCode, response: &reqwest::Response) -> LlmError {
                 .map(Duration::from_secs),
         },
         529 => LlmError::RateLimited { retry_after: None },
-        code => LlmError::Status { status: code },
+        code => LlmError::Status {
+            status: code,
+            message: provider_message::read(response, Some(key)).await,
+        },
     }
 }
 

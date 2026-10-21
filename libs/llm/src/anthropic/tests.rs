@@ -10,8 +10,8 @@ use std::{
 use common::Secret;
 use httpmock::prelude::*;
 use lodestone_core::{
-    LlmError, LlmProvider, LlmRequest, ProviderDefinition, ProviderKind, UntrustedDocument,
-    render_user_content,
+    GenerationParams, LlmError, LlmProvider, LlmRequest, ProviderDefinition, ProviderKind,
+    UntrustedDocument, render_user_content,
 };
 use serde_json::{Value, json};
 use tracing::instrument::WithSubscriber;
@@ -88,6 +88,8 @@ fn definition(server: &MockServer, timeout: Duration) -> ProviderDefinition {
         model: "claude-test".to_owned(),
         api_key: Some(Secret::new(KEY)),
         timeout,
+        reasoning_effort: None,
+        generation: GenerationParams::default(),
     }
 }
 
@@ -115,6 +117,7 @@ fn request<'a>(documents: &'a [UntrustedDocument<'a>], schema: &'a Value) -> Llm
         schema_name: "verdict",
         schema,
         max_tokens: 256,
+        temperature: None,
     }
 }
 
@@ -184,6 +187,41 @@ async fn request_has_the_exact_expected_shape() {
 }
 
 #[tokio::test]
+async fn temperature_and_max_tokens_are_sent_and_penalties_are_not() {
+    let server = MockServer::start();
+    let mut definition = definition(&server, Duration::from_secs(5));
+    definition.generation = GenerationParams {
+        max_tokens: Some(700),
+        temperature: Some(0.3),
+        frequency_penalty: Some(0.5),
+        presence_penalty: Some(0.5),
+        repeat_penalty: Some(1.3),
+    };
+    let provider = AnthropicProvider::new(definition).unwrap();
+    let mock = server.mock(|when, then| {
+        when.method(POST).path("/v1/messages").matches(|request| {
+            request.body.as_ref().is_some_and(|body| {
+                let value: Value = serde_json::from_slice(body).unwrap();
+                value["max_tokens"] == json!(700)
+                    && value["temperature"] == json!(0.3)
+                    && value.get("frequency_penalty").is_none()
+                    && value.get("presence_penalty").is_none()
+                    && value.get("repeat_penalty").is_none()
+            })
+        });
+        then.status(200)
+            .json_body(ok_body("{\"verdict\":\"hot\"}", "end_turn"));
+    });
+    let schema = schema();
+    let documents = documents();
+    provider
+        .complete(&request(&documents, &schema))
+        .await
+        .unwrap();
+    mock.assert();
+}
+
+#[tokio::test]
 async fn success_maps_output_usage_and_model() {
     let server = MockServer::start();
     server.mock(|when, then| {
@@ -232,7 +270,10 @@ async fn errors_are_mapped_and_never_leak_the_key() {
             500,
             json!({"error": KEY}),
             vec![],
-            LlmError::Status { status: 500 },
+            LlmError::Status {
+                status: 500,
+                message: Some("[redacted]".to_owned()),
+            },
         ),
     ];
     for (status, body, headers, expected) in cases {
@@ -251,6 +292,35 @@ async fn errors_are_mapped_and_never_leak_the_key() {
         assert!(!format!("{error:?}").contains(KEY));
         assert!(!logs.contains(KEY));
     }
+}
+
+#[tokio::test]
+async fn client_error_keeps_the_provider_message() {
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST).path("/v1/messages");
+        then.status(400).json_body(json!({
+            "type": "error",
+            "error": {
+                "type": "invalid_request_error",
+                "message": format!("output_config.format: bad schema for {KEY}")
+            }
+        }));
+    });
+    let (result, logs) = run(&server, Duration::from_secs(5)).await;
+    let error = result.unwrap_err();
+    assert_eq!(
+        error,
+        LlmError::Status {
+            status: 400,
+            message: Some("output_config.format: bad schema for [redacted]".to_owned()),
+        }
+    );
+    assert_eq!(
+        error.to_string(),
+        "llm provider answered with status 400: output_config.format: bad schema for [redacted]"
+    );
+    assert!(!logs.contains(KEY));
 }
 
 #[tokio::test]

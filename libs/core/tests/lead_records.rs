@@ -4,7 +4,8 @@ use std::num::NonZeroU16;
 
 use lodestone_core::output::RecordLookup;
 use lodestone_core::{
-    LeadId, LeadQuery, LeadStatus, LodestoneUseCase, ProfileId, UserId, WebhookPolicy,
+    LeadId, LeadQuery, LeadStatus, LodestoneUseCase, ProfileId, Rejection, RejectionReason, UserId,
+    WebhookPolicy,
 };
 use sqlx::PgPool;
 use support::{create_profile, seen_lead};
@@ -205,14 +206,14 @@ async fn approving_a_draft_enqueues_a_webhook_only_when_enabled(pool: PgPool) {
     let second_assessment = assessment(&pool, second).await;
 
     LodestoneUseCase::new(pool.clone())
-        .approve_draft(lodestone_core::AssessmentId(first_assessment), actor)
+        .approve_draft(lodestone_core::AssessmentId(first_assessment), actor, None)
         .await
         .unwrap();
     assert!(webhook_jobs(&pool).await.is_empty());
 
     LodestoneUseCase::new(pool.clone())
         .with_webhooks(Some(policy(vec![])))
-        .approve_draft(lodestone_core::AssessmentId(second_assessment), actor)
+        .approve_draft(lodestone_core::AssessmentId(second_assessment), actor, None)
         .await
         .unwrap();
     let jobs = webhook_jobs(&pool).await;
@@ -232,7 +233,7 @@ async fn a_profile_outside_the_filter_enqueues_nothing(pool: PgPool) {
 
     LodestoneUseCase::new(pool.clone())
         .with_webhooks(Some(policy(vec![beta])))
-        .approve_draft(lodestone_core::AssessmentId(assessment_id), actor)
+        .approve_draft(lodestone_core::AssessmentId(assessment_id), actor, None)
         .await
         .unwrap();
 
@@ -247,21 +248,26 @@ async fn moving_a_lead_to_validated_enqueues_a_webhook_and_other_moves_do_not(po
     let usecase = LodestoneUseCase::new(pool.clone()).with_webhooks(Some(policy(vec![profile])));
 
     usecase
-        .change_lead_status(id, LeadStatus::Rejected, actor)
+        .change_lead_status(
+            id,
+            LeadStatus::Rejected,
+            actor,
+            Some(Rejection::new(RejectionReason::OffTarget, None).unwrap()),
+        )
         .await
         .unwrap();
     assert!(webhook_jobs(&pool).await.is_empty());
 
     usecase
-        .change_lead_status(id, LeadStatus::New, actor)
+        .change_lead_status(id, LeadStatus::New, actor, None)
         .await
         .unwrap();
     usecase
-        .change_lead_status(id, LeadStatus::Qualified, actor)
+        .change_lead_status(id, LeadStatus::Qualified, actor, None)
         .await
         .unwrap();
     usecase
-        .change_lead_status(id, LeadStatus::Validated, actor)
+        .change_lead_status(id, LeadStatus::Validated, actor, None)
         .await
         .unwrap();
     assert_eq!(webhook_jobs(&pool).await.len(), 1);
@@ -269,7 +275,7 @@ async fn moving_a_lead_to_validated_enqueues_a_webhook_and_other_moves_do_not(po
     let disabled = LodestoneUseCase::new(pool.clone());
     let other = lead(&pool, profile, "b.com", "qualified", 9.0).await;
     disabled
-        .change_lead_status(other, LeadStatus::Validated, actor)
+        .change_lead_status(other, LeadStatus::Validated, actor, None)
         .await
         .unwrap();
     assert_eq!(webhook_jobs(&pool).await.len(), 1);

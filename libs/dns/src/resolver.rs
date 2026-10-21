@@ -6,7 +6,7 @@ use hickory_resolver::{
     net::{NetError, runtime::TokioRuntimeProvider},
     proto::rr::{RData, RecordType},
 };
-use lodestone_core::{DnsError, DnsResolver, Hostname, MxLookup, NormalizedDomain};
+use lodestone_core::{DnsError, DnsRecords, DnsResolver, Hostname, MxLookup, NormalizedDomain};
 use thiserror::Error;
 
 #[derive(Debug, Clone, Copy)]
@@ -33,6 +33,7 @@ pub struct DnsBuildError(String);
 #[derive(Clone)]
 pub struct HickoryResolver {
     inner: TokioResolver,
+    over_tcp: TokioResolver,
     max_chain: usize,
 }
 
@@ -65,10 +66,31 @@ impl HickoryResolver {
         settings: DnsSettings,
     ) -> Result<Self, DnsBuildError> {
         let inner = builder.build().map_err(|e| DnsBuildError(e.to_string()))?;
+        let mut tcp_builder = TokioResolver::builder_with_config(
+            ResolverConfig::from_name_servers(CLOUDFLARE.tcp().collect()),
+            TokioRuntimeProvider::default(),
+        );
+        apply(tcp_builder.options_mut(), settings);
+        let over_tcp = tcp_builder
+            .build()
+            .map_err(|e| DnsBuildError(e.to_string()))?;
         Ok(Self {
             inner,
+            over_tcp,
             max_chain: settings.max_chain,
         })
+    }
+
+    async fn records(&self, name: &str, kind: RecordType) -> Result<Vec<RData>, NetError> {
+        let lookup = match self.inner.lookup(name, kind).await {
+            Err(NetError::Truncated) => self.over_tcp.lookup(name, kind).await,
+            other => other,
+        }?;
+        Ok(lookup
+            .answers()
+            .iter()
+            .map(|record| record.data.clone())
+            .collect())
     }
 
     async fn next_target(&self, name: &Hostname) -> Result<Option<String>, DnsError> {
@@ -96,6 +118,7 @@ impl HickoryResolver {
 fn apply(options: &mut hickory_resolver::config::ResolverOpts, settings: DnsSettings) {
     options.timeout = settings.timeout;
     options.attempts = settings.attempts;
+    options.edns0 = true;
 }
 
 fn classify(error: &NetError) -> Result<Option<String>, DnsError> {
@@ -122,6 +145,57 @@ impl MxLookup for HickoryResolver {
                 _ => false,
             })),
             Err(error) => classify(&error).map(|_| false),
+        }
+    }
+}
+
+pub fn txt_text(parts: &[Box<[u8]>]) -> String {
+    parts
+        .iter()
+        .map(|part| String::from_utf8_lossy(part))
+        .collect::<Vec<_>>()
+        .concat()
+}
+
+pub fn mx_order(mut exchanges: Vec<(u16, String)>) -> Vec<Hostname> {
+    exchanges.sort_by_key(|(preference, _)| *preference);
+    let mut hosts: Vec<Hostname> = Vec::new();
+    for (_, exchange) in exchanges {
+        if let Ok(host) = Hostname::parse(&exchange)
+            && !hosts.contains(&host)
+        {
+            hosts.push(host);
+        }
+    }
+    hosts
+}
+
+impl DnsRecords for HickoryResolver {
+    async fn mx_hosts(&self, domain: &NormalizedDomain) -> Result<Vec<Hostname>, DnsError> {
+        match self.records(domain.as_str(), RecordType::MX).await {
+            Ok(records) => Ok(mx_order(
+                records
+                    .iter()
+                    .filter_map(|data| match data {
+                        RData::MX(mx) => Some((mx.preference, mx.exchange.to_utf8())),
+                        _ => None,
+                    })
+                    .collect(),
+            )),
+            Err(error) => classify(&error).map(|_| Vec::new()),
+        }
+    }
+
+    async fn txt_records(&self, name: &str) -> Result<Vec<String>, DnsError> {
+        match self.records(name, RecordType::TXT).await {
+            Ok(records) => Ok(records
+                .iter()
+                .filter_map(|data| match data {
+                    RData::TXT(txt) => Some(txt_text(&txt.txt_data)),
+                    _ => None,
+                })
+                .collect()),
+            Err(error) => classify(&error).map(|_| Vec::new()),
         }
     }
 }
@@ -253,6 +327,31 @@ mod tests {
         assert_eq!(
             run("a.example.com", &map, 8).await,
             Ok(vec![host("b.example.net")])
+        );
+    }
+
+    #[test]
+    fn txt_character_strings_are_joined() {
+        let parts: Vec<Box<[u8]>> = vec![
+            b"v=spf1 include:_spf.google.com "
+                .to_vec()
+                .into_boxed_slice(),
+            b"~all".to_vec().into_boxed_slice(),
+        ];
+        assert_eq!(txt_text(&parts), "v=spf1 include:_spf.google.com ~all");
+    }
+
+    #[test]
+    fn mx_hosts_follow_their_preference_without_duplicates() {
+        let hosts = mx_order(vec![
+            (20, "alt1.aspmx.l.google.com.".to_owned()),
+            (10, "aspmx.l.google.com.".to_owned()),
+            (30, "aspmx.l.google.com.".to_owned()),
+            (40, ".".to_owned()),
+        ]);
+        assert_eq!(
+            hosts,
+            [host("aspmx.l.google.com"), host("alt1.aspmx.l.google.com")]
         );
     }
 

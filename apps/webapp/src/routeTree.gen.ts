@@ -11,16 +11,20 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as AppRouteImport } from './routes/_app'
 import { Route as AppIndexRouteImport } from './routes/_app.index'
+import { Route as AppSourcesIndexRouteImport } from './routes/_app.sources.index'
+import { Route as AppQualityIndexRouteImport } from './routes/_app.quality.index'
 import { Route as AppProfilesIndexRouteImport } from './routes/_app.profiles.index'
 import { Route as AppLlmIndexRouteImport } from './routes/_app.llm.index'
 import { Route as AppLeadsIndexRouteImport } from './routes/_app.leads.index'
 import { Route as AppDraftsIndexRouteImport } from './routes/_app.drafts.index'
+import { Route as AppSourcesActivityRouteImport } from './routes/_app.sources.activity'
 import { Route as AppProfilesNewRouteImport } from './routes/_app.profiles.new'
 import { Route as AppProfilesProfileIdRouteImport } from './routes/_app.profiles.$profileId'
 import { Route as AppLlmNewRouteImport } from './routes/_app.llm.new'
 import { Route as AppLlmProviderIdRouteImport } from './routes/_app.llm.$providerId'
 import { Route as AppLeadsLeadIdRouteImport } from './routes/_app.leads.$leadId'
 import { Route as AppDraftsAssessmentIdRouteImport } from './routes/_app.drafts.$assessmentId'
+import { Route as AppSourcesProvidersKeyRouteImport } from './routes/_app.sources.providers.$key'
 
 const AppRoute = AppRouteImport.update({
   id: '/_app',
@@ -29,6 +33,16 @@ const AppRoute = AppRouteImport.update({
 const AppIndexRoute = AppIndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppSourcesIndexRoute = AppSourcesIndexRouteImport.update({
+  id: '/sources/',
+  path: '/sources/',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppQualityIndexRoute = AppQualityIndexRouteImport.update({
+  id: '/quality/',
+  path: '/quality/',
   getParentRoute: () => AppRoute,
 } as any)
 const AppProfilesIndexRoute = AppProfilesIndexRouteImport.update({
@@ -49,6 +63,11 @@ const AppLeadsIndexRoute = AppLeadsIndexRouteImport.update({
 const AppDraftsIndexRoute = AppDraftsIndexRouteImport.update({
   id: '/drafts/',
   path: '/drafts/',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppSourcesActivityRoute = AppSourcesActivityRouteImport.update({
+  id: '/sources/activity',
+  path: '/sources/activity',
   getParentRoute: () => AppRoute,
 } as any)
 const AppProfilesNewRoute = AppProfilesNewRouteImport.update({
@@ -81,6 +100,11 @@ const AppDraftsAssessmentIdRoute = AppDraftsAssessmentIdRouteImport.update({
   path: '/drafts/$assessmentId',
   getParentRoute: () => AppRoute,
 } as any)
+const AppSourcesProvidersKeyRoute = AppSourcesProvidersKeyRouteImport.update({
+  id: '/sources/providers/$key',
+  path: '/sources/providers/$key',
+  getParentRoute: () => AppRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof AppIndexRoute
@@ -90,10 +114,14 @@ export interface FileRoutesByFullPath {
   '/llm/new': typeof AppLlmNewRoute
   '/profiles/$profileId': typeof AppProfilesProfileIdRoute
   '/profiles/new': typeof AppProfilesNewRoute
+  '/sources/activity': typeof AppSourcesActivityRoute
   '/drafts/': typeof AppDraftsIndexRoute
   '/leads/': typeof AppLeadsIndexRoute
   '/llm/': typeof AppLlmIndexRoute
   '/profiles/': typeof AppProfilesIndexRoute
+  '/quality/': typeof AppQualityIndexRoute
+  '/sources/': typeof AppSourcesIndexRoute
+  '/sources/providers/$key': typeof AppSourcesProvidersKeyRoute
 }
 export interface FileRoutesByTo {
   '/': typeof AppIndexRoute
@@ -103,10 +131,14 @@ export interface FileRoutesByTo {
   '/llm/new': typeof AppLlmNewRoute
   '/profiles/$profileId': typeof AppProfilesProfileIdRoute
   '/profiles/new': typeof AppProfilesNewRoute
+  '/sources/activity': typeof AppSourcesActivityRoute
   '/drafts': typeof AppDraftsIndexRoute
   '/leads': typeof AppLeadsIndexRoute
   '/llm': typeof AppLlmIndexRoute
   '/profiles': typeof AppProfilesIndexRoute
+  '/quality': typeof AppQualityIndexRoute
+  '/sources': typeof AppSourcesIndexRoute
+  '/sources/providers/$key': typeof AppSourcesProvidersKeyRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -118,10 +150,14 @@ export interface FileRoutesById {
   '/_app/llm/new': typeof AppLlmNewRoute
   '/_app/profiles/$profileId': typeof AppProfilesProfileIdRoute
   '/_app/profiles/new': typeof AppProfilesNewRoute
+  '/_app/sources/activity': typeof AppSourcesActivityRoute
   '/_app/drafts/': typeof AppDraftsIndexRoute
   '/_app/leads/': typeof AppLeadsIndexRoute
   '/_app/llm/': typeof AppLlmIndexRoute
   '/_app/profiles/': typeof AppProfilesIndexRoute
+  '/_app/quality/': typeof AppQualityIndexRoute
+  '/_app/sources/': typeof AppSourcesIndexRoute
+  '/_app/sources/providers/$key': typeof AppSourcesProvidersKeyRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -133,10 +169,14 @@ export interface FileRouteTypes {
     | '/llm/new'
     | '/profiles/$profileId'
     | '/profiles/new'
+    | '/sources/activity'
     | '/drafts/'
     | '/leads/'
     | '/llm/'
     | '/profiles/'
+    | '/quality/'
+    | '/sources/'
+    | '/sources/providers/$key'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -146,10 +186,14 @@ export interface FileRouteTypes {
     | '/llm/new'
     | '/profiles/$profileId'
     | '/profiles/new'
+    | '/sources/activity'
     | '/drafts'
     | '/leads'
     | '/llm'
     | '/profiles'
+    | '/quality'
+    | '/sources'
+    | '/sources/providers/$key'
   id:
     | '__root__'
     | '/_app'
@@ -160,10 +204,14 @@ export interface FileRouteTypes {
     | '/_app/llm/new'
     | '/_app/profiles/$profileId'
     | '/_app/profiles/new'
+    | '/_app/sources/activity'
     | '/_app/drafts/'
     | '/_app/leads/'
     | '/_app/llm/'
     | '/_app/profiles/'
+    | '/_app/quality/'
+    | '/_app/sources/'
+    | '/_app/sources/providers/$key'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -184,6 +232,20 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof AppIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/sources/': {
+      id: '/_app/sources/'
+      path: '/sources'
+      fullPath: '/sources/'
+      preLoaderRoute: typeof AppSourcesIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/quality/': {
+      id: '/_app/quality/'
+      path: '/quality'
+      fullPath: '/quality/'
+      preLoaderRoute: typeof AppQualityIndexRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/profiles/': {
@@ -212,6 +274,13 @@ declare module '@tanstack/react-router' {
       path: '/drafts'
       fullPath: '/drafts/'
       preLoaderRoute: typeof AppDraftsIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/sources/activity': {
+      id: '/_app/sources/activity'
+      path: '/sources/activity'
+      fullPath: '/sources/activity'
+      preLoaderRoute: typeof AppSourcesActivityRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/profiles/new': {
@@ -256,6 +325,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppDraftsAssessmentIdRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/sources/providers/$key': {
+      id: '/_app/sources/providers/$key'
+      path: '/sources/providers/$key'
+      fullPath: '/sources/providers/$key'
+      preLoaderRoute: typeof AppSourcesProvidersKeyRouteImport
+      parentRoute: typeof AppRoute
+    }
   }
 }
 
@@ -267,10 +343,14 @@ interface AppRouteChildren {
   AppLlmNewRoute: typeof AppLlmNewRoute
   AppProfilesProfileIdRoute: typeof AppProfilesProfileIdRoute
   AppProfilesNewRoute: typeof AppProfilesNewRoute
+  AppSourcesActivityRoute: typeof AppSourcesActivityRoute
   AppDraftsIndexRoute: typeof AppDraftsIndexRoute
   AppLeadsIndexRoute: typeof AppLeadsIndexRoute
   AppLlmIndexRoute: typeof AppLlmIndexRoute
   AppProfilesIndexRoute: typeof AppProfilesIndexRoute
+  AppQualityIndexRoute: typeof AppQualityIndexRoute
+  AppSourcesIndexRoute: typeof AppSourcesIndexRoute
+  AppSourcesProvidersKeyRoute: typeof AppSourcesProvidersKeyRoute
 }
 
 const AppRouteChildren: AppRouteChildren = {
@@ -281,10 +361,14 @@ const AppRouteChildren: AppRouteChildren = {
   AppLlmNewRoute: AppLlmNewRoute,
   AppProfilesProfileIdRoute: AppProfilesProfileIdRoute,
   AppProfilesNewRoute: AppProfilesNewRoute,
+  AppSourcesActivityRoute: AppSourcesActivityRoute,
   AppDraftsIndexRoute: AppDraftsIndexRoute,
   AppLeadsIndexRoute: AppLeadsIndexRoute,
   AppLlmIndexRoute: AppLlmIndexRoute,
   AppProfilesIndexRoute: AppProfilesIndexRoute,
+  AppQualityIndexRoute: AppQualityIndexRoute,
+  AppSourcesIndexRoute: AppSourcesIndexRoute,
+  AppSourcesProvidersKeyRoute: AppSourcesProvidersKeyRoute,
 }
 
 const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)

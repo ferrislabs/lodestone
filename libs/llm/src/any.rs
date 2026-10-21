@@ -22,6 +22,17 @@ impl AnyProvider {
     }
 }
 
+impl AnyProvider {
+    pub fn reporting_from_definition(definition: &ProviderDefinition) -> Result<Self, LlmError> {
+        match Self::from_definition(definition)? {
+            Self::OpenAiCompatible(provider) => {
+                Ok(Self::OpenAiCompatible(provider.without_fallback()))
+            }
+            other => Ok(other),
+        }
+    }
+}
+
 impl LlmProvider for AnyProvider {
     async fn complete(&self, request: &LlmRequest<'_>) -> Result<LlmResponse, LlmError> {
         match self {
@@ -38,6 +49,8 @@ mod tests {
     use common::Secret;
     use url::Url;
 
+    use lodestone_core::GenerationParams;
+
     use super::*;
 
     fn definition(kind: ProviderKind, key: Option<&str>) -> ProviderDefinition {
@@ -47,6 +60,8 @@ mod tests {
             model: "test-model".to_owned(),
             api_key: key.map(Secret::new),
             timeout: Duration::from_secs(5),
+            reasoning_effort: None,
+            generation: GenerationParams::default(),
         }
     }
 

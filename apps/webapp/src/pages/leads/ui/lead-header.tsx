@@ -1,11 +1,16 @@
 import { Button } from '#/components/ui/button'
-import { formatDateTime, formatScore } from '#/pages/leads/lib/format'
+import { formatSignalStrength } from '#/pages/leads/lib/format'
 import { leadStatusLabel } from '#/pages/leads/lib/labels'
-import type { Lead, LeadStatus } from '#/pages/leads/lib/types'
+import type { Company, Lead, LeadStatus } from '#/pages/leads/lib/types'
+import { CompanyLine } from './company-line'
+import { LeadConfidence } from './lead-confidence'
 import { LeadStatusBadge } from './lead-status-badge'
+import { VerdictBadge } from './verdict-badge'
 
 interface LeadHeaderProps {
 	lead: Lead
+	company: Company | null
+	onOpenLead: (leadId: string) => void
 	nextStatuses: readonly LeadStatus[]
 	onChangeStatus: (status: LeadStatus) => void
 	changing: boolean
@@ -14,6 +19,8 @@ interface LeadHeaderProps {
 
 export function LeadHeader({
 	lead,
+	company,
+	onOpenLead,
 	nextStatuses,
 	onChangeStatus,
 	changing,
@@ -24,6 +31,7 @@ export function LeadHeader({
 			<div className="flex flex-wrap items-center gap-3">
 				<h1 className="text-2xl font-bold tracking-tight">{lead.domain}</h1>
 				<LeadStatusBadge status={lead.status} />
+				<VerdictBadge verdict={lead.verdict} />
 			</div>
 			<dl className="grid gap-x-8 gap-y-1 text-sm sm:grid-cols-2 lg:grid-cols-4">
 				<div>
@@ -31,17 +39,15 @@ export function LeadHeader({
 					<dd>{lead.profile.name}</dd>
 				</div>
 				<div>
-					<dt className="text-muted-foreground">Score</dt>
-					<dd className="font-mono">{formatScore(lead.score)}</dd>
+					<dt className="text-muted-foreground">Force des signaux</dt>
+					<dd className="font-mono">{formatSignalStrength(lead.score)}</dd>
 				</div>
-				<div>
-					<dt className="text-muted-foreground">Première détection</dt>
-					<dd>{formatDateTime(lead.first_seen_at)}</dd>
-				</div>
-				<div>
-					<dt className="text-muted-foreground">Dernière détection</dt>
-					<dd>{formatDateTime(lead.last_seen_at)}</dd>
-				</div>
+				<LeadConfidence lead={lead} />
+				<CompanyLine
+					company={company}
+					profileId={lead.profile.id}
+					onOpenLead={onOpenLead}
+				/>
 			</dl>
 			<div className="flex flex-wrap items-center gap-2">
 				<span className="text-sm text-muted-foreground">Passer à</span>

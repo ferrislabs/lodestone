@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM ecosystem_module_runs WHERE ran_at < $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "85489bc75be97a48d2ab2967a0c0bf4f8aeb512f7760e66ebcd44e41e4c2dcf1"
+}

@@ -2,8 +2,9 @@ use std::{sync::Arc, time::Duration};
 
 use chrono::{DateTime, Utc};
 use lodestone_core::{
-    ActiveProfile, CandidateHost, CandidateHosts, DnsResolver, Hostname, Observation, Provenance,
-    SignalKind, Source, SourceError, SourceName, UnitInterval, definition::Agent,
+    ActiveProfile, CandidateHost, CandidateHosts, DnsError, DnsResolver, Hostname, Observation,
+    Provenance, SignalKind, Source, SourceError, SourceName, UnitInterval,
+    definition::SourceTarget, transient_checked_at,
 };
 use serde_json::json;
 use tokio::{sync::Semaphore, task::JoinSet};
@@ -23,6 +24,19 @@ pub struct ResolvedHost {
     pub host: CandidateHost,
     pub chain: Vec<Hostname>,
     pub resolved_at: DateTime<Utc>,
+}
+
+enum Lookup {
+    Resolved(ResolvedHost),
+    Failed(Hostname),
+    Transient(Hostname),
+}
+
+#[derive(Default)]
+struct Resolution {
+    resolved: Vec<ResolvedHost>,
+    failed: Vec<Hostname>,
+    transient: Vec<Hostname>,
 }
 
 pub struct DnsCnameSource<R: DnsResolver, H: CandidateHosts> {
@@ -57,11 +71,7 @@ where
     R: DnsResolver + 'static,
     H: CandidateHosts + 'static,
 {
-    async fn resolve_all(
-        &self,
-        due: Vec<CandidateHost>,
-        now: DateTime<Utc>,
-    ) -> Vec<(usize, ResolvedHost)> {
+    async fn resolve_all(&self, due: Vec<CandidateHost>, now: DateTime<Utc>) -> Resolution {
         let permits = Arc::new(Semaphore::new(self.settings.concurrency.max(1)));
         let mut tasks = JoinSet::new();
         for (index, host) in due.into_iter().enumerate() {
@@ -72,29 +82,43 @@ where
                 match resolver.cname_chain(&host.host).await {
                     Ok(chain) => Some((
                         index,
-                        ResolvedHost {
+                        Lookup::Resolved(ResolvedHost {
                             host,
                             chain,
                             resolved_at: now,
-                        },
+                        }),
                     )),
                     Err(error) => {
                         tracing::debug!(host = %host.host, %error, "cname lookup failed");
-                        None
+                        Some((
+                            index,
+                            match error {
+                                DnsError::Timeout => Lookup::Transient(host.host),
+                                DnsError::Failure(_) => Lookup::Failed(host.host),
+                            },
+                        ))
                     }
                 }
             });
         }
-        let mut resolved = Vec::new();
+        let mut entries = Vec::new();
         while let Some(joined) = tasks.join_next().await {
             match joined {
-                Ok(Some(entry)) => resolved.push(entry),
+                Ok(Some(entry)) => entries.push(entry),
                 Ok(None) => {}
                 Err(error) => tracing::debug!(%error, "cname lookup task aborted"),
             }
         }
-        resolved.sort_by_key(|(index, _)| *index);
-        resolved
+        entries.sort_by_key(|(index, _)| *index);
+        let mut resolution = Resolution::default();
+        for (_, lookup) in entries {
+            match lookup {
+                Lookup::Resolved(item) => resolution.resolved.push(item),
+                Lookup::Failed(host) => resolution.failed.push(host),
+                Lookup::Transient(host) => resolution.transient.push(host),
+            }
+        }
+        resolution
     }
 }
 
@@ -128,17 +152,27 @@ where
             )
             .await
             .map_err(upstream)?;
-        let resolved: Vec<ResolvedHost> = self
-            .resolve_all(due, now)
-            .await
-            .into_iter()
-            .map(|(_, item)| item)
-            .collect();
-        let names: Vec<Hostname> = resolved.iter().map(|item| item.host.host.clone()).collect();
+        let Resolution {
+            resolved,
+            failed,
+            transient,
+        } = self.resolve_all(due, now).await;
+        let mut names: Vec<Hostname> = resolved.iter().map(|item| item.host.host.clone()).collect();
+        names.extend(failed);
         self.hosts
             .mark_checked(&names, SourceName::DnsCname, now)
             .await
             .map_err(upstream)?;
+        if !transient.is_empty() {
+            self.hosts
+                .mark_checked(
+                    &transient,
+                    SourceName::DnsCname,
+                    transient_checked_at(now, self.settings.revisit_interval),
+                )
+                .await
+                .map_err(upstream)?;
+        }
         Ok(resolved)
     }
 
@@ -146,9 +180,9 @@ where
         &self,
         item: &Self::Item,
         _profile: &ActiveProfile,
-        agent: &Agent,
+        target: &SourceTarget<'_>,
     ) -> Vec<Observation> {
-        let Some(config) = agent.source.dns_cname() else {
+        let Some(config) = target.dns() else {
             return Vec::new();
         };
         let Ok(kind) = SignalKind::parse(SIGNAL_KIND) else {

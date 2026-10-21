@@ -11,6 +11,9 @@ import {
 } from '#/pages/profiles/feature/definition-form'
 import { invalidateProfiles } from '#/pages/profiles/feature/invalidate'
 import { useDefinitionEditor } from '#/pages/profiles/feature/use-definition-editor'
+import { useEcosystemUi } from '#/pages/profiles/feature/use-ecosystem-ui'
+import { useProviderOptions } from '#/pages/profiles/feature/use-provider-options'
+import { useSourceCatalog } from '#/pages/profiles/feature/use-source-catalog'
 import { agentList } from '#/pages/profiles/lib/agents'
 import { PROFILE_HINTS } from '#/pages/profiles/lib/form-hints'
 import {
@@ -18,6 +21,11 @@ import {
 	problemsOutsidePath,
 } from '#/pages/profiles/lib/problems'
 import { PROFILE_SCHEMA } from '#/pages/profiles/lib/profile-schema'
+import {
+	newQualificationAgent,
+	qualificationList,
+	withQualification,
+} from '#/pages/profiles/lib/qualification'
 import { prepareSave } from '#/pages/profiles/lib/save'
 import { asEditorTab, editorTabItems } from '#/pages/profiles/lib/tabs'
 import type { Problem } from '#/pages/profiles/lib/types'
@@ -30,9 +38,15 @@ export function ProfileNewFeature() {
 	const search = useSearch({ from: '/_app/profiles/new' })
 	const tab = asEditorTab(search.tab)
 	const queryClient = useQueryClient()
+	const providers = useProviderOptions()
+	const catalog = useSourceCatalog()
+	const ecosystem = useEcosystemUi(null)
 	const [name, setName] = useState('')
 	const [initial] = useState(() =>
-		toJsonObject(defaultValue(PROFILE_SCHEMA, PROFILE_SCHEMA, PROFILE_HINTS)),
+		withQualification(
+			toJsonObject(defaultValue(PROFILE_SCHEMA, PROFILE_SCHEMA, PROFILE_HINTS)),
+			[newQualificationAgent('pertinence', new Set())],
+		),
 	)
 	const editor = useDefinitionEditor(initial)
 	const [localProblems, setLocalProblems] = useState<Problem[]>([])
@@ -59,6 +73,7 @@ export function ProfileNewFeature() {
 	const formError = parsed && parsed.status !== 422 ? parsed.message : null
 
 	const noAgents = agentList(editor.value).length === 0
+	const noQualification = qualificationList(editor.value).length === 0
 
 	const save = () => {
 		const definition = prepareSave(editor.value)
@@ -106,11 +121,13 @@ export function ProfileNewFeature() {
 							tab={tab}
 							value={editor.value}
 							problems={problems}
-							onNavigate={(next) =>
+							providers={providers}
+							catalog={catalog}
+							ecosystem={ecosystem}
+							onOpenProvider={(key) =>
 								void navigate({
-									to: '/profiles/new',
-									search: { tab: next },
-									replace: true,
+									to: '/sources/providers/$key',
+									params: { key },
 								})
 							}
 							onChange={(next) => {
@@ -121,7 +138,11 @@ export function ProfileNewFeature() {
 						/>
 					}
 					blockedReason={
-						noAgents ? 'Ajouter au moins un agent pour créer le profil.' : null
+						noAgents
+							? 'Ajouter au moins un agent pour créer le profil.'
+							: noQualification
+								? 'Ajouter au moins un agent de qualification pour créer le profil.'
+								: null
 					}
 					problems={unmatchedProblems(editor.value, problems)}
 					notice={null}

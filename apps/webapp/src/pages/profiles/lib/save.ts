@@ -2,6 +2,8 @@ import { translateApiMessage } from '#/lib/api-errors'
 import { type JsonObject, validateValue } from '#/lib/schema-form'
 import { validateAgents } from '#/pages/profiles/lib/agents'
 import { PROFILE_SCHEMA } from '#/pages/profiles/lib/profile-schema'
+import { validateQualification } from '#/pages/profiles/lib/qualification'
+import { validateScoringAgents } from '#/pages/profiles/lib/scoring-agents'
 import type { Problem } from '#/pages/profiles/lib/types'
 
 export type SaveAttempt =
@@ -15,6 +17,8 @@ export function prepareSave(value: JsonObject): SaveAttempt {
 			message: translateApiMessage(problem.message),
 		})),
 		...validateAgents(value),
+		...validateQualification(value),
+		...validateScoringAgents(value),
 	]
 	return problems.length === 0 ? { ok: true, value } : { ok: false, problems }
 }

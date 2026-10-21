@@ -1,14 +1,12 @@
 //! Benchmarks for the pure domain logic of `lodestone-core`: domain
 //! normalisation (called for every observed host), profile validation,
-//! keyword triage and lead scoring.
+//! keyword triage and the strength of a lead's evidence.
 
 use chrono::{TimeZone, Utc};
 use lodestone_core::{
-    DISTINCT_SIGNALS_FACTOR, LeadId, NormalizedDomain, Provenance, Signal, SignalId, SignalKind,
-    SourceName, UnitInterval, ValidatedProfile, definition::ProfileDefinition, market_context,
-    route, score,
+    IndependentSignal, NormalizedDomain, SignalKind, SourceName, UnitInterval, ValidatedProfile,
+    definition::ProfileDefinition, route, signal_strength, strength_score,
 };
-use uuid::Uuid;
 
 const IAM_PROFILE: &str = include_str!("../../../docs/examples/profiles/iam-ferriskey.json");
 const ECOMMERCE_PROFILE: &str =
@@ -72,12 +70,6 @@ mod profile_definition {
             .with_inputs(|| value.clone())
             .bench_local_values(|value| divan::black_box(ValidatedProfile::parse(value).unwrap()));
     }
-
-    #[divan::bench]
-    fn market_context_iam(bencher: divan::Bencher) {
-        let definition = profile(IAM_PROFILE);
-        bencher.bench_local(|| divan::black_box(market_context(divan::black_box(&definition))));
-    }
 }
 
 mod triage {
@@ -92,39 +84,34 @@ mod triage {
     #[divan::bench]
     fn route_job_offer(bencher: divan::Bencher) {
         let definition = profile(IAM_PROFILE);
-        let rules = definition.sources.france_travail.clone().unwrap();
-        bencher.bench_local(|| divan::black_box(route(divan::black_box(OFFER), &rules)));
+        let agent = definition
+            .enabled_search_agents(SourceName::FranceTravail)
+            .next()
+            .unwrap()
+            .clone();
+        bencher.bench_local(|| divan::black_box(route(divan::black_box(OFFER), &agent)));
     }
 }
 
 mod scoring {
     use super::*;
 
-    const KINDS: &[(&str, Option<&str>)] = &[
-        ("product_detected", Some("keycloak")),
-        ("debt_marker", Some("legacy_auth_path")),
-        ("saas_provider", Some("auth0")),
-        ("job_offer", None),
-        ("public_tender", None),
-        ("role_contact_found", None),
+    const KINDS: &[&str] = &[
+        "product_detected",
+        "debt_marker",
+        "saas_provider",
+        "job_offer",
+        "public_tender",
+        "role_contact_found",
     ];
 
-    fn signals(count: usize) -> Vec<Signal> {
+    fn signals(count: usize) -> Vec<IndependentSignal> {
         let observed_at = Utc.timestamp_opt(1_800_000_000, 0).unwrap();
         (0..count)
-            .map(|i| {
-                let (kind, value) = KINDS[i % KINDS.len()];
-                Signal {
-                    id: SignalId(Uuid::nil()),
-                    lead_id: LeadId(Uuid::nil()),
-                    kind: SignalKind::parse(kind).unwrap(),
-                    value: value.map(str::to_owned),
-                    source: SourceName::HttpProbe,
-                    raw: serde_json::Value::Null,
-                    provenance: Provenance::parse("https://sso.acme.com/").unwrap(),
-                    strength: UnitInterval::new((i % 10) as f64 / 10.0).unwrap(),
-                    observed_at,
-                }
+            .map(|i| IndependentSignal {
+                kind: SignalKind::parse(KINDS[i % KINDS.len()]).unwrap(),
+                strength: UnitInterval::new((i % 10) as f64 / 10.0).unwrap(),
+                observed_at: observed_at - chrono::Duration::days((i % 400) as i64),
             })
             .collect()
     }
@@ -132,16 +119,11 @@ mod scoring {
     #[divan::bench(args = [6, 60, 600])]
     fn score_lead(bencher: divan::Bencher, count: usize) {
         let definition = profile(IAM_PROFILE);
-        assert!(
-            definition
-                .scoring
-                .factors
-                .iter()
-                .any(|factor| factor.signal == DISTINCT_SIGNALS_FACTOR)
-        );
         let signals = signals(count);
+        let now = Utc.timestamp_opt(1_800_000_000, 0).unwrap();
         bencher.bench_local(|| {
-            divan::black_box(score(divan::black_box(&signals), &definition.scoring))
+            let strength = signal_strength(divan::black_box(&signals), &definition.evidence, now);
+            divan::black_box(strength_score(strength))
         });
     }
 }

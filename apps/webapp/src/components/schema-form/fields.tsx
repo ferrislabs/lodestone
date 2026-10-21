@@ -86,6 +86,7 @@ function ScalarInput({
 		)
 	}
 	if (node.kind === 'enum') {
+		const optionLabels = context.hints.optionLabels?.[genericPath(path)]
 		return (
 			<select
 				id={id}
@@ -103,7 +104,7 @@ function ScalarInput({
 			>
 				{node.options.map((option) => (
 					<option key={String(option)} value={String(option)}>
-						{String(option)}
+						{optionLabels?.[String(option)] ?? String(option)}
 					</option>
 				))}
 			</select>

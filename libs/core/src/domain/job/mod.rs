@@ -7,6 +7,7 @@ use uuid::Uuid;
 use crate::domain::lead::{str_enum, uuid_id};
 
 pub mod ports;
+pub mod schedule;
 
 uuid_id!(JobId);
 uuid_id!(LeaseToken);
@@ -44,6 +45,7 @@ pub enum JobStatus {
     Running,
     Succeeded,
     Failed,
+    Cancelled,
 }
 
 str_enum!(JobStatus {
@@ -51,6 +53,7 @@ str_enum!(JobStatus {
     Running => "running",
     Succeeded => "succeeded",
     Failed => "failed",
+    Cancelled => "cancelled",
 });
 
 #[derive(Debug, Clone, PartialEq)]

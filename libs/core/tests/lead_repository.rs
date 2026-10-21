@@ -29,7 +29,7 @@ async fn record_seen_moves_only_the_relevant_bound(pool: PgPool) {
         let mut repo = PgLeadRepository::new(&shared);
         repo.update_status(first.id, LeadStatus::New, LeadStatus::Qualified, at(5))
             .await?;
-        repo.update_score(first.id, &total(42.0), at(5)).await?;
+        repo.update_score(first.id, total(42.0), at(5)).await?;
         let after = repo
             .record_seen(profile, &domain("example.com"), at(100))
             .await?;
@@ -101,13 +101,9 @@ async fn update_score_persists_and_misses_absent(pool: PgPool) {
 
     let (updated, absent, found) = with_tx(&pool, async |shared| {
         let mut repo = PgLeadRepository::new(&shared);
-        let updated = repo.update_score(lead.id, &total(7.5), at(3)).await?;
+        let updated = repo.update_score(lead.id, total(7.5), at(3)).await?;
         let absent = repo
-            .update_score(
-                lodestone_core::LeadId(uuid::Uuid::nil()),
-                &total(1.0),
-                at(3),
-            )
+            .update_score(lodestone_core::LeadId(uuid::Uuid::nil()), total(1.0), at(3))
             .await?;
         let found = repo.find(lead.id).await?;
         Ok((updated, absent, found))
@@ -132,7 +128,7 @@ async fn list_by_profile_orders_by_score_then_domain(pool: PgPool) {
         for host in ["b.com", "a.com", "c.com"] {
             ids.push(repo.record_seen(profile, &domain(host), at(0)).await?.id);
         }
-        repo.update_score(ids[0], &total(5.0), at(1)).await?;
+        repo.update_score(ids[0], total(5.0), at(1)).await?;
         repo.list_by_profile(profile).await
     })
     .await
@@ -181,31 +177,6 @@ async fn deleting_a_profile_cascades_to_leads(pool: PgPool) {
     assert_eq!(remaining, 0);
 }
 
-fn total(value: f64) -> lodestone_core::ScoreBreakdown {
-    lodestone_core::ScoreBreakdown {
-        total: Score::new(value).unwrap(),
-        contributions: vec![lodestone_core::ScoreContribution {
-            signal: "product_detected".to_owned(),
-            value: Some("keycloak".to_owned()),
-            weight: value,
-            measure: 1.0,
-            contribution: value,
-        }],
-    }
-}
-
-#[sqlx::test(migrations = "../../migrations")]
-async fn score_breakdown_round_trips(pool: PgPool) {
-    let profile = create_profile(&pool, "alpha").await;
-    let lead = seen_lead(&pool, profile, "example.com").await;
-    let updated = with_tx(&pool, async |shared| {
-        PgLeadRepository::new(&shared)
-            .update_score(lead.id, &total(12.5), at(9))
-            .await
-    })
-    .await
-    .unwrap()
-    .unwrap();
-    assert_eq!(updated.score.get(), 12.5);
-    assert_eq!(updated.score_breakdown, total(12.5).contributions);
+fn total(value: f64) -> Score {
+    Score::new(value).unwrap()
 }

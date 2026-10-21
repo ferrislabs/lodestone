@@ -1,14 +1,22 @@
 pub mod api;
 pub mod auth;
+pub mod calibration;
+pub mod company;
 pub mod drafts;
+pub mod ecosystem;
 pub mod errors;
 pub mod exports;
 pub mod leads;
 pub mod llm;
 pub mod profiles;
+pub mod quality;
 pub mod rate_limit;
 pub mod response;
+pub mod settings;
+pub mod source_providers;
+pub mod sources;
 pub mod state;
+pub mod timeline;
 
 pub use auth::AuthenticatedUser;
 pub use errors::{ApiError, MiddlewareError};

@@ -18,6 +18,40 @@ impl PgContactTargets {
     }
 }
 
+impl PgContactTargets {
+    #[tracing::instrument(skip(self), fields(db.system = "postgresql", db.operation = "select", db.table = "leads"), err)]
+    pub async fn count_due(
+        &self,
+        source: SourceName,
+        checked_before: DateTime<Utc>,
+        after: Option<SourceName>,
+    ) -> Result<u64, CoreError> {
+        let count = sqlx::query_scalar!(
+            r#"
+            SELECT COUNT(*) AS "count!"
+            FROM (SELECT DISTINCT leads.domain FROM leads
+                  JOIN profiles ON profiles.id = leads.profile_id AND profiles.active) l
+            LEFT JOIN lead_domain_checks c ON c.domain = l.domain AND c.source = $1
+            WHERE (c.checked_at IS NULL OR c.checked_at < $2)
+              AND NOT EXISTS (
+                  SELECT 1 FROM suppression_list s WHERE s.kind = 'domain' AND s.value = l.domain
+              )
+              AND ($3::text IS NULL OR EXISTS (
+                  SELECT 1 FROM lead_domain_checks p WHERE p.domain = l.domain AND p.source = $3
+              ))
+            "#,
+            source.as_str(),
+            checked_before,
+            after.map(SourceName::as_str),
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+        u64::try_from(count)
+            .map_err(|_| CoreError::Internal("due target count is out of range".to_owned()))
+    }
+}
+
 impl ContactTargets for PgContactTargets {
     #[tracing::instrument(skip(self), fields(db.system = "postgresql", db.operation = "select", db.table = "leads"), err)]
     async fn list_due(

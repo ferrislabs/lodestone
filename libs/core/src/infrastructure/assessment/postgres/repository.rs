@@ -7,21 +7,28 @@ use sqlx::{Postgres, QueryBuilder};
 use uuid::Uuid;
 
 use crate::{
-    Assessment, AssessmentId, DraftEdit, DraftPage, DraftRecord, DraftReview, DraftStatus, Lead,
+    Assessment, AssessmentId, DraftEdit, DraftPage, DraftRecord, DraftReview, DraftRevision, Lead,
     LeadId, ProfileId, ProfileName,
-    domain::lead::ports::AssessmentRepository,
+    domain::lead::{ports::AssessmentRepository, query::VerdictFilter},
     infrastructure::{
         assessment::postgres::model::{ASSESSMENT_COLUMNS, AssessmentRow, evidence_to_json},
-        lead::postgres::{model::LeadRow, repository::NOT_SUPPRESSED},
+        lead::postgres::{
+            model::LeadRow,
+            repository::{NOT_SUPPRESSED, push_verdicts},
+        },
         postgres::{SharedTx, error::map_sqlx_error},
     },
 };
 
-const LEAD_COLUMNS: &str = "id, profile_id, domain, status, score, score_breakdown, first_seen_at, last_seen_at, updated_at";
+const LEAD_COLUMNS: &str = "id, profile_id, domain, status, score, confidence, verdict, llm_score, qualified_at, first_seen_at, last_seen_at, updated_at";
 
 const LATEST_ASSESSMENT: &str = " AND assessments.id = (SELECT latest.id FROM assessments latest WHERE latest.lead_id = leads.id ORDER BY latest.created_at DESC, latest.id DESC LIMIT 1)";
 
-fn push_queue_filters<'a>(builder: &mut QueryBuilder<'a, Postgres>, profile_id: Option<ProfileId>) {
+fn push_queue_filters<'a>(
+    builder: &mut QueryBuilder<'a, Postgres>,
+    profile_id: Option<ProfileId>,
+    verdicts: &[VerdictFilter],
+) {
     builder.push(
         " FROM assessments JOIN leads ON leads.id = assessments.lead_id WHERE assessments.draft_status = 'pending' AND leads.status = 'qualified'",
     );
@@ -31,6 +38,7 @@ fn push_queue_filters<'a>(builder: &mut QueryBuilder<'a, Postgres>, profile_id: 
             .push(" AND leads.profile_id = ")
             .push_bind(profile_id.0);
     }
+    push_verdicts(builder, verdicts);
     builder.push(NOT_SUPPRESSED);
 }
 
@@ -51,32 +59,97 @@ impl<'tx> AssessmentRepository for PgAssessmentRepository<'tx> {
         let revision = i32::try_from(assessment.profile_revision.get())
             .map_err(|_| CoreError::Internal("profile revision number out of range".to_owned()))?;
         let evidence = evidence_to_json(&assessment.evidence)?;
+        let generation = serde_json::to_value(assessment.provenance.generation)
+            .map_err(|error| CoreError::Internal(error.to_string()))?;
+        let samples = i32::try_from(assessment.provenance.samples)
+            .map_err(|_| CoreError::Internal("assessment samples out of range".to_owned()))?;
         let mut tx = self.tx.lock().await;
-        sqlx::query!(
-            r#"
-            INSERT INTO assessments (id, lead_id, profile_revision, summary, approach_angle, evidence, model, prompt_version, draft_subject, draft_body, draft_status, created_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-            "#,
-            assessment.id.0,
-            assessment.lead_id.0,
-            revision,
-            assessment.summary,
-            assessment.approach_angle,
-            evidence,
-            assessment.model,
-            assessment.prompt_version,
-            assessment.draft.as_ref().map(|draft| draft.subject.as_str()),
-            assessment.draft.as_ref().map(|draft| draft.body.as_str()),
+        let review = assessment.draft.as_ref().map(|_| {
             assessment
-                .draft
-                .as_ref()
-                .map(|_| assessment
-                    .draft_review
-                    .as_ref()
-                    .map_or(DraftStatus::Pending, |review| review.status)
-                    .as_str()),
-            assessment.created_at,
+                .draft_review
+                .clone()
+                .unwrap_or_else(DraftReview::pending)
+        });
+        let draft = assessment.draft.as_ref();
+        let draft_revision =
+            i32::try_from(review.as_ref().map_or(0, |review| review.revision.get()))
+                .map_err(|_| CoreError::Internal("draft revision out of range".to_owned()))?;
+        let warnings: Vec<&str> = assessment
+            .quality_warnings
+            .iter()
+            .map(|warning| warning.as_str())
+            .collect();
+        sqlx::query(
+            r#"
+            INSERT INTO assessments (
+                id, lead_id, profile_revision, summary, verdict_narrative, approach_angle, evidence,
+                evidence_verified, model, prompt_version, draft_subject, draft_body, draft_status,
+                draft_reviewed_by, draft_reviewed_at, draft_edited_at, draft_rejection_reason,
+                draft_original_subject, draft_original_body, draft_suggested_subject,
+                draft_suggested_body, draft_outdated_at, created_at, quality_warnings,
+                provider_id, provider_name, generation, samples, draft_revision
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29)
+            "#,
         )
+        .bind(assessment.id.0)
+        .bind(assessment.lead_id.0)
+        .bind(revision)
+        .bind(&assessment.summary)
+        .bind(&assessment.verdict_narrative)
+        .bind(&assessment.approach_angle)
+        .bind(&evidence)
+        .bind(assessment.evidence_verified)
+        .bind(&assessment.provenance.model)
+        .bind(&assessment.provenance.prompt_version)
+        .bind(draft.map(|draft| draft.subject.as_str()))
+        .bind(draft.map(|draft| draft.body.as_str()))
+        .bind(review.as_ref().map(|review| review.status.as_str()))
+        .bind(
+            review
+                .as_ref()
+                .and_then(|review| review.reviewed_by)
+                .map(|user| user.0),
+        )
+        .bind(review.as_ref().and_then(|review| review.reviewed_at))
+        .bind(review.as_ref().and_then(|review| review.edited_at))
+        .bind(
+            review
+                .as_ref()
+                .and_then(|review| review.rejection_reason.as_deref()),
+        )
+        .bind(
+            review
+                .as_ref()
+                .and_then(|review| review.original.as_ref())
+                .map(|original| original.subject.as_str()),
+        )
+        .bind(
+            review
+                .as_ref()
+                .and_then(|review| review.original.as_ref())
+                .map(|original| original.body.as_str()),
+        )
+        .bind(
+            review
+                .as_ref()
+                .and_then(|review| review.suggestion.as_ref())
+                .map(|suggestion| suggestion.subject.as_str()),
+        )
+        .bind(
+            review
+                .as_ref()
+                .and_then(|review| review.suggestion.as_ref())
+                .map(|suggestion| suggestion.body.as_str()),
+        )
+        .bind(review.as_ref().and_then(|review| review.outdated_at))
+        .bind(assessment.created_at)
+        .bind(&warnings)
+        .bind(assessment.provenance.provider_id.map(|provider| provider.0))
+        .bind(&assessment.provenance.provider_name)
+        .bind(&generation)
+        .bind(samples)
+        .bind(draft_revision)
         .execute(&mut ***tx)
         .await
         .map_err(map_sqlx_error)?;
@@ -96,6 +169,26 @@ impl<'tx> AssessmentRepository for PgAssessmentRepository<'tx> {
         .map_err(map_sqlx_error)?;
 
         rows.into_iter().map(Assessment::try_from).collect()
+    }
+
+    #[tracing::instrument(skip(self, lead_ids), fields(db.system = "postgresql", db.operation = "select", db.table = "assessments"), err)]
+    async fn latest_summaries(
+        &mut self,
+        lead_ids: &[LeadId],
+    ) -> Result<HashMap<LeadId, String>, CoreError> {
+        let ids: Vec<Uuid> = lead_ids.iter().map(|id| id.0).collect();
+        let mut tx = self.tx.lock().await;
+        let rows: Vec<(Uuid, String)> = sqlx::query_as(
+            "SELECT DISTINCT ON (lead_id) lead_id, summary FROM assessments WHERE lead_id = ANY($1) ORDER BY lead_id, created_at DESC, id DESC",
+        )
+        .bind(&ids)
+        .fetch_all(&mut ***tx)
+        .await
+        .map_err(map_sqlx_error)?;
+        Ok(rows
+            .into_iter()
+            .map(|(id, summary)| (LeadId(id), summary))
+            .collect())
     }
 
     #[tracing::instrument(skip(self), fields(db.system = "postgresql", db.operation = "select", db.table = "assessments", assessment.id = %id), err)]
@@ -119,15 +212,16 @@ impl<'tx> AssessmentRepository for PgAssessmentRepository<'tx> {
     async fn list_pending_drafts(
         &mut self,
         profile_id: Option<ProfileId>,
+        verdicts: &[VerdictFilter],
         limit: u32,
         offset: u64,
     ) -> Result<DraftPage, CoreError> {
         let mut count = QueryBuilder::<Postgres>::new("SELECT COUNT(*)");
-        push_queue_filters(&mut count, profile_id);
+        push_queue_filters(&mut count, profile_id, verdicts);
 
         let mut select = QueryBuilder::<Postgres>::new(format!("SELECT {ASSESSMENT_COLUMNS}"));
-        push_queue_filters(&mut select, profile_id);
-        select.push(" ORDER BY leads.score DESC, assessments.created_at ASC, assessments.id ASC");
+        push_queue_filters(&mut select, profile_id, verdicts);
+        select.push(" ORDER BY leads.confidence DESC NULLS LAST, leads.score DESC, assessments.created_at ASC, assessments.id ASC");
         select.push(" LIMIT ").push_bind(i64::from(limit));
         select
             .push(" OFFSET ")
@@ -156,8 +250,11 @@ impl<'tx> AssessmentRepository for PgAssessmentRepository<'tx> {
         &mut self,
         id: AssessmentId,
         edit: &DraftEdit,
+        expected: DraftRevision,
         at: DateTime<Utc>,
     ) -> Result<bool, CoreError> {
+        let expected = i32::try_from(expected.get())
+            .map_err(|_| CoreError::Internal("draft revision out of range".to_owned()))?;
         let mut tx = self.tx.lock().await;
         let result = sqlx::query(
             r#"
@@ -166,14 +263,16 @@ impl<'tx> AssessmentRepository for PgAssessmentRepository<'tx> {
                 draft_original_body    = COALESCE(draft_original_body, draft_body),
                 draft_subject          = COALESCE($2, draft_subject),
                 draft_body             = COALESCE($3, draft_body),
-                draft_edited_at        = $4
-            WHERE id = $1 AND draft_status = 'pending'
+                draft_edited_at        = $4,
+                draft_revision         = draft_revision + 1
+            WHERE id = $1 AND draft_status = 'pending' AND draft_revision = $5
             "#,
         )
         .bind(id.0)
         .bind(edit.subject())
         .bind(edit.body())
         .bind(at)
+        .bind(expected)
         .execute(&mut ***tx)
         .await
         .map_err(map_sqlx_error)?;
@@ -186,7 +285,10 @@ impl<'tx> AssessmentRepository for PgAssessmentRepository<'tx> {
         &mut self,
         id: AssessmentId,
         review: &DraftReview,
+        expected: DraftRevision,
     ) -> Result<bool, CoreError> {
+        let expected = i32::try_from(expected.get())
+            .map_err(|_| CoreError::Internal("draft revision out of range".to_owned()))?;
         let mut tx = self.tx.lock().await;
         let result = sqlx::query(
             r#"
@@ -195,7 +297,7 @@ impl<'tx> AssessmentRepository for PgAssessmentRepository<'tx> {
                 draft_reviewed_by      = $3,
                 draft_reviewed_at      = $4,
                 draft_rejection_reason = $5
-            WHERE id = $1 AND draft_status = 'pending'
+            WHERE id = $1 AND draft_status = 'pending' AND draft_revision = $6
             "#,
         )
         .bind(id.0)
@@ -203,6 +305,7 @@ impl<'tx> AssessmentRepository for PgAssessmentRepository<'tx> {
         .bind(review.reviewed_by.map(|user| user.0))
         .bind(review.reviewed_at)
         .bind(review.rejection_reason.as_deref())
+        .bind(expected)
         .execute(&mut ***tx)
         .await
         .map_err(map_sqlx_error)?;
