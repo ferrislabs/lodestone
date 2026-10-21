@@ -1,5 +1,13 @@
 export namespace Schemas {
   // <Schemas>
+  export type AgentQualityDto = {
+    agent_id: string;
+    mean_rejected?: (number | null) | undefined;
+    mean_validated?: (number | null) | undefined;
+    rejected: number;
+    separation?: (number | null) | undefined;
+    validated: number;
+  };
   export type DraftStatusDto = "pending" | "approved" | "rejected";
   export type DraftDto = {
     body: string;
@@ -63,6 +71,7 @@ export namespace Schemas {
     siren?: (string | null) | undefined;
     state: string;
   };
+  export type ConfidenceBucketDto = { from: number; rejected: number; to: number; validated: number };
   export type ContactDto = {
     address: string;
     confidence: number;
@@ -313,6 +322,48 @@ export namespace Schemas {
     };
     pagination?: (null | PaginationMetadata) | undefined;
   };
+  export type DecisionCountsDto = {
+    drafts_approved: number;
+    drafts_rejected: number;
+    rejected: number;
+    validated: number;
+  };
+  export type DiscardedShareDto = { discarded: number; share?: (number | null) | undefined; total: number };
+  export type ThresholdsDto = { discard_below: number; reliable_from: number };
+  export type SuggestionDto = {
+    discard_below?: (number | null) | undefined;
+    labelled: number;
+    ready: boolean;
+    reliable_from?: (number | null) | undefined;
+    required: number;
+  };
+  export type ProfileQualityDto = {
+    current: ThresholdsDto;
+    name: string;
+    precision?: (number | null) | undefined;
+    profile_id: string;
+    rejected: number;
+    suggestion: SuggestionDto;
+    validated: number;
+  };
+  export type VerdictPrecisionDto = {
+    n: number;
+    precision?: (number | null) | undefined;
+    rejected: number;
+    validated: number;
+    verdict?: (null | VerdictDto) | undefined;
+  };
+  export type DataEnvelope_QualityDto = {
+    data: {
+      agents: Array<AgentQualityDto>;
+      confidence: Array<ConfidenceBucketDto>;
+      decisions: DecisionCountsDto;
+      discarded: DiscardedShareDto;
+      profiles: Array<ProfileQualityDto>;
+      verdicts: Array<VerdictPrecisionDto>;
+    };
+    pagination?: (null | PaginationMetadata) | undefined;
+  };
   export type RevisionSummaryDto = { created_at: string; created_by?: (string | null) | undefined; number: number };
   export type DataEnvelope_RevisionDto = {
     data: RevisionSummaryDto & { definition: Record<string, unknown> };
@@ -547,6 +598,14 @@ export namespace Schemas {
     tiers: Array<string>;
     timeout_seconds: number;
     updated_at: string;
+  };
+  export type QualityDto = {
+    agents: Array<AgentQualityDto>;
+    confidence: Array<ConfidenceBucketDto>;
+    decisions: DecisionCountsDto;
+    discarded: DiscardedShareDto;
+    profiles: Array<ProfileQualityDto>;
+    verdicts: Array<VerdictPrecisionDto>;
   };
   export type RejectDraftRequest = Partial<{ reason: string | null }>;
   export type RevisionDto = RevisionSummaryDto & { definition: Record<string, unknown> };
@@ -991,6 +1050,15 @@ export namespace Endpoints {
     };
     responses: { 200: Schemas.DataEnvelope_RevisionDto; 400: unknown; 401: unknown; 404: unknown };
   };
+  export type get_Quality = {
+    method: "GET";
+    path: "/api/v1/quality";
+    requestFormat: "json";
+    parameters: {
+      query: Partial<{ from: string; to: string; profile_id: string }>;
+    };
+    responses: { 200: Schemas.DataEnvelope_QualityDto; 400: unknown; 401: unknown; 403: unknown; 404: unknown };
+  };
   export type get_List_sources = {
     method: "GET";
     path: "/api/v1/sources";
@@ -1035,6 +1103,7 @@ export type EndpointByMethod = {
     "/api/v1/profiles/{profile_id}/leads/export": Endpoints.get_Export_leads;
     "/api/v1/profiles/{profile_id}/revisions": Endpoints.get_List_revisions;
     "/api/v1/profiles/{profile_id}/revisions/{number}": Endpoints.get_Get_revision;
+    "/api/v1/quality": Endpoints.get_Quality;
     "/api/v1/sources": Endpoints.get_List_sources;
   };
   patch: {

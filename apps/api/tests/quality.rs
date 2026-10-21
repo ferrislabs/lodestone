@@ -1,0 +1,269 @@
+mod support;
+
+use http::{Method, StatusCode};
+use serde_json::{Value, json};
+use sqlx::PgPool;
+use support::{Harness, send};
+use utoipa::OpenApi;
+
+async fn profile(pool: &PgPool, name: &str) -> String {
+    let id = common::generate_uuid_v7();
+    sqlx::query(
+        "INSERT INTO profiles (id, name, active, created_at, updated_at) VALUES ($1, $2, true, now(), now())",
+    )
+    .bind(id)
+    .bind(name)
+    .execute(pool)
+    .await
+    .expect("profile");
+    id.to_string()
+}
+
+async fn lead(pool: &PgPool, profile: &str, domain: &str, status: &str) -> String {
+    let id = common::generate_uuid_v7();
+    sqlx::query(
+        "INSERT INTO leads (id, profile_id, domain, status, score, score_breakdown, first_seen_at, last_seen_at, updated_at)
+         VALUES ($1, $2::uuid, $3, $4, 1, '[]'::jsonb, now(), now(), now())",
+    )
+    .bind(id)
+    .bind(profile)
+    .bind(domain)
+    .bind(status)
+    .execute(pool)
+    .await
+    .expect("lead");
+    id.to_string()
+}
+
+async fn label(
+    pool: &PgPool,
+    lead: &str,
+    profile: &str,
+    kind: &str,
+    confidence: f64,
+    verdict: &str,
+    days_ago: i32,
+) {
+    sqlx::query(
+        "INSERT INTO decision_labels (id, lead_id, profile_id, profile_revision, kind, decided_at, snapshot)
+         VALUES ($1, $2::uuid, $3::uuid, 1, $4, now() - make_interval(days => $5), $6)",
+    )
+    .bind(common::generate_uuid_v7())
+    .bind(lead)
+    .bind(profile)
+    .bind(kind)
+    .bind(days_ago)
+    .bind(json!({
+        "confidence": confidence,
+        "opinion": null,
+        "evidence": null,
+        "verdict": verdict,
+        "verdict_reason": null,
+        "agents": {"fit": {"status": "valid", "score": confidence / 100.0}},
+    }))
+    .execute(pool)
+    .await
+    .expect("label");
+}
+
+struct Api {
+    harness: Harness,
+    bearer: String,
+}
+
+impl Api {
+    async fn new(pool: PgPool) -> Self {
+        let harness = Harness::new(pool).await;
+        let bearer = format!("Bearer {}", harness.valid_user_token());
+        Self { harness, bearer }
+    }
+
+    async fn get(&self, uri: &str) -> (StatusCode, Value) {
+        let (status, body, _) = send(
+            self.harness.public(),
+            Method::GET,
+            uri,
+            Some(&self.bearer),
+            None,
+        )
+        .await;
+        (status, body)
+    }
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn an_empty_database_yields_an_empty_report(pool: PgPool) {
+    let api = Api::new(pool).await;
+    let (status, body) = api.get("/api/v1/quality").await;
+    assert_eq!(status, StatusCode::OK);
+    let data = &body["data"];
+    assert_eq!(
+        data["decisions"],
+        json!({"validated": 0, "rejected": 0, "drafts_approved": 0, "drafts_rejected": 0})
+    );
+    assert_eq!(data["confidence"].as_array().unwrap().len(), 10);
+    assert_eq!(data["verdicts"].as_array().unwrap().len(), 3);
+    assert_eq!(data["verdicts"][0]["precision"], Value::Null);
+    assert_eq!(data["discarded"]["share"], Value::Null);
+    assert_eq!(data["agents"], json!([]));
+    assert_eq!(data["profiles"], json!([]));
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_report_carries_counts_precision_agents_and_suggestions(pool: PgPool) {
+    let alpha = profile(&pool, "alpha").await;
+    let beta = profile(&pool, "beta").await;
+    for index in 0..10 {
+        let confidence = 70.0 + f64::from(index);
+        let validated = lead(&pool, &alpha, &format!("v{index}.com"), "validated").await;
+        label(
+            &pool,
+            &validated,
+            &alpha,
+            "lead_validated",
+            confidence,
+            "fiable",
+            1,
+        )
+        .await;
+        let rejected = lead(&pool, &alpha, &format!("r{index}.com"), "rejected").await;
+        label(
+            &pool,
+            &rejected,
+            &alpha,
+            "lead_rejected",
+            confidence - 50.0,
+            "a_verifier",
+            1,
+        )
+        .await;
+    }
+    let draft = lead(&pool, &alpha, "draft.com", "validated").await;
+    label(&pool, &draft, &alpha, "draft_approved", 90.0, "fiable", 1).await;
+    let elsewhere = lead(&pool, &beta, "beta.com", "rejected").await;
+    label(&pool, &elsewhere, &beta, "lead_rejected", 10.0, "ecarte", 1).await;
+
+    let api = Api::new(pool).await;
+    let (status, body) = api.get("/api/v1/quality").await;
+    assert_eq!(status, StatusCode::OK);
+    let data = &body["data"];
+    assert_eq!(data["decisions"]["validated"], 10);
+    assert_eq!(data["decisions"]["rejected"], 11);
+    assert_eq!(data["decisions"]["drafts_approved"], 1);
+    assert_eq!(data["verdicts"][0]["verdict"], "fiable");
+    assert_eq!(data["verdicts"][0]["n"], 10);
+    assert_eq!(data["verdicts"][0]["precision"], 1.0);
+    assert_eq!(data["verdicts"][2]["verdict"], "ecarte");
+    assert_eq!(data["verdicts"][2]["precision"], 0.0);
+    assert_eq!(data["profiles"].as_array().unwrap().len(), 2);
+
+    let (_, scoped) = api
+        .get(&format!("/api/v1/quality?profile_id={alpha}"))
+        .await;
+    let data = &scoped["data"];
+    assert_eq!(data["decisions"]["rejected"], 10);
+    let profiles = data["profiles"].as_array().unwrap();
+    assert_eq!(profiles.len(), 1);
+    assert_eq!(profiles[0]["name"], "alpha");
+    assert_eq!(profiles[0]["suggestion"]["ready"], true);
+    assert_eq!(profiles[0]["suggestion"]["labelled"], 20);
+    assert_eq!(profiles[0]["suggestion"]["reliable_from"], 70);
+    assert_eq!(profiles[0]["suggestion"]["discard_below"], 65);
+    assert_eq!(profiles[0]["current"]["reliable_from"], 70);
+    let agent = &data["agents"][0];
+    assert_eq!(agent["agent_id"], "fit");
+    assert_eq!(agent["validated"], 10);
+    assert_eq!(agent["rejected"], 10);
+    assert!((agent["separation"].as_f64().unwrap() - 0.5).abs() < 1e-9);
+
+    let (_, beta_only) = api.get(&format!("/api/v1/quality?profile_id={beta}")).await;
+    let suggestion = &beta_only["data"]["profiles"][0]["suggestion"];
+    assert_eq!(suggestion["ready"], false);
+    assert_eq!(suggestion["labelled"], 1);
+    assert_eq!(suggestion["required"], 20);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_period_bounds_the_decisions(pool: PgPool) {
+    let alpha = profile(&pool, "alpha").await;
+    let recent = lead(&pool, &alpha, "recent.com", "validated").await;
+    label(&pool, &recent, &alpha, "lead_validated", 80.0, "fiable", 2).await;
+    let old = lead(&pool, &alpha, "old.com", "rejected").await;
+    label(&pool, &old, &alpha, "lead_rejected", 30.0, "a_verifier", 60).await;
+
+    let api = Api::new(pool).await;
+    let from = (chrono::Utc::now() - chrono::Duration::days(7))
+        .to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    let (status, body) = api.get(&format!("/api/v1/quality?from={from}")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["data"]["decisions"]["validated"], 1);
+    assert_eq!(body["data"]["decisions"]["rejected"], 0);
+
+    let to = (chrono::Utc::now() - chrono::Duration::days(30))
+        .to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    let (_, before) = api.get(&format!("/api/v1/quality?to={to}")).await;
+    assert_eq!(before["data"]["decisions"]["validated"], 0);
+    assert_eq!(before["data"]["decisions"]["rejected"], 1);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn bad_parameters_and_unknown_profiles_are_refused(pool: PgPool) {
+    let api = Api::new(pool).await;
+    for uri in [
+        "/api/v1/quality?from=yesterday",
+        "/api/v1/quality?to=2026-13-40",
+        "/api/v1/quality?profile_id=nope",
+        "/api/v1/quality?from=2026-10-02T00:00:00Z&to=2026-10-01T00:00:00Z",
+    ] {
+        let (status, _) = api.get(uri).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{uri}");
+    }
+    let unknown = common::generate_uuid_v7();
+    let (status, _) = api
+        .get(&format!("/api/v1/quality?profile_id={unknown}"))
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_report_is_for_authenticated_users_only(pool: PgPool) {
+    let harness = Harness::new(pool).await;
+    let (anonymous, _, _) =
+        send(harness.public(), Method::GET, "/api/v1/quality", None, None).await;
+    assert_eq!(anonymous, StatusCode::UNAUTHORIZED);
+    let client = format!("Bearer {}", harness.valid_client_token());
+    let (service, _, _) = send(
+        harness.public(),
+        Method::GET,
+        "/api/v1/quality",
+        Some(&client),
+        None,
+    )
+    .await;
+    assert_eq!(service, StatusCode::FORBIDDEN);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_status_change_through_the_api_records_a_label(pool: PgPool) {
+    let alpha = profile(&pool, "alpha").await;
+    let id = lead(&pool, &alpha, "a.com", "qualified").await;
+    let api = Api::new(pool).await;
+    let (status, _, _) = send(
+        api.harness.public(),
+        Method::PATCH,
+        &format!("/api/v1/leads/{id}/status"),
+        Some(&api.bearer),
+        Some(json!({"status": "validated"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, body) = api.get("/api/v1/quality").await;
+    assert_eq!(body["data"]["decisions"]["validated"], 1);
+    assert_eq!(body["data"]["verdicts"][3]["verdict"], Value::Null);
+}
+
+#[test]
+fn openapi_documents_the_quality_path() {
+    let spec = serde_json::to_value(api::openapi::ApiDoc::openapi()).expect("spec");
+    assert!(spec["paths"]["/api/v1/quality"]["get"].is_object());
+}

@@ -4,7 +4,7 @@ use lodestone_macros::transactional;
 
 use crate::{
     UserId,
-    application::{LodestoneUseCase, output::schedule_webhook},
+    application::{LodestoneUseCase, output::schedule_webhook, quality::record_decisions},
     domain::{
         company::{CompanyDossier, ports::CompanyRepository},
         facts::LeadFacts,
@@ -16,6 +16,7 @@ use crate::{
         },
         profile::{ProfileId, ports::ProfileRepository},
         qualification::ports::QualificationRepository,
+        quality::DecisionKind,
         suppression::ports::SuppressionRepository,
     },
     infrastructure::job::postgres::PgJobOutbox,
@@ -130,7 +131,7 @@ impl LodestoneUseCase {
         Ok((found, facts, dossier))
     }
 
-    #[transactional(lead, suppression)]
+    #[transactional(lead, suppression, qualification, profile, decision)]
     pub async fn change_lead_status(
         &self,
         lead_id: LeadId,
@@ -139,6 +140,9 @@ impl LodestoneUseCase {
     ) -> Result<Lead, CoreError> {
         let mut leads = lead_repository;
         let mut suppression = suppression_repository;
+        let mut qualification = qualification_repository;
+        let mut profiles = profile_repository;
+        let mut decisions = decision_repository;
 
         let lead = leads.find(lead_id).await?.ok_or(CoreError::NotFound)?;
         if suppression.is_domain_suppressed(&lead.domain).await? {
@@ -158,6 +162,18 @@ impl LodestoneUseCase {
             .ok_or_else(|| {
                 CoreError::Conflict("lead status changed concurrently, reload and retry".to_owned())
             })?;
+        if let Some(kind) = DecisionKind::for_lead(target) {
+            record_decisions(
+                &mut decisions,
+                &mut qualification,
+                &mut profiles,
+                &lead,
+                &[kind],
+                actor,
+                updated.updated_at,
+            )
+            .await?;
+        }
         if target == LeadStatus::Validated {
             schedule_webhook(&mut PgJobOutbox::new(&tx), self.webhooks.as_ref(), &updated).await?;
         }

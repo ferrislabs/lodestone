@@ -7,6 +7,7 @@ pub mod exports;
 pub mod leads;
 pub mod llm;
 pub mod profiles;
+pub mod quality;
 pub mod rate_limit;
 pub mod response;
 pub mod sources;

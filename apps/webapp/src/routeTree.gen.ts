@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as AppRouteImport } from './routes/_app'
 import { Route as AppIndexRouteImport } from './routes/_app.index'
 import { Route as AppSourcesIndexRouteImport } from './routes/_app.sources.index'
+import { Route as AppQualityIndexRouteImport } from './routes/_app.quality.index'
 import { Route as AppProfilesIndexRouteImport } from './routes/_app.profiles.index'
 import { Route as AppLlmIndexRouteImport } from './routes/_app.llm.index'
 import { Route as AppLeadsIndexRouteImport } from './routes/_app.leads.index'
@@ -35,6 +36,11 @@ const AppIndexRoute = AppIndexRouteImport.update({
 const AppSourcesIndexRoute = AppSourcesIndexRouteImport.update({
   id: '/sources/',
   path: '/sources/',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppQualityIndexRoute = AppQualityIndexRouteImport.update({
+  id: '/quality/',
+  path: '/quality/',
   getParentRoute: () => AppRoute,
 } as any)
 const AppProfilesIndexRoute = AppProfilesIndexRouteImport.update({
@@ -100,6 +106,7 @@ export interface FileRoutesByFullPath {
   '/leads/': typeof AppLeadsIndexRoute
   '/llm/': typeof AppLlmIndexRoute
   '/profiles/': typeof AppProfilesIndexRoute
+  '/quality/': typeof AppQualityIndexRoute
   '/sources/': typeof AppSourcesIndexRoute
 }
 export interface FileRoutesByTo {
@@ -114,6 +121,7 @@ export interface FileRoutesByTo {
   '/leads': typeof AppLeadsIndexRoute
   '/llm': typeof AppLlmIndexRoute
   '/profiles': typeof AppProfilesIndexRoute
+  '/quality': typeof AppQualityIndexRoute
   '/sources': typeof AppSourcesIndexRoute
 }
 export interface FileRoutesById {
@@ -130,6 +138,7 @@ export interface FileRoutesById {
   '/_app/leads/': typeof AppLeadsIndexRoute
   '/_app/llm/': typeof AppLlmIndexRoute
   '/_app/profiles/': typeof AppProfilesIndexRoute
+  '/_app/quality/': typeof AppQualityIndexRoute
   '/_app/sources/': typeof AppSourcesIndexRoute
 }
 export interface FileRouteTypes {
@@ -146,6 +155,7 @@ export interface FileRouteTypes {
     | '/leads/'
     | '/llm/'
     | '/profiles/'
+    | '/quality/'
     | '/sources/'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -160,6 +170,7 @@ export interface FileRouteTypes {
     | '/leads'
     | '/llm'
     | '/profiles'
+    | '/quality'
     | '/sources'
   id:
     | '__root__'
@@ -175,6 +186,7 @@ export interface FileRouteTypes {
     | '/_app/leads/'
     | '/_app/llm/'
     | '/_app/profiles/'
+    | '/_app/quality/'
     | '/_app/sources/'
   fileRoutesById: FileRoutesById
 }
@@ -203,6 +215,13 @@ declare module '@tanstack/react-router' {
       path: '/sources'
       fullPath: '/sources/'
       preLoaderRoute: typeof AppSourcesIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/quality/': {
+      id: '/_app/quality/'
+      path: '/quality'
+      fullPath: '/quality/'
+      preLoaderRoute: typeof AppQualityIndexRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/profiles/': {
@@ -290,6 +309,7 @@ interface AppRouteChildren {
   AppLeadsIndexRoute: typeof AppLeadsIndexRoute
   AppLlmIndexRoute: typeof AppLlmIndexRoute
   AppProfilesIndexRoute: typeof AppProfilesIndexRoute
+  AppQualityIndexRoute: typeof AppQualityIndexRoute
   AppSourcesIndexRoute: typeof AppSourcesIndexRoute
 }
 
@@ -305,6 +325,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppLeadsIndexRoute: AppLeadsIndexRoute,
   AppLlmIndexRoute: AppLlmIndexRoute,
   AppProfilesIndexRoute: AppProfilesIndexRoute,
+  AppQualityIndexRoute: AppQualityIndexRoute,
   AppSourcesIndexRoute: AppSourcesIndexRoute,
 }
 
