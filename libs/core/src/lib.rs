@@ -17,9 +17,10 @@ pub use domain::{
     },
     ats_target::AtsTargets,
     company::{
-        CompanyBuilder, CompanyDossier, CompanyPage, DossierBuild, DossierDocument, DossierState,
-        InvalidSiren, OFFICIAL_SOURCE, OfficialData, PAGE_PROMPT_CHARS, PAGE_STORE_CHARS, Siren,
-        bounded_error, headcount_label, naf_section_label, ports::CompanyRepository,
+        CompanyBuilder, CompanyDossier, CompanyEntity, CompanyPage, DossierBuild, DossierDocument,
+        DossierState, InvalidSiren, OFFICIAL_SOURCE, OfficialData, PAGE_PROMPT_CHARS,
+        PAGE_STORE_CHARS, SiblingLead, Siren, bounded_error, headcount_label, naf_section_label,
+        ports::CompanyRepository,
     },
     contact::{
         ContactFinder, ContactTargets, FoundAddress, rank_contacts, rank_of,
@@ -27,8 +28,8 @@ pub use domain::{
         select_for_profile,
     },
     facts::{
-        CompanyFacts, Country, CountryBasis, Environment, HostFact, LeadFacts, OfficialFacts,
-        environment_of, signal_sentence,
+        CompanyFacts, Country, CountryBasis, Environment, HostFact, IndependentSignal, LeadFacts,
+        OfficialFacts, SiblingSignals, environment_of, signal_sentence,
     },
     fetch::{
         FetchError, FetchPurpose, FetchRequest, FetchResponse,

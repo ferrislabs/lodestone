@@ -1,5 +1,6 @@
 import {
 	evidenceComponentRows,
+	evidenceSignalRows,
 	verdictReasonLabel,
 } from '#/pages/leads/lib/confidence'
 import type { Lead } from '#/pages/leads/lib/types'
@@ -50,6 +51,20 @@ export function LeadConfidence({ lead }: LeadConfidenceProps) {
 										<span className="font-mono">
 											{formatConfidence(row.value)}
 										</span>
+									</li>
+								))}
+							</ul>
+						) : null}
+						{evidence ? (
+							<ul className="grid gap-x-8 gap-y-1 sm:grid-cols-2 lg:grid-cols-4">
+								{evidenceSignalRows(evidence).map((row) => (
+									<li
+										key={row.key}
+										data-evidence-signals={row.key}
+										className="flex justify-between gap-2"
+									>
+										<span className="text-muted-foreground">{row.label}</span>
+										<span className="font-mono">{row.value}</span>
 									</li>
 								))}
 							</ul>

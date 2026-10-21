@@ -21,6 +21,7 @@ interface LeadDetailProps {
 	detail: LeadDetailData | null
 	nextStatuses: readonly LeadStatus[]
 	onBack: () => void
+	onOpenLead: (leadId: string) => void
 	onChangeStatus: (status: LeadStatus) => void
 	rejectionDialog: ReactNode
 	onOpenDraft: (assessmentId: string) => void
@@ -40,6 +41,7 @@ export function LeadDetail({
 	detail,
 	nextStatuses,
 	onBack,
+	onOpenLead,
 	onChangeStatus,
 	rejectionDialog,
 	onOpenDraft,
@@ -76,6 +78,8 @@ export function LeadDetail({
 				<>
 					<LeadHeader
 						lead={detail.lead}
+						company={detail.company ?? null}
+						onOpenLead={onOpenLead}
 						nextStatuses={nextStatuses}
 						onChangeStatus={onChangeStatus}
 						changing={changing}

@@ -12,6 +12,10 @@ const evidence = {
 	strength: 35,
 	components: { volume: 28.4, diversity: 50, environment: 0, strength: 24.2 },
 	signal_count: 1,
+	independent_signals: 1,
+	decayed_signals: 0.5,
+	source_count: 1,
+	kind_count: 1,
 	signal_score: 12.1,
 	only_non_production: true,
 }
@@ -47,8 +51,16 @@ describe('verdictReasonLabel', () => {
 describe('evidenceComponentRows', () => {
 	it('lists the four components in display order', () => {
 		expect(evidenceComponentRows(evidence)).toEqual([
-			{ key: 'volume', label: 'Volume de signaux', value: 28.4 },
-			{ key: 'diversity', label: 'Diversité des sources', value: 50 },
+			{
+				key: 'volume',
+				label: 'Volume de signaux indépendants',
+				value: 28.4,
+			},
+			{
+				key: 'diversity',
+				label: 'Diversité des sources et des types',
+				value: 50,
+			},
 			{ key: 'environment', label: 'Environnement', value: 0 },
 			{ key: 'strength', label: 'Force des signaux', value: 24.2 },
 		])

@@ -962,6 +962,48 @@ describe('evidence settings panel', () => {
 		})
 	})
 
+	it('shows the half-life of every signal kind in days with its default', () => {
+		render(<Harness />)
+		const group = screen.getByRole('group', {
+			name: 'Demi-vie des signaux (jours)',
+		})
+		const expected: Record<string, string> = {
+			"Offre d'emploi": '90',
+			"Appel d'offres": '180',
+			'Marché attribué': '365',
+			'Fournisseur SaaS': '365',
+			'Produit détecté': '365',
+			'Marqueur de dette technique': '365',
+			'Contact par rôle trouvé': '365',
+			'Autres signaux': '180',
+		}
+		for (const [label, days] of Object.entries(expected)) {
+			expect(within(group).getByLabelText(label)).toHaveProperty('value', days)
+		}
+	})
+
+	it('writes an edited half-life into the evidence section', () => {
+		const seen = vi.fn()
+		render(<Harness onValue={seen} />)
+		fireEvent.change(screen.getByLabelText("Offre d'emploi"), {
+			target: { value: '45' },
+		})
+		expect(lastValue(seen).evidence).toEqual({
+			half_life_days: { job_offer: 45 },
+		})
+	})
+
+	it('rejects a half-life outside 1 to 3650 days', () => {
+		render(<Harness />)
+		fireEvent.change(screen.getByLabelText("Appel d'offres"), {
+			target: { value: '4000' },
+		})
+		expect(screen.getByRole('alert').textContent).toContain('1 à 3650 jours')
+		expect(
+			screen.getByLabelText("Appel d'offres").getAttribute('aria-invalid'),
+		).toBe('true')
+	})
+
 	it('rejects a calibration floor above 20 %', () => {
 		render(<Harness />)
 		fireEvent.change(screen.getByLabelText('Plancher de calibration'), {

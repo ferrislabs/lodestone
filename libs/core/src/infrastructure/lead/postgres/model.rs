@@ -23,6 +23,13 @@ pub struct LeadRow {
     pub updated_at: DateTime<Utc>,
 }
 
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct GroupedLeadRow {
+    #[sqlx(flatten)]
+    pub lead: LeadRow,
+    pub siren: Option<String>,
+}
+
 impl TryFrom<LeadRow> for Lead {
     type Error = CoreError;
 

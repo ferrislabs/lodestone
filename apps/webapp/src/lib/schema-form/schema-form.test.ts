@@ -150,6 +150,7 @@ describe('defaultValue', () => {
 				min_evidence: 0.5,
 			},
 			evidence: {
+				half_life_days: {},
 				influence: 0.6,
 				reference_score: 50,
 				weights: { volume: 1, diversity: 1, environment: 1, strength: 1 },

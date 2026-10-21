@@ -28,6 +28,17 @@
     "evidence": {
       "$ref": "#/$defs/EvidenceSettings",
       "default": {
+        "half_life_days": {
+          "awarded_contract": 365,
+          "contact": 365,
+          "debt_marker": 365,
+          "default": 180,
+          "job_offer": 90,
+          "product_detected": 365,
+          "public_tender": 180,
+          "role_contact_found": 365,
+          "saas_provider": 365
+        },
         "influence": 0.6,
         "reference_score": 50.0,
         "weights": {
@@ -52,7 +63,7 @@
       }
     },
     "schema_version": {
-      "description": "Profile format version. Must be 9.",
+      "description": "Profile format version. Must be 10.",
       "type": "integer",
       "format": "uint32",
       "minimum": 0
@@ -596,6 +607,26 @@
       "description": "How the strength of the evidence behind a lead (signals, sources, hosts) weighs on its confidence.",
       "type": "object",
       "properties": {
+        "half_life_days": {
+          "description": "Half-life in days of a signal, by signal kind. A signal of that age counts for half in the volume and the strength of the evidence. The `default` key applies to every kind not listed; a kind that is not listed falls back to its built-in value.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "maximum": 3650,
+            "minimum": 1
+          },
+          "default": {
+            "awarded_contract": 365,
+            "contact": 365,
+            "debt_marker": 365,
+            "default": 180,
+            "job_offer": 90,
+            "product_detected": 365,
+            "public_tender": 180,
+            "role_contact_found": 365,
+            "saas_provider": 365
+          }
+        },
         "influence": {
           "description": "Confidence = agents opinion x ((1 - influence) + influence x evidence strength). 0 ignores the evidence, 1 multiplies the opinion by it.",
           "type": "number",
@@ -629,7 +660,7 @@
       "type": "object",
       "properties": {
         "diversity": {
-          "description": "Number of distinct sources.",
+          "description": "Number of distinct sources and signal kinds.",
           "type": "integer",
           "format": "uint8",
           "default": 1,
@@ -645,7 +676,7 @@
           "minimum": 0
         },
         "strength": {
-          "description": "Signal score of the lead against the reference score.",
+          "description": "Signal score of the lead, weighted by the freshness of its signals, against the reference score.",
           "type": "integer",
           "format": "uint8",
           "default": 1,
@@ -653,7 +684,7 @@
           "minimum": 0
         },
         "volume": {
-          "description": "Number of signals.",
+          "description": "Number of independent signals, each decayed by its age.",
           "type": "integer",
           "format": "uint8",
           "default": 1,

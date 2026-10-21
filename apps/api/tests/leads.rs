@@ -595,7 +595,11 @@ async fn the_lead_exposes_its_opinion_evidence_and_verdict_reason(pool: PgPool) 
         "components": {"volume": 0.2835, "diversity": 0.5, "environment": 0.0, "strength": 0.242},
         "signal_count": 1,
         "signal_score": 12.1,
-        "only_non_production": true
+        "only_non_production": true,
+        "independent_signals": 1,
+        "decayed_signals": 0.5,
+        "source_count": 1,
+        "kind_count": 1
     }))
     .execute(&pool)
     .await
@@ -615,6 +619,10 @@ async fn the_lead_exposes_its_opinion_evidence_and_verdict_reason(pool: PgPool) 
     assert_eq!(lead["evidence"]["components"]["environment"], 0.0);
     assert_eq!(lead["evidence"]["components"]["strength"], 24.2);
     assert_eq!(lead["evidence"]["signal_count"], 1);
+    assert_eq!(lead["evidence"]["independent_signals"], 1);
+    assert_eq!(lead["evidence"]["decayed_signals"], 0.5);
+    assert_eq!(lead["evidence"]["source_count"], 1);
+    assert_eq!(lead["evidence"]["kind_count"], 1);
     assert_eq!(lead["evidence"]["only_non_production"], true);
     assert_eq!(lead["verdict_reason"], "non_production");
     assert!(find("bare.com")["opinion"].is_null());
@@ -1520,4 +1528,204 @@ fn openapi_documents_the_leads_paths() {
         let json = serde_json::to_value(item).expect("path item");
         assert!(json.get(method).is_some(), "{method} {path}");
     }
+}
+
+async fn link_company(pool: &PgPool, domain: &str, siren: &str, legal_name: &str) {
+    sqlx::query(
+        "INSERT INTO companies (siren, legal_name) VALUES ($1, $2) ON CONFLICT (siren) DO NOTHING",
+    )
+    .bind(siren)
+    .bind(legal_name)
+    .execute(pool)
+    .await
+    .expect("company");
+    sqlx::query(
+        "INSERT INTO company_dossiers (domain, state, siren, official, pages, built_at, next_attempt_at, company_siren)
+         VALUES ($1, 'complete', $2, $3, '[]'::jsonb, now(), now() + interval '90 days', $2)",
+    )
+    .bind(domain)
+    .bind(siren)
+    .bind(json!({"siren": siren, "legal_name": legal_name}))
+    .execute(pool)
+    .await
+    .expect("dossier");
+}
+
+async fn judge(pool: &PgPool, lead: &str, confidence: f64, verdict: &str) {
+    sqlx::query("UPDATE leads SET confidence = $2, verdict = $3 WHERE id = $1::uuid")
+        .bind(lead)
+        .bind(confidence)
+        .bind(verdict)
+        .execute(pool)
+        .await
+        .expect("judgement");
+}
+
+struct Group {
+    seed: Seed,
+    profile: String,
+    other_profile: String,
+    first: String,
+    second: String,
+    elsewhere: String,
+}
+
+async fn group_fixture(pool: &PgPool) -> Group {
+    let seed = Seed { pool: pool.clone() };
+    let profile = seed.profile("keycloak-ops").await;
+    let other_profile = seed.profile("auth-ops").await;
+    let first = seed.lead(&profile, "acme.com", "new", 10.0, 3).await;
+    let second = seed.lead(&profile, "acme.fr", "new", 20.0, 2).await;
+    let elsewhere = seed.lead(&other_profile, "acme.com", "new", 5.0, 1).await;
+    seed.lead(&profile, "solo.io", "new", 30.0, 1).await;
+    link_company(pool, "acme.com", "552081317", "ACME SAS").await;
+    link_company(pool, "acme.fr", "552081317", "ACME SAS").await;
+    judge(pool, &first, 40.0, "a_verifier").await;
+    judge(pool, &second, 85.0, "fiable").await;
+    judge(pool, &elsewhere, 20.0, "ecarte").await;
+    Group {
+        seed,
+        profile,
+        other_profile,
+        first,
+        second,
+        elsewhere,
+    }
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_detail_exposes_the_company_entity_and_its_sibling_leads(pool: PgPool) {
+    let group = group_fixture(&pool).await;
+    let api = Api::new(pool).await;
+
+    let (status, body) = api.get(&format!("/api/v1/leads/{}", group.first)).await;
+
+    assert_eq!(status, StatusCode::OK);
+    let company = &body["data"]["company"];
+    assert_eq!(company["siren"], "552081317");
+    assert_eq!(company["legal_name"], "ACME SAS");
+    let siblings = company["siblings"].as_array().expect("siblings");
+    assert_eq!(siblings.len(), 2);
+    assert_eq!(siblings[0]["id"], group.second);
+    assert_eq!(siblings[0]["domain"], "acme.fr");
+    assert_eq!(siblings[0]["profile"]["id"], group.profile);
+    assert_eq!(siblings[0]["profile"]["name"], "keycloak-ops");
+    assert_eq!(siblings[0]["verdict"], "fiable");
+    assert_eq!(siblings[0]["confidence"], 85.0);
+    assert_eq!(siblings[1]["id"], group.elsewhere);
+    assert_eq!(siblings[1]["profile"]["id"], group.other_profile);
+    assert_eq!(siblings[1]["verdict"], "ecarte");
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_lead_without_a_siren_has_no_siblings(pool: PgPool) {
+    let group = group_fixture(&pool).await;
+    let solo = group
+        .seed
+        .lead(&group.profile, "bare.fr", "new", 1.0, 1)
+        .await;
+    seed_dossier(&pool, "bare.fr", "partial", false).await;
+    let api = Api::new(pool).await;
+
+    let (_, body) = api.get(&format!("/api/v1/leads/{solo}")).await;
+
+    assert!(body["data"]["company"]["legal_name"].is_null());
+    assert_eq!(body["data"]["company"]["siblings"], json!([]));
+    assert_eq!(body["data"]["facts"]["sibling_domains"], json!([]));
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_facts_count_the_signals_of_siblings_of_the_same_profile_once(pool: PgPool) {
+    let group = group_fixture(&pool).await;
+    let seed = &group.seed;
+    seed.host_signal(
+        &group.first,
+        "saas_provider",
+        "auth0",
+        "dns_cname",
+        "sso.acme.com",
+    )
+    .await;
+    seed.host_signal(
+        &group.second,
+        "saas_provider",
+        "auth0",
+        "dns_cname",
+        "sso.acme.fr",
+    )
+    .await;
+    seed.host_signal(&group.second, "job_offer", "devops", "ats", "jobs.acme.fr")
+        .await;
+    seed.host_signal(
+        &group.elsewhere,
+        "public_tender",
+        "iam",
+        "boamp",
+        "x.acme.com",
+    )
+    .await;
+    let api = Api::new(pool).await;
+
+    let (_, body) = api.get(&format!("/api/v1/leads/{}", group.first)).await;
+
+    let facts = &body["data"]["facts"];
+    assert_eq!(facts["signal_count"], 3);
+    assert_eq!(facts["independent_signals"], 2);
+    assert_eq!(facts["sibling_domains"], json!(["acme.fr"]));
+    assert_eq!(facts["sources"], json!(["ats", "dns_cname"]));
+    assert_eq!(facts["kinds"], json!(["job_offer", "saas_provider"]));
+    assert_eq!(facts["distinct_hosts"], 3);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_list_groups_siblings_of_a_company_when_asked(pool: PgPool) {
+    let group = group_fixture(&pool).await;
+    let api = Api::new(pool).await;
+
+    let (status, body) = api
+        .get(&format!(
+            "/api/v1/profiles/{}/leads?group_by=company&sort=confidence_desc",
+            group.profile
+        ))
+        .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(domains(&body), vec!["acme.fr", "solo.io"]);
+    assert_eq!(body["pagination"]["total"], 2);
+    let rows = body["data"].as_array().expect("rows");
+    assert_eq!(rows[0]["id"], group.second);
+    let grouped = rows[0]["grouped_leads"].as_array().expect("grouped");
+    assert_eq!(grouped.len(), 1);
+    assert_eq!(grouped[0]["id"], group.first);
+    assert_eq!(grouped[0]["domain"], "acme.com");
+    assert_eq!(grouped[0]["verdict"], "a_verifier");
+    assert_eq!(grouped[0]["confidence"], 40.0);
+    assert_eq!(rows[1]["grouped_leads"], json!([]));
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_list_is_flat_by_default_and_rejects_an_unknown_grouping(pool: PgPool) {
+    let group = group_fixture(&pool).await;
+    let api = Api::new(pool).await;
+
+    let (_, flat) = api
+        .get(&format!("/api/v1/profiles/{}/leads", group.profile))
+        .await;
+    let (_, none) = api
+        .get(&format!(
+            "/api/v1/profiles/{}/leads?group_by=none",
+            group.profile
+        ))
+        .await;
+    let (status, _) = api
+        .get(&format!(
+            "/api/v1/profiles/{}/leads?group_by=nonsense",
+            group.profile
+        ))
+        .await;
+
+    assert_eq!(flat["pagination"]["total"], 3);
+    assert_eq!(flat, none);
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(flat["data"][0]["grouped_leads"], json!([]));
 }

@@ -350,7 +350,7 @@ export const FIELD_COPY: Readonly<Record<string, FieldCopy>> = {
 	evidence: {
 		label: 'Preuves',
 		description:
-			"Solidité des preuves derrière un lead (nombre de signaux, diversité des sources, environnement des hôtes, force des signaux). Elle pondère l'avis des agents dans la confiance.",
+			"Solidité des preuves derrière un lead (signaux indépendants et vieillis, diversité des sources et des types, environnement des hôtes, force des signaux), calculée sur l'entreprise entière quand plusieurs domaines partagent un SIREN. Elle pondère l'avis des agents dans la confiance.",
 	},
 	'evidence.influence': {
 		label: 'Influence des preuves',
@@ -369,11 +369,13 @@ export const FIELD_COPY: Readonly<Record<string, FieldCopy>> = {
 	},
 	'evidence.weights.volume': {
 		label: 'Volume de signaux',
-		description: 'Poids du nombre de signaux détectés, de 0 à 10.',
+		description:
+			'Poids du nombre de signaux indépendants, chacun diminué selon son âge, de 0 à 10.',
 	},
 	'evidence.weights.diversity': {
 		label: 'Diversité des sources',
-		description: 'Poids du nombre de sources distinctes, de 0 à 10.',
+		description:
+			'Poids du nombre de sources et de types de signaux distincts, de 0 à 10.',
 	},
 	'evidence.weights.environment': {
 		label: 'Environnement',
@@ -383,6 +385,11 @@ export const FIELD_COPY: Readonly<Record<string, FieldCopy>> = {
 	'evidence.weights.strength': {
 		label: 'Force des signaux',
 		description: 'Poids du score des signaux du lead, de 0 à 10.',
+	},
+	'evidence.half_life_days': {
+		label: 'Demi-vie des signaux (jours)',
+		description:
+			"Âge en jours auquel un signal ne compte plus que pour moitié dans le volume et la force des preuves, par type de signal. « default » s'applique aux types non listés.",
 	},
 	scoring: {
 		label: 'Scoring',

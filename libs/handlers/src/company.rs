@@ -2,13 +2,43 @@ use axum::{
     Extension,
     extract::{Path, State},
 };
-use lodestone_core::{CompanyDossier, OfficialData};
+use lodestone_core::{CompanyDossier, CompanyEntity, OfficialData, SiblingLead};
 use serde::Serialize;
 use utoipa::ToSchema;
 
 use crate::{
-    auth::AuthenticatedUser, errors::ApiError, leads::lead_id, response::Response, state::AppState,
+    auth::AuthenticatedUser,
+    errors::ApiError,
+    leads::{VerdictDto, lead_id},
+    profiles::ProfileRefDto,
+    response::Response,
+    state::AppState,
 };
+
+/// Another lead of the same company, found through the SIREN shared by the dossiers of the two domains.
+#[derive(Debug, Serialize, PartialEq, ToSchema)]
+pub struct SiblingLeadDto {
+    pub id: String,
+    pub domain: String,
+    pub profile: ProfileRefDto,
+    pub verdict: Option<VerdictDto>,
+    pub confidence: Option<f64>,
+}
+
+impl From<&SiblingLead> for SiblingLeadDto {
+    fn from(sibling: &SiblingLead) -> Self {
+        Self {
+            id: sibling.id.to_string(),
+            domain: sibling.domain.as_str().to_owned(),
+            profile: ProfileRefDto {
+                id: sibling.profile_id.to_string(),
+                name: sibling.profile_name.as_str().to_owned(),
+            },
+            verdict: sibling.verdict.map(VerdictDto::from),
+            confidence: sibling.confidence,
+        }
+    }
+}
 
 #[derive(Debug, Serialize, PartialEq, ToSchema)]
 pub struct OfficialDataDto {
@@ -58,6 +88,10 @@ pub struct CompanyDto {
     /// SIREN found on the company site, even when the official lookup failed.
     pub siren: Option<String>,
     pub official: Option<OfficialDataDto>,
+    /// Legal name of the company entity the domain belongs to; absent until the SIREN is resolved against the official register.
+    pub legal_name: Option<String>,
+    /// Other leads of the same company, in every profile; empty until the SIREN is resolved.
+    pub siblings: Vec<SiblingLeadDto>,
     /// Pages of the company site that were read.
     pub pages: Vec<CompanyPageDto>,
     #[schema(format = DateTime)]
@@ -74,6 +108,8 @@ impl From<&CompanyDossier> for CompanyDto {
             state: dossier.state.as_str().to_owned(),
             siren: dossier.siren.as_ref().map(ToString::to_string),
             official: dossier.official.as_ref().map(OfficialDataDto::from),
+            legal_name: None,
+            siblings: Vec::new(),
             pages: dossier
                 .pages
                 .iter()
@@ -85,6 +121,17 @@ impl From<&CompanyDossier> for CompanyDto {
             next_attempt_at: dossier.next_attempt_at.to_rfc3339(),
             error: dossier.error.clone(),
         }
+    }
+}
+
+impl CompanyDto {
+    pub fn with_entity(mut self, entity: Option<&CompanyEntity>, siblings: &[SiblingLead]) -> Self {
+        if let Some(entity) = entity {
+            self.siren = Some(entity.siren.to_string());
+            self.legal_name = Some(entity.legal_name.clone());
+        }
+        self.siblings = siblings.iter().map(SiblingLeadDto::from).collect();
+        self
     }
 }
 

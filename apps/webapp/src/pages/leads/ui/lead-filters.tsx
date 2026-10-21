@@ -150,6 +150,14 @@ export function LeadFiltersForm({
 						))}
 					</select>
 				</div>
+				<label className="flex items-end gap-2 pb-2 text-sm">
+					<input
+						type="checkbox"
+						name="group"
+						defaultChecked={filters.grouped}
+					/>
+					Regrouper par entreprise
+				</label>
 				<div className="flex items-end gap-2">
 					<Button type="submit">Appliquer</Button>
 					<Button type="button" variant="outline" onClick={onReset}>

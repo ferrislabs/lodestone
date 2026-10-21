@@ -1,10 +1,12 @@
+use std::collections::BTreeMap;
+
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::domain::values::SourceName;
 
-pub const PROFILE_SCHEMA_VERSION: u32 = 9;
+pub const PROFILE_SCHEMA_VERSION: u32 = 10;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -13,7 +15,7 @@ pub const PROFILE_SCHEMA_VERSION: u32 = 9;
     description = "Describes one market: what is sold, which agents scan which sources, which qualification agents judge a lead and how an aggregator sums it up, how leads are scored and which contacts to prefer."
 )]
 pub struct ProfileDefinition {
-    #[schemars(description = "Profile format version. Must be 9.")]
+    #[schemars(description = "Profile format version. Must be 10.")]
     pub schema_version: u32,
     pub identity: Identity,
     #[schemars(description = "Detection agents. At least one is required.")]
@@ -399,10 +401,16 @@ impl Default for VerdictThresholds {
 )]
 pub struct EvidenceWeights {
     #[serde(default = "default_evidence_weight")]
-    #[schemars(range(min = 0, max = 10), description = "Number of signals.")]
+    #[schemars(
+        range(min = 0, max = 10),
+        description = "Number of independent signals, each decayed by its age."
+    )]
     pub volume: u8,
     #[serde(default = "default_evidence_weight")]
-    #[schemars(range(min = 0, max = 10), description = "Number of distinct sources.")]
+    #[schemars(
+        range(min = 0, max = 10),
+        description = "Number of distinct sources and signal kinds."
+    )]
     pub diversity: u8,
     #[serde(default = "default_evidence_weight")]
     #[schemars(
@@ -413,7 +421,7 @@ pub struct EvidenceWeights {
     #[serde(default = "default_evidence_weight")]
     #[schemars(
         range(min = 0, max = 10),
-        description = "Signal score of the lead against the reference score."
+        description = "Signal score of the lead, weighted by the freshness of its signals, against the reference score."
     )]
     pub strength: u8,
 }
@@ -433,7 +441,31 @@ impl Default for EvidenceWeights {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub const DEFAULT_HALF_LIFE_KEY: &str = "default";
+pub const FALLBACK_HALF_LIFE_DAYS: u32 = 180;
+pub const MIN_HALF_LIFE_DAYS: u32 = 1;
+pub const MAX_HALF_LIFE_DAYS: u32 = 3650;
+
+const BUILT_IN_HALF_LIVES: [(&str, u32); 9] = [
+    ("job_offer", 90),
+    ("public_tender", 180),
+    ("awarded_contract", 365),
+    ("saas_provider", 365),
+    ("product_detected", 365),
+    ("debt_marker", 365),
+    ("contact", 365),
+    ("role_contact_found", 365),
+    (DEFAULT_HALF_LIFE_KEY, FALLBACK_HALF_LIFE_DAYS),
+];
+
+fn default_half_life_days() -> BTreeMap<String, u32> {
+    BUILT_IN_HALF_LIVES
+        .iter()
+        .map(|(kind, days)| ((*kind).to_owned(), *days))
+        .collect()
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[schemars(
     title = "Evidence settings",
@@ -454,6 +486,28 @@ pub struct EvidenceSettings {
     pub reference_score: f64,
     #[serde(default)]
     pub weights: EvidenceWeights,
+    #[serde(default = "default_half_life_days")]
+    #[schemars(
+        description = "Half-life in days of a signal, by signal kind. A signal of that age counts for half in the volume and the strength of the evidence. The `default` key applies to every kind not listed; a kind that is not listed falls back to its built-in value.",
+        extend("additionalProperties" = {"type": "integer", "minimum": 1, "maximum": 3650})
+    )]
+    pub half_life_days: BTreeMap<String, u32>,
+}
+
+impl EvidenceSettings {
+    pub fn half_life_days_for(&self, kind: &str) -> u32 {
+        self.half_life_days
+            .get(kind)
+            .copied()
+            .or_else(|| {
+                BUILT_IN_HALF_LIVES
+                    .iter()
+                    .find(|(built_in, _)| *built_in == kind)
+                    .map(|(_, days)| *days)
+            })
+            .or_else(|| self.half_life_days.get(DEFAULT_HALF_LIFE_KEY).copied())
+            .unwrap_or(FALLBACK_HALF_LIFE_DAYS)
+    }
 }
 
 fn default_influence() -> f64 {
@@ -470,6 +524,7 @@ impl Default for EvidenceSettings {
             influence: default_influence(),
             reference_score: default_reference_score(),
             weights: EvidenceWeights::default(),
+            half_life_days: default_half_life_days(),
         }
     }
 }

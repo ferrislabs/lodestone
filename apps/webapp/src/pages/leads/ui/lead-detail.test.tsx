@@ -22,6 +22,7 @@ const detail: LeadDetailData = {
 		domain: 'acme.test',
 		status: 'qualified',
 		exclusions: [],
+		grouped_leads: [],
 		score: 42.5,
 		first_seen_at: '2026-01-01T00:00:00Z',
 		last_seen_at: '2026-02-01T00:00:00Z',
@@ -38,6 +39,10 @@ const detail: LeadDetailData = {
 				strength: 24.2,
 			},
 			signal_count: 1,
+			independent_signals: 1,
+			decayed_signals: 0.5,
+			source_count: 1,
+			kind_count: 1,
 			signal_score: 12.1,
 			only_non_production: true,
 		},
@@ -106,6 +111,9 @@ const detail: LeadDetailData = {
 		only_non_production: true,
 		distinct_subdomains: 3,
 		signal_count: 1,
+		independent_signals: 1,
+		kinds: ['hiring_page'],
+		sibling_domains: [],
 		source_count: 1,
 		sources: ['crawler'],
 		first_seen_at: '2026-01-01T00:00:00Z',
@@ -181,6 +189,7 @@ function renderDetail(
 			detail={detail}
 			nextStatuses={['validated', 'rejected', 'new']}
 			onBack={() => {}}
+			onOpenLead={() => {}}
 			onChangeStatus={() => {}}
 			rejectionDialog={<div>rejection-dialog</div>}
 			onOpenDraft={() => {}}
@@ -771,6 +780,7 @@ describe('LeadDetail', () => {
 		built_at: '2026-10-06T10:00:00Z',
 		next_attempt_at: '2027-01-04T10:00:00Z',
 		error: null,
+		siblings: [],
 	}
 
 	it('shows the company block with its official data, pages and state', () => {
@@ -1023,5 +1033,130 @@ describe('LeadDetail', () => {
 				.querySelector('[data-agent="maturite"]')
 				?.querySelector('[data-part="escalated"]'),
 		).toBeNull()
+	})
+	describe('company entity', () => {
+		const entity: NonNullable<LeadDetailData['company']> = {
+			state: 'complete',
+			siren: '552081317',
+			legal_name: 'ACME SAS',
+			official: null,
+			pages: [],
+			built_at: '2026-10-06T10:00:00Z',
+			next_attempt_at: '2027-01-04T10:00:00Z',
+			error: null,
+			siblings: [
+				{
+					id: 's1',
+					domain: 'acme.fr',
+					profile: { id: 'p1', name: 'Fintech' },
+					verdict: 'fiable',
+					confidence: 81,
+				},
+				{
+					id: 's2',
+					domain: 'acme.com',
+					profile: { id: 'p2', name: 'Cyber' },
+					verdict: null,
+					confidence: null,
+				},
+			],
+		}
+
+		it('shows the legal name, the SIREN and the sibling domains as links', () => {
+			const onOpenLead = vi.fn()
+			const { container } = renderDetail({
+				detail: { ...detail, company: entity },
+				onOpenLead,
+			})
+			const line = container.querySelector('[data-section="company-entity"]')
+			expect(line?.textContent).toContain('Entreprise')
+			expect(line?.textContent).toContain('ACME SAS')
+			expect(line?.textContent).toContain('SIREN 552 081 317')
+			const links = Array.from(line?.querySelectorAll('a') ?? [])
+			expect(links.map((link) => link.textContent)).toEqual([
+				'acme.fr',
+				'acme.com · Cyber',
+			])
+			expect(links.map((link) => link.getAttribute('href'))).toEqual([
+				'/leads/s1',
+				'/leads/s2',
+			])
+			fireEvent.click(links[0] as HTMLElement)
+			expect(onOpenLead).toHaveBeenCalledWith('s1')
+			expect(line?.textContent).toMatch(/81\s%/)
+		})
+
+		it('shows no entity line without a resolved SIREN', () => {
+			const { container } = renderDetail({
+				detail: {
+					...detail,
+					company: { ...entity, legal_name: null, siblings: [] },
+				},
+			})
+			expect(
+				container.querySelector('[data-section="company-entity"]'),
+			).toBeNull()
+		})
+
+		it('shows only the legal name when the company has no sibling', () => {
+			const { container } = renderDetail({
+				detail: { ...detail, company: { ...entity, siblings: [] } },
+			})
+			const line = container.querySelector('[data-section="company-entity"]')
+			expect(line?.textContent).toContain('ACME SAS')
+			expect(line?.textContent).not.toContain('Autres domaines')
+		})
+
+		it('lists the aggregated domains in the facts', () => {
+			const { container } = renderDetail({
+				detail: {
+					...detail,
+					facts: { ...detail.facts, sibling_domains: ['acme.fr'] },
+				},
+			})
+			const facts = container.querySelector('[data-section="facts"]')
+			expect(facts?.textContent).toContain('Domaines regroupésacme.fr')
+			expect(facts?.textContent).toContain('Signaux indépendants1')
+		})
+	})
+
+	it('shows the independent signals and the decayed volume in the calculation', () => {
+		const { container } = renderDetail({
+			detail: {
+				...detail,
+				lead: {
+					...detail.lead,
+					evidence: {
+						strength: 35,
+						components: {
+							volume: 20,
+							diversity: 75,
+							environment: 100,
+							strength: 24.2,
+						},
+						signal_count: 5,
+						independent_signals: 3,
+						decayed_signals: 1.5,
+						source_count: 1,
+						kind_count: 2,
+						signal_score: 12.1,
+						only_non_production: false,
+					},
+				},
+			},
+		})
+		const calculation = container.querySelector(
+			'[data-section="confidence-calculation"]',
+		)
+		const independent = calculation?.querySelector(
+			'[data-evidence-signals="independent"]',
+		)
+		expect(independent?.textContent).toContain('Signaux indépendants')
+		expect(independent?.textContent).toContain('3 sur 5')
+		const decayed = calculation?.querySelector(
+			'[data-evidence-signals="decayed"]',
+		)
+		expect(decayed?.textContent).toContain('Volume après décroissance')
+		expect(decayed?.textContent).toContain('1,5 sur 3')
 	})
 })

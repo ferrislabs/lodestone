@@ -85,12 +85,14 @@ pub trait QualificationRepository: Send {
         profile_id: ProfileId,
         revision: RevisionNumber,
         limit: u32,
+        now: DateTime<Utc>,
     ) -> impl Future<Output = Result<Vec<Lead>, CoreError>> + Send;
 
     fn count_stale_scorings(
         &mut self,
         profile_id: ProfileId,
         revision: RevisionNumber,
+        now: DateTime<Utc>,
     ) -> impl Future<Output = Result<u64, CoreError>> + Send;
 
     fn rescore(

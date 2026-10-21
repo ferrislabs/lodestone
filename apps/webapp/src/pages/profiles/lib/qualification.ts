@@ -52,6 +52,8 @@ export const DEFAULT_INFLUENCE = 0.6
 export const DEFAULT_REFERENCE_SCORE = 50
 export const DEFAULT_EVIDENCE_WEIGHT = 1
 export const MAX_EVIDENCE_WEIGHT = 10
+export const MIN_HALF_LIFE_DAYS = 1
+export const MAX_HALF_LIFE_DAYS = 3650
 
 const IDENTIFIER = /^[a-z0-9][a-z0-9_-]{0,62}$/
 const SLUG = /^[a-z0-9][a-z0-9-]{0,62}$/
@@ -274,12 +276,37 @@ export const EVIDENCE_WEIGHT_KEYS = [
 
 export type EvidenceWeightKey = (typeof EVIDENCE_WEIGHT_KEYS)[number]
 
+export const HALF_LIFE_KEYS = [
+	'job_offer',
+	'public_tender',
+	'awarded_contract',
+	'saas_provider',
+	'product_detected',
+	'debt_marker',
+	'role_contact_found',
+	'default',
+] as const
+
+export type HalfLifeKey = (typeof HALF_LIFE_KEYS)[number]
+
+export const DEFAULT_HALF_LIVES: Readonly<Record<HalfLifeKey, number>> = {
+	job_offer: 90,
+	public_tender: 180,
+	awarded_contract: 365,
+	saas_provider: 365,
+	product_detected: 365,
+	debt_marker: 365,
+	role_contact_found: 365,
+	default: 180,
+}
+
 export interface EvidenceSettings {
 	calibrationFloor: number | null
 	minEvidence: number | null
 	influence: number | null
 	referenceScore: number | null
 	weights: Record<EvidenceWeightKey, number | null>
+	halfLives: Record<HalfLifeKey, number | null>
 }
 
 function percentOf(
@@ -296,8 +323,13 @@ export function evidenceSettingsOf(value: JsonObject): EvidenceSettings {
 	const verdict = isJsonObject(value.verdict) ? value.verdict : {}
 	const evidence = isJsonObject(value.evidence) ? value.evidence : {}
 	const weights = isJsonObject(evidence.weights) ? evidence.weights : {}
+	const stored = isJsonObject(evidence.half_life_days)
+		? evidence.half_life_days
+		: {}
 	const weight = (key: EvidenceWeightKey) =>
 		key in weights ? numberField(weights, key) : DEFAULT_EVIDENCE_WEIGHT
+	const halfLife = (key: HalfLifeKey) =>
+		key in stored ? numberField(stored, key) : DEFAULT_HALF_LIVES[key]
 	return {
 		calibrationFloor: percentOf(
 			verdict,
@@ -316,6 +348,9 @@ export function evidenceSettingsOf(value: JsonObject): EvidenceSettings {
 			environment: weight('environment'),
 			strength: weight('strength'),
 		},
+		halfLives: Object.fromEntries(
+			HALF_LIFE_KEYS.map((key) => [key, halfLife(key)]),
+		) as Record<HalfLifeKey, number | null>,
 	}
 }
 
@@ -323,6 +358,16 @@ export const FLOOR_ERROR = `Doit être un pourcentage entier de 0 à ${MAX_CALIB
 export const REFERENCE_SCORE_ERROR = "Doit être un nombre d'au moins 1"
 export const WEIGHT_ERROR = `Doit être un entier de 0 à ${MAX_EVIDENCE_WEIGHT}`
 export const NO_WEIGHT_ERROR = 'Au moins un poids doit être supérieur à 0'
+export const HALF_LIFE_ERROR = `Doit être un entier de ${MIN_HALF_LIFE_DAYS} à ${MAX_HALF_LIFE_DAYS} jours`
+
+function isHalfLife(value: number | null): value is number {
+	return (
+		value !== null &&
+		Number.isInteger(value) &&
+		value >= MIN_HALF_LIFE_DAYS &&
+		value <= MAX_HALF_LIFE_DAYS
+	)
+}
 
 function isWeight(value: number | null): value is number {
 	return (
@@ -367,6 +412,14 @@ export function evidenceProblems(settings: EvidenceSettings): Problem[] {
 		EVIDENCE_WEIGHT_KEYS.every((key) => settings.weights[key] === 0)
 	) {
 		problems.push({ path: 'evidence.weights', message: NO_WEIGHT_ERROR })
+	}
+	for (const key of HALF_LIFE_KEYS) {
+		if (!isHalfLife(settings.halfLives[key])) {
+			problems.push({
+				path: `evidence.half_life_days.${key}`,
+				message: HALF_LIFE_ERROR,
+			})
+		}
 	}
 	return problems
 }
@@ -692,6 +745,21 @@ export function setEvidenceWeight(
 	return {
 		...value,
 		evidence: { ...current, weights: { ...weights, [key]: next } },
+	}
+}
+
+export function setHalfLife(
+	value: JsonObject,
+	key: HalfLifeKey,
+	next: number | null,
+): JsonObject {
+	const current = isJsonObject(value.evidence) ? value.evidence : {}
+	const days = isJsonObject(current.half_life_days)
+		? current.half_life_days
+		: {}
+	return {
+		...value,
+		evidence: { ...current, half_life_days: { ...days, [key]: next } },
 	}
 }
 

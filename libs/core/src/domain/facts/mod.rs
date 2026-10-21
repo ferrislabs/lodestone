@@ -7,7 +7,7 @@ use crate::domain::{
     company::{CompanyDossier, DossierState},
     host::{CandidateHost, Hostname},
     lead::{Lead, Signal},
-    values::SourceName,
+    values::{SignalKind, SourceName},
 };
 
 mod country;
@@ -57,12 +57,27 @@ pub struct CompanyFacts {
     pub official: Option<OfficialFacts>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IndependentSignal {
+    pub kind: SignalKind,
+    pub observed_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct SiblingSignals<'a> {
+    pub domain: &'a NormalizedDomain,
+    pub signals: &'a [Signal],
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct LeadFacts {
     pub hosts: Vec<HostFact>,
     pub distinct_subdomains: usize,
     pub signal_count: usize,
+    pub independent: Vec<IndependentSignal>,
+    pub kinds: Vec<SignalKind>,
     pub sources: Vec<SourceName>,
+    pub sibling_domains: Vec<NormalizedDomain>,
     pub first_seen_at: DateTime<Utc>,
     pub last_seen_at: DateTime<Utc>,
     pub probable_country: Option<Country>,
@@ -116,28 +131,83 @@ impl CompanyFacts {
     }
 }
 
+fn normalised_value(value: Option<&str>) -> String {
+    value
+        .map(|raw| raw.trim().to_lowercase())
+        .unwrap_or_default()
+}
+
+fn independent_signals<'a>(signals: impl Iterator<Item = &'a Signal>) -> Vec<IndependentSignal> {
+    let mut latest: BTreeMap<(&str, String, &str), (&SignalKind, DateTime<Utc>)> = BTreeMap::new();
+    for signal in signals {
+        let key = (
+            signal.kind.as_str(),
+            normalised_value(signal.value.as_deref()),
+            signal.source.as_str(),
+        );
+        latest
+            .entry(key)
+            .and_modify(|(_, seen)| *seen = (*seen).max(signal.observed_at))
+            .or_insert((&signal.kind, signal.observed_at));
+    }
+    latest
+        .into_values()
+        .map(|(kind, observed_at)| IndependentSignal {
+            kind: kind.clone(),
+            observed_at,
+        })
+        .collect()
+}
+
 impl LeadFacts {
     pub fn compute(lead: &Lead, signals: &[Signal], known_hosts: &[CandidateHost]) -> Self {
+        Self::compute_aggregated(lead, signals, known_hosts, &[])
+    }
+
+    pub fn compute_aggregated(
+        lead: &Lead,
+        signals: &[Signal],
+        known_hosts: &[CandidateHost],
+        siblings: &[SiblingSignals<'_>],
+    ) -> Self {
+        let pools: Vec<(&NormalizedDomain, &[Signal])> = std::iter::once((&lead.domain, signals))
+            .chain(
+                siblings
+                    .iter()
+                    .map(|sibling| (sibling.domain, sibling.signals)),
+            )
+            .collect();
+        let domains: Vec<&NormalizedDomain> = pools.iter().map(|(domain, _)| *domain).collect();
+        let all_signals = || pools.iter().flat_map(|(_, pool)| pool.iter());
         let mut counts: BTreeMap<Hostname, usize> = BTreeMap::new();
-        for signal in signals {
-            if let Some(host) = signal_host(signal, &lead.domain) {
-                *counts.entry(host).or_default() += 1;
+        for (domain, pool) in &pools {
+            for signal in *pool {
+                if let Some(host) = signal_host(signal, domain) {
+                    *counts.entry(host).or_default() += 1;
+                }
             }
         }
         let mut subdomains: BTreeSet<&Hostname> = counts.keys().collect();
         subdomains.extend(
             known_hosts
                 .iter()
-                .filter(|known| known.domain == lead.domain)
+                .filter(|known| domains.contains(&&known.domain))
                 .map(|known| &known.host),
         );
         let distinct_subdomains = subdomains
             .iter()
-            .filter(|host| host.as_str() != lead.domain.as_str())
+            .filter(|host| {
+                !domains
+                    .iter()
+                    .any(|domain| host.as_str() == domain.as_str())
+            })
             .count();
-        let mut sources: Vec<SourceName> = signals.iter().map(|signal| signal.source).collect();
+        let mut sources: Vec<SourceName> = all_signals().map(|signal| signal.source).collect();
         sources.sort_by_key(|source| source.as_str());
         sources.dedup();
+        let mut kinds: Vec<SignalKind> = all_signals().map(|signal| signal.kind.clone()).collect();
+        kinds.sort_by(|left, right| left.as_str().cmp(right.as_str()));
+        kinds.dedup();
         let probable_country = country::country_of(&lead.domain);
         Self {
             hosts: counts
@@ -149,14 +219,24 @@ impl LeadFacts {
                 })
                 .collect(),
             distinct_subdomains,
-            signal_count: signals.len(),
+            signal_count: all_signals().count(),
+            independent: independent_signals(all_signals()),
+            kinds,
             sources,
+            sibling_domains: siblings
+                .iter()
+                .map(|sibling| sibling.domain.clone())
+                .collect(),
             first_seen_at: lead.first_seen_at,
             last_seen_at: lead.last_seen_at,
             country_basis: probable_country.map(|_| CountryBasis::Tld),
             probable_country,
             company: None,
         }
+    }
+
+    pub fn independent_signals(&self) -> usize {
+        self.independent.len()
     }
 
     pub fn with_dossier(mut self, dossier: Option<&CompanyDossier>) -> Self {
@@ -246,6 +326,17 @@ impl LeadFacts {
             "- distinct subdomains seen for the domain: {}",
             self.distinct_subdomains
         ));
+        if !self.sibling_domains.is_empty() {
+            let domains: Vec<&str> = self
+                .sibling_domains
+                .iter()
+                .map(NormalizedDomain::as_str)
+                .collect();
+            lines.push(format!(
+                "- aggregated with the other domains of the same company in this profile: {}",
+                domains.join(", ")
+            ));
+        }
         let sources: Vec<&str> = self.sources.iter().map(|source| source.as_str()).collect();
         lines.push(format!(
             "- signals: {} from {} distinct source(s){}",
@@ -616,6 +707,130 @@ mod tests {
         assert_eq!(pending, base);
         assert_eq!(base.clone().with_dossier(None), base);
         assert!(!base.render().contains("company dossier"));
+    }
+
+    fn valued(kind: &str, value: &str, source: SourceName, host: &str, seconds: i64) -> Signal {
+        Signal {
+            value: Some(value.to_owned()),
+            observed_at: at(seconds),
+            ..signal(kind, source, Some(host), &format!("https://{host}/{value}"))
+        }
+    }
+
+    #[test]
+    fn identical_kind_value_and_source_are_one_independent_signal() {
+        let signals = [
+            valued(
+                "saas_provider",
+                "Auth0",
+                SourceName::DnsCname,
+                "a.acme.com",
+                10,
+            ),
+            valued(
+                "saas_provider",
+                " auth0 ",
+                SourceName::DnsCname,
+                "b.acme.com",
+                30,
+            ),
+            valued(
+                "saas_provider",
+                "auth0",
+                SourceName::HttpProbe,
+                "a.acme.com",
+                20,
+            ),
+            valued(
+                "saas_provider",
+                "okta",
+                SourceName::DnsCname,
+                "a.acme.com",
+                20,
+            ),
+            valued(
+                "product_detected",
+                "auth0",
+                SourceName::DnsCname,
+                "a.acme.com",
+                20,
+            ),
+        ];
+        let facts = LeadFacts::compute(&lead("acme.com"), &signals, &[]);
+        assert_eq!(facts.signal_count, 5);
+        assert_eq!(facts.independent_signals(), 4);
+        assert_eq!(facts.sources.len(), 2);
+        assert_eq!(facts.kinds.len(), 2);
+        let merged = facts
+            .independent
+            .iter()
+            .find(|signal| signal.kind.as_str() == "saas_provider" && signal.observed_at == at(30))
+            .unwrap();
+        assert_eq!(merged.kind.as_str(), "saas_provider");
+    }
+
+    #[test]
+    fn siblings_add_their_signals_sources_kinds_and_hosts() {
+        let own = [valued(
+            "saas_provider",
+            "auth0",
+            SourceName::DnsCname,
+            "sso.acme.com",
+            0,
+        )];
+        let other = [
+            valued(
+                "saas_provider",
+                "auth0",
+                SourceName::DnsCname,
+                "sso.acme.fr",
+                0,
+            ),
+            valued("job_offer", "devops", SourceName::Ats, "jobs.acme.fr", 0),
+        ];
+        let sibling_domain = NormalizedDomain::from_host("acme.fr").unwrap();
+        let facts = LeadFacts::compute_aggregated(
+            &lead("acme.com"),
+            &own,
+            &[known("www.acme.fr"), known("www.elsewhere.com")],
+            &[SiblingSignals {
+                domain: &sibling_domain,
+                signals: &other,
+            }],
+        );
+        assert_eq!(facts.signal_count, 3);
+        assert_eq!(facts.independent_signals(), 2);
+        assert_eq!(facts.sources, vec![SourceName::Ats, SourceName::DnsCname]);
+        assert_eq!(facts.kinds.len(), 2);
+        assert_eq!(facts.distinct_hosts(), 3);
+        assert_eq!(facts.distinct_subdomains, 4);
+        assert_eq!(facts.sibling_domains, vec![sibling_domain]);
+        assert!(facts.render().contains(
+            "aggregated with the other domains of the same company in this profile: acme.fr"
+        ));
+    }
+
+    #[test]
+    fn a_sibling_signal_naming_a_foreign_host_adds_no_host() {
+        let sibling_domain = NormalizedDomain::from_host("acme.fr").unwrap();
+        let other = [valued(
+            "saas_provider",
+            "auth0",
+            SourceName::DnsCname,
+            "sso.acme.com",
+            0,
+        )];
+        let facts = LeadFacts::compute_aggregated(
+            &lead("acme.com"),
+            &[],
+            &[],
+            &[SiblingSignals {
+                domain: &sibling_domain,
+                signals: &other,
+            }],
+        );
+        assert!(facts.hosts.is_empty());
+        assert_eq!(facts.signal_count, 1);
     }
 
     #[test]

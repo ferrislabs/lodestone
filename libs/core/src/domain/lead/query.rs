@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::domain::{
-    company::CompanyDossier,
+    company::{CompanyDossier, CompanyEntity, SiblingLead},
     facts::LeadFacts,
     lead::{Assessment, ContactEmail, Lead, LeadId, LeadStatus, Signal},
     profile::{Profile, ProfileId, ProfileName, RevisionNumber, definition::QualificationAgent},
@@ -96,6 +96,7 @@ pub struct LeadQuery {
     pub min_score: Option<f64>,
     pub domain_contains: Option<String>,
     pub signal_kind: Option<SignalKind>,
+    pub group_by_company: bool,
     pub sort: LeadSort,
     pub limit: u32,
     pub offset: u64,
@@ -105,6 +106,7 @@ pub struct LeadQuery {
 pub struct LeadPage {
     pub items: Vec<Lead>,
     pub total: u64,
+    pub members: HashMap<LeadId, Vec<Lead>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -128,6 +130,8 @@ pub struct LeadDetail {
     pub summary_state: Option<SummaryState>,
     pub scoring: Option<LeadScoring>,
     pub company: Option<CompanyDossier>,
+    pub entity: Option<CompanyEntity>,
+    pub siblings: Vec<SiblingLead>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

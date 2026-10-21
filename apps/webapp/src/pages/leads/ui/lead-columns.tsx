@@ -1,5 +1,5 @@
 import type { ColumnDef } from '@tanstack/react-table'
-
+import { groupedBadge } from '#/pages/leads/lib/company'
 import {
 	confidenceBreakdown,
 	exclusionSummary,
@@ -21,15 +21,31 @@ export function buildLeadColumns(
 		{
 			id: 'domain',
 			header: 'Domaine',
-			cell: ({ row }) => (
-				<button
-					type="button"
-					className="font-medium text-foreground hover:underline"
-					onClick={() => onOpenLead(row.original.id)}
-				>
-					{row.original.domain}
-				</button>
-			),
+			cell: ({ row }) => {
+				const badge = groupedBadge(row.original.grouped_leads)
+				return (
+					<div className="flex flex-col items-start gap-1">
+						<button
+							type="button"
+							className="font-medium text-foreground hover:underline"
+							onClick={() => onOpenLead(row.original.id)}
+						>
+							{row.original.domain}
+						</button>
+						{badge ? (
+							<button
+								type="button"
+								data-group-toggle={row.original.id}
+								aria-expanded={row.getIsExpanded()}
+								className="rounded-md border bg-muted px-2 py-0.5 text-xs text-muted-foreground hover:bg-accent"
+								onClick={row.getToggleExpandedHandler()}
+							>
+								{badge}
+							</button>
+						) : null}
+					</div>
+				)
+			},
 		},
 		{
 			id: 'verdict',

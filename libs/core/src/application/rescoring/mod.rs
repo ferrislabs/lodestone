@@ -1,3 +1,4 @@
+use chrono::{DateTime, Utc};
 use common::CoreError;
 use lodestone_macros::transactional;
 use tracing::info;
@@ -21,7 +22,11 @@ pub struct RescoreReport {
 }
 
 impl LodestoneUseCase {
-    pub async fn rescore_stale_leads(&self, batch_size: u32) -> Result<RescoreReport, CoreError> {
+    pub async fn rescore_stale_leads(
+        &self,
+        batch_size: u32,
+        now: DateTime<Utc>,
+    ) -> Result<RescoreReport, CoreError> {
         let profiles = self.list_active_profiles().await?;
         let mut report = RescoreReport::default();
         let mut remaining = batch_size;
@@ -29,14 +34,14 @@ impl LodestoneUseCase {
             if remaining == 0 {
                 break;
             }
-            for lead in &self.stale_scorings(active, remaining).await? {
-                self.rescore_lead(active, lead).await?;
+            for lead in &self.stale_scorings(active, remaining, now).await? {
+                self.rescore_lead(active, lead, now).await?;
                 report.leads += 1;
                 remaining = remaining.saturating_sub(1);
             }
         }
         for active in &profiles {
-            report.backlog += self.count_stale_scorings(active).await?;
+            report.backlog += self.count_stale_scorings(active, now).await?;
         }
         if report.leads > 0 {
             info!(
@@ -48,7 +53,12 @@ impl LodestoneUseCase {
         Ok(report)
     }
 
-    async fn rescore_lead(&self, active: &ActiveProfile, lead: &Lead) -> Result<(), CoreError> {
+    async fn rescore_lead(
+        &self,
+        active: &ActiveProfile,
+        lead: &Lead,
+        now: DateTime<Utc>,
+    ) -> Result<(), CoreError> {
         let definition = active.revision.definition.definition();
         let results = self.lead_qualification_results(lead.id).await?;
         let (_, facts, _) = self.signals_with_facts(lead).await?;
@@ -76,7 +86,8 @@ impl LodestoneUseCase {
             });
             agent_scores.push((result.id, score));
         }
-        let evidence = EvidenceStrength::compute(&facts, lead.score.get(), &definition.evidence);
+        let evidence =
+            EvidenceStrength::compute(&facts, lead.score.get(), &definition.evidence, now);
         let rescoring = Rescoring {
             lead_id: lead.id,
             judgement: judge(
@@ -87,6 +98,7 @@ impl LodestoneUseCase {
             )
             .excluding(exclusions(&results, &definition.qualification_agents)),
             scoring_version: SCORING_VERSION,
+            scored_at: now,
             agent_scores,
         };
         self.store_rescoring(&rescoring).await
@@ -97,16 +109,21 @@ impl LodestoneUseCase {
         &self,
         active: &ActiveProfile,
         limit: u32,
+        now: DateTime<Utc>,
     ) -> Result<Vec<Lead>, CoreError> {
         let mut repo = qualification_repository;
-        repo.stale_scorings(active.profile.id, active.revision.number, limit)
+        repo.stale_scorings(active.profile.id, active.revision.number, limit, now)
             .await
     }
 
     #[transactional(qualification)]
-    async fn count_stale_scorings(&self, active: &ActiveProfile) -> Result<u64, CoreError> {
+    async fn count_stale_scorings(
+        &self,
+        active: &ActiveProfile,
+        now: DateTime<Utc>,
+    ) -> Result<u64, CoreError> {
         let mut repo = qualification_repository;
-        repo.count_stale_scorings(active.profile.id, active.revision.number)
+        repo.count_stale_scorings(active.profile.id, active.revision.number, now)
             .await
     }
 

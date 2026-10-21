@@ -40,6 +40,7 @@ export const leadsSearchSchema = z.object({
 	domain: text.optional(),
 	signal: text.optional(),
 	sort: z.enum(LEAD_SORTS).optional(),
+	group: z.enum(['company', 'none']).optional(),
 	page: z.number().int().min(1).optional(),
 })
 
@@ -53,7 +54,10 @@ export interface LeadFilters {
 	domain: string
 	signal: string
 	sort: LeadSort
+	grouped: boolean
 }
+
+export type LeadGrouping = 'company' | 'none'
 
 export interface LeadsQuery {
 	status?: LeadStatus
@@ -75,6 +79,7 @@ export function filtersFromSearch(search: LeadsSearch): LeadFilters {
 		domain: search.domain ?? '',
 		signal: search.signal ?? '',
 		sort: search.sort ?? DEFAULT_SORT,
+		grouped: search.group !== 'none',
 	}
 }
 
@@ -106,6 +111,7 @@ export function filtersFromForm(form: FormData): LeadFilters {
 		domain: read('domain'),
 		signal: read('signal'),
 		sort: parseSort(read('sort')),
+		grouped: form.has('group'),
 	}
 }
 
@@ -133,6 +139,7 @@ export function searchFromFilters(
 		domain: filters.domain === '' ? undefined : filters.domain,
 		signal: filters.signal === '' ? undefined : filters.signal,
 		sort: filters.sort === DEFAULT_SORT ? undefined : filters.sort,
+		group: filters.grouped ? undefined : 'none',
 		page: undefined,
 	}
 }
@@ -149,4 +156,8 @@ export function queryFromSearch(search: LeadsSearch): LeadsQuery {
 		...(search.signal ? { signal: search.signal } : {}),
 		sort: search.sort ?? DEFAULT_SORT,
 	}
+}
+
+export function groupingFromSearch(search: LeadsSearch): LeadGrouping {
+	return search.group === 'none' ? 'none' : 'company'
 }
