@@ -144,11 +144,13 @@ async fn the_catalog_lists_every_provider_as_not_configured(pool: PgPool) {
             "ted",
             "ats",
             "hacker_news_hiring",
+            "welcome_to_the_jungle",
             "certificate_transparency",
             "dns_cname",
             "http_probe",
             "contacts",
-            "company_research"
+            "company_research",
+            "bodacc"
         ]
     );
     for provider in providers {

@@ -1,55 +1,156 @@
-use std::{num::NonZeroU32, time::Duration};
+use std::{
+    num::NonZeroU32,
+    pin::pin,
+    sync::{Mutex, MutexGuard, PoisonError},
+    time::Duration,
+};
 
 use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
+use serde_json::Value;
 use thiserror::Error;
+use tokio::{select, sync::Notify};
 use tracing::warn;
 
 use aws_lc_rs::digest::{Context, SHA256};
 use chrono::Utc;
+use common::CoreError;
 use serde::Serialize;
 
-use crate::domain::llm::{
-    LlmError, LlmProvider, LlmRequest, TokenUsage, UntrustedDocument,
-    cache::{CacheScope, CachedOutput, LlmCache},
-    provider::TokenPricing,
+use crate::domain::{
+    agent_work::{AgentWork, CancelReason},
+    llm::{
+        LlmError, LlmProvider, LlmRequest, TokenUsage, UntrustedDocument,
+        cache::{CacheScope, CachedOutput, LlmCache},
+        provider::TokenPricing,
+    },
 };
 
 const MICROCENTS_PER_CENT: u64 = 1_000_000;
 const MAX_BACKOFF: Duration = Duration::from_secs(60);
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Default)]
+struct Ledger {
+    spent: u64,
+    reserved: u64,
+    in_flight: u32,
+    estimate: Option<u64>,
+}
+
+#[derive(Debug)]
 pub struct RunBudget {
     limit_microcents: u64,
-    spent_microcents: u64,
+    ledger: Mutex<Ledger>,
+    settled: Notify,
+}
+
+fn cost_of(usage: TokenUsage, pricing: TokenPricing) -> u64 {
+    usage
+        .input_tokens
+        .saturating_mul(u64::from(pricing.input_cents_per_mtok))
+        .saturating_add(
+            usage
+                .output_tokens
+                .saturating_mul(u64::from(pricing.output_cents_per_mtok)),
+        )
+}
+
+fn is_free(pricing: TokenPricing) -> bool {
+    pricing.input_cents_per_mtok == 0 && pricing.output_cents_per_mtok == 0
 }
 
 impl RunBudget {
     pub fn new(limit_cents: NonZeroU32) -> Self {
         Self {
             limit_microcents: u64::from(limit_cents.get()) * MICROCENTS_PER_CENT,
-            spent_microcents: 0,
+            ledger: Mutex::new(Ledger::default()),
+            settled: Notify::new(),
         }
     }
 
+    fn ledger(&self) -> MutexGuard<'_, Ledger> {
+        self.ledger.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
     pub fn is_exhausted(&self) -> bool {
-        self.spent_microcents >= self.limit_microcents
+        self.ledger().spent >= self.limit_microcents
     }
 
     pub fn spent_cents(&self) -> f64 {
-        self.spent_microcents as f64 / MICROCENTS_PER_CENT as f64
+        self.ledger().spent as f64 / MICROCENTS_PER_CENT as f64
     }
 
-    pub fn charge(&mut self, usage: TokenUsage, pricing: TokenPricing) {
-        let cost = usage
-            .input_tokens
-            .saturating_mul(u64::from(pricing.input_cents_per_mtok))
-            .saturating_add(
-                usage
-                    .output_tokens
-                    .saturating_mul(u64::from(pricing.output_cents_per_mtok)),
-            );
-        self.spent_microcents = self.spent_microcents.saturating_add(cost);
+    pub fn charge(&self, usage: TokenUsage, pricing: TokenPricing) {
+        let cost = cost_of(usage, pricing);
+        let mut ledger = self.ledger();
+        ledger.spent = ledger.spent.saturating_add(cost);
+        ledger.estimate = Some(ledger.estimate.unwrap_or_default().max(cost));
+        drop(ledger);
+        self.settled.notify_waiters();
+    }
+
+    fn try_reserve(&self, pricing: TokenPricing) -> Result<Option<u64>, LlmCallError> {
+        let mut ledger = self.ledger();
+        if ledger.spent >= self.limit_microcents {
+            return Err(LlmCallError::BudgetExhausted);
+        }
+        if is_free(pricing) {
+            return Ok(Some(0));
+        }
+        let admitted = match ledger.estimate {
+            None => ledger.in_flight == 0,
+            Some(_) => ledger.spent.saturating_add(ledger.reserved) < self.limit_microcents,
+        };
+        if !admitted {
+            return Ok(None);
+        }
+        let amount = ledger.estimate.unwrap_or_default();
+        ledger.reserved = ledger.reserved.saturating_add(amount);
+        ledger.in_flight += 1;
+        Ok(Some(amount))
+    }
+
+    pub async fn reserve(&self, pricing: TokenPricing) -> Result<Reservation<'_>, LlmCallError> {
+        loop {
+            let mut settled = pin!(self.settled.notified());
+            settled.as_mut().enable();
+            if let Some(amount) = self.try_reserve(pricing)? {
+                return Ok(Reservation {
+                    budget: self,
+                    amount,
+                    counted: !is_free(pricing),
+                });
+            }
+            settled.await;
+        }
+    }
+
+    fn release(&self, amount: u64, counted: bool) {
+        if counted {
+            let mut ledger = self.ledger();
+            ledger.reserved = ledger.reserved.saturating_sub(amount);
+            ledger.in_flight = ledger.in_flight.saturating_sub(1);
+        }
+        self.settled.notify_waiters();
+    }
+}
+
+#[derive(Debug)]
+pub struct Reservation<'a> {
+    budget: &'a RunBudget,
+    amount: u64,
+    counted: bool,
+}
+
+impl Reservation<'_> {
+    pub fn commit(self, usage: TokenUsage, pricing: TokenPricing) {
+        self.budget.charge(usage, pricing);
+    }
+}
+
+impl Drop for Reservation<'_> {
+    fn drop(&mut self) {
+        self.budget.release(self.amount, self.counted);
     }
 }
 
@@ -87,6 +188,8 @@ pub enum LlmCallError {
     Provider(LlmError),
     #[error("llm output schema could not be generated: {0}")]
     Schema(String),
+    #[error("llm call stopped: {}", .0.as_str())]
+    Cancelled(CancelReason),
 }
 
 impl LlmCallError {
@@ -100,7 +203,7 @@ impl LlmCallError {
                     | LlmError::Network(_)
                     | LlmError::Status { .. }
             ),
-            Self::InvalidOutput(_) | Self::Schema(_) => false,
+            Self::InvalidOutput(_) | Self::Schema(_) | Self::Cancelled(_) => false,
         }
     }
 
@@ -150,7 +253,7 @@ pub async fn call_structured<T, P>(
     provider: &P,
     prompt: Prompt<'_>,
     settings: CallSettings,
-    budget: &mut RunBudget,
+    budget: &RunBudget,
 ) -> Result<Structured<T>, LlmCallError>
 where
     T: DeserializeOwned + JsonSchema,
@@ -168,7 +271,7 @@ async fn call_parsed<T, P, F>(
     prompt: Prompt<'_>,
     schema: &serde_json::Value,
     settings: CallSettings,
-    budget: &mut RunBudget,
+    budget: &RunBudget,
     parse: F,
 ) -> Result<Structured<T>, LlmCallError>
 where
@@ -186,12 +289,10 @@ where
     };
     let mut attempt: u32 = 0;
     loop {
-        if budget.is_exhausted() {
-            return Err(LlmCallError::BudgetExhausted);
-        }
+        let reservation = budget.reserve(settings.pricing).await?;
         let failure = match provider.complete(&request).await {
             Ok(response) => {
-                budget.charge(response.usage, settings.pricing);
+                reservation.commit(response.usage, settings.pricing);
                 match parse(response.output) {
                     Ok(value) => {
                         return Ok(Structured {
@@ -204,7 +305,10 @@ where
                     Err(message) => LlmError::InvalidOutput(message),
                 }
             }
-            Err(error) => error,
+            Err(error) => {
+                drop(reservation);
+                error
+            }
         };
         if !is_retryable(&failure) || attempt >= u32::from(settings.max_retries) {
             return Err(match failure {
@@ -231,7 +335,7 @@ pub async fn call_with_schema<P, C, A>(
     call: SchemaCall<'_>,
     accept: A,
     settings: CallSettings,
-    budget: &mut RunBudget,
+    budget: &RunBudget,
 ) -> Result<Structured<serde_json::Value>, LlmCallError>
 where
     P: LlmProvider,
@@ -244,7 +348,7 @@ where
         schema,
     } = call;
     let key = cache_key(scope, &prompt, schema);
-    match cache.get(&key).await {
+    match cached(cache, scope, &key).await {
         Ok(Some(hit)) if accept(&hit.output) => {
             return Ok(Structured {
                 value: hit.output,
@@ -270,9 +374,41 @@ where
     Ok(fresh)
 }
 
+pub async fn call_with_schema_until<P, C, A>(
+    provider: &P,
+    cache: &C,
+    call: SchemaCall<'_>,
+    accept: A,
+    settings: CallSettings,
+    budget: &RunBudget,
+    work: &AgentWork,
+) -> Result<Structured<Value>, LlmCallError>
+where
+    P: LlmProvider,
+    C: LlmCache,
+    A: Fn(&Value) -> bool,
+{
+    select! {
+        biased;
+        reason = work.cancelled() => Err(LlmCallError::Cancelled(reason)),
+        result = call_with_schema(provider, cache, call, accept, settings, budget) => result,
+    }
+}
+
 fn hash_field(context: &mut Context, field: &[u8]) {
     context.update(&(field.len() as u64).to_be_bytes());
     context.update(field);
+}
+
+async fn cached<C: LlmCache>(
+    cache: &C,
+    scope: &CacheScope,
+    key: &[u8],
+) -> Result<Option<CachedOutput>, CoreError> {
+    if scope.fresh {
+        return Ok(None);
+    }
+    cache.get(key).await
 }
 
 pub fn cache_key(scope: &CacheScope, prompt: &Prompt<'_>, schema: &serde_json::Value) -> Vec<u8> {
@@ -342,7 +478,7 @@ pub async fn call_structured_cached<T, P, C>(
     scope: &CacheScope,
     prompt: Prompt<'_>,
     settings: CallSettings,
-    budget: &mut RunBudget,
+    budget: &RunBudget,
 ) -> Result<Structured<T>, LlmCallError>
 where
     T: DeserializeOwned + JsonSchema + Serialize,
@@ -351,7 +487,7 @@ where
 {
     let schema = output_schema::<T>()?;
     let key = cache_key(scope, &prompt, &schema);
-    match cache.get(&key).await {
+    match cached(cache, scope, &key).await {
         Ok(Some(hit)) => match serde_json::from_value::<T>(hit.output) {
             Ok(value) => {
                 return Ok(Structured {
@@ -385,13 +521,28 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::VecDeque, sync::Mutex};
+    use std::collections::VecDeque;
+
+    use futures_util::future::join_all;
+    use serde_json::json;
+    use tokio::time::{Instant, sleep, timeout};
+    use uuid::Uuid;
 
     use schemars::JsonSchema;
     use serde::Deserialize;
 
     use super::*;
-    use crate::domain::llm::LlmResponse;
+    use crate::{
+        application::llm::limits::{ProviderGates, Throttled},
+        domain::{
+            NormalizedDomain,
+            llm::{
+                LlmResponse,
+                provider::{MaxConcurrency, ProviderId},
+            },
+            profile::{ProfileId, RevisionNumber, definition::AgentId},
+        },
+    };
 
     #[test]
     fn only_transport_status_timeout_rate_limit_and_budget_are_call_failures() {
@@ -427,12 +578,13 @@ mod tests {
 
     fn scope_of(agent: Option<&str>) -> CacheScope {
         CacheScope {
-            profile_id: crate::domain::profile::ProfileId(uuid::Uuid::nil()),
-            revision: crate::domain::profile::RevisionNumber::FIRST,
+            profile_id: ProfileId(Uuid::nil()),
+            revision: RevisionNumber::FIRST,
             prompt: "triage@1".to_owned(),
-            domain: crate::domain::NormalizedDomain::from_host("acme.com").unwrap(),
-            agent: agent.map(crate::domain::profile::definition::AgentId::new),
+            domain: NormalizedDomain::from_host("acme.com").unwrap(),
+            agent: agent.map(AgentId::new),
             sample: 0,
+            fresh: false,
         }
     }
 
@@ -566,9 +718,9 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn valid_output_is_typed_and_charged() {
         let provider = Scripted::new(vec![Ok(valid())]);
-        let mut budget = budget(10);
+        let budget = budget(10);
         let result: Structured<Verdict> =
-            call_structured(&provider, prompt(), settings(2), &mut budget)
+            call_structured(&provider, prompt(), settings(2), &budget)
                 .await
                 .unwrap();
         assert!(result.value.relevant);
@@ -581,9 +733,8 @@ mod tests {
     async fn invalid_output_is_retried_then_rejected_and_never_returned() {
         let wrong = serde_json::json!({"relevant": "yes"});
         let provider = Scripted::new(vec![Ok(wrong.clone()), Ok(wrong.clone()), Ok(wrong)]);
-        let mut budget = budget(10);
-        let result =
-            call_structured::<Verdict, _>(&provider, prompt(), settings(2), &mut budget).await;
+        let budget = budget(10);
+        let result = call_structured::<Verdict, _>(&provider, prompt(), settings(2), &budget).await;
         assert!(matches!(result, Err(LlmCallError::InvalidOutput(_))));
         assert_eq!(provider.calls(), 3);
     }
@@ -597,10 +748,9 @@ mod tests {
             }),
             Ok(valid()),
         ]);
-        let started = tokio::time::Instant::now();
-        let mut budget = budget(10);
-        let result =
-            call_structured::<Verdict, _>(&provider, prompt(), settings(3), &mut budget).await;
+        let started = Instant::now();
+        let budget = budget(10);
+        let result = call_structured::<Verdict, _>(&provider, prompt(), settings(3), &budget).await;
         assert!(result.is_ok());
         assert_eq!(provider.calls(), 3);
         assert_eq!(started.elapsed(), Duration::from_secs(1 + 7));
@@ -613,9 +763,8 @@ mod tests {
             Err(LlmError::Timeout),
             Err(LlmError::Timeout),
         ]);
-        let mut budget = budget(10);
-        let result =
-            call_structured::<Verdict, _>(&provider, prompt(), settings(1), &mut budget).await;
+        let budget = budget(10);
+        let result = call_structured::<Verdict, _>(&provider, prompt(), settings(1), &budget).await;
         assert_eq!(result, Err(LlmCallError::Provider(LlmError::Timeout)));
         assert_eq!(provider.calls(), 2);
     }
@@ -631,9 +780,9 @@ mod tests {
             },
         ] {
             let provider = Scripted::new(vec![Err(error.clone()), Ok(valid())]);
-            let mut budget = budget(10);
+            let budget = budget(10);
             let result =
-                call_structured::<Verdict, _>(&provider, prompt(), settings(3), &mut budget).await;
+                call_structured::<Verdict, _>(&provider, prompt(), settings(3), &budget).await;
             assert_eq!(result, Err(LlmCallError::Provider(error)));
             assert_eq!(provider.calls(), 1);
         }
@@ -642,14 +791,13 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn exhausted_budget_stops_calls() {
         let provider = Scripted::new(vec![Ok(valid()), Ok(valid()), Ok(valid()), Ok(valid())]);
-        let mut budget = budget(1);
+        let budget = budget(1);
         for _ in 0..3 {
-            call_structured::<Verdict, _>(&provider, prompt(), settings(0), &mut budget)
+            call_structured::<Verdict, _>(&provider, prompt(), settings(0), &budget)
                 .await
                 .unwrap();
         }
-        let fourth =
-            call_structured::<Verdict, _>(&provider, prompt(), settings(0), &mut budget).await;
+        let fourth = call_structured::<Verdict, _>(&provider, prompt(), settings(0), &budget).await;
         assert_eq!(fourth, Err(LlmCallError::BudgetExhausted));
         assert_eq!(provider.calls(), 3);
         assert_eq!(
@@ -660,7 +808,7 @@ mod tests {
 
     #[test]
     fn budget_charges_input_and_output_prices() {
-        let mut budget = budget(100);
+        let budget = budget(100);
         budget.charge(
             TokenUsage {
                 input_tokens: 2_000_000,
@@ -681,7 +829,7 @@ mod tests {
     }
 
     impl LlmCache for MemoryCache {
-        async fn get(&self, key: &[u8]) -> Result<Option<CachedOutput>, common::CoreError> {
+        async fn get(&self, key: &[u8]) -> Result<Option<CachedOutput>, CoreError> {
             Ok(self
                 .entries
                 .lock()
@@ -696,11 +844,10 @@ mod tests {
             key: &[u8],
             _scope: &CacheScope,
             entry: &CachedOutput,
-        ) -> Result<(), common::CoreError> {
-            self.entries
-                .lock()
-                .unwrap()
-                .push((key.to_vec(), entry.clone()));
+        ) -> Result<(), CoreError> {
+            let mut entries = self.entries.lock().unwrap();
+            entries.retain(|(stored, _)| stored != key);
+            entries.push((key.to_vec(), entry.clone()));
             Ok(())
         }
     }
@@ -723,14 +870,14 @@ mod tests {
         let cache = MemoryCache::default();
         let schema = dynamic_schema();
         let scope = scope_of(Some("agent"));
-        let mut budget = budget(10);
+        let budget = budget(10);
         let result = call_with_schema(
             &provider,
             &cache,
             with_schema(&scope, &schema),
             |_| true,
             settings(0),
-            &mut budget,
+            &budget,
         )
         .await
         .unwrap();
@@ -746,7 +893,7 @@ mod tests {
         let cache = MemoryCache::default();
         let schema = dynamic_schema();
         let scope = scope_of(Some("agent"));
-        let mut budget = budget(10);
+        let budget = budget(10);
         for expected_cache in [false, true] {
             let result = call_with_schema(
                 &provider,
@@ -754,13 +901,52 @@ mod tests {
                 with_schema(&scope, &schema),
                 |_| true,
                 settings(0),
-                &mut budget,
+                &budget,
             )
             .await
             .unwrap();
             assert_eq!(result.from_cache, expected_cache);
         }
         assert_eq!(provider.calls(), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_fresh_scope_calls_the_model_and_refreshes_the_cache() {
+        let provider = Scripted::new(vec![
+            Ok(json!({"free": "first"})),
+            Ok(json!({"free": "second"})),
+        ]);
+        let cache = MemoryCache::default();
+        let schema = dynamic_schema();
+        let scope = scope_of(Some("agent"));
+        let fresh = CacheScope {
+            fresh: true,
+            ..scope_of(Some("agent"))
+        };
+        let budget = budget(10);
+        let mut answers = Vec::new();
+        for current in [&scope, &fresh, &scope] {
+            let result = call_with_schema(
+                &provider,
+                &cache,
+                with_schema(current, &schema),
+                |_| true,
+                settings(0),
+                &budget,
+            )
+            .await
+            .unwrap();
+            answers.push((result.value["free"].clone(), result.from_cache));
+        }
+        assert_eq!(provider.calls(), 2);
+        assert_eq!(
+            answers,
+            [
+                (json!("first"), false),
+                (json!("second"), false),
+                (json!("second"), true),
+            ]
+        );
     }
 
     #[tokio::test(start_paused = true)]
@@ -772,7 +958,7 @@ mod tests {
         let cache = MemoryCache::default();
         let schema = dynamic_schema();
         let scope = scope_of(Some("agent"));
-        let mut budget = budget(10);
+        let budget = budget(10);
         for _ in 0..2 {
             let result = call_with_schema(
                 &provider,
@@ -780,7 +966,7 @@ mod tests {
                 with_schema(&scope, &schema),
                 |_| false,
                 settings(0),
-                &mut budget,
+                &budget,
             )
             .await
             .unwrap();
@@ -796,19 +982,19 @@ mod tests {
         let cache = MemoryCache::default();
         let schema = dynamic_schema();
         let scope = scope_of(None);
-        let mut small = budget(1);
+        let small = budget(1);
         let retried = call_with_schema(
             &provider,
             &cache,
             with_schema(&scope, &schema),
             |_| true,
             settings(1),
-            &mut small,
+            &small,
         )
         .await;
         assert!(retried.is_ok());
         assert_eq!(provider.calls(), 2);
-        let mut spent = budget(1);
+        let spent = budget(1);
         spent.charge(
             TokenUsage {
                 input_tokens: 10_000_000,
@@ -826,9 +1012,176 @@ mod tests {
             with_schema(&other, &schema),
             |_| true,
             settings(0),
-            &mut spent,
+            &spent,
         )
         .await;
         assert_eq!(exhausted, Err(LlmCallError::BudgetExhausted));
+    }
+
+    struct Delayed {
+        running: Mutex<(u32, u32)>,
+        calls: Mutex<u32>,
+    }
+
+    impl Delayed {
+        fn new() -> Self {
+            Self {
+                running: Mutex::new((0, 0)),
+                calls: Mutex::new(0),
+            }
+        }
+
+        fn peak(&self) -> u32 {
+            self.running.lock().unwrap().1
+        }
+
+        fn calls(&self) -> u32 {
+            *self.calls.lock().unwrap()
+        }
+    }
+
+    impl LlmProvider for Delayed {
+        async fn complete(&self, _: &LlmRequest<'_>) -> Result<LlmResponse, LlmError> {
+            *self.calls.lock().unwrap() += 1;
+            {
+                let mut running = self.running.lock().unwrap();
+                running.0 += 1;
+                running.1 = running.1.max(running.0);
+            }
+            sleep(Duration::from_millis(100)).await;
+            self.running.lock().unwrap().0 -= 1;
+            Ok(LlmResponse {
+                output: valid(),
+                model: "delayed".to_owned(),
+                usage: TokenUsage {
+                    input_tokens: 1_000,
+                    output_tokens: 100,
+                },
+            })
+        }
+    }
+
+    fn throttled(limit: u8) -> Throttled<Delayed> {
+        let gates = ProviderGates::default();
+        let gate = gates.gate(
+            ProviderId(Uuid::now_v7()),
+            MaxConcurrency::new(limit).unwrap(),
+        );
+        Throttled::new(Delayed::new(), gate)
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn concurrent_calls_overlap_and_stay_under_the_provider_limit() {
+        let provider = throttled(3);
+        let budget = budget(100);
+        let results = join_all(
+            (0..9)
+                .map(|_| call_structured::<Verdict, _>(&provider, prompt(), settings(0), &budget)),
+        )
+        .await;
+        assert!(results.iter().all(Result::is_ok));
+        assert_eq!(provider.gate().load().in_flight, 0);
+        let peak = provider.inner().peak();
+        assert!(peak > 1, "calls never overlapped");
+        assert!(peak <= 3, "the limit was exceeded: {peak}");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn concurrent_calls_stop_at_the_budget_exactly_like_sequential_ones() {
+        let provider = throttled(8);
+        let budget = budget(1);
+        let results = join_all(
+            (0..8)
+                .map(|_| call_structured::<Verdict, _>(&provider, prompt(), settings(0), &budget)),
+        )
+        .await;
+        let answered = results.iter().filter(|result| result.is_ok()).count();
+        let refused = results
+            .iter()
+            .filter(|result| matches!(result, Err(LlmCallError::BudgetExhausted)))
+            .count();
+        assert_eq!((answered, refused), (3, 5));
+        assert_eq!(provider.inner().calls(), 3);
+        assert!((budget.spent_cents() - 1.35).abs() < 1e-9);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn free_calls_are_never_held_back_by_the_budget() {
+        let provider = throttled(4);
+        let budget = budget(1);
+        let free = CallSettings {
+            pricing: TokenPricing {
+                input_cents_per_mtok: 0,
+                output_cents_per_mtok: 0,
+            },
+            ..settings(0)
+        };
+        let started = Instant::now();
+        let results = join_all(
+            (0..4).map(|_| call_structured::<Verdict, _>(&provider, prompt(), free, &budget)),
+        )
+        .await;
+        assert!(results.iter().all(Result::is_ok));
+        assert_eq!(started.elapsed(), Duration::from_millis(100));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_dropped_call_gives_back_its_permit_and_its_reservation() {
+        let provider = throttled(1);
+        let budget = budget(1);
+        let dropped = timeout(
+            Duration::from_millis(10),
+            call_structured::<Verdict, _>(&provider, prompt(), settings(0), &budget),
+        )
+        .await;
+        assert!(dropped.is_err());
+        assert_eq!(provider.gate().load().in_flight, 0);
+        let next = timeout(
+            Duration::from_millis(150),
+            call_structured::<Verdict, _>(&provider, prompt(), settings(0), &budget),
+        )
+        .await;
+        assert!(matches!(next, Ok(Ok(_))));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_cache_hit_takes_no_permit() {
+        let provider = throttled(1);
+        let cache = MemoryCache::default();
+        let schema = dynamic_schema();
+        let scope = scope_of(Some("agent"));
+        let budget = budget(10);
+        call_with_schema(
+            &provider,
+            &cache,
+            with_schema(&scope, &schema),
+            |_| true,
+            settings(0),
+            &budget,
+        )
+        .await
+        .unwrap();
+        let held = provider.gate().acquire().await;
+        let hit = timeout(
+            Duration::from_millis(1),
+            call_with_schema(
+                &provider,
+                &cache,
+                with_schema(&scope, &schema),
+                |_| true,
+                settings(0),
+                &budget,
+            ),
+        )
+        .await;
+        drop(held);
+        assert!(matches!(
+            hit,
+            Ok(Ok(Structured {
+                from_cache: true,
+                ..
+            }))
+        ));
+        assert_eq!(provider.inner().calls(), 1);
     }
 }

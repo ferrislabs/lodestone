@@ -10,6 +10,29 @@ const DATE_TIME = new Intl.DateTimeFormat(LOCALE, {
 	timeStyle: 'short',
 })
 
+const DAY = new Intl.DateTimeFormat(LOCALE, {
+	dateStyle: 'medium',
+	timeZone: 'UTC',
+})
+const EUROS = new Intl.NumberFormat(LOCALE, {
+	style: 'currency',
+	currency: 'EUR',
+	minimumFractionDigits: 0,
+	maximumFractionDigits: 2,
+})
+const DAY_PATTERN = /^\d{4}-\d{2}-\d{2}$/
+
+export function formatDay(day: string): string {
+	if (!DAY_PATTERN.test(day)) return day
+	const date = new Date(`${day}T00:00:00Z`)
+	if (Number.isNaN(date.getTime())) return day
+	return DAY.format(date)
+}
+
+export function formatEuros(amount: number): string {
+	return EUROS.format(amount)
+}
+
 export function formatNumber(value: number): string {
 	return NUMBER.format(value)
 }

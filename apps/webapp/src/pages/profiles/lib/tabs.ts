@@ -5,6 +5,7 @@ import type { Problem } from '#/pages/profiles/lib/types'
 export const EDITOR_TABS = [
 	'identity',
 	'sourcing',
+	'enrichment',
 	'qualification',
 	'scoring',
 ] as const
@@ -15,6 +16,7 @@ export type ProfileTab = EditorTab | 'history'
 export const TAB_LABELS: Record<ProfileTab, string> = {
 	identity: 'Identité',
 	sourcing: 'Sourcing',
+	enrichment: 'Enrichissement',
 	qualification: 'Qualification',
 	scoring: 'Scoring',
 	history: 'Historique des révisions',
@@ -33,6 +35,7 @@ export const tabSearchSchema = z.object({
 		)
 		.optional()
 		.catch(undefined),
+	agent: z.string().optional().catch(undefined),
 })
 
 export interface TabItem<T extends string = ProfileTab> {
@@ -54,6 +57,9 @@ export function tabOfPath(path: string): EditorTab | null {
 	if (belongsTo(path, 'agents') || belongsTo(path, 'contact_ranking')) {
 		return 'sourcing'
 	}
+	if (belongsTo(path, 'enrichment') || belongsTo(path, 'inspection')) {
+		return 'enrichment'
+	}
 	if (
 		belongsTo(path, 'qualification_agents') ||
 		belongsTo(path, 'aggregator') ||
@@ -74,6 +80,7 @@ export function problemCounts(
 	const counts: Record<EditorTab, number> = {
 		identity: 0,
 		sourcing: 0,
+		enrichment: 0,
 		qualification: 0,
 		scoring: 0,
 	}

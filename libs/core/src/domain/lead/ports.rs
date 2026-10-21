@@ -7,7 +7,7 @@ use crate::domain::{
     NormalizedDomain,
     lead::{
         Assessment, AssessmentId, ContactEmail, Lead, LeadId, LeadStatus, Score, Signal,
-        draft::{DraftEdit, DraftPage, DraftRecord, DraftReview},
+        draft::{DraftEdit, DraftPage, DraftRecord, DraftReview, DraftRevision},
         query::{LeadPage, LeadQuery, ProfileSummary, VerdictFilter},
     },
     profile::ProfileId,
@@ -123,6 +123,7 @@ pub trait AssessmentRepository: Send {
         &mut self,
         id: AssessmentId,
         edit: &DraftEdit,
+        expected: DraftRevision,
         at: DateTime<Utc>,
     ) -> impl Future<Output = Result<bool, CoreError>> + Send;
 
@@ -130,5 +131,6 @@ pub trait AssessmentRepository: Send {
         &mut self,
         id: AssessmentId,
         review: &DraftReview,
+        expected: DraftRevision,
     ) -> impl Future<Output = Result<bool, CoreError>> + Send;
 }

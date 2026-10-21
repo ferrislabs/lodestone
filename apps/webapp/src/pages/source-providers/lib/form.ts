@@ -10,6 +10,21 @@ export function settingFields(detail: ProviderDetail): ProviderField[] {
 	return detail.fields.filter((field) => field.kind !== 'secret')
 }
 
+export interface Attestation {
+	key: string
+	label: string
+	at: string
+}
+
+export function attestations(detail: ProviderDetail): Attestation[] {
+	return settingFields(detail).flatMap((field) => {
+		const at = detail.settings[`${field.key}_at`]
+		if (field.kind !== 'bool' || !field.required) return []
+		if (detail.settings[field.key] !== true || typeof at !== 'string') return []
+		return [{ key: field.key, label: field.label, at }]
+	})
+}
+
 export function secretFields(detail: ProviderDetail): ProviderField[] {
 	return detail.fields.filter((field) => field.kind === 'secret')
 }

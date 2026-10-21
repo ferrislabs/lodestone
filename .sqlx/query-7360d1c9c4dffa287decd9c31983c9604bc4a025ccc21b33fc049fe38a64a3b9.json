@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM lead_ecosystem WHERE domain = $1 AND module = $2 AND NOT (finding_key = ANY($3::text[]))",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "7360d1c9c4dffa287decd9c31983c9604bc4a025ccc21b33fc049fe38a64a3b9"
+}

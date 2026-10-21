@@ -22,7 +22,7 @@ export const LEARNED_CALIBRATION_COPY: FieldCopy = {
 		"Corrige chaque jour les probabilités de cet agent d'après vos décisions, dès 50 leads étiquetés dont au moins 10 de chaque classe.",
 }
 
-const FINGERPRINT = 'agents[].source.fingerprints[]'
+const FINGERPRINT = 'enrichment.custom.fingerprints[]'
 const MARKER = `${FINGERPRINT}.debt_markers[]`
 
 export const FIELD_COPY: Readonly<Record<string, FieldCopy>> = {
@@ -40,12 +40,13 @@ export const FIELD_COPY: Readonly<Record<string, FieldCopy>> = {
 	},
 	agents: {
 		label: 'Agents',
-		description: 'Agents de détection. Au moins un est requis.',
+		description:
+			'Agents de sourcing : ils trouvent les leads. Au moins un est requis, sauf si le profil a ses propres empreintes ou des mots-clés à mettre en avant.',
 	},
 	'agents[]': {
 		label: 'Agent',
 		description:
-			'Un agent de recherche interroge des fournisseurs du catalogue, un agent de signal lit un fournisseur technique.',
+			'Un agent de recherche interroge des fournisseurs du catalogue, un agent Certificats lit les journaux de certificats, un agent DNS reconnaît des fournisseurs par la cible CNAME.',
 	},
 	'agents[].id': {
 		label: 'Identifiant',
@@ -59,40 +60,76 @@ export const FIELD_COPY: Readonly<Record<string, FieldCopy>> = {
 		label: 'Activé',
 		description: "Un agent désactivé est conservé mais n'est pas exécuté.",
 	},
-	'agents[].source': {
-		label: 'Source',
-		description: 'La source interrogée et ses réglages.',
-	},
-	'agents[].source.labels': {
+	'agents[].labels': {
 		label: 'Libellés',
 		description:
 			"Libellés de nom d'hôte à rechercher, par exemple auth ou sso.",
 	},
-	'agents[].source.patterns': {
+	'agents[].countries': {
+		label: 'Pays',
+		description:
+			"Pays visés. Un hôte sous l'extension d'un autre pays ne crée pas de lead ; une extension générique en crée un, retiré du profil si le siège de l'entreprise est ailleurs.",
+	},
+	'agents[].patterns': {
 		label: 'Motifs CNAME',
 		description: 'Couples fournisseur et suffixe de cible.',
 	},
-	'agents[].source.patterns[]': {
+	'agents[].patterns[]': {
 		label: 'Motif CNAME',
 		description: "Un fournisseur et le suffixe de cible CNAME qui l'identifie.",
 		add: 'Ajouter un motif',
 	},
-	'agents[].source.patterns[].provider': {
+	'agents[].patterns[].provider': {
 		label: 'Fournisseur',
 		description: 'Nom du fournisseur.',
 	},
-	'agents[].source.patterns[].target_suffix': {
+	'agents[].patterns[].target_suffix': {
 		label: 'Suffixe cible',
 		description: 'Suffixe de la cible CNAME qui identifie le fournisseur.',
 	},
-	'agents[].source.fingerprints': {
+	inspection: {
+		label: "Inspection de l'écosystème",
+		description:
+			'Chaque lead avec un domaine reçoit la même inspection, quel que soit le profil : identité officielle, vie légale, marchés publics, site et stack technique, DNS et e-mail, recrutement et activité récente.',
+	},
+	'inspection.enabled': {
+		label: "Inspecter l'écosystème des leads",
+		description:
+			"Désactivée, les leads du profil ne sont pas inspectés et la qualification n'attend pas l'inspection.",
+	},
+	enrichment: {
+		label: 'Enrichissement',
+		description:
+			"Réglages de l'inspection propres à ce profil. Tout le reste est identique pour chaque profil.",
+	},
+	'enrichment.custom': {
+		label: 'Empreintes propres au profil',
+		description:
+			'Empreintes sondées sur le site de chaque lead du profil, produits ignorés et sous-domaines sondés en plus.',
+	},
+	'enrichment.custom.extra_subdomains': {
+		label: 'Sous-domaines supplémentaires',
+		description:
+			'Sous-domaines du domaine du lead sondés en plus avec vos empreintes, par exemple auth ou sso. Vide par défaut.',
+	},
+	'enrichment.custom.fingerprints': {
 		label: 'Empreintes',
-		description: 'Empreintes à sonder sur chaque domaine.',
+		description: 'Empreintes à sonder sur le site de chaque lead.',
+	},
+	'enrichment.custom.excluded_products': {
+		label: 'Produits exclus',
+		description: 'Produits à ignorer, par exemple les vôtres.',
+	},
+	'enrichment.highlight_keywords': {
+		label: 'Mots-clés à mettre en avant',
+		description:
+			"Mots-clés cherchés dans les offres d'emploi des leads. Une offre qui les contient est mise en avant et devient un signal. Vide : les mots-clés des agents de recherche activés.",
 	},
 	[FINGERPRINT]: {
 		label: 'Empreinte',
 		description:
 			"Empreinte d'un produit : chemin à requêter, conditions, extracteur de version facultatif et marqueurs de dette.",
+		add: 'Ajouter une empreinte',
 	},
 	[`${FINGERPRINT}.id`]: {
 		label: 'Identifiant',
@@ -158,10 +195,6 @@ export const FIELD_COPY: Readonly<Record<string, FieldCopy>> = {
 		description:
 			'Expression régulière avec un groupe de capture pour la version.',
 	},
-	'agents[].source.excluded_products': {
-		label: 'Produits exclus',
-		description: 'Produits à ignorer, par exemple les vôtres.',
-	},
 	'agents[].filters': {
 		label: 'Filtres',
 		description:
@@ -189,17 +222,18 @@ export const FIELD_COPY: Readonly<Record<string, FieldCopy>> = {
 	},
 	'agents[].keywords': {
 		label: 'Mots-clés',
-		description: 'Mots-clés à rechercher.',
+		description:
+			'Une annonce est gardée si elle contient au moins un de ces mots-clés, en mot entier.',
 	},
 	'agents[].accept_min_keywords': {
-		label: 'Mots-clés distincts pour accepter sans LLM',
+		label: 'Mots-clés distincts pour un signal fort',
 		description:
-			"Nombre de mots-clés distincts requis pour accepter un candidat sans le LLM. En dessous, ou en présence d'une exclusion, il passe au tri par le LLM.",
+			"Nombre de mots-clés distincts qu'une annonce doit contenir pour donner un signal fort. En dessous, ou si une exclusion y figure, l'annonce est gardée avec un signal plus faible. Une annonce sans aucun mot-clé est écartée.",
 	},
 	'agents[].exclusions': {
 		label: 'Exclusions',
 		description:
-			"Mots-clés qui envoient un candidat au tri par le LLM lorsqu'ils sont présents.",
+			"Mots qui affaiblissent le signal d'une annonce lorsqu'ils y figurent. Ils ne l'écartent pas : seule une annonce sans aucun mot-clé est écartée.",
 	},
 	'qualification_agents[].learned_calibration': LEARNED_CALIBRATION_COPY,
 	qualification_agents: {
@@ -537,7 +571,8 @@ export const FIELD_COPY: Readonly<Record<string, FieldCopy>> = {
 
 export const VARIANT_TITLES: Readonly<Record<string, string>> = {
 	search: 'Recherche',
-	signal: 'Signal',
+	certificates: 'Certificats',
+	dns: 'DNS',
 	certificate_transparency: 'Transparence des certificats',
 	dns_cname: 'DNS CNAME',
 	http_probe: 'Sonde HTTP',

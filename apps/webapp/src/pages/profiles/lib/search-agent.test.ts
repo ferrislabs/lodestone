@@ -1,9 +1,13 @@
 import { describe, expect, it } from 'vitest'
 
 import { newAgent } from '#/pages/profiles/lib/agents'
+import { COUNTRY_CODES } from '#/pages/profiles/lib/countries'
 import {
 	agentContracts,
+	agentCountries,
+	agentKeywordCount,
 	agentRemote,
+	allContracts,
 	capabilityHint,
 	capabilityText,
 	isReadyProvider,
@@ -12,6 +16,7 @@ import {
 	providerStatusOf,
 	searchProviders,
 	withContract,
+	withCountries,
 	withFilter,
 	withProvider,
 } from '#/pages/profiles/lib/search-agent'
@@ -107,5 +112,35 @@ describe('search agent edits', () => {
 			['employee'],
 		)
 		expect(agentRemote(contracts)).toBe('full_remote')
+	})
+
+	it('treats Tous as the absence of contract filter and clears the others', () => {
+		const agent = newAgent('search', [])
+		expect(allContracts(agent)).toBe(true)
+		const picked = withContract(agent, 'freelance', true)
+		expect(allContracts(picked)).toBe(false)
+		const cleared = withContract(picked, 'any', true)
+		expect(agentContracts(cleared)).toEqual([])
+		expect(allContracts(cleared)).toBe(true)
+	})
+
+	it('drops any when a specific contract is chosen', () => {
+		const agent = withFilter(newAgent('search', []), 'contracts', ['any'])
+		expect(agentContracts(withContract(agent, 'employee', true))).toEqual([
+			'employee',
+		])
+	})
+
+	it('reads and writes the country codes', () => {
+		const codes = COUNTRY_CODES.slice(0, 2)
+		const agent = withCountries(newAgent('search', []), codes)
+		expect(agentCountries(agent)).toEqual(codes)
+		expect(agentRemote(agent)).toBe('any')
+		expect(agentCountries(undefined)).toEqual([])
+	})
+
+	it('counts the non empty keywords', () => {
+		expect(agentKeywordCount({ keywords: ['sso', ' ', 'mfa'] })).toBe(2)
+		expect(agentKeywordCount(undefined)).toBe(0)
 	})
 })

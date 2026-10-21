@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT l.domain AS \"domain!\"\n            FROM (\n                SELECT DISTINCT leads.domain\n                FROM leads\n                WHERE leads.profile_id = ANY($3::uuid[])\n            ) l\n            LEFT JOIN lead_domain_checks c ON c.domain = l.domain AND c.source = $1\n            WHERE (\n                c.checked_at IS NULL\n                OR c.checked_at < $2\n                OR EXISTS (\n                    SELECT 1 FROM leads fresh\n                    WHERE fresh.domain = l.domain\n                      AND fresh.profile_id = ANY($3::uuid[])\n                      AND NOT EXISTS (\n                          SELECT 1 FROM lead_enrichments e\n                          WHERE e.lead_id = fresh.id AND e.step = $5 AND e.ran_at IS NOT NULL\n                      )\n                )\n            )\n              AND NOT EXISTS (\n                  SELECT 1 FROM suppression_list s WHERE s.kind = 'domain' AND s.value = l.domain\n              )\n            ORDER BY c.checked_at NULLS FIRST, l.domain\n            LIMIT $4\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "domain!",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Timestamptz",
+        "UuidArray",
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "aaf4c423d65f7112b2881b8228273c82770f6f98ec04d51d0552b537854eb94e"
+}

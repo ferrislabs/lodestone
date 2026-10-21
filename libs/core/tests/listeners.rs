@@ -14,7 +14,7 @@ use common::CoreError;
 use lodestone_core::{
     ActiveProfile, CandidateHost, CandidateHosts, Clock, HostOrigin, Hostname, ListenerState,
     LodestoneUseCase, Observation, Source, SourceError, SourceName, StepOutcome,
-    definition::Agent,
+    definition::SourceTarget,
     infrastructure::{candidate_host::PgCandidateHosts, listener::postgres::PgListenerLock},
     listeners::{Listener, ListenerSettings, ListenerStep},
     lock_key,
@@ -219,6 +219,7 @@ async fn a_failing_step_reports_the_error_and_backs_off(pool: PgPool) {
     .await;
     let row = status(&pool, "security_txt").await.unwrap();
     assert!(row.last_error.unwrap().contains("boom"));
+    assert!(row.last_error_at.is_some());
 
     eventually(|| async { runs.load(Ordering::SeqCst) >= 3 }).await;
     eventually(|| async {
@@ -227,13 +228,9 @@ async fn a_failing_step_reports_the_error_and_backs_off(pool: PgPool) {
             .is_some_and(|s| s.state == ListenerState::Idle)
     })
     .await;
-    assert!(
-        status(&pool, "security_txt")
-            .await
-            .unwrap()
-            .last_error
-            .is_some()
-    );
+    let cleared = status(&pool, "security_txt").await.unwrap();
+    assert_eq!(cleared.last_error, None);
+    assert_eq!(cleared.last_error_at, None);
 
     shutdown.send_replace(true);
     handle.await.unwrap();
@@ -487,7 +484,12 @@ impl Source for BatchSource {
         Ok(std::mem::take(&mut *self.hosts.lock().unwrap()))
     }
 
-    fn evaluate(&self, _: &Self::Item, _: &ActiveProfile, _: &Agent) -> Vec<Observation> {
+    fn evaluate(
+        &self,
+        _: &Self::Item,
+        _: &ActiveProfile,
+        _: &SourceTarget<'_>,
+    ) -> Vec<Observation> {
         Vec::new()
     }
 }

@@ -9,7 +9,7 @@ use common::CoreError;
 use lodestone_core::{
     ActiveProfile, CandidateHost, CandidateHosts, CtCursors, FetchError, FetchRequest,
     FetchResponse, Fetcher, Hostname, Profile, ProfileId, ProfileName, ProfileRevision,
-    RevisionNumber, Source, SourceName, ValidatedProfile,
+    RevisionNumber, Source, SourceName, ValidatedProfile, definition::Agent,
 };
 use serde_json::json;
 use url::Url;
@@ -180,6 +180,16 @@ impl CandidateHosts for FakeHosts {
         _at: DateTime<Utc>,
     ) -> Result<(), CoreError> {
         Ok(())
+    }
+
+    async fn seed_lead_hosts(
+        &self,
+        _profile: ProfileId,
+        _subdomains: &[String],
+        _at: DateTime<Utc>,
+        _limit: u32,
+    ) -> Result<u64, CoreError> {
+        Ok(0)
     }
 }
 
@@ -361,17 +371,47 @@ async fn a_log_too_far_behind_skips_ahead() {
 }
 
 #[tokio::test]
-async fn evaluate_never_creates_signals() {
+async fn a_matching_certificate_host_creates_a_weak_signal_for_its_domain() {
     let source = source(256, None, 1, 1);
     let host = CandidateHost::discovered(
-        Hostname::parse("sso.example.com").unwrap(),
+        Hostname::parse("sso.login.example.co.uk").unwrap(),
         HostOrigin::CertificateTransparency,
         at(0),
     )
     .unwrap();
-    let profile = profile(Some(&["sso"]));
+    let profile = profile(Some(&["sso", "login", "auth"]));
     let agent = agent_of(&profile, SourceName::CertificateTransparency);
-    assert!(source.evaluate(&host, &profile, &agent).is_empty());
+    let found = source.evaluate(&host, &profile, &SourceTarget::Agent(&agent));
+    assert_eq!(found.len(), 1);
+    let observation = &found[0];
+    assert_eq!(observation.domain.as_str(), "example.co.uk");
+    assert_eq!(observation.kind.as_str(), "certificate_seen");
+    assert_eq!(
+        observation.value.as_deref(),
+        Some("sso.login.example.co.uk")
+    );
+    assert_eq!(
+        observation.raw,
+        json!({"host": "sso.login.example.co.uk", "labels": ["sso", "login"]})
+    );
+    assert_eq!(observation.strength.get(), CERTIFICATE_STRENGTH);
+    assert!(observation.strength.get() < 0.5);
+    assert_eq!(
+        observation.provenance.as_str(),
+        "https://crt.sh/?q=sso.login.example.co.uk"
+    );
+    assert_eq!(observation.observed_at, at(0));
+    let other = CandidateHost::discovered(
+        Hostname::parse("www.example.com").unwrap(),
+        HostOrigin::CertificateTransparency,
+        at(0),
+    )
+    .unwrap();
+    assert!(
+        source
+            .evaluate(&other, &profile, &SourceTarget::Agent(&agent))
+            .is_empty()
+    );
 }
 
 fn ct_agents_profile(agents: &[(&str, &[&str])]) -> ActiveProfile {
@@ -418,10 +458,12 @@ fn a_matched_host_is_attributed_to_the_agents_whose_labels_match() {
         at(0),
     )
     .unwrap();
-    assert!(source.serves(&sso_host, &agents[0]));
-    assert!(!source.serves(&sso_host, &agents[1]));
-    assert!(source.serves(&auth_host, &agents[1]));
-    assert!(!source.serves(&auth_host, &agents[0]));
+    let first = SourceTarget::Agent(&agents[0]);
+    let second = SourceTarget::Agent(&agents[1]);
+    assert!(source.serves(&sso_host, &first));
+    assert!(!source.serves(&sso_host, &second));
+    assert!(source.serves(&auth_host, &second));
+    assert!(!source.serves(&auth_host, &first));
 }
 
 #[test]

@@ -3,7 +3,10 @@ use std::time::Duration;
 use chrono::{DateTime, Utc};
 use common::CoreError;
 
-use crate::domain::job::{ClaimedJob, Job, JobId, LeaseToken, NewJob};
+use crate::domain::{
+    agent_work::CancelReason,
+    job::{ClaimedJob, Job, JobId, LeaseToken, NewJob},
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum JobFailure {
@@ -52,6 +55,14 @@ pub trait JobQueue: Send + Sync {
         id: JobId,
         token: LeaseToken,
         run_at: DateTime<Utc>,
+        now: DateTime<Utc>,
+    ) -> impl Future<Output = Result<bool, CoreError>> + Send;
+
+    fn cancel(
+        &self,
+        id: JobId,
+        token: LeaseToken,
+        reason: CancelReason,
         now: DateTime<Utc>,
     ) -> impl Future<Output = Result<bool, CoreError>> + Send;
 

@@ -1,6 +1,7 @@
 use chrono::{DateTime, Utc};
 use common::CoreError;
 use lodestone_macros::repository;
+use sqlx::{query, query_as};
 
 use crate::{
     Profile, ProfileId, ProfileRevision, RevisionNumber,
@@ -210,5 +211,49 @@ impl<'tx> ProfileRepository for PgProfileRepository<'tx> {
         .map_err(map_sqlx_error)?;
 
         rows.into_iter().map(ActiveProfile::try_from).collect()
+    }
+
+    #[tracing::instrument(skip(self), fields(db.system = "postgresql", db.operation = "select", db.table = "profiles"), err)]
+    async fn list_current(&mut self) -> Result<Vec<ActiveProfile>, CoreError> {
+        let mut tx = self.tx.lock().await;
+        let rows = query_as!(
+            ActiveProfileRow,
+            r#"
+            SELECT
+                p.id,
+                p.name,
+                p.active,
+                p.created_at,
+                p.updated_at,
+                r.revision,
+                r.definition,
+                r.created_by,
+                r.created_at AS revision_created_at
+            FROM profiles p
+            JOIN LATERAL (
+                SELECT revision, definition, created_by, created_at
+                FROM profile_revisions
+                WHERE profile_id = p.id
+                ORDER BY revision DESC
+                LIMIT 1
+            ) r ON true
+            ORDER BY p.name
+            "#,
+        )
+        .fetch_all(&mut ***tx)
+        .await
+        .map_err(map_sqlx_error)?;
+
+        rows.into_iter().map(ActiveProfile::try_from).collect()
+    }
+
+    #[tracing::instrument(skip(self), fields(db.system = "postgresql", db.operation = "delete", db.table = "profiles", profile.id = %id), err)]
+    async fn delete(&mut self, id: ProfileId) -> Result<bool, CoreError> {
+        let mut tx = self.tx.lock().await;
+        let result = query!("DELETE FROM profiles WHERE id = $1", id.0)
+            .execute(&mut ***tx)
+            .await
+            .map_err(map_sqlx_error)?;
+        Ok(result.rows_affected() == 1)
     }
 }

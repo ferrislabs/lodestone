@@ -14,6 +14,7 @@ pub struct CacheScope {
     pub domain: NormalizedDomain,
     pub agent: Option<AgentId>,
     pub sample: u32,
+    pub fresh: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]

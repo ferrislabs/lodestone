@@ -8,6 +8,7 @@ use lodestone_core::{
     JobStatus, ListenerStatus, ProviderConfiguration, ProviderStatus, QUALIFICATION_LISTENER,
     ScheduledJob, SourceName, SourceRunRecord,
     company::COMPANY_RESEARCH_LISTENER,
+    ecosystem::ECOSYSTEM_LISTENER,
     is_continuous, provider_descriptor, provider_key_of_source,
     schedule::{schedule_key, source_of_schedule_key},
 };
@@ -25,17 +26,20 @@ const MAX_SOURCE_NAME_LEN: usize = 64;
 const SOURCE_JOB_KIND: &str = "source.run";
 const QUALIFICATION_LISTENER_KIND: &str = "listener.qualification";
 const COMPANY_LISTENER_KIND: &str = "listener.company_research";
+const ECOSYSTEM_LISTENER_KIND: &str = "listener.ecosystem_inspection";
 
 #[derive(Debug, Serialize, PartialEq, Eq, ToSchema)]
 pub struct SourceRunDto {
     pub profile_id: String,
     pub profile_name: String,
     pub agent_id: Option<String>,
-    /// One of `running`, `succeeded`, `failed`.
+    /// One of `running`, `succeeded`, `failed`, `cancelled`.
     pub status: String,
     pub volume: u64,
     pub signals: u64,
     pub error: Option<String>,
+    /// Why a `cancelled` run stopped: `agent_removed`, `agent_disabled`, `profile_deactivated` or `profile_deleted`.
+    pub cancel_reason: Option<String>,
     #[schema(format = DateTime)]
     pub started_at: String,
     #[schema(format = DateTime)]
@@ -52,6 +56,9 @@ impl From<&SourceRunRecord> for SourceRunDto {
             volume: record.volume,
             signals: record.signals,
             error: record.error.clone(),
+            cancel_reason: record
+                .cancel_reason
+                .map(|reason| reason.as_str().to_owned()),
             started_at: record.started_at.to_rfc3339(),
             finished_at: record.finished_at.map(|at| at.to_rfc3339()),
         }
@@ -67,6 +74,8 @@ pub struct ListenerDto {
     #[schema(format = DateTime)]
     pub last_activity_at: Option<String>,
     pub last_error: Option<String>,
+    #[schema(format = DateTime)]
+    pub last_error_at: Option<String>,
     pub items_total: u64,
     pub signals_total: u64,
     /// Work waiting: lag in tiles (certificate transparency), due hosts, due contact targets, leads to qualify or leads to summarise.
@@ -84,6 +93,7 @@ impl ListenerDto {
                 holder: status.holder.clone(),
                 last_activity_at: status.last_activity_at.map(|at| at.to_rfc3339()),
                 last_error: status.last_error.clone(),
+                last_error_at: status.last_error_at.map(|at| at.to_rfc3339()),
                 items_total: status.items_total,
                 signals_total: status.signals_total,
                 backlog: status.backlog,
@@ -94,6 +104,7 @@ impl ListenerDto {
                 holder: None,
                 last_activity_at: None,
                 last_error: None,
+                last_error_at: None,
                 items_total: 0,
                 signals_total: 0,
                 backlog: None,
@@ -139,11 +150,11 @@ pub struct SourceDto {
     pub mode: String,
     /// Listener state of a continuous source; absent for scheduled sources.
     pub listener: Option<ListenerDto>,
-    /// Job kind: `source.run`, `listener.qualification` or `listener.company_research`.
+    /// Job kind: `source.run`, `listener.qualification`, `listener.company_research` or `listener.ecosystem_inspection`.
     pub kind: String,
     /// Translation key of the source label.
     pub label_key: String,
-    /// One of `pending`, `running`, `succeeded`, `failed`, `unavailable` for scheduled sources;
+    /// One of `pending`, `running`, `succeeded`, `failed`, `cancelled`, `unavailable` for scheduled sources;
     /// the listener state for continuous ones.
     pub status: String,
     /// Why the source has no job; set only when `status` is `unavailable`. Always `not_scheduled`.
@@ -312,6 +323,14 @@ pub async fn list_sources(
             )
             .with_provider(&configurations),
         ))
+        .chain(once(SourceDto::continuous(
+            ECOSYSTEM_LISTENER,
+            ECOSYSTEM_LISTENER_KIND,
+            listeners
+                .iter()
+                .find(|listener| listener.name == ECOSYSTEM_LISTENER),
+            &[],
+        )))
         .collect();
     Ok(Response::OK(sources))
 }

@@ -1,26 +1,38 @@
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use chrono::{DateTime, Utc};
 use common::{CoreError, generate_uuid_v7};
+use futures_util::{StreamExt, stream};
 use lodestone_macros::transactional;
 use tracing::{info, warn};
 
 use crate::{
     application::{
         LodestoneUseCase,
-        evaluation::{EvaluationSettings, Loaded, ProviderBuilder, load_provider, render_signal},
+        evaluation::{
+            EvaluationSettings, LeadStep, Loaded, ProviderBuilder, lead_step, load_provider,
+            qualification_works, render_signal,
+        },
         llm::gateway::{
-            CallSettings, LlmCallError, Prompt, RunBudget, SchemaCall, call_with_schema,
+            CallSettings, LlmCallError, Prompt, RunBudget, SchemaCall, call_with_schema_until,
+        },
+        timeline::{
+            in_flight::Subject as Running, round_key, status_changed, summary_entries,
+            summary_failed,
         },
     },
     domain::{
+        agent_work::{
+            AgentWork, CancelReason, WorkKind, WorkTarget, first_stop, ports::AgentWorkRepository,
+        },
         aggregation::{
             AggregatorOutput, EVIDENCE_RETRY, Facts, agent_source, build, check,
             instruction_with_dossier, missing_results, render_agent, render_scoring, retry_message,
             scoring_source, warnings, with_problem,
         },
-        company::PAGE_PROMPT_CHARS,
         job::ports::Clock,
         lead::{
-            Assessment, AssessmentId, Evidence, Lead, LeadStatus, QualityWarning, Signal,
+            Assessment, AssessmentId, Evidence, Lead, LeadId, LeadStatus, QualityWarning, Signal,
             draft::{DraftReview, carry_draft},
             ports::{AssessmentRepository, LeadRepository},
         },
@@ -30,12 +42,17 @@ use crate::{
             provider::{ProviderId, SecretCipher, Tier},
         },
         profile::{ActiveProfile, definition::ProfileDefinition},
-        prompt::check_evidence,
+        prompt::{EvidenceCheck, check_evidence},
         qualification::{
             QualificationResult, ports::QualificationRepository, prompt::lead_document,
+            summary_retry_delay,
         },
         scoring_agent::ScoringResult,
         suppression::ports::SuppressionRepository,
+        timeline::{
+            EventActor, EventStatus, TimelineEntry, TimelineStep, kind, micros,
+            ports::TimelineRepository,
+        },
         values::Provenance,
     },
 };
@@ -51,6 +68,7 @@ pub struct AggregationReport {
     pub leads: u64,
     pub unverified: u64,
     pub failed: u64,
+    pub stopped: u64,
     pub backlog: u64,
     pub budget_exhausted: bool,
 }
@@ -60,6 +78,21 @@ enum Outcome {
     Skipped,
     Failed(String),
     BudgetExhausted,
+    Stopped(CancelReason),
+}
+
+fn aggregation_works(usecase: &LodestoneUseCase, active: &ActiveProfile) -> Vec<AgentWork> {
+    let mut works = vec![usecase.agent_work(active, WorkTarget::aggregator())];
+    works.extend(qualification_works(usecase, active));
+    works.extend(
+        active
+            .revision
+            .definition
+            .definition()
+            .enabled_scoring_agents()
+            .map(|agent| usecase.agent_work(active, WorkTarget::new(WorkKind::Scoring, &agent.id))),
+    );
+    works
 }
 
 struct Candidate {
@@ -96,7 +129,7 @@ fn scoring_blocks(
 }
 
 fn evidence_of(
-    check: &crate::domain::prompt::EvidenceCheck<'_>,
+    check: &EvidenceCheck<'_>,
     signals: &[Signal],
     quotable: &[UntrustedDocument<'_>],
 ) -> Vec<Evidence> {
@@ -121,6 +154,7 @@ struct Summariser<'a, P, C> {
     loaded: &'a Loaded<P>,
     cache: &'a C,
     settings: EvaluationSettings,
+    work: &'a AgentWork,
 }
 
 impl<P, C> Summariser<'_, P, C>
@@ -133,7 +167,7 @@ where
         usecase: &LodestoneUseCase,
         active: &ActiveProfile,
         lead: &Lead,
-        budget: &mut RunBudget,
+        budget: &RunBudget,
         clock: &K,
     ) -> Result<Outcome, CoreError> {
         let definition = active.revision.definition.definition();
@@ -147,10 +181,7 @@ where
         if signals.is_empty() {
             return Ok(Outcome::Skipped);
         }
-        let dossier_documents = dossier
-            .as_ref()
-            .map(|dossier| dossier.documents(PAGE_PROMPT_CHARS))
-            .unwrap_or_default();
+        let dossier_documents = usecase.grounding_documents(lead, dossier.as_ref()).await?;
         let signal_contents: Vec<String> = signals.iter().map(render_signal).collect();
         let overview = lead_document(lead.domain.as_str(), &facts);
         let scoring_results = usecase.lead_scoring_results(lead.id).await?;
@@ -198,132 +229,190 @@ where
             domain: lead.domain.clone(),
             agent: None,
             sample: 0,
+            fresh: usecase.lead_fresh_calls(lead.id).await?,
         };
-        let mut current = base.clone();
-        let mut candidate: Option<Candidate> = None;
-        let mut reason = REASON_CALL.to_owned();
-        for _ in 0..ATTEMPTS {
-            let call = SchemaCall {
-                scope: &scope,
-                prompt: Prompt {
-                    system: &prompt.system,
-                    instruction: &current,
-                    documents: &documents,
-                    max_tokens: self.settings.max_tokens,
-                    temperature: None,
-                },
-                schema: &schema,
-            };
-            let structured = match call_with_schema(
-                &self.loaded.provider,
-                self.cache,
-                call,
-                |value| {
-                    AggregatorOutput::parse(value).is_ok_and(|output| {
-                        check_evidence(&output.evidence, evidence_documents).is_sound()
-                            && check(&output).is_empty()
-                    })
-                },
-                CallSettings {
-                    max_retries: self.loaded.max_retries,
-                    pricing: self.loaded.pricing,
-                    base_delay: self.settings.base_delay,
-                },
-                budget,
+        let started = clock.now();
+        let span = format!(
+            "summary:{}:{}",
+            round_key(lead.qualified_at),
+            micros(started)
+        );
+        let actor = EventActor::default().with_model(&self.loaded.name, &self.loaded.model);
+        let _running = usecase.enter_step(
+            Running::Lead(lead.id),
+            TimelineStep::Aggregation,
+            actor.clone(),
+            started,
+        );
+        usecase
+            .record_timeline(
+                lead.id,
+                &TimelineEntry::started(TimelineStep::Aggregation, kind::SUMMARY, started, &span)
+                    .actor(actor.clone()),
             )
-            .await
-            {
-                Ok(structured) => structured,
-                Err(LlmCallError::BudgetExhausted) => return Ok(Outcome::BudgetExhausted),
-                Err(error) => {
-                    warn!(
-                        lead_id = %lead.id,
-                        %error,
-                        provider_message = error.provider_message(),
-                        "aggregation call failed"
-                    );
-                    if let Some(message) = error.provider_message() {
-                        reason = format!("{REASON_CALL} : {message}");
-                    }
-                    break;
-                }
-            };
-            match AggregatorOutput::parse(&structured.value) {
-                Err(problem) => {
-                    reason = REASON_CONTRACT.to_owned();
-                    warn!(lead_id = %lead.id, %problem, "aggregator answer broke the contract");
-                    current = with_problem(
-                        &base,
-                        &format!(
-                            "{CONTRACT_RETRY}: {problem}. Answer again with only the JSON object that follows the contract."
-                        ),
-                    );
-                }
-                Ok(output) => {
-                    let sound = check_evidence(&output.evidence, evidence_documents).is_sound();
-                    let violations = check(&output);
-                    let mut problems: Vec<String> = Vec::new();
-                    if !sound {
-                        warn!(lead_id = %lead.id, "aggregator evidence is not verbatim, retrying");
-                        problems.push(EVIDENCE_RETRY.to_owned());
-                    }
-                    if !violations.is_empty() {
-                        warn!(lead_id = %lead.id, violations = violations.len(), "aggregator answer broke the output rules, retrying");
-                        problems.push(retry_message(&violations));
-                    }
-                    candidate = Some(Candidate {
-                        output,
-                        model: structured.model,
-                    });
-                    if problems.is_empty() {
+            .await?;
+        let outcome: Result<Outcome, CoreError> = async {
+            let mut current = base.clone();
+            let mut candidate: Option<Candidate> = None;
+            let mut reason = REASON_CALL.to_owned();
+            for _ in 0..ATTEMPTS {
+                let call = SchemaCall {
+                    scope: &scope,
+                    prompt: Prompt {
+                        system: &prompt.system,
+                        instruction: &current,
+                        documents: &documents,
+                        max_tokens: self.settings.max_tokens,
+                        temperature: None,
+                    },
+                    schema: &schema,
+                };
+                let structured = match call_with_schema_until(
+                    &self.loaded.provider,
+                    self.cache,
+                    call,
+                    |value| {
+                        AggregatorOutput::parse(value).is_ok_and(|output| {
+                            check_evidence(&output.evidence, evidence_documents).is_sound()
+                                && check(&output).is_empty()
+                        })
+                    },
+                    CallSettings {
+                        max_retries: self.loaded.max_retries,
+                        pricing: self.loaded.pricing,
+                        base_delay: self.settings.base_delay,
+                    },
+                    budget,
+                    self.work,
+                )
+                .await
+                {
+                    Ok(structured) => structured,
+                    Err(LlmCallError::BudgetExhausted) => return Ok(Outcome::BudgetExhausted),
+                    Err(LlmCallError::Cancelled(reason)) => return Ok(Outcome::Stopped(reason)),
+                    Err(error) => {
+                        warn!(
+                            lead_id = %lead.id,
+                            %error,
+                            provider_message = error.provider_message(),
+                            "aggregation call failed"
+                        );
+                        if let Some(message) = error.provider_message() {
+                            reason = format!("{REASON_CALL} : {message}");
+                        }
                         break;
                     }
-                    current = with_problem(&base, &problems.join("\n\n"));
+                };
+                match AggregatorOutput::parse(&structured.value) {
+                    Err(problem) => {
+                        reason = REASON_CONTRACT.to_owned();
+                        warn!(lead_id = %lead.id, %problem, "aggregator answer broke the contract");
+                        current = with_problem(
+                            &base,
+                            &format!(
+                                "{CONTRACT_RETRY}: {problem}. Answer again with only the JSON object that follows the contract."
+                            ),
+                        );
+                    }
+                    Ok(output) => {
+                        let sound = check_evidence(&output.evidence, evidence_documents).is_sound();
+                        let violations = check(&output);
+                        let mut problems: Vec<String> = Vec::new();
+                        if !sound {
+                            warn!(lead_id = %lead.id, "aggregator evidence is not verbatim, retrying");
+                            problems.push(EVIDENCE_RETRY.to_owned());
+                        }
+                        if !violations.is_empty() {
+                            warn!(lead_id = %lead.id, violations = violations.len(), "aggregator answer broke the output rules, retrying");
+                            problems.push(retry_message(&violations));
+                        }
+                        candidate = Some(Candidate {
+                            output,
+                            model: structured.model,
+                        });
+                        if problems.is_empty() {
+                            break;
+                        }
+                        current = with_problem(&base, &problems.join("\n\n"));
+                    }
                 }
             }
-        }
-        let Some(Candidate { output, model }) = candidate else {
-            return Ok(Outcome::Failed(reason));
-        };
-        let checked = check_evidence(&output.evidence, evidence_documents);
-        let verified = !checked.verified.is_empty();
-        let mut quality_warnings = warnings(&check(&output));
-        if verified && checked.rejected > 0 {
-            quality_warnings.push(QualityWarning::DroppedQuotes);
-        }
-        let evidence = evidence_of(&checked, &signals, evidence_documents);
-        let now = clock.now();
-        let assessment = Assessment {
-            id: AssessmentId(generate_uuid_v7()),
-            lead_id: lead.id,
-            profile_revision: active.revision.number,
-            summary: output.summary,
-            verdict_narrative: output.verdict_narrative,
-            approach_angle: output.approach_angle,
-            evidence,
-            evidence_verified: verified,
-            quality_warnings,
-            provenance: self.loaded.provenance(
-                &model,
-                prompt.tag.clone(),
-                self.settings.max_tokens,
-            ),
-            draft: Some(output.draft_message),
-            draft_review: Some(DraftReview::pending()),
-            created_at: now,
-        };
-        let Some(qualified_at) = lead.qualified_at else {
-            return Ok(Outcome::Skipped);
-        };
-        match usecase.store_summary(&assessment, qualified_at, now).await {
-            Ok(true) => Ok(Outcome::Stored { verified }),
-            Ok(false) => Ok(Outcome::Skipped),
-            Err(CoreError::Conflict(reason)) => {
-                warn!(lead_id = %lead.id, %reason, "summary dropped, the lead changed meanwhile");
-                Ok(Outcome::Skipped)
+            let Some(Candidate { output, model }) = candidate else {
+                return Ok(Outcome::Failed(reason));
+            };
+            let checked = check_evidence(&output.evidence, evidence_documents);
+            let verified = !checked.verified.is_empty();
+            let mut quality_warnings = warnings(&check(&output));
+            if verified && checked.rejected > 0 {
+                quality_warnings.push(QualityWarning::DroppedQuotes);
             }
-            Err(error) => Err(error),
+            let evidence = evidence_of(&checked, &signals, evidence_documents);
+            let now = clock.now();
+            let assessment = Assessment {
+                id: AssessmentId(generate_uuid_v7()),
+                lead_id: lead.id,
+                profile_revision: active.revision.number,
+                summary: output.summary,
+                verdict_narrative: output.verdict_narrative,
+                approach_angle: output.approach_angle,
+                evidence,
+                evidence_verified: verified,
+                quality_warnings,
+                provenance: self.loaded.provenance(
+                    &model,
+                    prompt.tag.clone(),
+                    self.settings.max_tokens,
+                ),
+                draft: Some(output.draft_message),
+                draft_review: Some(DraftReview::pending()),
+                created_at: now,
+            };
+            let Some(qualified_at) = lead.qualified_at else {
+                return Ok(Outcome::Skipped);
+            };
+            if let Some(reason) = first_stop(&aggregation_works(usecase, active)) {
+                return Ok(Outcome::Stopped(reason));
+            }
+            let entries = summary_entries(&assessment, (&span, started), now, actor.clone());
+            match usecase
+                .store_summary(&assessment, qualified_at, now, &entries)
+                .await
+            {
+                Ok(true) => Ok(Outcome::Stored { verified }),
+                Ok(false) => Ok(Outcome::Skipped),
+                Err(CoreError::Conflict(reason)) => {
+                    warn!(lead_id = %lead.id, %reason, "summary dropped, the lead changed meanwhile");
+                    Ok(Outcome::Skipped)
+                }
+                Err(error) => Err(error),
+            }
         }
+        .await;
+        let ended = |status: EventStatus, error: Option<&str>| {
+            TimelineEntry::ended(
+                TimelineStep::Aggregation,
+                kind::SUMMARY,
+                status,
+                (&span, started),
+                clock.now(),
+            )
+            .actor(actor.clone())
+            .error(error)
+        };
+        match &outcome {
+            Ok(Outcome::Stored { .. }) | Err(_) => {}
+            Ok(Outcome::Failed(reason)) => {
+                usecase
+                    .record_timeline(lead.id, &ended(EventStatus::Failed, Some(reason)))
+                    .await?;
+            }
+            Ok(Outcome::Skipped | Outcome::BudgetExhausted | Outcome::Stopped(_)) => {
+                usecase
+                    .record_timeline(lead.id, &ended(EventStatus::Skipped, None))
+                    .await?;
+            }
+        }
+        outcome
     }
 }
 
@@ -343,7 +432,7 @@ impl LodestoneUseCase {
         K: Clock,
     {
         let profiles: Vec<ActiveProfile> = self
-            .list_active_profiles()
+            .refreshed_active_profiles()
             .await?
             .into_iter()
             .filter(|active| {
@@ -357,10 +446,10 @@ impl LodestoneUseCase {
             })
             .collect();
         let mut report = AggregationReport::default();
-        let mut budget = RunBudget::new(settings.budget_cents);
+        let budget = &RunBudget::new(settings.budget_cents);
         let mut remaining = settings.batch_size;
-        'profiles: for active in &profiles {
-            if remaining == 0 {
+        for active in &profiles {
+            if remaining == 0 || report.budget_exhausted {
                 break;
             }
             let definition = active.revision.definition.definition();
@@ -387,17 +476,43 @@ impl LodestoneUseCase {
                 }
                 continue;
             };
-            let summariser = Summariser {
+            let works = &aggregation_works(self, active);
+            let summariser = &Summariser {
                 loaded: &loaded,
                 cache,
                 settings,
+                work: &works[0],
             };
-            for lead in &leads {
-                match summariser
-                    .summarise(self, active, lead, &mut budget, clock)
-                    .await?
-                {
-                    Outcome::Stored { verified } => {
+            let halted = &AtomicBool::new(false);
+            let leads = &leads;
+            let mut steps = stream::iter(0..leads.len())
+                .map(move |index| async move {
+                    let lead = &leads[index];
+                    if let Some(step) = lead_step(halted, works) {
+                        return Ok((lead, step));
+                    }
+                    summariser
+                        .summarise(self, active, lead, budget, clock)
+                        .await
+                        .map(|outcome| (lead, LeadStep::Ran(outcome)))
+                })
+                .buffered(settings.concurrency.get());
+            while let Some(step) = steps.next().await {
+                let (lead, step) = step?;
+                match step {
+                    LeadStep::Skipped => {}
+                    LeadStep::Halted(reason) => {
+                        if !halted.swap(true, Ordering::AcqRel) {
+                            info!(profile = %active.profile.id, reason = reason.as_str(), "aggregation pass stopped for the profile");
+                        }
+                    }
+                    LeadStep::Ran(Outcome::Stopped(reason)) => {
+                        report.stopped += 1;
+                        halted.store(true, Ordering::Release);
+                        self.note_stop(lead.id, &works[0], reason, clock.now())
+                            .await?;
+                    }
+                    LeadStep::Ran(Outcome::Stored { verified }) => {
                         info!(
                             monotonic_counter.aggregation_summaries = 1u64,
                             verified, "lead summary recorded"
@@ -408,16 +523,18 @@ impl LodestoneUseCase {
                         }
                         remaining = remaining.saturating_sub(1);
                     }
-                    Outcome::Skipped => {}
-                    Outcome::Failed(reason) => {
+                    LeadStep::Ran(Outcome::Skipped) => {}
+                    LeadStep::Ran(Outcome::Failed(reason)) => {
                         report.failed += 1;
                         self.note_summary_failure(lead, &reason, Some(loaded.id), clock.now())
                             .await?;
                     }
-                    Outcome::BudgetExhausted => {
+                    LeadStep::Ran(Outcome::BudgetExhausted) => {
+                        if !report.budget_exhausted {
+                            warn!("aggregation stopped, the run budget is exhausted");
+                        }
                         report.budget_exhausted = true;
-                        warn!("aggregation stopped, the run budget is exhausted");
-                        break 'profiles;
+                        halted.store(true, Ordering::Release);
                     }
                 }
             }
@@ -459,25 +576,39 @@ impl LodestoneUseCase {
         Ok(())
     }
 
-    #[transactional(qualification)]
+    #[transactional(qualification, timeline)]
     async fn record_summary_failure(
         &self,
-        lead_id: crate::domain::lead::LeadId,
+        lead_id: LeadId,
         qualified_at: DateTime<Utc>,
         reason: &str,
         provider_id: Option<ProviderId>,
         at: DateTime<Utc>,
     ) -> Result<Option<u32>, CoreError> {
         let mut repo = qualification_repository;
-        repo.record_summary_failure(lead_id, qualified_at, reason, provider_id, at)
-            .await
+        let mut timeline = timeline_repository;
+        let attempts = repo
+            .record_summary_failure(lead_id, qualified_at, reason, provider_id, at)
+            .await?;
+        if let Some(attempts) = attempts {
+            timeline
+                .record(
+                    lead_id,
+                    &summary_failed(
+                        qualified_at,
+                        attempts,
+                        at + summary_retry_delay(attempts),
+                        reason,
+                        at,
+                    ),
+                )
+                .await?;
+        }
+        Ok(attempts)
     }
 
     #[transactional(lead, suppression, qualification)]
-    pub async fn retry_lead_summary(
-        &self,
-        lead_id: crate::domain::lead::LeadId,
-    ) -> Result<Lead, CoreError> {
+    pub async fn retry_lead_summary(&self, lead_id: LeadId) -> Result<Lead, CoreError> {
         let mut leads = lead_repository;
         let mut suppression = suppression_repository;
         let mut qualification = qualification_repository;
@@ -494,10 +625,7 @@ impl LodestoneUseCase {
     }
 
     #[transactional(lead, suppression, qualification)]
-    pub async fn retry_lead_agents(
-        &self,
-        lead_id: crate::domain::lead::LeadId,
-    ) -> Result<Lead, CoreError> {
+    pub async fn retry_lead_agents(&self, lead_id: LeadId) -> Result<Lead, CoreError> {
         let mut leads = lead_repository;
         let mut suppression = suppression_repository;
         let mut qualification = qualification_repository;
@@ -516,16 +644,22 @@ impl LodestoneUseCase {
             .await
     }
 
-    #[transactional(lead, assessment, qualification)]
+    #[transactional(lead, assessment, qualification, agent_work, timeline)]
     async fn store_summary(
         &self,
         assessment: &Assessment,
         qualified_at: DateTime<Utc>,
         at: DateTime<Utc>,
+        entries: &[TimelineEntry],
     ) -> Result<bool, CoreError> {
         let mut leads = lead_repository;
         let mut assessments = assessment_repository;
         let mut qualification = qualification_repository;
+        let mut stops = agent_work_repository;
+        let mut timeline = timeline_repository;
+        stops
+            .clear_stops(assessment.lead_id, &[WorkKind::Aggregator])
+            .await?;
         let Some(current) = leads.find(assessment.lead_id).await? else {
             return Ok(false);
         };
@@ -553,8 +687,17 @@ impl LodestoneUseCase {
                     "lead status changed concurrently".to_owned(),
                 ));
             }
+            timeline
+                .record(
+                    assessment.lead_id,
+                    &status_changed(LeadStatus::New, to, at, None),
+                )
+                .await?;
         }
         assessments.insert(assessment).await?;
+        for entry in entries {
+            timeline.record(assessment.lead_id, entry).await?;
+        }
         Ok(true)
     }
 }

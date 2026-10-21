@@ -1,3 +1,5 @@
+import { ShieldCheck } from 'lucide-react'
+
 import { Button } from '#/components/ui/button'
 import { Input } from '#/components/ui/input'
 import { Skeleton } from '#/components/ui/skeleton'
@@ -36,6 +38,7 @@ interface CatalogPageProps {
 	onReset: () => void
 	onOpen: (key: string) => void
 	onSelectTab: (tab: SourcesTab) => void
+	onOpenRules: () => void
 }
 
 export function CatalogPage({
@@ -51,21 +54,28 @@ export function CatalogPage({
 	onReset,
 	onOpen,
 	onSelectTab,
+	onOpenRules,
 }: CatalogPageProps) {
 	const visible = filterProviders(providers, { category, status, query })
 	const counts = categoryCounts(providers, query)
 	const totalCount = counts.reduce((sum, entry) => sum + entry.count, 0)
 	return (
 		<div className="flex flex-col gap-6 p-4 md:p-8">
-			<div className="flex flex-col gap-1">
-				<h1 className="text-2xl font-bold tracking-tight">
-					Catalogue des sources
-				</h1>
-				<p className="text-sm text-muted-foreground">
-					Chaque source se configure une seule fois pour toute l'organisation.
-					Elle n'est utilisable par les agents qu'après un test de connexion
-					réussi.
-				</p>
+			<div className="flex flex-wrap items-start justify-between gap-4">
+				<div className="flex flex-col gap-1">
+					<h1 className="text-2xl font-bold tracking-tight">
+						Catalogue des sources
+					</h1>
+					<p className="text-sm text-muted-foreground">
+						Chaque source se configure une seule fois pour toute l'organisation.
+						Elle n'est utilisable par les agents qu'après un test de connexion
+						réussi.
+					</p>
+				</div>
+				<Button type="button" variant="outline" onClick={onOpenRules}>
+					<ShieldCheck aria-hidden="true" />
+					Règles de collecte
+				</Button>
 			</div>
 			<SourcesTabs active="catalog" onSelect={onSelectTab} />
 			{state === 'error' ? (

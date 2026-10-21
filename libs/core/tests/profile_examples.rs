@@ -2,7 +2,7 @@ use std::{fs, path::PathBuf};
 
 use lodestone_core::{
     SourceName, ValidatedProfile,
-    definition::{Agent, AgentId, Escalation, ProfileDefinition},
+    definition::{Agent, Escalation, ProfileDefinition},
 };
 use schemars::schema_for;
 use serde_json::{Map, Value, from_str, json, to_string_pretty};
@@ -10,6 +10,9 @@ use serde_json::{Map, Value, from_str, json, to_string_pretty};
 const IAM: &str = include_str!("../../../docs/examples/profiles/iam-ferriskey.json");
 const IAM_V1: &str = include_str!("fixtures/profiles/iam-ferriskey.v1.json");
 const IAM_V2: &str = include_str!("fixtures/profiles/iam-ferriskey.v2.json");
+const IAM_V16: &str = include_str!("fixtures/profiles/iam-ferriskey.v16.json");
+const IAM_V17: &str = include_str!("fixtures/profiles/iam-ferriskey.v17.json");
+const IAM_V18: &str = include_str!("fixtures/profiles/iam-ferriskey.v18.json");
 const ECOMMERCE: &str =
     include_str!("../../../docs/examples/profiles/ecommerce-replatforming.json");
 
@@ -33,26 +36,26 @@ const PUBLIC_PROCUREMENT: [(&str, &str, &str); 3] = [
     ("ted", "TED", "ted"),
 ];
 
-fn split_example() -> ValidatedProfile {
-    let mut definition = parse(IAM).definition().clone();
-    let position = definition
-        .agents
+fn split_v16() -> Value {
+    let mut value: Value = from_str(IAM_V16).expect("json");
+    let agents = value["agents"].as_array_mut().expect("agents");
+    let position = agents
         .iter()
-        .position(|agent| agent.id().as_str() == "marches-publics")
-        .expect("iam example has the public procurement agent");
-    let Agent::Search(merged) = definition.agents.remove(position) else {
-        panic!("public procurement is a search agent");
-    };
+        .position(|agent| agent["id"] == "marches-publics")
+        .expect("iam v16 fixture has the public procurement agent");
+    let merged = agents.remove(position);
     for (offset, (id, name, provider)) in PUBLIC_PROCUREMENT.iter().enumerate() {
         let mut agent = merged.clone();
-        agent.id = AgentId::new(*id);
-        agent.name = (*name).to_owned();
-        agent.providers = vec![(*provider).to_owned()];
-        definition
-            .agents
-            .insert(position + offset, Agent::Search(agent));
+        agent["id"] = (*id).into();
+        agent["name"] = (*name).into();
+        agent["providers"] = json!([provider]);
+        agents.insert(position + offset, agent);
     }
-    ValidatedProfile::try_from(definition).expect("split example is valid")
+    value
+}
+
+fn split_example() -> ValidatedProfile {
+    parse(&split_v16().to_string())
 }
 
 fn version_fifteen_agent(agent: &Value) -> Value {
@@ -82,7 +85,7 @@ fn version_fifteen_agent(agent: &Value) -> Value {
 }
 
 fn version_fifteen_agents() -> Value {
-    let agents = split_example().to_json()["agents"].clone();
+    let agents = split_v16()["agents"].clone();
     Value::Array(
         agents
             .as_array()
@@ -94,7 +97,7 @@ fn version_fifteen_agents() -> Value {
 }
 
 fn version_thirteen() -> Value {
-    let mut value: Value = from_str(IAM).expect("json");
+    let mut value: Value = from_str(IAM_V16).expect("json");
     value["agents"] = version_fifteen_agents();
     let object = value.as_object_mut().expect("object");
     object.remove("language");
@@ -124,10 +127,23 @@ fn agent_ids(profile: &ValidatedProfile) -> Vec<&str> {
 fn iam_example_is_valid_and_has_expected_content() {
     let profile = parse(IAM);
     let definition = profile.definition();
+    assert_eq!(
+        definition
+            .agents
+            .iter()
+            .map(|agent| (agent.id().as_str(), agent.name()))
+            .collect::<Vec<_>>(),
+        [
+            ("certificats", "Certificats"),
+            ("dns", "DNS"),
+            ("marches-publics", "Marchés publics"),
+            ("offres-et-missions", "Offres et missions"),
+        ]
+    );
     let labels = &definition
-        .enabled_signal_agents(SourceName::CertificateTransparency)
-        .find_map(|agent| agent.source.certificate_transparency())
-        .expect("iam example enables certificate transparency")
+        .enabled_agents(SourceName::CertificateTransparency)
+        .find_map(Agent::certificates)
+        .expect("iam example has a certificates agent")
         .labels;
     for expected in [
         "auth", "sso", "login", "iam", "keycloak", "id", "accounts", "identity", "idp",
@@ -137,41 +153,45 @@ fn iam_example_is_valid_and_has_expected_content() {
             "missing {expected}"
         );
     }
-    let probe = definition
-        .enabled_signal_agents(SourceName::HttpProbe)
-        .find_map(|agent| agent.source.http_probe())
-        .expect("iam example has a probe");
+    assert!(definition.inspection.enabled);
+    assert!(definition.probes_hosts());
+    let probe = &definition.enrichment.custom;
     assert_eq!(probe.excluded_products, ["ferriskey"]);
     assert_eq!(probe.fingerprints.len(), 5);
+    assert!(
+        probe
+            .fingerprints
+            .iter()
+            .any(|fingerprint| fingerprint.id == "keycloak-realm")
+    );
+    assert_eq!(
+        probe.extra_subdomains,
+        ["auth", "sso", "login", "id", "idp", "accounts"]
+    );
 }
 
 #[test]
-fn iam_example_has_two_job_agents() {
+fn iam_example_reads_the_job_offers_of_every_lead() {
     let profile = parse(IAM);
-    let ats: Vec<_> = profile
-        .definition()
-        .enabled_search_agents(SourceName::Ats)
-        .collect();
-    assert_eq!(
-        ats.iter()
-            .map(|agent| agent.id.as_str())
-            .collect::<Vec<_>>(),
-        ["ats-fr", "ats-en"]
-    );
+    let definition = profile.definition();
+    let jobs = &definition.enrichment.highlight_keywords;
+    assert!(definition.reads_company_jobs());
+    assert_eq!(jobs[0], "Keycloak");
+    assert!(jobs.iter().any(|keyword| keyword == "single sign-on"));
+    assert_eq!(definition.enabled_search_agents(SourceName::Ats).count(), 0);
+    assert_eq!(definition.targets(SourceName::Ats).len(), 1);
     assert!(
-        profile.definition().qualification_agents[0]
+        definition.qualification_agents[0]
             .system_prompt
-            .contains("Criteria of the agent Job offers (English)")
+            .contains("Criteria for job offers")
     );
-    assert_eq!(
-        profile
-            .definition()
-            .enabled_search_agents(SourceName::Ats)
-            .next()
-            .expect("first ats agent")
-            .keywords[0],
-        "Keycloak"
-    );
+    let offers = definition
+        .agents
+        .iter()
+        .filter_map(Agent::as_search)
+        .find(|agent| agent.id.as_str() == "offres-et-missions")
+        .expect("offers agent");
+    assert_eq!(offers.providers, ["france_travail", "hacker_news_hiring"]);
 }
 
 #[test]
@@ -208,55 +228,145 @@ fn iam_example_has_one_public_procurement_agent_over_three_providers() {
     );
 }
 
+fn assert_upgraded_iam_agents(upgraded: &ValidatedProfile) {
+    assert_eq!(
+        agent_ids(upgraded),
+        [
+            "certificate-transparency",
+            "dns-cname",
+            "marches-publics",
+            "france-travail"
+        ]
+    );
+    let json = upgraded.to_json();
+    assert_eq!(json["agents"][0]["type"], "certificates");
+    assert_eq!(json["agents"][1]["type"], "dns");
+    assert_eq!(json["agents"][2]["name"], "Marchés publics");
+    assert_eq!(
+        json["agents"][2]["providers"],
+        json!(["boamp", "decp", "ted"])
+    );
+    assert_eq!(json["agents"][3]["providers"], json!(["france_travail"]));
+    let enrichment = &upgraded.definition().enrichment;
+    assert_eq!(enrichment.custom.fingerprints.len(), 5);
+    assert_eq!(enrichment.custom.excluded_products, ["ferriskey"]);
+    assert_eq!(
+        enrichment.custom.extra_subdomains,
+        ["auth", "sso", "login", "id", "idp", "accounts"]
+    );
+    assert!(!enrichment.highlight_keywords.is_empty());
+    assert!(upgraded.definition().inspection.enabled);
+}
+
 #[test]
-fn version_fifteen_agents_become_one_agent_per_provider_without_merging() {
-    let mut value: Value = from_str(IAM).expect("json");
+fn the_version_sixteen_iam_example_upgrades_to_sourcing_and_enrichment() {
+    let upgraded = parse(IAM_V16);
+    assert_eq!(upgraded.definition().schema_version, 19);
+    assert_upgraded_iam_agents(&upgraded);
+    let jobs = &upgraded.definition().enrichment.highlight_keywords;
+    assert_eq!(
+        *jobs,
+        [
+            "Keycloak",
+            "IAM",
+            "ingénieur IAM",
+            "migration Okta",
+            "migration Auth0",
+            "gestion des identités",
+            "identity and access management",
+            "SSO",
+            "single sign-on",
+            "Okta migration"
+        ]
+    );
+    let current = parse(IAM);
+    assert_eq!(
+        upgraded.definition().enrichment.custom,
+        current.definition().enrichment.custom
+    );
+    assert_eq!(jobs, &current.definition().enrichment.highlight_keywords);
+}
+
+#[test]
+fn the_version_seventeen_iam_example_upgrades_to_the_current_example() {
+    let raw: Value = from_str(IAM_V17).expect("json");
+    assert_eq!(raw["schema_version"], 17);
+    assert_eq!(raw["enrichment"]["http_probe"]["enabled"], true);
+    let upgraded = parse(IAM_V17);
+    assert_eq!(upgraded, parse(IAM_V18));
+    let json = upgraded.to_json();
+    assert_eq!(json["schema_version"], 19);
+    assert_eq!(json["inspection"], json!({"enabled": true}));
+    assert!(json["enrichment"].get("http_probe").is_none());
+    assert!(json["enrichment"].get("company_jobs").is_none());
+}
+
+#[test]
+fn a_version_eighteen_profile_gains_empty_countries_on_its_host_agents() {
+    let raw: Value = from_str(IAM_V18).expect("json");
+    assert_eq!(raw["schema_version"], 18);
+    let upgraded = parse(IAM_V18).to_json();
+    assert_eq!(upgraded["schema_version"], 19);
+    assert_eq!(upgraded["agents"][0]["countries"], json!([]));
+    assert_eq!(upgraded["agents"][1]["countries"], json!([]));
+    let mut expected: Value = from_str(IAM).expect("json");
+    for index in [0, 1] {
+        expected["agents"][index]["countries"] = json!([]);
+    }
+    assert_eq!(upgraded, parse(&expected.to_string()).to_json());
+}
+
+#[test]
+fn the_iam_example_targets_france_on_its_host_agents() {
+    let profile = parse(IAM);
+    let countries: Vec<Vec<&str>> = profile
+        .definition()
+        .agents
+        .iter()
+        .filter_map(|agent| agent.host_countries())
+        .map(|countries| countries.iter().map(|code| code.as_str()).collect())
+        .collect();
+    assert_eq!(countries, [vec!["FR"], vec!["FR"]]);
+    let mut invalid: Value = from_str(IAM).expect("json");
+    invalid["agents"][1]["countries"] = json!(["fr"]);
+    let error = ValidatedProfile::parse(invalid).expect_err("lowercase code");
+    assert_eq!(error.path, "agents[1].countries[0]");
+}
+
+#[test]
+fn a_version_seventeen_profile_without_identity_fingerprints_loses_the_iam_default_subdomains() {
+    let mut value: Value = from_str(ECOMMERCE).expect("json");
+    let custom = value["enrichment"]["custom"].clone();
+    value["schema_version"] = 17.into();
+    value.as_object_mut().expect("object").remove("inspection");
+    value["enrichment"] = json!({
+        "http_probe": {
+            "enabled": true,
+            "fingerprints": custom["fingerprints"],
+            "excluded_products": [],
+            "extra_subdomains": ["auth", "sso", "login", "id", "idp", "accounts"]
+        },
+        "company_jobs": {"enabled": false, "keywords": ["Magento"], "accept_min_keywords": 2}
+    });
+    let upgraded = parse(&value.to_string());
+    let enrichment = &upgraded.definition().enrichment;
+    assert!(enrichment.custom.extra_subdomains.is_empty());
+    assert_eq!(enrichment.custom.fingerprints.len(), 1);
+    assert!(enrichment.highlight_keywords.is_empty());
+}
+
+#[test]
+fn version_fifteen_agents_merge_and_leave_probes_and_job_pages_to_the_enrichment() {
+    let mut value: Value = from_str(IAM_V16).expect("json");
     value["schema_version"] = 15.into();
     value["agents"] = version_fifteen_agents();
     let upgraded = parse(&value.to_string());
     assert_eq!(upgraded, split_example());
-    assert_eq!(
-        agent_ids(&upgraded),
-        [
-            "certificate-transparency",
-            "http-probe",
-            "dns-cname",
-            "boamp",
-            "decp",
-            "ted",
-            "france-travail",
-            "ats-fr",
-            "ats-en"
-        ]
-    );
+    assert_eq!(upgraded, parse(IAM_V16));
+    assert_upgraded_iam_agents(&upgraded);
     let json = upgraded.to_json();
-    for index in 0..3 {
-        assert_eq!(json["agents"][index]["type"], "signal");
-    }
-    assert_eq!(
-        json["agents"][0]["source"]["provider"],
-        "certificate_transparency"
-    );
-    assert_eq!(json["agents"][1]["source"]["provider"], "http_probe");
-    assert_eq!(json["agents"][2]["source"]["provider"], "dns_cname");
-    for (index, provider) in [
-        (3, "boamp"),
-        (4, "decp"),
-        (5, "ted"),
-        (6, "france_travail"),
-        (7, "ats"),
-        (8, "ats"),
-    ] {
-        assert_eq!(json["agents"][index]["type"], "search");
-        assert_eq!(json["agents"][index]["providers"], json!([provider]));
-        assert_eq!(json["agents"][index]["filters"]["remote"], "any");
-        assert_eq!(json["agents"][index]["filters"]["contracts"], json!([]));
-    }
-    assert_eq!(json["agents"][3]["keywords"], json["agents"][4]["keywords"]);
-    assert_eq!(
-        json["agents"][3]["exclusions"],
-        json["agents"][5]["exclusions"]
-    );
+    assert_eq!(json["agents"][2]["filters"]["remote"], "any");
+    assert_eq!(json["agents"][2]["filters"]["contracts"], json!([]));
 }
 
 #[test]
@@ -288,20 +398,8 @@ fn parse_value(value: Value) -> ValidatedProfile {
 fn version_one_iam_fixture_is_upgraded_to_the_current_example() {
     let upgraded = parse(IAM_V1);
     let current = split_example();
-    assert_eq!(upgraded.definition().schema_version, 16);
-    assert_eq!(
-        agent_ids(&upgraded),
-        [
-            "certificate-transparency",
-            "http-probe",
-            "dns-cname",
-            "boamp",
-            "decp",
-            "ted",
-            "france-travail",
-            "ats"
-        ]
-    );
+    assert_eq!(upgraded.definition().schema_version, 19);
+    assert_upgraded_iam_agents(&upgraded);
     let names: Vec<_> = upgraded
         .definition()
         .agents
@@ -312,13 +410,9 @@ fn version_one_iam_fixture_is_upgraded_to_the_current_example() {
         names,
         [
             "Certificate transparency",
-            "HTTP probe",
             "DNS CNAME",
-            "BOAMP",
-            "DECP",
-            "TED",
-            "France Travail",
-            "ATS"
+            "Marchés publics",
+            "France Travail"
         ]
     );
     assert!(
@@ -332,17 +426,21 @@ fn version_one_iam_fixture_is_upgraded_to_the_current_example() {
         let mut value = profile.to_json();
         value["qualification_agents"] = Value::Null;
         value["aggregator"] = Value::Null;
-        let agents = value["agents"].as_array_mut().expect("agents");
-        agents.retain(|agent| agent["id"] != "ats-en");
-        for agent in agents.iter_mut() {
-            if agent["id"] == "ats-fr" {
-                agent["id"] = "ats".into();
-                agent["name"] = "ATS".into();
-            }
-        }
+        value["enrichment"]["highlight_keywords"] = Value::Null;
         value
     };
     assert_eq!(strip(&upgraded), strip(&current));
+    assert_eq!(
+        upgraded.definition().enrichment.highlight_keywords,
+        [
+            "Keycloak",
+            "IAM",
+            "ingénieur IAM",
+            "migration Okta",
+            "migration Auth0",
+            "gestion des identités"
+        ]
+    );
     assert_eq!(
         upgraded.definition().language,
         current.definition().language
@@ -353,8 +451,8 @@ fn version_one_iam_fixture_is_upgraded_to_the_current_example() {
 fn version_two_iam_fixture_is_upgraded_to_version_six() {
     let upgraded = parse(IAM_V2);
     let definition = upgraded.definition();
-    assert_eq!(definition.schema_version, 16);
-    assert_eq!(upgraded.to_json()["schema_version"], 16);
+    assert_eq!(definition.schema_version, 19);
+    assert_eq!(upgraded.to_json()["schema_version"], 19);
     assert!(upgraded.to_json().get("scoring").is_none());
     assert!(upgraded.to_json().get("llm").is_none());
 }
@@ -483,7 +581,7 @@ fn the_current_example_upgrades_from_its_version_three_form() {
         value.as_object_mut().expect("object").remove(key);
     }
     let upgraded = parse(&value.to_string());
-    assert_eq!(upgraded.definition().schema_version, 16);
+    assert_eq!(upgraded.definition().schema_version, 19);
     assert_eq!(
         upgraded.definition().agents,
         split_example().definition().agents
@@ -562,7 +660,7 @@ fn the_current_example_upgrades_from_its_version_nine_form() {
     let upgraded = parse(&value.to_string());
     assert_eq!(upgraded, split_example());
     let evidence = &upgraded.definition().evidence;
-    assert_eq!(upgraded.definition().schema_version, 16);
+    assert_eq!(upgraded.definition().schema_version, 19);
     assert_eq!(evidence.half_life_days_for("job_offer"), 90);
     assert_eq!(evidence.half_life_days_for("public_tender"), 180);
     assert_eq!(evidence.half_life_days_for("saas_provider"), 365);
@@ -576,7 +674,7 @@ fn the_current_example_upgrades_from_its_version_eleven_form() {
     value.as_object_mut().expect("object").remove("calibration");
     let upgraded = parse(&value.to_string());
     assert_eq!(upgraded, split_example());
-    assert_eq!(upgraded.definition().schema_version, 16);
+    assert_eq!(upgraded.definition().schema_version, 19);
     assert!(upgraded.to_json().get("calibration").is_none());
     assert!(
         upgraded
@@ -589,7 +687,7 @@ fn the_current_example_upgrades_from_its_version_eleven_form() {
 
 #[test]
 fn version_fourteen_drops_the_qualification_agent_weights() {
-    let mut value: Value = from_str(IAM).expect("json");
+    let mut value: Value = from_str(IAM_V16).expect("json");
     value["schema_version"] = 14.into();
     value["agents"] = version_fifteen_agents();
     let agents = value["qualification_agents"]
@@ -601,7 +699,7 @@ fn version_fourteen_drops_the_qualification_agent_weights() {
     let scoring_weight = value["scoring_agents"][0]["weight"].clone();
     let upgraded = parse(&value.to_string());
     assert_eq!(upgraded, split_example());
-    assert_eq!(upgraded.definition().schema_version, 16);
+    assert_eq!(upgraded.definition().schema_version, 19);
     let json = upgraded.to_json();
     for agent in json["qualification_agents"].as_array().expect("agents") {
         assert!(agent.get("weight").is_none());
@@ -630,7 +728,7 @@ fn the_current_example_upgrades_from_its_version_twelve_form() {
     value["evidence"]["reference_score"] = 50.into();
     let upgraded = parse(&value.to_string());
     assert_eq!(upgraded, split_example());
-    assert_eq!(upgraded.definition().schema_version, 16);
+    assert_eq!(upgraded.definition().schema_version, 19);
     let json = upgraded.to_json();
     assert!(json.get("scoring").is_none());
     assert!(json["evidence"].get("reference_score").is_none());
@@ -672,7 +770,7 @@ fn the_current_example_upgrades_from_its_version_thirteen_form() {
     value["calibration"] = json!({"learned": false});
     let upgraded = parse(&value.to_string());
     let definition = upgraded.definition();
-    assert_eq!(definition.schema_version, 16);
+    assert_eq!(definition.schema_version, 19);
     assert!(
         definition.qualification_agents[0].system_prompt.ends_with(
             "Critères de l'agent « Job offers (English) » : Offers for identity engineers"
@@ -693,7 +791,13 @@ fn the_current_example_upgrades_from_its_version_thirteen_form() {
     let json = upgraded.to_json();
     assert!(json.get("llm").is_none());
     assert!(json.get("calibration").is_none());
-    assert!(json["agents"][8].get("llm").is_none());
+    assert!(
+        json["agents"]
+            .as_array()
+            .expect("agents")
+            .iter()
+            .all(|agent| agent.get("llm").is_none())
+    );
 }
 
 #[test]
@@ -709,7 +813,7 @@ fn the_current_example_upgrades_from_its_version_ten_form() {
     let upgraded = parse(&value.to_string());
     assert_eq!(upgraded, split_example());
     let definition = upgraded.definition();
-    assert_eq!(definition.schema_version, 16);
+    assert_eq!(definition.schema_version, 19);
     assert_eq!(definition.scoring_agents.len(), 1);
     let agent = &definition.scoring_agents[0];
     assert_eq!(agent.id.as_str(), "score-global");
@@ -751,7 +855,7 @@ fn the_current_example_upgrades_from_its_version_eight_form() {
     let upgraded = parse(&value.to_string());
     assert_eq!(upgraded, split_example());
     let definition = upgraded.definition();
-    assert_eq!(definition.schema_version, 16);
+    assert_eq!(definition.schema_version, 19);
     assert_eq!(definition.escalation, Escalation::default());
     assert_eq!(definition.escalation.provider, None);
     assert_eq!(
@@ -869,7 +973,7 @@ fn the_current_example_upgrades_from_its_version_four_form() {
     }
     let upgraded = parse(&value.to_string());
     let current = current_without_exclusions_agent();
-    assert_eq!(upgraded.definition().schema_version, 16);
+    assert_eq!(upgraded.definition().schema_version, 19);
     for (old, new) in upgraded
         .definition()
         .qualification_agents
@@ -893,7 +997,7 @@ fn the_current_example_upgrades_from_its_version_five_form() {
     value["verdict"] = json!({"reliable_from": 70, "discard_below": 30});
     let upgraded = parse(&value.to_string());
     let current = current_without_exclusions_agent();
-    assert_eq!(upgraded.definition().schema_version, 16);
+    assert_eq!(upgraded.definition().schema_version, 19);
     assert_eq!(upgraded, current);
 }
 
@@ -915,7 +1019,7 @@ fn committed_schema_matches_definition() {
         to_string_pretty(&schema_for!(ProfileDefinition)).expect("schema serializes");
     generated.push('\n');
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../docs/schemas/profile.v16.schema.json");
+        .join("../../docs/schemas/profile.v19.schema.json");
     if std::env::var("UPDATE_SCHEMA").as_deref() == Ok("1") {
         fs::write(&path, &generated).expect("schema file is writable");
         return;
@@ -924,6 +1028,6 @@ fn committed_schema_matches_definition() {
         fs::read_to_string(&path).expect("schema file exists, regenerate with UPDATE_SCHEMA=1");
     assert!(
         committed == generated,
-        "docs/schemas/profile.v16.schema.json is stale, regenerate with UPDATE_SCHEMA=1"
+        "docs/schemas/profile.v19.schema.json is stale, regenerate with UPDATE_SCHEMA=1"
     );
 }

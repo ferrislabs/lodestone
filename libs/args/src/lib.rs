@@ -2,21 +2,25 @@ use clap::Parser;
 use common::{Config, SettingsError};
 
 use crate::{
-    ats::AtsArgs, auth::AuthArgs, boamp::BoampArgs, company::CompanyArgs, contacts::ContactArgs,
-    ct::CtArgs, database::DatabaseArgs, decp::DecpArgs, france_travail::FranceTravailArgs,
-    hacker_news::HackerNewsArgs, jobs::JobsArgs, listeners::ListenerArgs, llm::LlmArgs,
-    log::LogArgs, observability::ObservabilityArgs, outbound::OutboundArgs,
-    rate_limit::RateLimitArgs, server::ServerArgs, ted::TedArgs, webhook::WebhookArgs,
+    ats::AtsArgs, auth::AuthArgs, boamp::BoampArgs, bodacc::BodaccArgs, company::CompanyArgs,
+    contacts::ContactArgs, crawl::CrawlArgs, ct::CtArgs, database::DatabaseArgs, decp::DecpArgs,
+    enrichment::EnrichmentArgs, france_travail::FranceTravailArgs, hacker_news::HackerNewsArgs,
+    jobs::JobsArgs, listeners::ListenerArgs, llm::LlmArgs, log::LogArgs,
+    observability::ObservabilityArgs, outbound::OutboundArgs, rate_limit::RateLimitArgs,
+    server::ServerArgs, ted::TedArgs, webhook::WebhookArgs,
 };
 
 pub mod ats;
 pub mod auth;
 pub mod boamp;
+pub mod bodacc;
 pub mod company;
 pub mod contacts;
+pub mod crawl;
 pub mod ct;
 pub mod database;
 pub mod decp;
+pub mod enrichment;
 pub mod france_travail;
 pub mod hacker_news;
 pub mod jobs;
@@ -72,10 +76,16 @@ pub struct Args {
     pub company: CompanyArgs,
 
     #[command(flatten)]
+    pub enrichment: EnrichmentArgs,
+
+    #[command(flatten)]
     pub boamp: BoampArgs,
 
     #[command(flatten)]
     pub decp: DecpArgs,
+
+    #[command(flatten)]
+    pub bodacc: BodaccArgs,
 
     #[command(flatten)]
     pub ted: TedArgs,
@@ -91,6 +101,9 @@ pub struct Args {
 
     #[command(flatten)]
     pub webhook: WebhookArgs,
+
+    #[command(flatten)]
+    pub crawl: CrawlArgs,
 }
 
 impl TryFrom<Args> for Config {

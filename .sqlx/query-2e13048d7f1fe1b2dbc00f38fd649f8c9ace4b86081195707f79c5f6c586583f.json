@@ -1,0 +1,82 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT id, profile_id, source, status, started_at, finished_at, volume, signals, error, agent_id, cancel_reason\n            FROM runs\n            ORDER BY started_at DESC, id DESC\n            LIMIT $1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "profile_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "source",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "status",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "started_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 5,
+        "name": "finished_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 6,
+        "name": "volume",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 7,
+        "name": "signals",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 8,
+        "name": "error",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "agent_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
+        "name": "cancel_reason",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "2e13048d7f1fe1b2dbc00f38fd649f8c9ace4b86081195707f79c5f6c586583f"
+}

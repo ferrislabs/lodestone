@@ -48,17 +48,11 @@ describe('resolve', () => {
 })
 
 describe('classify', () => {
-	const unions = [
-		'Matcher',
-		'VersionExtractor',
-		'DebtRule',
-		'Agent',
-		'SignalSource',
-	]
+	const unions = ['Matcher', 'VersionExtractor', 'DebtRule', 'Agent']
 
 	it('classifies every $def of the committed schema', () => {
 		const names = Object.keys(root.$defs ?? {})
-		expect(names.length).toBe(25)
+		expect(names.length).toBe(27)
 		for (const name of names) {
 			const node = classify(root, { $ref: `#/$defs/${name}` })
 			const expected = unions.includes(name)
@@ -162,19 +156,24 @@ describe('defaultValue', () => {
 				weights: { volume: 1, diversity: 1, environment: 1, strength: 1 },
 			},
 			contact_ranking: { preferred_local_parts: [], guess_local_parts: [] },
+			inspection: { enabled: true },
+			enrichment: {
+				custom: {
+					fingerprints: [],
+					excluded_products: [],
+					extra_subdomains: [],
+				},
+				highlight_keywords: [],
+			},
 			language: 'fr',
 		})
 		for (const key of root.required ?? []) expect(value).toHaveProperty(key)
 	})
 
 	it('fills schema defaults for keyword sources', () => {
-		const source = defaultValue(
-			root,
-			{ $ref: '#/$defs/SignalSource' },
-			PROFILE_HINTS,
-		)
-		expect(source).toEqual({
-			provider: 'certificate_transparency',
+		const certificates = def('Agent').oneOf?.[1] ?? {}
+		expect(defaultValue(root, certificates, PROFILE_HINTS)).toMatchObject({
+			type: 'certificates',
 			labels: [],
 		})
 		const search = def('Agent').oneOf?.[0] ?? {}
@@ -191,9 +190,8 @@ describe('defaultValue', () => {
 	it('starts unions on their first variant with the discriminator set', () => {
 		expect(
 			defaultValue(root, { $ref: '#/$defs/Matcher' }, PROFILE_HINTS, [
-				'agents',
-				0,
-				'source',
+				'enrichment',
+				'custom',
 				'fingerprints',
 				0,
 				'matchers',
@@ -209,9 +207,8 @@ describe('defaultValue', () => {
 		const version = def('Fingerprint').properties?.version ?? {}
 		expect(
 			enabledValue(root, version, PROFILE_HINTS, [
-				'agents',
-				0,
-				'source',
+				'enrichment',
+				'custom',
 				'fingerprints',
 				0,
 				'version',
@@ -229,16 +226,15 @@ describe('paths', () => {
 		)
 		expect(
 			formatPath([
-				'agents',
-				0,
-				'source',
+				'enrichment',
+				'custom',
 				'fingerprints',
 				0,
 				'matchers',
 				1,
 				'pattern',
 			]),
-		).toBe('agents[0].source.fingerprints[0].matchers[1].pattern')
+		).toBe('enrichment.custom.fingerprints[0].matchers[1].pattern')
 		expect(formatPath(['agents', 1, 'source', 'labels', 1])).toBe(
 			'agents[1].source.labels[1]',
 		)
@@ -302,31 +298,20 @@ describe('validateValue', () => {
 		})
 		const bad = setIn(
 			setIn(value, ['evidence', 'influence'], 3),
-			['agents'],
+			['enrichment', 'custom', 'fingerprints'],
 			[
 				{
-					type: 'signal',
 					id: 'x',
-					name: 'n',
-					enabled: true,
-					source: {
-						provider: 'http_probe',
-						fingerprints: [
-							{
-								id: 'x',
-								path: '/',
-								product: 'p',
-								matchers: [{ kind: 'status', equals: 70000 }],
-							},
-						],
-					},
+					path: '/',
+					product: 'p',
+					matchers: [{ kind: 'status', equals: 70000 }],
 				},
 			],
 		)
 		const paths = validateValue(root, root, bad).map((p) => p.path)
 		expect(paths).toContain('evidence.influence')
 		expect(paths).toContain(
-			'agents[0].source.fingerprints[0].matchers[0].equals',
+			'enrichment.custom.fingerprints[0].matchers[0].equals',
 		)
 	})
 

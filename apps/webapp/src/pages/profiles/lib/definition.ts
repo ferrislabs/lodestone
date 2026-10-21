@@ -1,11 +1,22 @@
 export const NEW_PROFILE_TEMPLATE = `{
-  "schema_version": 16,
+  "schema_version": 18,
   "identity": {
     "offer": "",
     "target_customer": ""
   },
   "language": "fr",
   "agents": [],
+  "inspection": {
+    "enabled": true
+  },
+  "enrichment": {
+    "custom": {
+      "fingerprints": [],
+      "excluded_products": [],
+      "extra_subdomains": []
+    },
+    "highlight_keywords": []
+  },
   "qualification_agents": [],
   "scoring_agents": [],
   "aggregator": {

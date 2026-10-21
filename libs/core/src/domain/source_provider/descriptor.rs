@@ -92,6 +92,8 @@ pub struct FieldSpec {
     pub default: Option<&'static str>,
     pub help: &'static str,
     pub options: &'static [&'static str],
+    pub range: Option<(i64, i64)>,
+    pub hosts: &'static [&'static str],
 }
 
 impl FieldSpec {
@@ -116,7 +118,17 @@ impl FieldSpec {
             default: None,
             help: "",
             options: &[],
+            range: None,
+            hosts: &[],
         }
+    }
+
+    pub const fn flag(key: &'static str, label: &'static str, required: bool) -> Self {
+        Self::of(key, label, FieldKind::Bool, required)
+    }
+
+    pub const fn number(key: &'static str, label: &'static str, required: bool) -> Self {
+        Self::of(key, label, FieldKind::Number, required)
     }
 
     pub const fn with_default(mut self, default: &'static str) -> Self {
@@ -132,6 +144,31 @@ impl FieldSpec {
     pub const fn with_options(mut self, options: &'static [&'static str]) -> Self {
         self.options = options;
         self
+    }
+
+    pub const fn with_range(mut self, min: i64, max: i64) -> Self {
+        self.range = Some((min, max));
+        self
+    }
+
+    pub const fn with_hosts(mut self, hosts: &'static [&'static str]) -> Self {
+        self.hosts = hosts;
+        self
+    }
+
+    pub fn is_attestation(&self) -> bool {
+        self.kind == FieldKind::Bool && self.required
+    }
+
+    pub fn accepts_host(&self, host: &str) -> bool {
+        let host = host.trim_end_matches('.').to_ascii_lowercase();
+        self.hosts.is_empty()
+            || self.hosts.iter().any(|allowed| {
+                host == *allowed
+                    || host
+                        .strip_suffix(allowed)
+                        .is_some_and(|rest| rest.ends_with('.'))
+            })
     }
 
     pub fn is_secret(&self) -> bool {

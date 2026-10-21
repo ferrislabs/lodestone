@@ -5,6 +5,10 @@ import { useCallback, useMemo, useState } from 'react'
 
 import { errorMessage, lodestoneApi } from '#/api/lodestone'
 import {
+	EVALUATION_POLL_MS,
+	evaluationMoves,
+} from '#/pages/leads/lib/evaluation'
+import {
 	filtersFromSearch,
 	groupingFromSearch,
 	type LeadFilters,
@@ -45,6 +49,10 @@ export function LeadsListFeature() {
 		}).queryOptions,
 		enabled: profileId !== undefined,
 		placeholderData: keepPreviousData,
+		refetchInterval: (current) =>
+			current.state.data?.data.some((lead) => evaluationMoves(lead.evaluation))
+				? EVALUATION_POLL_MS
+				: false,
 	})
 
 	const leads = leadsQuery.data?.data ?? NO_LEADS

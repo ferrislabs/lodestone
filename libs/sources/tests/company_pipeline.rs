@@ -1,9 +1,16 @@
 use std::{num::NonZeroU32, sync::Arc, time::Duration};
 
-use fetch::{FetchSettings, PoliteFetcher};
-use httpmock::{Method::GET, MockServer};
-use lodestone_core::{CompanyBuilder, DossierBuild, DossierState, NormalizedDomain};
-use sources::company::{CompanyResearch, CompanySettings};
+use common::RobotsPolicy;
+use fetch::{FetchSettings, PoliteFetcher, RobotsGate};
+use httpmock::{Method::GET, Mock, MockServer};
+use lodestone_core::{
+    CompanyBuilder, CompanyPage, DossierBuild, DossierState, LinkRejection, NormalizedDomain,
+    PAGE_STORE_CHARS, PageVerifier,
+};
+use sources::{
+    company::{CompanyResearch, CompanySettings},
+    link_check::BASELINE_PATH_PREFIX,
+};
 use url::Url;
 
 const SIREN: &str = "123456782";
@@ -45,10 +52,12 @@ fn domain() -> NormalizedDomain {
 }
 
 fn html(body: &str) -> String {
-    format!("<html><body>{body}</body></html>")
+    format!(
+        "<html><body>{body}<footer>Acme, pièces mécaniques de précision à Lyon</footer></body></html>"
+    )
 }
 
-fn page<'a>(server: &'a MockServer, path: &str, body: &str) -> httpmock::Mock<'a> {
+fn page<'a>(server: &'a MockServer, path: &str, body: &str) -> Mock<'a> {
     let content = html(body);
     let path = path.to_owned();
     server.mock(|when, then| {
@@ -59,7 +68,7 @@ fn page<'a>(server: &'a MockServer, path: &str, body: &str) -> httpmock::Mock<'a
     })
 }
 
-fn register_answer(register: &MockServer) -> httpmock::Mock<'_> {
+fn register_answer(register: &MockServer) -> Mock<'_> {
     register.mock(|when, then| {
         when.method(GET)
             .path("/search")
@@ -291,7 +300,211 @@ async fn a_siren_past_the_stored_text_budget_is_still_found() {
         .iter()
         .find(|page| page.url.ends_with("/mentions-legales"))
         .unwrap();
-    assert_eq!(legal.text.chars().count(), lodestone_core::PAGE_STORE_CHARS);
+    assert_eq!(legal.text.chars().count(), PAGE_STORE_CHARS);
     assert!(!legal.text.contains("123 456 782"));
     lookup.assert_hits(1);
+}
+
+const NOTION_MISSING: &str = "<html><head><title>Notion</title></head><body><h1>Cette page est introuvable</h1><p>Retournez à l'accueil de cet espace de travail.</p></body></html>";
+const PARKED_MISSING: &str = "<html><head><title>Jawagg</title></head><body><h1>Oups</h1><p>Le contenu demandé a peut-être été déplacé, retournez à l'accueil pour continuer votre visite.</p></body></html>";
+const GUESSED: [&str; 4] = ["/mentions-legales", "/legal", "/a-propos", "/about"];
+
+fn raw<'a>(server: &'a MockServer, path: &str, body: &str) -> Mock<'a> {
+    let path = path.to_owned();
+    let body = body.to_owned();
+    server.mock(|when, then| {
+        when.method(GET).path(path);
+        then.status(200)
+            .header("content-type", "text/html; charset=utf-8")
+            .body(body);
+    })
+}
+
+fn missing_everywhere<'a>(server: &'a MockServer, body: &str) -> Mock<'a> {
+    let body = body.to_owned();
+    server.mock(|when, then| {
+        when.method(GET).path_contains(BASELINE_PATH_PREFIX);
+        then.status(200)
+            .header("content-type", "text/html; charset=utf-8")
+            .body(body);
+    })
+}
+
+fn urls(build: &DossierBuild) -> Vec<String> {
+    build.pages.iter().map(|page| page.url.clone()).collect()
+}
+
+#[tokio::test]
+async fn a_site_answering_200_with_a_not_found_page_keeps_only_its_home_page() {
+    let site = MockServer::start_async().await;
+    let register = MockServer::start_async().await;
+    page(
+        &site,
+        "/",
+        "<h1>Jawagg</h1><p>Le studio qui conçoit vos jeux.</p>",
+    );
+    for path in GUESSED {
+        raw(&site, path, NOTION_MISSING);
+    }
+    let baseline = missing_everywhere(&site, NOTION_MISSING);
+    let build = built(&research(&site, &register, 5)).await;
+    assert_eq!(build.state(), DossierState::Partial);
+    assert_eq!(urls(&build), [site.url("/")]);
+    assert_eq!(build.unconfirmed.soft_404_marker, 4);
+    assert_eq!(build.unconfirmed.total(), 4);
+    baseline.assert_hits(0);
+}
+
+#[tokio::test]
+async fn pages_identical_to_the_missing_page_of_the_site_are_dropped_and_real_ones_kept() {
+    let site = MockServer::start_async().await;
+    let register = MockServer::start_async().await;
+    page(
+        &site,
+        "/",
+        r#"<h1>Jawagg</h1><a href="/qui-sommes-nous">Qui sommes-nous</a>"#,
+    );
+    for path in ["/mentions-legales", "/legal"] {
+        raw(&site, path, PARKED_MISSING);
+    }
+    page(
+        &site,
+        "/qui-sommes-nous",
+        "<p>Une équipe de douze personnes installée à Nantes depuis 2015.</p>",
+    );
+    let baseline = missing_everywhere(&site, PARKED_MISSING);
+    let build = built(&research(&site, &register, 5)).await;
+    assert_eq!(urls(&build), [site.url("/"), site.url("/qui-sommes-nous")]);
+    assert_eq!(build.unconfirmed.soft_404_baseline, 2);
+    baseline.assert_hits(1);
+}
+
+#[tokio::test]
+async fn guessed_paths_redirected_home_missing_failing_or_empty_are_not_kept() {
+    let site = MockServer::start_async().await;
+    let register = MockServer::start_async().await;
+    let home = page(&site, "/", "<h1>Acme</h1>");
+    site.mock(|when, then| {
+        when.method(GET).path("/mentions-legales");
+        then.status(301).header("location", "/");
+    });
+    site.mock(|when, then| {
+        when.method(GET).path("/legal");
+        then.status(500);
+    });
+    raw(
+        &site,
+        "/about",
+        "<html><body><div id=\"app\"></div></body></html>",
+    );
+    let build = built(&research(&site, &register, 5)).await;
+    assert_eq!(urls(&build), [site.url("/")]);
+    assert_eq!(build.unconfirmed.redirected_home, 1);
+    assert_eq!(build.unconfirmed.status, 2);
+    assert_eq!(build.unconfirmed.empty_content, 1);
+    home.assert_hits(2);
+}
+
+#[tokio::test]
+async fn a_page_reached_twice_through_redirects_is_kept_once() {
+    let site = MockServer::start_async().await;
+    let register = MockServer::start_async().await;
+    page(&site, "/", "<h1>Acme</h1>");
+    page(
+        &site,
+        "/mentions-legales",
+        "<p>Editeur : Acme SAS, Lyon.</p>",
+    );
+    site.mock(|when, then| {
+        when.method(GET).path("/legal");
+        then.status(301).header("location", "/mentions-legales");
+    });
+    let build = built(&research(&site, &register, 5)).await;
+    assert_eq!(urls(&build), [site.url("/"), site.url("/mentions-legales")]);
+}
+
+#[tokio::test]
+async fn a_javascript_only_home_page_makes_the_site_unusable() {
+    let site = MockServer::start_async().await;
+    let register = MockServer::start_async().await;
+    raw(
+        &site,
+        "/",
+        r#"<html><head><title>Acme</title><script src="/app.js"></script></head><body><div id="root"></div></body></html>"#,
+    );
+    let build = built(&research(&site, &register, 5)).await;
+    assert_eq!(build.state(), DossierState::Unreachable);
+    assert!(build.failure.as_deref().unwrap().contains("empty_content"));
+    assert_eq!(build.unconfirmed.empty_content, 1);
+}
+
+#[tokio::test]
+async fn the_review_of_stored_pages_rejects_only_the_unconfirmed_ones() {
+    let site = MockServer::start_async().await;
+    let register = MockServer::start_async().await;
+    page(&site, "/", "<h1>Jawagg</h1>");
+    raw(&site, "/mentions-legales", NOTION_MISSING);
+    page(
+        &site,
+        "/a-propos",
+        "<p>Une équipe de douze personnes à Nantes.</p>",
+    );
+    site.mock(|when, then| {
+        when.method(GET).path("/legal");
+        then.status(404);
+    });
+    let stored: Vec<CompanyPage> = ["/", "/mentions-legales", "/legal", "/a-propos"]
+        .iter()
+        .map(|path| CompanyPage {
+            url: site.url(*path),
+            text: "texte".to_owned(),
+        })
+        .collect();
+    let review = research(&site, &register, 5).review(&stored).await.unwrap();
+    assert_eq!(
+        review.rejected,
+        [
+            (site.url("/mentions-legales"), LinkRejection::Soft404Marker),
+            (site.url("/legal"), LinkRejection::Status),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn with_the_ignore_policy_a_site_refused_by_robots_txt_is_read() {
+    let site = MockServer::start_async().await;
+    let register = MockServer::start_async().await;
+    let robots = site.mock(|when, then| {
+        when.method(GET).path("/robots.txt");
+        then.status(200).body("User-agent: *\nDisallow: /\n");
+    });
+    let home = page(
+        &site,
+        "/",
+        "<a href=\"/mentions-legales\">Mentions légales</a>",
+    );
+    page(&site, "/mentions-legales", "<p>SIRET 123 456 782 00019</p>");
+    register_answer(&register);
+    let fetcher =
+        PoliteFetcher::clone(&fetcher()).with_robots_gate(RobotsGate::new(RobotsPolicy::Ignore));
+    let research = CompanyResearch::new(
+        Arc::new(fetcher),
+        CompanySettings {
+            entreprises_url: Url::parse(&register.url("/search")).unwrap().into(),
+            max_pages: 5,
+            max_rate_limit_wait: Duration::from_secs(1),
+            origin: Some(Url::parse(&site.base_url()).unwrap()),
+        },
+    );
+    let build = built(&research).await;
+    assert!(build.reachable);
+    assert!(!build.pages.is_empty());
+    assert!(
+        build
+            .failure
+            .as_deref()
+            .is_none_or(|failure| !failure.contains("robots"))
+    );
+    home.assert_hits(1);
+    robots.assert_hits(0);
 }

@@ -13,7 +13,8 @@ use axum::{
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use clap::Parser;
 use common::{EncryptionKey, Secret};
-use fetch::{FetchSettings, PoliteFetcher};
+use dns::{DnsSettings, HickoryResolver};
+use fetch::{FetchSettings, PoliteFetcher, RobotsGate};
 use handlers::AppState;
 use http::{
     Method, Request, StatusCode,
@@ -21,13 +22,21 @@ use http::{
 };
 use httpmock::{Method::GET, MockServer};
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
-use lodestone_core::{LodestoneUseCase, infrastructure::crypto::AesGcmCipher};
+use lodestone_core::{LodestoneUseCase, RequalifyPolicy, infrastructure::crypto::AesGcmCipher};
 use rate_limit::{InMemoryRateLimiter, Quota, RateLimitService};
 use rsa::{RsaPrivateKey, pkcs1::EncodeRsaPrivateKey, rand_core::OsRng, traits::PublicKeyParts};
 use serde_json::{Value, json};
 use source_providers::ProviderEngine;
+use sources::{
+    bodacc::BodaccSettings,
+    company::CompanySettings,
+    decp::holders::HolderSettings,
+    ecosystem::{EcosystemConfig, EcosystemModules, WebsiteSettings},
+    endpoint::Endpoint,
+};
 use sqlx::PgPool;
 use tower::ServiceExt;
+use url::Url;
 
 pub const KID: &str = "lodestone-test-key";
 pub const KEY: &str = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
@@ -88,6 +97,20 @@ pub fn client_claims(issuer: &str, exp: i64) -> Value {
     })
 }
 
+fn test_fetcher() -> PoliteFetcher {
+    PoliteFetcher::new(FetchSettings {
+        contact: "bot@example.com".to_owned(),
+        requests_per_host_per_minute: NonZeroU32::MIN.saturating_add(9_999),
+        request_timeout: Duration::from_secs(5),
+        max_body_bytes: 64 * 1024,
+        max_redirects: 3,
+        robots_ttl: Duration::from_secs(3600),
+        source_quotas: Vec::new(),
+        allow_private_targets: true,
+    })
+    .expect("fetcher")
+}
+
 pub struct Harness {
     pub server: MockServer,
     pub key: TestKey,
@@ -121,28 +144,54 @@ impl Harness {
         ])
         .expect("parse default args");
         let repository = FerrisKeyRepository::new(server.base_url(), Some("lodestone".to_owned()));
+        let requalify = RequalifyPolicy::from_std(
+            args.enrichment.requalify_debounce(),
+            args.enrichment.requalify_max_per_day,
+        );
+        let usecase = LodestoneUseCase::new(pool).with_requalify_policy(requalify);
+        let ecosystem = EcosystemModules::new(
+            Arc::new(test_fetcher()),
+            Arc::new(HickoryResolver::from_system(DnsSettings::default()).expect("resolver")),
+            EcosystemConfig {
+                company: CompanySettings {
+                    entreprises_url: Endpoint::from(
+                        Url::parse(&format!("{}/entreprises", server.base_url())).expect("url"),
+                    ),
+                    max_pages: 2,
+                    max_rate_limit_wait: Duration::from_secs(1),
+                    origin: Url::parse(&server.base_url()).ok(),
+                },
+                bodacc: BodaccSettings {
+                    dataset_url: Endpoint::from(
+                        Url::parse(&format!("{}/bodacc/annonces", server.base_url())).expect("url"),
+                    ),
+                    max_rate_limit_wait: Duration::from_secs(1),
+                },
+                holders: HolderSettings {
+                    holders_url: Endpoint::from(
+                        Url::parse(&format!("{}/decp/holders/", server.base_url())).expect("url"),
+                    ),
+                    max_rate_limit_wait: Duration::from_secs(1),
+                },
+                website: WebsiteSettings {
+                    max_rate_limit_wait: Duration::from_secs(1),
+                    origin: Url::parse(&server.base_url()).ok(),
+                },
+                max_career_paths: 1,
+                max_rate_limit_wait: Duration::from_secs(1),
+            },
+        );
         let state = AppState {
             args: Arc::new(args),
             auth: AuthService::new(repository),
-            usecase: LodestoneUseCase::new(pool),
+            usecase,
             rate_limit: RateLimitService::new(InMemoryRateLimiter::new()),
             rate_limit_quota: Quota::per_minute(1000),
             providers: Arc::new(
-                ProviderEngine::new(Arc::new(
-                    PoliteFetcher::new(FetchSettings {
-                        contact: "bot@example.com".to_owned(),
-                        requests_per_host_per_minute: NonZeroU32::MIN.saturating_add(9_999),
-                        request_timeout: Duration::from_secs(5),
-                        max_body_bytes: 64 * 1024,
-                        max_redirects: 3,
-                        robots_ttl: Duration::from_secs(3600),
-                        source_quotas: Vec::new(),
-                        allow_private_targets: true,
-                    })
-                    .expect("fetcher"),
-                ))
-                .with_allow_http(true),
+                ProviderEngine::new(Arc::new(test_fetcher())).with_allow_http(true),
             ),
+            ecosystem: Arc::new(ecosystem),
+            robots: RobotsGate::default(),
             cipher: Arc::new(
                 AesGcmCipher::new(&EncryptionKey::from_base64(&Secret::new(KEY)).expect("key"))
                     .expect("cipher"),

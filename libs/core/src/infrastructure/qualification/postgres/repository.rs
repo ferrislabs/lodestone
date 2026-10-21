@@ -3,15 +3,19 @@ use std::collections::HashMap;
 use chrono::{DateTime, Utc};
 use common::CoreError;
 use lodestone_macros::repository;
+use sqlx::{query, query_scalar};
 
 use crate::{
-    Lead, LeadId, ProfileId, ProviderId, RevisionNumber,
-    domain::qualification::{
-        AGENT_ERROR_MAX_CHARS, AGENT_FAILED_AFTER, AWAITING_SCORING_REASON, AgentCallFailure,
-        AgentFailure, AgentKind, Completion, EvidenceStrength, Exclusion, LeadScoring,
-        QualificationResult, Rescoring, SCORING_MAX_AGE_HOURS, SCORING_VERSION,
-        SUMMARY_ERROR_MAX_CHARS, SummaryState, agent_retry_delay, ports::QualificationRepository,
-        summary_retry_delay,
+    Lead, LeadId, NormalizedDomain, ProfileId, ProviderId, RevisionNumber,
+    domain::{
+        enrichment::{CERTIFICATE_SEEN_KIND, CONTACT_SOURCES},
+        qualification::{
+            AGENT_ERROR_MAX_CHARS, AGENT_FAILED_AFTER, AWAITING_SCORING_REASON, AgentCallFailure,
+            AgentFailure, AgentKind, Completion, DueGates, EvidenceStrength, Exclusion,
+            LeadScoring, QualificationResult, Rescoring, SCORING_MAX_AGE_HOURS, SCORING_VERSION,
+            SUMMARY_ERROR_MAX_CHARS, SummaryState, agent_retry_delay,
+            ports::QualificationRepository, summary_retry_delay,
+        },
     },
     infrastructure::{
         lead::postgres::{model::LeadRow, repository::NOT_SUPPRESSED},
@@ -74,6 +78,10 @@ fn exclusions_json(exclusions: &[Exclusion]) -> Result<serde_json::Value, CoreEr
     serde_json::to_value(exclusions).map_err(|error| CoreError::Internal(error.to_string()))
 }
 
+fn daily_cap(gates: DueGates) -> i32 {
+    i32::try_from(gates.requalify_max_per_day).unwrap_or(i32::MAX)
+}
+
 fn revision_number(revision: RevisionNumber) -> Result<i32, CoreError> {
     i32::try_from(revision.get())
         .map_err(|_| CoreError::Internal("profile revision number out of range".to_owned()))
@@ -82,6 +90,7 @@ fn revision_number(revision: RevisionNumber) -> Result<i32, CoreError> {
 const DUE: &str = r#"
     FROM leads
     LEFT JOIN lead_qualification_state state ON state.lead_id = leads.id
+    LEFT JOIN lead_requalifications requalification ON requalification.lead_id = leads.id
     WHERE leads.profile_id = $1
       AND EXISTS (SELECT 1 FROM signals WHERE signals.lead_id = leads.id)
       AND (
@@ -91,22 +100,40 @@ const DUE: &str = r#"
               SELECT 1 FROM signals
               WHERE signals.lead_id = leads.id AND NOT (signals.source = ANY (state.sources))
           )
-          OR EXISTS (
-              SELECT 1 FROM company_dossiers dossier
-              WHERE dossier.domain = leads.domain
-                AND dossier.content_at IS NOT NULL
-                AND (state.dossier_at IS NULL OR state.dossier_at < dossier.content_at)
-          )
-      )
-      AND (
-          $3::timestamptz IS NULL
-          OR leads.created_at <= $3
-          OR EXISTS (
-              SELECT 1 FROM company_dossiers dossier
-              WHERE dossier.domain = leads.domain AND dossier.state <> 'pending'
+          OR (
+              requalification.requalify_after <= $4
+              AND (
+                  requalification.forced
+                  OR requalification.counted_on IS DISTINCT FROM ($4::timestamptz AT TIME ZONE 'UTC')::date
+                  OR requalification.daily_count < $3
+              )
           )
       )
 "#;
+
+fn certificate_only_excluded() -> String {
+    let contact_sources = CONTACT_SOURCES
+        .iter()
+        .map(|source| format!("'{}'", source.as_str()))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        r#"
+      AND NOT (
+          EXISTS (
+              SELECT 1 FROM signals
+              WHERE signals.lead_id = leads.id AND signals.kind = '{CERTIFICATE_SEEN_KIND}'
+          )
+          AND NOT EXISTS (
+              SELECT 1 FROM signals
+              WHERE signals.lead_id = leads.id
+                AND signals.kind <> '{CERTIFICATE_SEEN_KIND}'
+                AND signals.source NOT IN ({contact_sources})
+          )
+      )
+"#
+    )
+}
 
 const QUALIFICATION_BACKOFF: &str = r#"
       AND NOT EXISTS (
@@ -160,18 +187,19 @@ impl<'tx> QualificationRepository for PgQualificationRepository<'tx> {
         profile_id: ProfileId,
         revision: RevisionNumber,
         limit: u32,
-        dossier_gate: Option<DateTime<Utc>>,
+        gates: DueGates,
         now: DateTime<Utc>,
     ) -> Result<Vec<Lead>, CoreError> {
         let revision = revision_number(revision)?;
+        let evidence = certificate_only_excluded();
         let query = format!(
-            "SELECT leads.id, leads.profile_id, leads.domain, leads.status, leads.score, leads.confidence, leads.verdict, leads.llm_score, leads.qualified_at, leads.first_seen_at, leads.last_seen_at, leads.updated_at {DUE}{QUALIFICATION_BACKOFF}{NOT_SUPPRESSED} ORDER BY leads.first_seen_at ASC, leads.id ASC LIMIT $5"
+            "SELECT leads.id, leads.profile_id, leads.domain, leads.status, leads.score, leads.confidence, leads.verdict, leads.llm_score, leads.qualified_at, leads.first_seen_at, leads.last_seen_at, leads.updated_at {DUE}{evidence}{QUALIFICATION_BACKOFF}{NOT_SUPPRESSED} ORDER BY (state.lead_id IS NULL) DESC, leads.first_seen_at ASC, leads.id ASC LIMIT $5"
         );
         let mut tx = self.tx.lock().await;
         let rows = sqlx::query_as::<_, LeadRow>(&query)
             .bind(profile_id.0)
             .bind(revision)
-            .bind(dossier_gate)
+            .bind(daily_cap(gates))
             .bind(now)
             .bind(i64::from(limit))
             .fetch_all(&mut ***tx)
@@ -185,16 +213,18 @@ impl<'tx> QualificationRepository for PgQualificationRepository<'tx> {
         &mut self,
         profile_id: ProfileId,
         revision: RevisionNumber,
-        dossier_gate: Option<DateTime<Utc>>,
+        gates: DueGates,
         now: DateTime<Utc>,
     ) -> Result<u64, CoreError> {
         let revision = revision_number(revision)?;
-        let query = format!("SELECT COUNT(*) {DUE}{QUALIFICATION_BACKOFF}{NOT_SUPPRESSED}");
+        let evidence = certificate_only_excluded();
+        let query =
+            format!("SELECT COUNT(*) {DUE}{evidence}{QUALIFICATION_BACKOFF}{NOT_SUPPRESSED}");
         let mut tx = self.tx.lock().await;
         let count: i64 = sqlx::query_scalar(&query)
             .bind(profile_id.0)
             .bind(revision)
-            .bind(dossier_gate)
+            .bind(daily_cap(gates))
             .bind(now)
             .fetch_one(&mut ***tx)
             .await
@@ -261,7 +291,57 @@ impl<'tx> QualificationRepository for PgQualificationRepository<'tx> {
         .execute(&mut ***tx)
         .await
         .map_err(map_sqlx_error)?;
-        Ok(result.rows_affected() == 1)
+        let summarised = result.rows_affected() == 1;
+        if summarised {
+            query("UPDATE lead_requalifications SET fresh_calls = FALSE WHERE lead_id = $1")
+                .bind(lead_id.0)
+                .execute(&mut ***tx)
+                .await
+                .map_err(map_sqlx_error)?;
+        }
+        Ok(summarised)
+    }
+
+    #[tracing::instrument(skip(self), fields(db.system = "postgresql", db.operation = "select", db.table = "lead_requalifications", lead.id = %lead_id), err)]
+    async fn fresh_calls(&mut self, lead_id: LeadId) -> Result<bool, CoreError> {
+        let mut tx = self.tx.lock().await;
+        let fresh: Option<bool> =
+            query_scalar("SELECT fresh_calls FROM lead_requalifications WHERE lead_id = $1")
+                .bind(lead_id.0)
+                .fetch_optional(&mut ***tx)
+                .await
+                .map_err(map_sqlx_error)?;
+        Ok(fresh.unwrap_or(false))
+    }
+
+    #[tracing::instrument(skip(self), fields(db.system = "postgresql", db.operation = "upsert", db.table = "lead_requalifications"), err)]
+    async fn backfill_dossier_requalifications(
+        &mut self,
+        after: DateTime<Utc>,
+        at: DateTime<Utc>,
+    ) -> Result<u64, CoreError> {
+        let mut tx = self.tx.lock().await;
+        let result = query(
+            r#"
+            INSERT INTO lead_requalifications (lead_id, requalify_after, marked_at)
+            SELECT leads.id, $1, $2
+            FROM leads
+            JOIN company_dossiers dossier ON dossier.domain = leads.domain
+            WHERE leads.qualified_at IS NOT NULL
+              AND dossier.content_at IS NOT NULL
+              AND dossier.content_at > leads.qualified_at
+            ON CONFLICT (lead_id) DO UPDATE SET
+                requalify_after = EXCLUDED.requalify_after,
+                marked_at = EXCLUDED.marked_at
+            WHERE lead_requalifications.requalify_after IS NULL
+            "#,
+        )
+        .bind(after)
+        .bind(at)
+        .execute(&mut ***tx)
+        .await
+        .map_err(map_sqlx_error)?;
+        Ok(result.rows_affected())
     }
 
     #[tracing::instrument(skip(self, reason), fields(db.system = "postgresql", db.operation = "update", db.table = "lead_qualification_state", lead.id = %lead_id), err)]
@@ -499,6 +579,13 @@ impl<'tx> QualificationRepository for PgQualificationRepository<'tx> {
             .map(revision_number)
             .transpose()?;
         let mut tx = self.tx.lock().await;
+        let evaluated_before: bool = query_scalar(
+            "SELECT EXISTS (SELECT 1 FROM lead_qualification_state WHERE lead_id = $1)",
+        )
+        .bind(completion.lead_id.0)
+        .fetch_one(&mut ***tx)
+        .await
+        .map_err(map_sqlx_error)?;
         sqlx::query(
             r#"
             INSERT INTO lead_qualification_state (
@@ -553,6 +640,88 @@ impl<'tx> QualificationRepository for PgQualificationRepository<'tx> {
             .execute(&mut ***tx)
             .await
             .map_err(map_sqlx_error)?;
+        query(
+            r#"
+            UPDATE lead_requalifications SET
+                daily_count = CASE
+                    WHEN $3 AND NOT forced AND requalify_after <= $2 THEN
+                        CASE WHEN counted_on = ($4::timestamptz AT TIME ZONE 'UTC')::date
+                            THEN daily_count + 1 ELSE 1 END
+                    ELSE daily_count
+                END,
+                counted_on = CASE
+                    WHEN $3 AND NOT forced AND requalify_after <= $2
+                        THEN ($4::timestamptz AT TIME ZONE 'UTC')::date
+                    ELSE counted_on
+                END,
+                requalify_after = NULL,
+                marked_at = NULL,
+                forced = FALSE
+            WHERE lead_id = $1 AND requalify_after IS NOT NULL AND marked_at <= $2
+            "#,
+        )
+        .bind(completion.lead_id.0)
+        .bind(completion.read_at)
+        .bind(evaluated_before)
+        .bind(completion.at)
+        .execute(&mut ***tx)
+        .await
+        .map_err(map_sqlx_error)?;
+        Ok(())
+    }
+
+    #[tracing::instrument(skip(self), fields(db.system = "postgresql", db.operation = "upsert", db.table = "lead_requalifications", domain = %domain), err)]
+    async fn mark_requalification(
+        &mut self,
+        domain: &NormalizedDomain,
+        after: DateTime<Utc>,
+        at: DateTime<Utc>,
+    ) -> Result<u64, CoreError> {
+        let mut tx = self.tx.lock().await;
+        let result = query(
+            r#"
+            INSERT INTO lead_requalifications (lead_id, requalify_after, marked_at)
+            SELECT leads.id, $2, $3 FROM leads WHERE leads.domain = $1 ORDER BY leads.id
+            ON CONFLICT (lead_id) DO UPDATE SET
+                requalify_after = CASE
+                    WHEN lead_requalifications.forced THEN lead_requalifications.requalify_after
+                    ELSE EXCLUDED.requalify_after
+                END,
+                marked_at = EXCLUDED.marked_at
+            "#,
+        )
+        .bind(domain.as_str())
+        .bind(after)
+        .bind(at)
+        .execute(&mut ***tx)
+        .await
+        .map_err(map_sqlx_error)?;
+        Ok(result.rows_affected())
+    }
+
+    #[tracing::instrument(skip(self), fields(db.system = "postgresql", db.operation = "upsert", db.table = "lead_requalifications", lead.id = %lead_id), err)]
+    async fn request_reevaluation(
+        &mut self,
+        lead_id: LeadId,
+        at: DateTime<Utc>,
+    ) -> Result<(), CoreError> {
+        let mut tx = self.tx.lock().await;
+        query(
+            r#"
+            INSERT INTO lead_requalifications (lead_id, requalify_after, marked_at, forced, fresh_calls)
+            VALUES ($1, $2, $2, TRUE, TRUE)
+            ON CONFLICT (lead_id) DO UPDATE SET
+                requalify_after = EXCLUDED.requalify_after,
+                marked_at = EXCLUDED.marked_at,
+                forced = TRUE,
+                fresh_calls = TRUE
+            "#,
+        )
+        .bind(lead_id.0)
+        .bind(at)
+        .execute(&mut ***tx)
+        .await
+        .map_err(map_sqlx_error)?;
         Ok(())
     }
 

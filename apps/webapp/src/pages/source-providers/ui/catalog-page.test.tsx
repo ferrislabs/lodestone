@@ -24,8 +24,14 @@ const PROVIDERS = [
 	}),
 	summary({
 		key: 'ats',
-		name: 'ATS',
-		category: 'jobs_and_missions',
+		name: "Offres d'emploi de l'entreprise",
+		description:
+			"Lit les offres d'emploi d'une entreprise déjà connue, sur sa page carrières ou sa plateforme de recrutement.",
+		category: 'companies',
+		capabilities: {
+			keyword_search: false,
+			filters: { remote: false, countries: false, contract: false },
+		},
 		auth_kind: 'api_key',
 		status: 'untested',
 	}),
@@ -57,6 +63,7 @@ function renderPage(
 		onReset: vi.fn(),
 		onOpen: vi.fn(),
 		onSelectTab: vi.fn(),
+		onOpenRules: vi.fn(),
 		...overrides,
 	}
 	render(<CatalogPage {...props} />)
@@ -69,6 +76,12 @@ describe('CatalogPage', () => {
 		expect(
 			screen.getByRole('heading', { name: 'Catalogue des sources', level: 1 }),
 		).toBeTruthy()
+	})
+
+	it('opens the collection rules from the header', () => {
+		const props = renderPage()
+		fireEvent.click(screen.getByRole('button', { name: 'Règles de collecte' }))
+		expect(props.onOpenRules).toHaveBeenCalled()
 	})
 
 	it('renders one grid of all the cards that fills the row', () => {
@@ -88,7 +101,7 @@ describe('CatalogPage', () => {
 		expect(within(group).getByRole('button', { name: 'Tous 4' })).toBeTruthy()
 		expect(
 			within(group)
-				.getByRole('button', { name: 'Offres et missions 2' })
+				.getByRole('button', { name: 'Offres et missions 1' })
 				.getAttribute('aria-pressed'),
 		).toBe('true')
 		expect(
@@ -97,16 +110,30 @@ describe('CatalogPage', () => {
 				.getAttribute('aria-pressed'),
 		).toBe('false')
 		expect(
-			within(group).queryByRole('button', { name: /Entreprises/ }),
-		).toBeNull()
-		expect(screen.getAllByTestId('provider-card')).toHaveLength(2)
+			within(group).getByRole('button', { name: 'Entreprises 1' }),
+		).toBeTruthy()
+		expect(screen.getAllByTestId('provider-card')).toHaveLength(1)
+	})
+
+	it('lists the company job offers under Entreprises with their new name', () => {
+		renderPage({ category: 'companies' })
+		const cards = screen.getAllByTestId('provider-card')
+		expect(cards).toHaveLength(1)
+		const card = cards[0] as HTMLElement
+		expect(
+			within(card).getByText("Offres d'emploi de l'entreprise"),
+		).toBeTruthy()
+		expect(
+			within(card).getByRole('button', { name: 'Filtrer par Entreprises' }),
+		).toBeTruthy()
+		expect(within(card).queryByText(/Pages carrières/)).toBeNull()
 	})
 
 	it('toggles a category chip and resets with Tous', () => {
 		const props = renderPage({ category: 'jobs_and_missions' })
 		const group = screen.getByRole('group', { name: 'Filtrer par type' })
 		fireEvent.click(
-			within(group).getByRole('button', { name: 'Offres et missions 2' }),
+			within(group).getByRole('button', { name: 'Offres et missions 1' }),
 		)
 		expect(props.onCategoryChange).toHaveBeenLastCalledWith(null)
 		fireEvent.click(
@@ -171,7 +198,9 @@ describe('CatalogPage', () => {
 			).className
 		expect(border(/^BOAMP/)).toContain('border-dashed')
 		expect(border(/^France Travail/)).toContain('border-red-500')
-		expect(border(/^ATS/)).toContain('border-amber-500')
+		expect(border(/^Offres d'emploi de l'entreprise/)).toContain(
+			'border-amber-500',
+		)
 		expect(border(/^Certificats/)).toContain('border-emerald-500')
 	})
 
@@ -216,7 +245,7 @@ describe('CatalogPage', () => {
 	it('shows a lucide icon when there is no logo', () => {
 		renderPage()
 		const card = screen
-			.getByRole('link', { name: /^ATS/ })
+			.getByRole('link', { name: /^Offres d'emploi de l'entreprise/ })
 			.closest('[data-testid="provider-card"]') as HTMLElement
 		expect(within(card).queryByRole('img')).toBeNull()
 		expect(card.querySelector('svg.lucide')).toBeTruthy()

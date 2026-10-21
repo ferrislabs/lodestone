@@ -17,6 +17,8 @@ use url::Url;
 
 use crate::{buyer_domain::domain_of_url, endpoint::Endpoint, search::search_agents};
 
+pub mod holders;
+
 pub const DATASET_API_URL: &str = "https://www.data.gouv.fr/api/1/datasets/donnees-essentielles-de-la-commande-publique-fichiers-consolides/";
 pub const ANNUAIRE_URL: &str = "https://api-lannuaire.service-public.fr/api/explore/v2.1/catalog/datasets/api-lannuaire-administration/records";
 pub const ENTREPRISES_URL: &str = "https://recherche-entreprises.api.gouv.fr/search";

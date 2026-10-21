@@ -1,6 +1,7 @@
 use chrono::{DateTime, Utc};
 
 use crate::domain::{
+    agent_work::CancelReason,
     lead::{str_enum, uuid_id},
     profile::{ProfileId, definition::AgentId},
     values::SourceName,
@@ -15,12 +16,14 @@ pub enum RunStatus {
     Running,
     Succeeded,
     Failed,
+    Cancelled,
 }
 
 str_enum!(RunStatus {
     Running => "running",
     Succeeded => "succeeded",
     Failed => "failed",
+    Cancelled => "cancelled",
 });
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -34,6 +37,11 @@ pub enum RunOutcome {
         signals: u64,
         error: String,
     },
+    Cancelled {
+        volume: u64,
+        signals: u64,
+        reason: CancelReason,
+    },
 }
 
 impl RunOutcome {
@@ -41,6 +49,14 @@ impl RunOutcome {
         match self {
             Self::Succeeded { .. } => RunStatus::Succeeded,
             Self::Failed { .. } => RunStatus::Failed,
+            Self::Cancelled { .. } => RunStatus::Cancelled,
+        }
+    }
+
+    pub fn cancel_reason(&self) -> Option<CancelReason> {
+        match self {
+            Self::Cancelled { reason, .. } => Some(*reason),
+            Self::Succeeded { .. } | Self::Failed { .. } => None,
         }
     }
 }
@@ -57,6 +73,7 @@ pub struct Run {
     pub signals: u64,
     pub error: Option<String>,
     pub agent: Option<AgentId>,
+    pub cancel_reason: Option<CancelReason>,
 }
 
 impl Run {
@@ -78,6 +95,7 @@ impl Run {
             volume: 0,
             signals: 0,
             error: None,
+            cancel_reason: None,
         }
     }
 }
@@ -105,11 +123,23 @@ mod tests {
             .status(),
             RunStatus::Failed
         );
+        let cancelled = RunOutcome::Cancelled {
+            volume: 2,
+            signals: 1,
+            reason: CancelReason::AgentRemoved,
+        };
+        assert_eq!(cancelled.status(), RunStatus::Cancelled);
+        assert_eq!(cancelled.cancel_reason(), Some(CancelReason::AgentRemoved));
     }
 
     #[test]
     fn statuses_round_trip_through_text() {
-        for status in [RunStatus::Running, RunStatus::Succeeded, RunStatus::Failed] {
+        for status in [
+            RunStatus::Running,
+            RunStatus::Succeeded,
+            RunStatus::Failed,
+            RunStatus::Cancelled,
+        ] {
             assert_eq!(RunStatus::parse(status.as_str()), Some(status));
         }
     }

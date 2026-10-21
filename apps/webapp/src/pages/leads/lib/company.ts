@@ -5,13 +5,19 @@ import type {
 	SiblingLead,
 } from './types'
 
-export type CompanyState = 'pending' | 'complete' | 'partial' | 'unreachable'
+export type CompanyState =
+	| 'pending'
+	| 'complete'
+	| 'partial'
+	| 'unreachable'
+	| 'hosting_platform'
 
 const STATE_LABELS: Readonly<Record<CompanyState, string>> = {
 	pending: 'Recherche en attente',
 	complete: 'Complète',
 	partial: 'Partielle',
 	unreachable: 'Inaccessible',
+	hosting_platform: 'Hébergé sur une plateforme',
 }
 
 export function companyState(company: Company | null): CompanyState {
@@ -19,6 +25,7 @@ export function companyState(company: Company | null): CompanyState {
 		case 'complete':
 		case 'partial':
 		case 'unreachable':
+		case 'hosting_platform':
 			return company.state
 		default:
 			return 'pending'
@@ -81,6 +88,9 @@ export function companyNotice(company: Company | null): string | null {
 	if (company === null || state === 'pending') {
 		return "La recherche n'a pas encore été faite pour ce domaine."
 	}
+	if (state === 'hosting_platform') {
+		return 'Site hébergé sur une plateforme : pas de dossier entreprise lu.'
+	}
 	if (state === 'unreachable') {
 		return "Le site de l'entreprise est inaccessible ou interdit aux robots."
 	}
@@ -90,6 +100,15 @@ export function companyNotice(company: Company | null): string | null {
 			: 'SIREN introuvable sur le site de l’entreprise : aucune donnée officielle.'
 	}
 	return null
+}
+
+export function ignoredLinksNote(count: number): string | null {
+	if (count <= 0) {
+		return null
+	}
+	return count === 1
+		? '1 lien ignoré : page introuvable, vide ou redirigée vers l’accueil.'
+		: `${count} liens ignorés : pages introuvables, vides ou redirigées vers l’accueil.`
 }
 
 export function pageLabel(url: string): string {

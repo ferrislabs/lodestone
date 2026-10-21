@@ -11,8 +11,8 @@ use http::{HeaderValue, StatusCode, header::LOCATION};
 use llm::any::AnyProvider;
 use lodestone_core::{
     GenerationParams, LlmError, LlmProvider, LlmProviderRecord, LlmRequest, MAX_TOKENS_LIMIT,
-    ProviderDefinition, ProviderId, ProviderKind, ReasoningEffort, SecretCipher, Tier,
-    TokenPricing,
+    MaxConcurrency, ProviderDefinition, ProviderId, ProviderKind, ReasoningEffort, SecretCipher,
+    Tier, TokenPricing,
     llm::{CreateLlmProvider, KeyChange, UpdateLlmProvider},
 };
 use serde::{Deserialize, Serialize};
@@ -75,6 +75,9 @@ pub struct ProviderDto {
     /// Whether an API key is stored. The key itself is never returned.
     pub has_api_key: bool,
     pub max_retries: u8,
+    #[schema(minimum = 1, maximum = 32)]
+    pub max_concurrency: u8,
+    pub in_flight: u32,
     pub timeout_seconds: u64,
     pub pricing: PricingDto,
     /// Defaults this provider is assigned to: `triage` (default of the qualification agents) or `qualification` (default of the aggregator).
@@ -98,7 +101,7 @@ pub struct ProviderDto {
 }
 
 impl ProviderDto {
-    fn new(record: &LlmProviderRecord, assignments: &[(Tier, ProviderId)]) -> Self {
+    fn new(record: &LlmProviderRecord, assignments: &[(Tier, ProviderId)], in_flight: u32) -> Self {
         Self {
             id: record.id.to_string(),
             name: record.name.clone(),
@@ -108,6 +111,8 @@ impl ProviderDto {
             enabled: record.enabled,
             has_api_key: record.has_api_key(),
             max_retries: record.max_retries,
+            max_concurrency: record.max_concurrency.get(),
+            in_flight,
             timeout_seconds: record.timeout.as_secs(),
             pricing: PricingDto {
                 input_cents_per_mtok: record.pricing.input_cents_per_mtok,
@@ -173,6 +178,8 @@ pub struct CreateProviderRequest {
     pub api_key: Option<String>,
     /// 0 to 10, defaults to 2.
     pub max_retries: Option<u8>,
+    #[schema(minimum = 1, maximum = 32)]
+    pub max_concurrency: Option<u8>,
     /// Defaults to zero.
     pub pricing: Option<PricingRequest>,
     /// 1 to 600, defaults to 30.
@@ -201,6 +208,8 @@ pub struct UpdateProviderRequest {
     #[schema(value_type = Option<String>, nullable)]
     pub api_key: Option<Option<String>>,
     pub max_retries: Option<u8>,
+    #[schema(minimum = 1, maximum = 32)]
+    pub max_concurrency: Option<u8>,
     pub pricing: Option<PricingRequest>,
     pub timeout_seconds: Option<u64>,
     /// Absent keeps the stored value, `null` stops sending it, a value sets it.
@@ -240,6 +249,7 @@ struct ProviderInput {
     model: Option<String>,
     api_key: KeyInput,
     max_retries: Option<u8>,
+    max_concurrency: Option<MaxConcurrency>,
     input_cents: Option<u32>,
     output_cents: Option<u32>,
     timeout: Option<Duration>,
@@ -474,6 +484,18 @@ fn parse_input(body: &[u8], required: bool) -> Result<ProviderInput, ApiError> {
         .remove("max_retries")
         .and_then(|value| parser.integer("max_retries", value, 0, MAX_RETRIES))
         .and_then(|number| u8::try_from(number).ok());
+    let max_concurrency = map
+        .remove("max_concurrency")
+        .and_then(|value| {
+            parser.integer(
+                "max_concurrency",
+                value,
+                u64::from(MaxConcurrency::MIN),
+                u64::from(MaxConcurrency::MAX),
+            )
+        })
+        .and_then(|number| u8::try_from(number).ok())
+        .and_then(MaxConcurrency::new);
     let (input_cents, output_cents) = parser.pricing(&mut map);
     let timeout = map
         .remove("timeout_seconds")
@@ -507,6 +529,7 @@ fn parse_input(body: &[u8], required: bool) -> Result<ProviderInput, ApiError> {
             model,
             api_key,
             max_retries,
+            max_concurrency,
             input_cents,
             output_cents,
             timeout,
@@ -565,7 +588,11 @@ fn created(location: String, body: ProviderDto) -> HttpResponse {
 
 async fn view(state: &AppState, record: &LlmProviderRecord) -> Result<ProviderDto, ApiError> {
     let assignments = state.usecase.list_llm_tiers().await?;
-    Ok(ProviderDto::new(record, &assignments))
+    Ok(ProviderDto::new(
+        record,
+        &assignments,
+        state.usecase.llm_in_flight(record.id),
+    ))
 }
 
 #[utoipa::path(
@@ -586,7 +613,9 @@ pub async fn list_providers(
     Ok(Response::OK(
         records
             .iter()
-            .map(|record| ProviderDto::new(record, &assignments))
+            .map(|record| {
+                ProviderDto::new(record, &assignments, state.usecase.llm_in_flight(record.id))
+            })
             .collect(),
     ))
 }
@@ -650,6 +679,7 @@ pub async fn create_provider(
                     .timeout
                     .unwrap_or(Duration::from_secs(DEFAULT_TIMEOUT_SECONDS)),
                 max_retries: input.max_retries.unwrap_or(DEFAULT_MAX_RETRIES),
+                max_concurrency: input.max_concurrency,
                 pricing: TokenPricing {
                     input_cents_per_mtok: input.input_cents.unwrap_or(0),
                     output_cents_per_mtok: input.output_cents.unwrap_or(0),
@@ -709,6 +739,7 @@ pub async fn update_provider(
                 model: input.model.unwrap_or(current.model),
                 timeout: input.timeout.unwrap_or(current.timeout),
                 max_retries: input.max_retries.unwrap_or(current.max_retries),
+                max_concurrency: input.max_concurrency.unwrap_or(current.max_concurrency),
                 pricing: TokenPricing {
                     input_cents_per_mtok: input
                         .input_cents
@@ -1121,6 +1152,7 @@ mod tests {
             model: "ministral-8b-2512".to_owned(),
             timeout: Duration::from_secs(5),
             max_retries: 0,
+            max_concurrency: MaxConcurrency::new(4).unwrap(),
             pricing: TokenPricing {
                 input_cents_per_mtok: 0,
                 output_cents_per_mtok: 0,

@@ -2,7 +2,7 @@ mod support;
 
 use std::{
     collections::{HashMap, VecDeque},
-    num::NonZeroU32,
+    num::{NonZeroU32, NonZeroUsize},
     sync::{Arc, Mutex},
     time::Duration,
 };
@@ -10,24 +10,27 @@ use std::{
 use chrono::{DateTime, Utc};
 use common::{EncryptionKey, Secret};
 use lodestone_core::{
-    ActiveProfile, Clock, CompanyDossier, CompanyRepository, CreateProfileCommand, DossierState,
-    GenerationParams, Lead, LeadId, LeadRepository, LeadScoring, LlmError, LlmProvider, LlmRequest,
-    LlmResponse, LodestoneUseCase, Observation, OfficialData, ProfileId, ProfileName, Provenance,
-    ProviderDefinition, ProviderId, ProviderKind, QualificationResult, ReasoningEffort, ResultId,
-    ResultStatus, ReviseProfileCommand, RevisionNumber, SCORING_VERSION, SignalKind, Siren,
-    SourceName, SuppressionTarget, Tier, TokenPricing, TokenUsage, UnitInterval, ValidatedProfile,
-    Verdict, VerdictCap, VerdictReason,
+    ActiveProfile, AgentRegistry, CancelReason, Clock, CompanyDossier, CompanyRepository,
+    CreateProfileCommand, DossierState, EventStatus, GenerationParams, Lead, LeadId,
+    LeadRepository, LeadScoring, LlmError, LlmProvider, LlmRequest, LlmResponse, LodestoneUseCase,
+    MaxConcurrency, Observation, OfficialData, ProfileId, ProfileName, Provenance,
+    ProviderDefinition, ProviderId, ProviderKind, QualificationResult, ROUND_STARTED,
+    ReasoningEffort, ResultId, ResultStatus, ReviseProfileCommand, RevisionNumber, RoundTrigger,
+    SCORING_VERSION, SignalKind, Siren, SourceName, Stage, StageReason, StageStatus,
+    SuppressionTarget, Tier, TimelineEvent, TimelineStep, TokenPricing, TokenUsage, UnitInterval,
+    ValidatedProfile, Verdict, VerdictCap, VerdictReason, WorkKind,
     evaluation::{EvaluationReport, EvaluationSettings, ProviderBuilder},
     infrastructure::{
         company::postgres::PgCompanyRepository, crypto::AesGcmCipher,
         lead::postgres::PgLeadRepository, llm_cache::postgres::PgLlmCache, postgres::with_tx,
     },
-    llm::CreateLlmProvider,
-    verdict_for,
+    llm::{CreateLlmProvider, KeyChange, UpdateLlmProvider},
+    timeline_kind, verdict_for,
 };
 use serde_json::{Value, json};
 use sqlx::PgPool;
 use support::{at, domain};
+use tokio::{spawn, time::sleep};
 
 const IAM: &str = include_str!("../../../docs/examples/profiles/iam-ferriskey.json");
 
@@ -62,6 +65,10 @@ struct Shared {
     replies: Mutex<HashMap<String, VecDeque<Reply>>>,
     seen: Mutex<Vec<Seen>>,
     input_tokens: u64,
+    on_call: Mutex<Option<(LodestoneUseCase, ActiveProfile)>>,
+    delays: Mutex<VecDeque<Duration>>,
+    pace: Mutex<Duration>,
+    running: Mutex<(u32, u32)>,
 }
 
 struct Scripted {
@@ -141,6 +148,10 @@ fn answers_from(schema: &Value, pick: Pick, quote: &str) -> Value {
 
 impl LlmProvider for Scripted {
     async fn complete(&self, request: &LlmRequest<'_>) -> Result<LlmResponse, LlmError> {
+        let change = self.shared.on_call.lock().unwrap().take();
+        if let Some((usecase, changed)) = change {
+            usecase.agent_registry().publish(&changed);
+        }
         self.shared.seen.lock().unwrap().push(Seen {
             system: request.system.to_owned(),
             instruction: request.instruction.to_owned(),
@@ -161,6 +172,22 @@ impl LlmProvider for Scripted {
             .get_mut(&self.model)
             .and_then(VecDeque::pop_front)
             .unwrap_or(Reply::Best);
+        let delay = self
+            .shared
+            .delays
+            .lock()
+            .unwrap()
+            .pop_front()
+            .unwrap_or(*self.shared.pace.lock().unwrap());
+        {
+            let mut running = self.shared.running.lock().unwrap();
+            running.0 += 1;
+            running.1 = running.1.max(running.0);
+        }
+        if !delay.is_zero() {
+            sleep(delay).await;
+        }
+        self.shared.running.lock().unwrap().0 -= 1;
         let output = match reply {
             Reply::Best => answers_from(request.schema, Pick::First, &quote_of(request)),
             Reply::Middle => answers_from(request.schema, Pick::Middle, &quote_of(request)),
@@ -192,6 +219,14 @@ fn settings(budget_cents: u32, batch_size: u32) -> EvaluationSettings {
         budget_cents: NonZeroU32::new(budget_cents).unwrap(),
         batch_size,
         base_delay: Duration::ZERO,
+        concurrency: NonZeroUsize::MIN,
+    }
+}
+
+fn concurrent(budget_cents: u32, batch_size: u32, concurrency: usize) -> EvaluationSettings {
+    EvaluationSettings {
+        concurrency: NonZeroUsize::new(concurrency).unwrap(),
+        ..settings(budget_cents, batch_size)
     }
 }
 
@@ -257,6 +292,10 @@ impl Harness {
                 replies: Mutex::new(HashMap::new()),
                 seen: Mutex::new(Vec::new()),
                 input_tokens,
+                on_call: Mutex::new(None),
+                delays: Mutex::new(VecDeque::new()),
+                pace: Mutex::new(Duration::ZERO),
+                running: Mutex::new((0, 0)),
             }),
         }
     }
@@ -271,6 +310,7 @@ impl Harness {
                     model: model.to_owned(),
                     timeout: Duration::from_secs(30),
                     max_retries: 0,
+                    max_concurrency: None,
                     pricing: TokenPricing {
                         input_cents_per_mtok,
                         output_cents_per_mtok: 0,
@@ -284,6 +324,49 @@ impl Harness {
             .await
             .unwrap()
             .id
+    }
+
+    async fn limited_provider(
+        &self,
+        model: &str,
+        input_cents_per_mtok: u32,
+        limit: u8,
+    ) -> ProviderId {
+        let id = self.provider(model, input_cents_per_mtok).await;
+        let current = self.usecase.get_llm_provider(id).await.unwrap();
+        self.usecase
+            .update_llm_provider(
+                UpdateLlmProvider {
+                    id,
+                    name: current.name,
+                    kind: current.kind,
+                    base_url: current.base_url,
+                    model: current.model,
+                    timeout: current.timeout,
+                    max_retries: current.max_retries,
+                    max_concurrency: MaxConcurrency::new(limit).unwrap(),
+                    pricing: current.pricing,
+                    api_key: KeyChange::Keep,
+                    reasoning_effort: current.reasoning_effort,
+                    generation: current.generation,
+                },
+                &self.cipher,
+            )
+            .await
+            .unwrap();
+        id
+    }
+
+    fn pace(&self, delay: Duration) {
+        *self.shared.pace.lock().unwrap() = delay;
+    }
+
+    fn delay(&self, delays: Vec<Duration>) {
+        *self.shared.delays.lock().unwrap() = delays.into();
+    }
+
+    fn peak(&self) -> u32 {
+        self.shared.running.lock().unwrap().1
     }
 
     async fn default_provider(&self, model: &str) -> ProviderId {
@@ -531,6 +614,7 @@ async fn each_result_stores_the_provider_model_prompt_and_generation_settings(po
                 model: "model-tuned".to_owned(),
                 timeout: Duration::from_secs(30),
                 max_retries: 0,
+                max_concurrency: None,
                 pricing: TokenPricing {
                     input_cents_per_mtok: 0,
                     output_cents_per_mtok: 0,
@@ -2281,4 +2365,444 @@ async fn escalation_spends_the_run_budget_and_a_replay_reuses_the_cached_calls(p
     assert_eq!(harness.calls_to("model-a"), 1);
     assert_eq!(harness.calls_to("model-b"), 1);
     assert!(harness.results(profile, "acme.com").await[0].escalated);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn disabling_an_agent_during_a_pass_stops_the_lead_and_stores_nothing(pool: PgPool) {
+    let harness = Harness::new(pool, 10);
+    harness.default_provider("model-default").await;
+    let profile = harness
+        .profile(vec![
+            agent("pertinence", None, "pertinence"),
+            agent("maturite", None, "maturite"),
+        ])
+        .await;
+    harness.observe("acme.com", SourceName::HttpProbe, 10).await;
+    let mut changed = harness.active().await;
+    let mut disabled = agent("maturite", None, "maturite");
+    disabled["enabled"] = json!(false);
+    changed.revision.number = changed.revision.number.next().unwrap();
+    changed.revision.definition = ValidatedProfile::parse(definition(vec![
+        agent("pertinence", None, "pertinence"),
+        disabled,
+    ]))
+    .unwrap();
+    *harness.shared.on_call.lock().unwrap() = Some((harness.usecase.clone(), changed));
+
+    let report = harness.step(settings(100, 10)).await;
+
+    assert_eq!(report.stopped, 1);
+    assert_eq!(report.leads, 0);
+    assert_eq!(harness.calls(), 1);
+    assert!(harness.results(profile, "acme.com").await.is_empty());
+    let lead = harness.lead(profile, "acme.com").await;
+    let detail = harness.usecase.lead_detail(lead.id).await.unwrap();
+    assert!(detail.scoring.is_none());
+    assert_eq!(detail.agent_stops.len(), 1);
+    assert_eq!(detail.agent_stops[0].target.kind, WorkKind::Qualification);
+    assert_eq!(detail.agent_stops[0].target.agent.as_str(), "maturite");
+    assert_eq!(detail.agent_stops[0].reason, CancelReason::AgentDisabled);
+}
+
+const HOSTS: [&str; 4] = ["acme.com", "globex.com", "initech.com", "umbrella.com"];
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn leads_agents_and_samples_run_at_once_within_the_provider_limit(pool: PgPool) {
+    let harness = Harness::new(pool, 10);
+    let provider = harness.limited_provider("model-a", 0, 3).await;
+    let profile = harness
+        .profile(vec![
+            sampled(agent("first", Some(provider), "q"), 2),
+            sampled(agent("second", Some(provider), "r"), 2),
+        ])
+        .await;
+    for host in &HOSTS[..3] {
+        harness.observe(host, SourceName::HttpProbe, 10).await;
+    }
+    harness.pace(Duration::from_millis(40));
+
+    let report = harness.step(concurrent(100, 10, 4)).await;
+
+    assert_eq!((report.leads, report.valid, report.invalid), (3, 6, 0));
+    assert_eq!(harness.calls(), 12);
+    let peak = harness.peak();
+    assert!(peak > 1, "calls never overlapped");
+    assert!(peak <= 3, "the provider limit was exceeded: {peak}");
+    assert_eq!(harness.usecase.llm_in_flight(provider), 0);
+    for host in &HOSTS[..3] {
+        assert_eq!(harness.results(profile, host).await.len(), 2);
+    }
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_lower_provider_limit_serialises_the_calls(pool: PgPool) {
+    let harness = Harness::new(pool, 10);
+    let provider = harness.limited_provider("model-a", 0, 1).await;
+    harness
+        .profile(vec![
+            agent("first", Some(provider), "q"),
+            agent("second", Some(provider), "r"),
+        ])
+        .await;
+    for host in &HOSTS[..2] {
+        harness.observe(host, SourceName::HttpProbe, 10).await;
+    }
+    harness.pace(Duration::from_millis(20));
+
+    let report = harness.step(concurrent(100, 10, 4)).await;
+
+    assert_eq!(report.leads, 2);
+    assert_eq!(harness.calls(), 4);
+    assert_eq!(harness.peak(), 1);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn votes_and_records_follow_the_sample_order_whatever_the_completion_order(pool: PgPool) {
+    let harness = Harness::new(pool, 10);
+    let provider = harness.limited_provider("model-a", 0, 3).await;
+    let profile = harness
+        .profile(vec![sampled(agent("solo", Some(provider), "q"), 3)])
+        .await;
+    harness.observe("acme.com", SourceName::HttpProbe, 10).await;
+    harness.script("model-a", vec![Reply::Worst, Reply::Best, Reply::Best]);
+    harness.delay(vec![
+        Duration::from_millis(90),
+        Duration::from_millis(60),
+        Duration::from_millis(30),
+    ]);
+
+    let report = harness.step(concurrent(100, 10, 4)).await;
+
+    assert_eq!((report.leads, report.valid), (1, 1));
+    assert!(harness.peak() > 1);
+    let results = harness.results(profile, "acme.com").await;
+    let result = &results[0];
+    assert_eq!(result.answers["q"]["choice"], "forte");
+    let agreement = result.answers["q"]["agreement"].as_f64().unwrap();
+    assert!((agreement - 2.0 / 3.0).abs() < 1e-9);
+    let indexes: Vec<u64> = result
+        .raw_samples
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|sample| sample["index"].as_u64().unwrap())
+        .collect();
+    assert_eq!(indexes, [0, 1, 2]);
+    let choices: Vec<&str> = result
+        .raw_samples
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|sample| sample["answers"]["q"]["choice"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        choices.iter().filter(|choice| **choice == "forte").count(),
+        2
+    );
+    assert_eq!(
+        choices.iter().filter(|choice| **choice == "faible").count(),
+        1
+    );
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn concurrent_leads_stop_at_the_budget_exactly(pool: PgPool) {
+    let harness = Harness::new(pool, 4_000);
+    let pricey = harness.limited_provider("model-pricey", 1_000, 8).await;
+    let profile = harness
+        .profile(vec![agent("solo", Some(pricey), "q")])
+        .await;
+    for host in HOSTS {
+        harness.observe(host, SourceName::HttpProbe, 10).await;
+    }
+    harness.pace(Duration::from_millis(30));
+
+    let report = harness.step(concurrent(10, 10, 4)).await;
+
+    assert!(report.budget_exhausted);
+    assert_eq!(harness.calls(), 3);
+    assert_eq!(report.leads, 3);
+    let mut qualified = 0;
+    for host in HOSTS {
+        if harness.lead(profile, host).await.qualified_at.is_some() {
+            qualified += 1;
+        }
+    }
+    assert_eq!(qualified, 3);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn disabling_an_agent_mid_flight_drops_the_running_calls_and_stores_nothing(pool: PgPool) {
+    let harness = Harness::new(pool, 10);
+    harness.default_provider("model-default").await;
+    let profile = harness
+        .profile(vec![
+            agent("pertinence", None, "pertinence"),
+            agent("maturite", None, "maturite"),
+        ])
+        .await;
+    for host in &HOSTS[..3] {
+        harness.observe(host, SourceName::HttpProbe, 10).await;
+    }
+    let mut changed = harness.active().await;
+    let mut disabled = agent("maturite", None, "maturite");
+    disabled["enabled"] = json!(false);
+    changed.revision.number = changed.revision.number.next().unwrap();
+    changed.revision.definition = ValidatedProfile::parse(definition(vec![
+        agent("pertinence", None, "pertinence"),
+        disabled,
+    ]))
+    .unwrap();
+    *harness.shared.on_call.lock().unwrap() = Some((harness.usecase.clone(), changed));
+    harness.pace(Duration::from_millis(200));
+
+    let report = harness.step(concurrent(100, 10, 4)).await;
+
+    assert_eq!(report.leads, 0);
+    assert!(report.stopped >= 1);
+    assert!(harness.peak() > 1);
+    for host in &HOSTS[..3] {
+        assert!(harness.results(profile, host).await.is_empty());
+        assert!(harness.lead(profile, host).await.qualified_at.is_none());
+    }
+}
+
+impl Harness {
+    async fn timeline(&self, profile: ProfileId, host: &str) -> Vec<TimelineEvent> {
+        let lead = self.lead(profile, host).await;
+        self.usecase
+            .lead_timeline(lead.id)
+            .await
+            .unwrap()
+            .rounds
+            .into_iter()
+            .flat_map(|round| round.events)
+            .collect()
+    }
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_qualification_records_its_round_agents_samples_and_combination(pool: PgPool) {
+    let harness = Harness::new(pool, 10);
+    let provider = harness.provider("model-a", 0).await;
+    harness.script(
+        "model-a",
+        vec![Reply::Best, Reply::Fail(LlmError::Refused), Reply::Best],
+    );
+    let profile = harness
+        .profile(vec![sampled(agent("solo", Some(provider), "q"), 3)])
+        .await;
+    harness.observe("acme.com", SourceName::HttpProbe, 10).await;
+
+    harness.step(settings(100, 10)).await;
+
+    let lead = harness.lead(profile, "acme.com").await;
+    let timeline = harness.usecase.lead_timeline(lead.id).await.unwrap();
+    assert_eq!(timeline.rounds.len(), 1);
+    assert_eq!(timeline.rounds[0].number, 1);
+    assert_eq!(timeline.rounds[0].trigger, RoundTrigger::Detection);
+    assert_eq!(timeline.rounds[0].sources, vec!["http_probe".to_owned()]);
+    let events = &timeline.rounds[0].events;
+    let steps: Vec<(TimelineStep, &str, EventStatus)> = events
+        .iter()
+        .map(|event| (event.step, event.kind.as_str(), event.status))
+        .collect();
+    for expected in [
+        (
+            TimelineStep::Detection,
+            timeline_kind::SIGNAL,
+            EventStatus::Succeeded,
+        ),
+        (
+            TimelineStep::Qualification,
+            ROUND_STARTED,
+            EventStatus::Started,
+        ),
+        (
+            TimelineStep::Qualification,
+            timeline_kind::AGENT,
+            EventStatus::Succeeded,
+        ),
+        (
+            TimelineStep::Qualification,
+            timeline_kind::SAMPLE_INVALID,
+            EventStatus::Failed,
+        ),
+        (
+            TimelineStep::Combination,
+            timeline_kind::COMBINED,
+            EventStatus::Succeeded,
+        ),
+    ] {
+        assert!(
+            steps.contains(&expected),
+            "{expected:?} missing in {steps:?}"
+        );
+    }
+    assert!(
+        !steps.contains(&(
+            TimelineStep::Qualification,
+            timeline_kind::AGENT,
+            EventStatus::Started
+        )),
+        "the agent start is folded into its end"
+    );
+    let agent = events
+        .iter()
+        .find(|event| event.kind == timeline_kind::AGENT)
+        .unwrap();
+    assert_eq!(agent.actor.agent_id.as_deref(), Some("solo"));
+    assert_eq!(agent.actor.model.as_deref(), Some("model-a"));
+    assert!(agent.finished_at.is_some());
+    assert!(timeline.in_flight.is_empty());
+    assert!(harness.usecase.in_flight().is_empty());
+    let stage = |stage: Stage| {
+        timeline
+            .pipeline
+            .stages
+            .iter()
+            .find(|state| state.stage == stage)
+            .unwrap()
+            .clone()
+    };
+    assert_eq!(stage(Stage::Qualification).status, StageStatus::Done);
+
+    harness.step(settings(100, 10)).await;
+    assert_eq!(
+        harness.timeline(profile, "acme.com").await.len(),
+        events.len()
+    );
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_failed_model_call_is_recorded_and_the_pipeline_waits_for_the_backoff(pool: PgPool) {
+    let harness = Harness::new(pool, 10);
+    let provider = harness.provider("model-a", 0).await;
+    harness.script("model-a", vec![Reply::Fail(LlmError::Timeout)]);
+    let profile = harness
+        .profile(vec![agent("solo", Some(provider), "q")])
+        .await;
+    harness.observe("acme.com", SourceName::HttpProbe, 10).await;
+
+    let report = harness.step(settings(100, 10)).await;
+
+    assert_eq!(report.deferred, 1);
+    let lead = harness.lead(profile, "acme.com").await;
+    let timeline = harness.usecase.lead_timeline(lead.id).await.unwrap();
+    let events: Vec<&TimelineEvent> = timeline
+        .rounds
+        .iter()
+        .flat_map(|round| round.events.iter())
+        .collect();
+    let failure = events
+        .iter()
+        .find(|event| event.kind == timeline_kind::CALL_FAILED)
+        .unwrap();
+    assert_eq!(failure.status, EventStatus::Waiting);
+    assert_eq!(failure.detail["attempts"], 1);
+    assert!(failure.error.as_deref().unwrap().contains("Échec"));
+    let agent = events
+        .iter()
+        .find(|event| event.kind == timeline_kind::AGENT)
+        .unwrap();
+    assert_eq!(agent.status, EventStatus::Failed);
+    let qualification = timeline
+        .pipeline
+        .stages
+        .iter()
+        .find(|state| state.stage == Stage::Qualification)
+        .unwrap();
+    assert_eq!(qualification.status, StageStatus::Waiting);
+    assert_eq!(
+        qualification.reason_code,
+        Some(StageReason::CallFailureBackoff)
+    );
+    assert!(qualification.next_at.unwrap() > at(1_000));
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn an_escalation_is_recorded_with_its_agents(pool: PgPool) {
+    let harness = Harness::new(pool, 10);
+    let local = harness.provider("model-a", 0).await;
+    let strong = harness.provider("model-b", 0).await;
+    harness.script("model-a", vec![Reply::Middle, Reply::Middle]);
+    harness.script("model-b", vec![Reply::Best, Reply::Best]);
+    let profile = harness
+        .escalating_profile(
+            vec![
+                agent("first", Some(local), "q"),
+                agent("second", Some(local), "q"),
+            ],
+            Some(strong),
+        )
+        .await;
+    harness.observe("acme.com", SourceName::HttpProbe, 10).await;
+
+    harness.step(settings(100, 10)).await;
+
+    let events = harness.timeline(profile, "acme.com").await;
+    assert!(
+        events
+            .iter()
+            .any(|event| event.kind == timeline_kind::ESCALATED)
+    );
+    let escalated: Vec<&TimelineEvent> = events
+        .iter()
+        .filter(|event| {
+            event.step == TimelineStep::Escalation && event.kind == timeline_kind::AGENT
+        })
+        .collect();
+    assert_eq!(escalated.len(), 2);
+    assert!(
+        escalated
+            .iter()
+            .all(|event| event.actor.model.as_deref() == Some("model-b"))
+    );
+    let primary = events
+        .iter()
+        .filter(|event| {
+            event.step == TimelineStep::Qualification && event.kind == timeline_kind::AGENT
+        })
+        .count();
+    assert_eq!(primary, 2);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn running_agents_are_listed_in_flight_while_they_wait_for_the_model(pool: PgPool) {
+    let harness = Arc::new(Harness::new(pool, 10));
+    let provider = harness.provider("model-a", 0).await;
+    let profile = harness
+        .profile(vec![agent("solo", Some(provider), "q")])
+        .await;
+    harness.observe("acme.com", SourceName::HttpProbe, 10).await;
+    let lead = harness.lead(profile, "acme.com").await;
+    harness.pace(Duration::from_millis(400));
+    let running = Arc::clone(&harness);
+    let pass = spawn(async move { running.step(settings(100, 10)).await });
+    let mut seen = Vec::new();
+    for _ in 0..40 {
+        seen = harness
+            .usecase
+            .lead_timeline(lead.id)
+            .await
+            .unwrap()
+            .in_flight;
+        if !seen.is_empty() {
+            break;
+        }
+        sleep(Duration::from_millis(10)).await;
+    }
+    assert_eq!(seen.len(), 1);
+    assert_eq!(seen[0].step, TimelineStep::Qualification);
+    assert_eq!(seen[0].actor.agent_id.as_deref(), Some("solo"));
+    let timeline = harness.usecase.lead_timeline(lead.id).await.unwrap();
+    let qualification = timeline
+        .pipeline
+        .stages
+        .iter()
+        .find(|state| state.stage == Stage::Qualification)
+        .unwrap();
+    assert_eq!(qualification.status, StageStatus::Running);
+    pass.await.unwrap();
+    assert!(harness.usecase.in_flight().is_empty());
 }

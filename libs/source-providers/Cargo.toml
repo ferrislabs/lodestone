@@ -7,6 +7,7 @@ edition.workspace = true
 [dependencies]
 lodestone-core = { workspace = true }
 fetch = { workspace = true }
+sources = { workspace = true }
 common = { workspace = true }
 rate-limit = { workspace = true }
 aws-lc-rs = { workspace = true }

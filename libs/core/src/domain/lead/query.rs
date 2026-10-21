@@ -1,8 +1,11 @@
 use std::collections::HashMap;
 
 use crate::domain::{
+    agent_work::ports::AgentStop,
     calibration::Calibrations,
     company::{CompanyDossier, CompanyEntity, SiblingLead},
+    ecosystem::DomainEcosystem,
+    enrichment::{EnrichmentState, EvaluationStatus},
     facts::LeadFacts,
     lead::{Assessment, ContactEmail, Lead, LeadId, LeadStatus, Signal},
     profile::{
@@ -126,11 +129,15 @@ pub struct LeadListing {
     pub page: LeadPage,
     pub summaries: HashMap<LeadId, String>,
     pub scorings: HashMap<LeadId, LeadScoring>,
+    pub evaluations: HashMap<LeadId, EvaluationStatus>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct LeadDetail {
     pub lead: Lead,
+    pub enrichment: EnrichmentState,
+    pub evaluation: EvaluationStatus,
+    pub ecosystem: DomainEcosystem,
     pub profile: Profile,
     pub signals: Vec<Signal>,
     pub facts: LeadFacts,
@@ -143,6 +150,7 @@ pub struct LeadDetail {
     pub calibrations: Calibrations,
     pub summary_state: Option<SummaryState>,
     pub agent_failures: Vec<AgentFailure>,
+    pub agent_stops: Vec<AgentStop>,
     pub scoring: Option<LeadScoring>,
     pub company: Option<CompanyDossier>,
     pub entity: Option<CompanyEntity>,

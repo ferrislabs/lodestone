@@ -2,6 +2,7 @@ mod support;
 
 use axum::Router;
 use http::{Method, StatusCode, header};
+use lodestone_core::{CancelReason, WorkKind, WorkTarget, definition::AgentId};
 use serde_json::{Value, json};
 use sqlx::PgPool;
 use support::{Harness, send, send_raw};
@@ -254,7 +255,7 @@ async fn invalid_update_creates_no_revision(pool: PgPool) {
     let api = Api::new(pool).await;
     let id = api.create("iam", iam()).await;
     let mut bad = iam();
-    bad["schema_version"] = json!(17);
+    bad["schema_version"] = json!(20);
 
     let (status, body) = api.update(&id, bad).await;
 
@@ -517,6 +518,7 @@ async fn service_accounts_can_read_but_not_mutate(pool: PgPool) {
             format!("/api/v1/profiles/{id}/deactivate"),
             None,
         ),
+        (Method::DELETE, format!("/api/v1/profiles/{id}"), None),
     ];
     for (method, uri, payload) in mutations {
         let (status, _, _) = send(api.app(), method, &uri, Some(&client), payload).await;
@@ -545,6 +547,7 @@ async fn every_profile_route_requires_authentication(pool: PgPool) {
         (Method::GET, format!("/api/v1/profiles/{id}/revisions/1")),
         (Method::POST, format!("/api/v1/profiles/{id}/activate")),
         (Method::POST, format!("/api/v1/profiles/{id}/deactivate")),
+        (Method::DELETE, format!("/api/v1/profiles/{id}")),
         (Method::GET, format!("/api/v1/profiles/{id}/export")),
     ];
 
@@ -567,6 +570,7 @@ fn openapi_documents_every_profile_path_with_bearer_auth() {
         ("/api/v1/profiles/{profile_id}/revisions/{number}", "get"),
         ("/api/v1/profiles/{profile_id}/activate", "post"),
         ("/api/v1/profiles/{profile_id}/deactivate", "post"),
+        ("/api/v1/profiles/{profile_id}", "delete"),
         ("/api/v1/profiles/{profile_id}/export", "get"),
     ];
 
@@ -579,4 +583,78 @@ fn openapi_documents_every_profile_path_with_bearer_auth() {
         );
     }
     assert!(spec["components"]["schemas"]["ErrorDetail"]["properties"]["path"].is_object());
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn deleting_a_profile_removes_it_and_stops_its_agents(pool: PgPool) {
+    let api = Api::new(pool).await;
+    let id = api.create("iam", iam()).await;
+    let (status, _) = api
+        .call(
+            Method::POST,
+            &format!("/api/v1/profiles/{id}/activate"),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let usecase = &api.harness.state.usecase;
+    let current = usecase.refreshed_active_profiles().await.unwrap().remove(0);
+    let work = usecase.agent_work(&current, WorkTarget::aggregator());
+    assert!(work.is_live());
+
+    let (status, _) = api
+        .call(Method::DELETE, &format!("/api/v1/profiles/{id}"), None)
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    assert_eq!(work.stop_reason(), Some(CancelReason::ProfileDeleted));
+    let (status, _) = api.get(&format!("/api/v1/profiles/{id}")).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, _) = api
+        .call(Method::DELETE, &format!("/api/v1/profiles/{id}"), None)
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn deactivating_a_profile_stops_the_agents_of_the_running_instance(pool: PgPool) {
+    let api = Api::new(pool).await;
+    let id = api.create("iam", iam()).await;
+    api.call(
+        Method::POST,
+        &format!("/api/v1/profiles/{id}/activate"),
+        None,
+    )
+    .await;
+    let usecase = &api.harness.state.usecase;
+    let current = usecase.refreshed_active_profiles().await.unwrap().remove(0);
+    let marche = usecase.agent_work(
+        &current,
+        WorkTarget::new(WorkKind::Qualification, &AgentId::new("marche")),
+    );
+    let pertinence = usecase.agent_work(
+        &current,
+        WorkTarget::new(WorkKind::Qualification, &AgentId::new("pertinence")),
+    );
+    let mut revised = iam();
+    revised["qualification_agents"]
+        .as_array_mut()
+        .unwrap()
+        .retain(|agent| agent["id"] != "marche");
+
+    let (status, _) = api.update(&id, revised).await;
+    assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(marche.stop_reason(), Some(CancelReason::AgentRemoved));
+    assert!(pertinence.is_live());
+
+    api.call(
+        Method::POST,
+        &format!("/api/v1/profiles/{id}/deactivate"),
+        None,
+    )
+    .await;
+    assert_eq!(
+        pertinence.stop_reason(),
+        Some(CancelReason::ProfileDeactivated)
+    );
 }

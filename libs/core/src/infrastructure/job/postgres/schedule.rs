@@ -3,7 +3,7 @@ use common::CoreError;
 use sqlx::PgPool;
 
 use crate::{
-    JobKind, JobSchedule, JobStatus, ProfileId, RunStatus, ScheduledJob, SourceName,
+    CancelReason, JobKind, JobSchedule, JobStatus, ProfileId, RunStatus, ScheduledJob, SourceName,
     SourceRunRecord, infrastructure::postgres::error::map_sqlx_error,
 };
 
@@ -124,10 +124,10 @@ impl JobSchedule for PgJobSchedule {
             r#"
             SELECT source AS "source!", profile_id AS "profile_id!", profile_name AS "profile_name!",
                 agent_id, status AS "status!", volume AS "volume!", signals AS "signals!",
-                error, started_at AS "started_at!", finished_at
+                error, started_at AS "started_at!", finished_at, cancel_reason
             FROM (
                 SELECT r.source, r.profile_id, p.name AS profile_name, r.agent_id, r.status,
-                    r.volume, r.signals, r.error, r.started_at, r.finished_at, r.id,
+                    r.volume, r.signals, r.error, r.started_at, r.finished_at, r.id, r.cancel_reason,
                     ROW_NUMBER() OVER (PARTITION BY r.source ORDER BY r.started_at DESC, r.id DESC) AS position
                 FROM runs r
                 JOIN profiles p ON p.id = r.profile_id
@@ -157,6 +157,7 @@ impl JobSchedule for PgJobSchedule {
                     error: row.error,
                     started_at: row.started_at,
                     finished_at: row.finished_at,
+                    cancel_reason: row.cancel_reason.as_deref().and_then(CancelReason::parse),
                 })
             })
             .collect()

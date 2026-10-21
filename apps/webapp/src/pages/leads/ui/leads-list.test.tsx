@@ -2,6 +2,7 @@ import { getCoreRowModel, useReactTable } from '@tanstack/react-table'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { formatDateTime } from '#/pages/leads/lib/format'
 import type { Lead, PaginationMeta } from '#/pages/leads/lib/types'
 import { buildLeadColumns } from './lead-columns'
 import { LeadsList } from './leads-list'
@@ -111,6 +112,76 @@ describe('LeadsList', () => {
 		expect(screen.getByText('Verdict')).toBeTruthy()
 		expect(screen.getByText(/^72,5\s%$/)).toBeTruthy()
 		expect(screen.getAllByText('—')).toHaveLength(2)
+	})
+
+	it('shows the evaluation status under the verdict of each lead', () => {
+		const evaluated: Lead[] = [
+			{
+				...leads[1],
+				id: 'w1',
+				domain: 'wait.test',
+				evaluation: {
+					stage: 'not_evaluated',
+					modules_done: 0,
+					modules_available: 7,
+					changed_modules: [],
+				},
+			},
+			{
+				...leads[1],
+				id: 'w2',
+				domain: 'cert.test',
+				evaluation: {
+					stage: 'certificate_only',
+					modules_done: 7,
+					modules_available: 7,
+					changed_modules: [],
+				},
+			},
+			{
+				...leads[0],
+				id: 'w3',
+				domain: 'running.test',
+				evaluation: {
+					stage: 'inspection_running',
+					evaluated_at: '2026-02-02T00:30:00Z',
+					modules_done: 3,
+					modules_available: 7,
+					changed_modules: [],
+				},
+			},
+			{
+				...leads[0],
+				id: 'w4',
+				domain: 'done.test',
+				evaluation: {
+					stage: 'inspection_complete',
+					evaluated_at: '2026-02-02T00:30:00Z',
+					modules_done: 7,
+					modules_available: 7,
+					changed_modules: [],
+				},
+			},
+		]
+		const { container } = render(<Harness data={evaluated} state="ready" />)
+		const badges = Array.from(container.querySelectorAll('[data-verdict]'))
+		expect(badges.map((badge) => badge.textContent)).toEqual([
+			'En attente du scoring',
+			'En attente du scoring',
+			'Fiable',
+			'Fiable',
+		])
+		const statuses = Array.from(container.querySelectorAll('[data-evaluation]'))
+		expect(statuses.map((status) => status.textContent)).toEqual([
+			'Non évalué',
+			"Certificat seul — en attente d'une autre preuve",
+			'Évalué — inspection en cours (3/7 modules)',
+			'Évalué — inspection complète',
+		])
+		expect(statuses[2]?.getAttribute('title')).toBe(
+			`Dernière évaluation le ${formatDateTime('2026-02-02T00:30:00Z')}`,
+		)
+		expect(statuses[0]?.getAttribute('title')).toBeNull()
 	})
 
 	it('shows the score decided by the scoring agents out of 100', () => {

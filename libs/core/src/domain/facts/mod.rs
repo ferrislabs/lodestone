@@ -14,7 +14,7 @@ mod country;
 mod environment;
 mod sentence;
 
-pub use country::Country;
+pub use country::{Country, country_of};
 pub use environment::{Environment, environment_of};
 pub use sentence::signal_sentence;
 
@@ -118,6 +118,9 @@ impl CompanyFacts {
                     official.siren,
                     parts.join("; ")
                 )
+            }
+            (None, DossierState::HostingPlatform) => {
+                "- company dossier: none, the domain is hosted on a platform, no company site was read".to_owned()
             }
             (None, DossierState::Unreachable) => {
                 "- company dossier: unreachable, the company site could not be read".to_owned()
@@ -706,6 +709,14 @@ mod tests {
             unreachable
                 .render()
                 .contains("unreachable, the company site could not be read")
+        );
+        let hosted =
+            base.clone()
+                .with_dossier(Some(&dossier(DossierState::HostingPlatform, None, false)));
+        assert!(
+            hosted
+                .render()
+                .contains("the domain is hosted on a platform, no company site was read")
         );
     }
 

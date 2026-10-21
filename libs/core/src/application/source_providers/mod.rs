@@ -15,7 +15,7 @@ use crate::{
             AuthSpec, ConnectedAccount, FieldKind, FieldProblem, OAUTH_STATE_TTL, OAuthState,
             ProviderConfiguration, ProviderStatus, SourceProviderDescriptor,
             SourceProviderRepository, TOKEN_ACCESS, TOKEN_REFRESH, missing_secrets, secret_context,
-            validate_settings,
+            stamp_attestations, validate_settings,
         },
     },
 };
@@ -190,12 +190,18 @@ impl LodestoneUseCase {
         &self,
         descriptor: &SourceProviderDescriptor,
         command: SaveProviderConfiguration,
-        settings: Map<String, Value>,
+        mut settings: Map<String, Value>,
         cipher: &C,
     ) -> Result<Merged, CoreError> {
         let mut repo = source_provider_repository;
         let now = Utc::now();
         let current = repo.find(descriptor.key).await?;
+        stamp_attestations(
+            descriptor,
+            current.as_ref().map(|current| &current.settings),
+            &mut settings,
+            now,
+        );
         let created_at = current.as_ref().map_or(now, |current| current.created_at);
         let url_changed = current.as_ref().is_some_and(|current| {
             descriptor.fields.iter().any(|field| {

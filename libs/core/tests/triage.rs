@@ -12,9 +12,9 @@ use lodestone_core::{
     },
     triage::CandidateSource,
 };
-use serde_json::{Value, json};
+use serde_json::{Value, from_str, json};
 use sqlx::PgPool;
-use support::{at, domain};
+use support::{at, domain, seen_lead};
 
 const IAM: &str = include_str!("../../../docs/examples/profiles/iam-ferriskey.json");
 
@@ -351,7 +351,7 @@ async fn an_agent_not_attached_to_the_provider_is_not_run(pool: PgPool) {
         vec![search_agent(
             "jobs",
             true,
-            &["ats", "france_travail"],
+            &["hacker_news_hiring", "france_travail"],
             &["SSO"],
             1,
         )],
@@ -398,4 +398,77 @@ async fn filters_drop_candidates_per_agent_after_collection(pool: PgPool) {
     for run in runs(&pool).await {
         assert_eq!(run.volume, 2);
     }
+}
+
+struct CompanyJobsSource {
+    candidates: Vec<Candidate>,
+}
+
+impl CandidateSource for CompanyJobsSource {
+    fn name(&self) -> SourceName {
+        SourceName::Ats
+    }
+
+    async fn collect(
+        &self,
+        _profiles: &[ActiveProfile],
+        _now: DateTime<Utc>,
+    ) -> Result<Vec<Candidate>, SourceError> {
+        Ok(self.candidates.clone())
+    }
+}
+
+async fn has_lead(pool: &PgPool, profile: ProfileId, host: &str) -> bool {
+    with_tx(pool, async |shared| {
+        PgLeadRepository::new(&shared)
+            .find_by_domain(profile, &domain(host))
+            .await
+    })
+    .await
+    .unwrap()
+    .is_some()
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn company_job_offers_only_complete_leads_of_their_own_profile(pool: PgPool) {
+    let first = iam_profile(&pool).await;
+    let second = activate(&pool, "iam-b", from_str(IAM).unwrap()).await;
+    seen_lead(&pool, first, "acme.com").await;
+    let mut offer = candidate("acme.com", "Ingénieur IAM Keycloak");
+    offer.source = SourceName::Ats;
+    offer.kind = SignalKind::parse("job_offer").unwrap();
+    let mut unrelated = candidate("acme.com", "Comptable");
+    unrelated.source = SourceName::Ats;
+    unrelated.kind = SignalKind::parse("job_offer").unwrap();
+    let mut elsewhere = candidate("beta.io", "Architecte IAM Keycloak");
+    elsewhere.source = SourceName::Ats;
+    elsewhere.kind = SignalKind::parse("job_offer").unwrap();
+    let source = CompanyJobsSource {
+        candidates: vec![offer, unrelated, elsewhere],
+    };
+
+    let report = LodestoneUseCase::new(pool.clone())
+        .run_triage(&source, &FixedClock)
+        .await
+        .unwrap();
+
+    assert_eq!(report.accepted_by_rules, 4);
+    assert_eq!(report.rejected_by_rules, 2);
+    assert_eq!(report.skipped_no_lead, 3);
+    let found = signals(&pool, first, "acme.com").await;
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].source, SourceName::Ats);
+    assert_eq!(found[0].kind.as_str(), "job_offer");
+    assert_eq!(found[0].agent, None);
+    assert_eq!(found[0].raw["route"], "keywords");
+    assert!(!has_lead(&pool, first, "beta.io").await);
+    assert!(!has_lead(&pool, second, "acme.com").await);
+    assert!(!has_lead(&pool, second, "beta.io").await);
+    let recorded = runs(&pool).await;
+    assert_eq!(recorded.len(), 2);
+    assert!(recorded.iter().all(|run| run.agent.is_none()));
+    assert!(recorded.iter().all(|run| run.source == SourceName::Ats));
+    let mut signals: Vec<u64> = recorded.iter().map(|run| run.signals).collect();
+    signals.sort_unstable();
+    assert_eq!(signals, [0, 1]);
 }

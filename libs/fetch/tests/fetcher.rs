@@ -12,6 +12,7 @@ use httpmock::{
 };
 use lodestone_core::{FetchError, FetchPurpose, FetchRequest, Fetcher, SourceName};
 use rate_limit::{Clock, InMemoryRateLimiter, Quota};
+use tokio::task::JoinSet;
 use url::Url;
 
 #[derive(Clone)]
@@ -129,6 +130,37 @@ async fn per_host_limit_blocks_and_recovers() {
     page.assert_hits_async(2).await;
     clock.advance(Duration::from_secs(60));
     fetcher.fetch(&req).await.unwrap();
+    page.assert_hits_async(3).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn concurrent_fetches_to_one_host_never_exceed_its_limit() {
+    let server = MockServer::start_async().await;
+    let page = server
+        .mock_async(|when, then| {
+            when.method(GET).path("/");
+            then.status(200).delay(Duration::from_millis(50));
+        })
+        .await;
+    let mut config = settings();
+    config.requests_per_host_per_minute = NonZeroU32::new(3).unwrap();
+    let fetcher = Arc::new(fetcher(config));
+    let mut tasks = JoinSet::new();
+    for _ in 0..12 {
+        let fetcher = Arc::clone(&fetcher);
+        let req = request(&server, "/", FetchPurpose::Api);
+        tasks.spawn(async move { fetcher.fetch(&req).await });
+    }
+    let mut served = 0;
+    let mut limited = 0;
+    while let Some(outcome) = tasks.join_next().await {
+        match outcome.unwrap() {
+            Ok(_) => served += 1,
+            Err(FetchError::RateLimited { .. }) => limited += 1,
+            Err(error) => panic!("unexpected error: {error}"),
+        }
+    }
+    assert_eq!((served, limited), (3, 9));
     page.assert_hits_async(3).await;
 }
 

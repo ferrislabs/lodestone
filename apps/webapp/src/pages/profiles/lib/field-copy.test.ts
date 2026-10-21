@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { renderedFields, renderedVariantValues } from '#/lib/schema-form'
 import { PROFILE_HINTS } from '#/pages/profiles/lib/form-hints'
 import { PROFILE_SCHEMA } from '#/pages/profiles/lib/profile-schema'
+import { tabOfPath } from '#/pages/profiles/lib/tabs'
 
 describe('french field copy', () => {
 	const fields = renderedFields(PROFILE_SCHEMA, PROFILE_HINTS)
@@ -31,6 +32,43 @@ describe('french field copy', () => {
 			(pattern) => !rendered.has(pattern),
 		)
 		expect(stale).toEqual([])
+	})
+
+	it('names the enrichment fields shown on the Enrichissement tab', () => {
+		const enrichment = fields
+			.map((field) => field.pattern)
+			.filter(
+				(pattern) =>
+					pattern.startsWith('enrichment.') || pattern.startsWith('inspection'),
+			)
+		expect(enrichment).toEqual(
+			expect.arrayContaining([
+				'inspection.enabled',
+				'enrichment.custom.fingerprints',
+				'enrichment.custom.extra_subdomains',
+				'enrichment.custom.excluded_products',
+				'enrichment.highlight_keywords',
+			]),
+		)
+		for (const pattern of enrichment) {
+			expect(tabOfPath(pattern)).toBe('enrichment')
+		}
+		const copy = PROFILE_HINTS.fields
+		expect(copy['enrichment.custom.extra_subdomains']?.label).toBe(
+			'Sous-domaines supplémentaires',
+		)
+		expect(copy['enrichment.custom.excluded_products']?.label).toBe(
+			'Produits exclus',
+		)
+		expect(copy['enrichment.highlight_keywords']?.label).toBe(
+			'Mots-clés à mettre en avant',
+		)
+		expect(copy['enrichment.highlight_keywords']?.description).toContain(
+			'Vide : les mots-clés des agents de recherche',
+		)
+		expect(copy['enrichment.custom.fingerprints[]']?.add).toBe(
+			'Ajouter une empreinte',
+		)
 	})
 
 	it('titles every union variant', () => {

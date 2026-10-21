@@ -79,11 +79,13 @@ impl fmt::Display for Hostname {
 pub enum HostOrigin {
     Import,
     CertificateTransparency,
+    Lead,
 }
 
 str_enum!(HostOrigin {
     Import => "import",
     CertificateTransparency => "certificate_transparency",
+    Lead => "lead",
 });
 
 #[derive(Debug, Clone, PartialEq, Eq)]

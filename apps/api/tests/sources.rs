@@ -6,7 +6,8 @@ use chrono::{DateTime, Duration as Delta, Utc};
 use common::Secret;
 use http::{Method, StatusCode};
 use lodestone_core::{
-    JobKind, JobQueue, NewJob, ProviderStatus, Run, RunId, RunOutcome, RunRepository, SourceName,
+    CancelReason, JobKind, JobQueue, NewJob, ProviderStatus, Run, RunId, RunOutcome, RunRepository,
+    SourceName,
     infrastructure::{
         job::postgres::PgJobQueue, postgres::with_tx, run::postgres::PgRunRepository,
     },
@@ -308,10 +309,13 @@ async fn list_shows_every_source_with_states_and_last_runs(pool: PgPool) {
 
     let listed = api.list().await;
 
-    assert_eq!(listed.len(), SourceName::ALL.len() + 2);
+    assert_eq!(listed.len(), SourceName::ALL.len() + 3);
     let company = entry(&listed, "company_research");
     assert_eq!(company["mode"], "continuous");
     assert_eq!(company["kind"], "listener.company_research");
+    let inspection = entry(&listed, "ecosystem_inspection");
+    assert_eq!(inspection["mode"], "continuous");
+    assert_eq!(inspection["kind"], "listener.ecosystem_inspection");
     let boamp = entry(&listed, "boamp");
     assert_eq!(boamp["status"], "pending");
     assert_eq!(boamp["kind"], "source.run");
@@ -464,4 +468,43 @@ async fn support_profile(pool: &PgPool) -> lodestone_core::ProfileId {
     .await
     .unwrap();
     lodestone_core::ProfileId(id)
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_cancelled_run_reports_why_it_stopped(pool: PgPool) {
+    let api = Api::new(pool.clone()).await;
+    api.schedule("source.run", "source:boamp", 6).await;
+    let profile = support_profile(&pool).await;
+    with_tx(&pool, async |shared| {
+        let mut repo = PgRunRepository::new(&shared);
+        let run = Run::start(
+            RunId(common::generate_uuid_v7()),
+            profile,
+            SourceName::Boamp,
+            None,
+            Utc::now() - Delta::minutes(5),
+        );
+        repo.insert(&run).await?;
+        repo.finish(
+            run.id,
+            &RunOutcome::Cancelled {
+                volume: 2,
+                signals: 1,
+                reason: CancelReason::AgentRemoved,
+            },
+            Utc::now(),
+        )
+        .await?;
+        Ok(())
+    })
+    .await
+    .unwrap();
+
+    let listed = api.list().await;
+
+    let run = &entry(&listed, "boamp")["last_runs"][0];
+    assert_eq!(run["status"], "cancelled");
+    assert_eq!(run["cancel_reason"], "agent_removed");
+    assert_eq!(run["volume"], 2);
+    assert!(run["error"].is_null());
 }

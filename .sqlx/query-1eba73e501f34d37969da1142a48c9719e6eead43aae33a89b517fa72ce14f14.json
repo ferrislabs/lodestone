@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT DISTINCT ON (module) module, latest_example\n            FROM ecosystem_module_runs\n            WHERE latest_example IS NOT NULL\n            ORDER BY module, ran_at DESC\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "module",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "latest_example",
+        "type_info": "Jsonb"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      true
+    ]
+  },
+  "hash": "1eba73e501f34d37969da1142a48c9719e6eead43aae33a89b517fa72ce14f14"
+}

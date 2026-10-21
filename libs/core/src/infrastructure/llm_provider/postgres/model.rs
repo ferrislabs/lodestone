@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 use crate::domain::llm::{
     GenerationParams, ProviderKind, ReasoningEffort,
-    provider::{LlmProviderRecord, ProviderId, SealedSecret, TokenPricing},
+    provider::{LlmProviderRecord, MaxConcurrency, ProviderId, SealedSecret, TokenPricing},
 };
 
 #[derive(Debug, Clone)]
@@ -19,6 +19,7 @@ pub struct LlmProviderRow {
     pub model: String,
     pub timeout_ms: i32,
     pub max_retries: i16,
+    pub max_concurrency: i16,
     pub input_cents_per_mtok: i32,
     pub output_cents_per_mtok: i32,
     pub api_key_nonce: Option<Vec<u8>>,
@@ -53,6 +54,12 @@ impl TryFrom<LlmProviderRow> for LlmProviderRecord {
         let max_retries = u8::try_from(row.max_retries).map_err(|_| {
             CoreError::Internal("stored llm provider retry count is invalid".to_owned())
         })?;
+        let max_concurrency = u8::try_from(row.max_concurrency)
+            .ok()
+            .and_then(MaxConcurrency::new)
+            .ok_or_else(|| {
+                CoreError::Internal("stored llm provider concurrency is invalid".to_owned())
+            })?;
         let api_key = match (row.api_key_nonce, row.api_key_ciphertext) {
             (Some(nonce), Some(ciphertext)) => Some(SealedSecret { nonce, ciphertext }),
             (None, None) => None,
@@ -81,6 +88,7 @@ impl TryFrom<LlmProviderRow> for LlmProviderRecord {
             model: row.model,
             timeout: Duration::from_millis(timeout_ms),
             max_retries,
+            max_concurrency,
             pricing: TokenPricing {
                 input_cents_per_mtok: pricing_value(row.input_cents_per_mtok)?,
                 output_cents_per_mtok: pricing_value(row.output_cents_per_mtok)?,

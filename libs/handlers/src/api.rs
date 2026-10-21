@@ -10,12 +10,13 @@ use utoipa::ToSchema;
 
 use crate::{
     auth::{AuthenticatedUser, auth_middleware},
-    calibration, company, drafts,
+    calibration, company, drafts, ecosystem,
     errors::ApiError,
     exports, leads, llm, profiles, quality,
     response::{DataEnvelope, Response},
-    source_providers, sources,
+    settings, source_providers, sources,
     state::AppState,
+    timeline,
 };
 
 pub const API_PREFIX: &str = "/api/v1";
@@ -30,7 +31,9 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route("/profiles/import", post(profiles::import_profile))
         .route(
             "/profiles/{profile_id}",
-            get(profiles::get_profile).put(profiles::update_profile),
+            get(profiles::get_profile)
+                .put(profiles::update_profile)
+                .delete(profiles::delete_profile),
         )
         .route(
             "/profiles/{profile_id}/revisions",
@@ -106,6 +109,10 @@ pub fn router(state: AppState) -> Router<AppState> {
             "/source-providers/{key}/disconnect",
             post(source_providers::disconnect_source_provider),
         )
+        .route(
+            "/settings/crawl",
+            get(settings::get_crawl_settings).put(settings::put_crawl_settings),
+        )
         .route("/sources", get(sources::list_sources))
         .route("/sources/{source}/run", post(sources::run_source))
         .route("/drafts", get(drafts::list_drafts))
@@ -134,10 +141,17 @@ pub fn router(state: AppState) -> Router<AppState> {
             "/leads/{lead_id}/agents/retry",
             post(leads::retry_lead_agents),
         )
+        .route("/leads/{lead_id}/reevaluate", post(leads::reevaluate_lead))
+        .route("/leads/{lead_id}/timeline", get(timeline::lead_timeline))
         .route(
             "/leads/{lead_id}/company/refresh",
             post(company::refresh_company),
-        );
+        )
+        .route(
+            "/leads/{lead_id}/ecosystem/dry-run",
+            post(ecosystem::dry_run_ecosystem_module),
+        )
+        .route("/ecosystem/modules", get(ecosystem::list_ecosystem_modules));
 
     let callback = Router::new().route(
         "/api/v1/source-providers/oauth/callback",

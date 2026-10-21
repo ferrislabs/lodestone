@@ -2,7 +2,12 @@ import { describe, expect, it } from 'vitest'
 
 import { isEdited, previewText } from './edit'
 
-const base = { subject: 's', body: 'b', status: 'pending' as const }
+const base = {
+	subject: 's',
+	body: 'b',
+	status: 'pending' as const,
+	revision: 0,
+}
 
 describe('draft edit helpers', () => {
 	it('is not edited without original text', () => {

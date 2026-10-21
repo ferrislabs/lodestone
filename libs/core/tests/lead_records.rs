@@ -206,14 +206,14 @@ async fn approving_a_draft_enqueues_a_webhook_only_when_enabled(pool: PgPool) {
     let second_assessment = assessment(&pool, second).await;
 
     LodestoneUseCase::new(pool.clone())
-        .approve_draft(lodestone_core::AssessmentId(first_assessment), actor)
+        .approve_draft(lodestone_core::AssessmentId(first_assessment), actor, None)
         .await
         .unwrap();
     assert!(webhook_jobs(&pool).await.is_empty());
 
     LodestoneUseCase::new(pool.clone())
         .with_webhooks(Some(policy(vec![])))
-        .approve_draft(lodestone_core::AssessmentId(second_assessment), actor)
+        .approve_draft(lodestone_core::AssessmentId(second_assessment), actor, None)
         .await
         .unwrap();
     let jobs = webhook_jobs(&pool).await;
@@ -233,7 +233,7 @@ async fn a_profile_outside_the_filter_enqueues_nothing(pool: PgPool) {
 
     LodestoneUseCase::new(pool.clone())
         .with_webhooks(Some(policy(vec![beta])))
-        .approve_draft(lodestone_core::AssessmentId(assessment_id), actor)
+        .approve_draft(lodestone_core::AssessmentId(assessment_id), actor, None)
         .await
         .unwrap();
 

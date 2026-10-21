@@ -4,12 +4,13 @@ use chrono::{DateTime, Utc};
 use common::CoreError;
 
 use crate::domain::{
+    NormalizedDomain,
     lead::{Lead, LeadId},
     llm::provider::ProviderId,
     profile::{ProfileId, RevisionNumber},
     qualification::{
-        AgentCallFailure, AgentFailure, Completion, LeadScoring, QualificationResult, Rescoring,
-        SummaryState,
+        AgentCallFailure, AgentFailure, Completion, DueGates, LeadScoring, QualificationResult,
+        Rescoring, SummaryState,
     },
 };
 
@@ -20,7 +21,7 @@ pub trait QualificationRepository: Send {
         profile_id: ProfileId,
         revision: RevisionNumber,
         limit: u32,
-        dossier_gate: Option<DateTime<Utc>>,
+        gates: DueGates,
         now: DateTime<Utc>,
     ) -> impl Future<Output = Result<Vec<Lead>, CoreError>> + Send;
 
@@ -28,7 +29,7 @@ pub trait QualificationRepository: Send {
         &mut self,
         profile_id: ProfileId,
         revision: RevisionNumber,
-        dossier_gate: Option<DateTime<Utc>>,
+        gates: DueGates,
         now: DateTime<Utc>,
     ) -> impl Future<Output = Result<u64, CoreError>> + Send;
 
@@ -102,6 +103,30 @@ pub trait QualificationRepository: Send {
         &mut self,
         completion: &Completion,
     ) -> impl Future<Output = Result<(), CoreError>> + Send;
+
+    fn mark_requalification(
+        &mut self,
+        domain: &NormalizedDomain,
+        after: DateTime<Utc>,
+        at: DateTime<Utc>,
+    ) -> impl Future<Output = Result<u64, CoreError>> + Send;
+
+    fn request_reevaluation(
+        &mut self,
+        lead_id: LeadId,
+        at: DateTime<Utc>,
+    ) -> impl Future<Output = Result<(), CoreError>> + Send;
+
+    fn fresh_calls(
+        &mut self,
+        lead_id: LeadId,
+    ) -> impl Future<Output = Result<bool, CoreError>> + Send;
+
+    fn backfill_dossier_requalifications(
+        &mut self,
+        after: DateTime<Utc>,
+        at: DateTime<Utc>,
+    ) -> impl Future<Output = Result<u64, CoreError>> + Send;
 
     fn current_results(
         &mut self,

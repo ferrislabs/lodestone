@@ -1,6 +1,6 @@
 use std::{
-    num::NonZeroU32,
-    sync::Mutex,
+    num::{NonZeroU32, NonZeroUsize},
+    sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 
@@ -9,12 +9,14 @@ use chrono::{DateTime, Utc};
 use common::CoreError;
 use dns::HickoryResolver;
 use fetch::PoliteFetcher;
+use handlers::state::Ecosystem;
 use llm::any::AnyProvider;
 use lodestone_core::{
     CompanyBuilder, ContactFinder, LlmError, LodestoneUseCase, ProviderDefinition, Source,
     SourceName, StepOutcome,
     company::{COMPANY_RESEARCH_LISTENER, CompanyRunSettings},
     contacts::ContactRunSettings,
+    ecosystem::{ECOSYSTEM_LISTENER, InspectionRunSettings},
     evaluation::{EvaluationSettings, ProviderBuilder, QUALIFICATION_LISTENER},
     infrastructure::{
         candidate_host::postgres::PgCandidateHosts, contact_target::postgres::PgContactTargets,
@@ -29,6 +31,7 @@ use sources::{
     contact_pages::PublicPageFinder, ct::CtSource, dns_cname::DnsCnameSource,
     http_probe::HttpProbeSource, role_guess::RoleGuessFinder, security_txt::SecurityTxtFinder,
 };
+use tracing::info;
 
 pub type CertificateTransparency = CtSource<PoliteFetcher, PgCandidateHosts, PgCtCursors>;
 pub type DnsCname = DnsCnameSource<HickoryResolver, PgCandidateHosts>;
@@ -104,6 +107,13 @@ impl<S: Source> ListenerStep for HostStep<S> {
             .usecase
             .listen_source(&self.source, &SystemClock)
             .await?;
+        if report.skipped_no_lead > 0 {
+            info!(
+                source = %self.source.name(),
+                skipped_no_lead = report.skipped_no_lead,
+                "enrichment matches without a lead in the profile were skipped"
+            );
+        }
         let backlog = self
             .hosts
             .count_due(self.source.name(), due_before(Utc::now(), self.revisit)?)
@@ -179,9 +189,54 @@ impl<B: CompanyBuilder> ListenerStep for CompanyStep<B> {
             .usecase
             .listen_company_research(&self.builder, self.settings, &SystemClock)
             .await?;
+        if report.unconfirmed_links.total() > 0 {
+            info!(
+                domains = report.domains,
+                unconfirmed_links = report.unconfirmed_links.total(),
+                unconfirmed_by_reason = %report.unconfirmed_links,
+                "company research ignored unconfirmed links"
+            );
+        }
         Ok(StepOutcome {
             processed: report.domains,
             signals: report.changed,
+            backlog: Some(report.backlog),
+        })
+    }
+}
+
+pub struct InspectionStep {
+    pub usecase: LodestoneUseCase,
+    pub modules: Arc<Ecosystem>,
+    pub settings: InspectionRunSettings,
+}
+
+impl ListenerStep for InspectionStep {
+    fn name(&self) -> &str {
+        ECOSYSTEM_LISTENER
+    }
+
+    async fn is_active(&self) -> Result<bool, CoreError> {
+        self.usecase.has_inspected_profile().await
+    }
+
+    async fn run_once(&self) -> Result<StepOutcome, SourceRunError> {
+        let report = self
+            .usecase
+            .inspect_due_domains(&self.modules.runners(), self.settings, &SystemClock)
+            .await?;
+        if report.failed > 0 || report.not_applicable > 0 {
+            info!(
+                inspected = report.domains,
+                failed = report.failed,
+                not_applicable = report.not_applicable,
+                rate_limited = report.rate_limited,
+                "ecosystem inspection pass finished"
+            );
+        }
+        Ok(StepOutcome {
+            processed: report.domains,
+            signals: report.findings,
             backlog: Some(report.backlog),
         })
     }
@@ -244,6 +299,7 @@ pub struct QualificationStep {
     pub cipher: AesGcmCipher,
     pub cache: PgLlmCache,
     pub budget_cents: NonZeroU32,
+    pub concurrency: NonZeroUsize,
     pub cooldowns: Mutex<Cooldowns>,
 }
 
@@ -291,6 +347,7 @@ impl ListenerStep for QualificationStep {
             budget_cents: self.budget_cents,
             batch_size: QUALIFICATION_BATCH_SIZE,
             base_delay: QUALIFICATION_BASE_DELAY,
+            concurrency: self.concurrency,
         };
         let [skip_evaluation, skip_scoring, skip_aggregation] = self.paused(Instant::now());
         let evaluation = if skip_evaluation {

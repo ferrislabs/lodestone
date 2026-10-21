@@ -3,10 +3,17 @@ import { useNavigate, useParams } from '@tanstack/react-router'
 
 import { errorMessage, lodestoneApi } from '#/api/lodestone'
 import { parseApiError } from '#/lib/api-errors'
+import {
+	EVALUATION_POLL_MS,
+	evaluationMoves,
+} from '#/pages/leads/lib/evaluation'
 import { nextStatuses } from '#/pages/leads/lib/transitions'
 import { LeadDetail } from '#/pages/leads/ui/lead-detail'
+import { LeadTimeline } from '#/pages/leads/ui/lead-timeline'
+import { PipelineStepper } from '#/pages/leads/ui/pipeline-stepper'
 import { useRejectionForm } from '#/pages/rejection/feature/use-rejection-form'
 import { RejectionDialog } from '#/pages/rejection/ui/rejection-dialog'
+import { useLeadTimeline } from './use-lead-timeline'
 
 const COMPANY_POLL_MS = 4_000
 
@@ -15,6 +22,7 @@ export function LeadDetailFeature() {
 	const navigate = useNavigate()
 	const queryClient = useQueryClient()
 	const rejection = useRejectionForm()
+	const timeline = useLeadTimeline(leadId)
 
 	const detailQuery = useQuery({
 		...lodestoneApi().get('/api/v1/leads/{lead_id}', {
@@ -23,7 +31,9 @@ export function LeadDetailFeature() {
 		refetchInterval: (query) =>
 			query.state.data?.data.company?.state === 'pending'
 				? COMPANY_POLL_MS
-				: false,
+				: evaluationMoves(query.state.data?.data.lead.evaluation)
+					? EVALUATION_POLL_MS
+					: false,
 	})
 
 	const changeStatus = useMutation({
@@ -74,6 +84,20 @@ export function LeadDetailFeature() {
 			}),
 	})
 
+	const reevaluate = useMutation({
+		...lodestoneApi().mutation('post', '/api/v1/leads/{lead_id}/reevaluate')
+			.mutationOptions,
+		onSuccess: () =>
+			Promise.all([
+				queryClient.invalidateQueries({
+					queryKey: [{ _id: '/api/v1/leads/{lead_id}' }],
+				}),
+				queryClient.invalidateQueries({
+					queryKey: [{ _id: '/api/v1/profiles/{profile_id}/leads' }],
+				}),
+			]),
+	})
+
 	const detail = detailQuery.data?.data ?? null
 	const statusError = changeStatus.isError
 		? parseApiError(changeStatus.error)
@@ -93,6 +117,35 @@ export function LeadDetailFeature() {
 			}
 			detail={detail}
 			nextStatuses={detail ? nextStatuses(detail.lead.status) : []}
+			pipeline={
+				timeline.timeline ? (
+					<PipelineStepper
+						stages={timeline.timeline.pipeline.stages}
+						current={timeline.timeline.pipeline.current ?? null}
+						now={timeline.now}
+						error={null}
+					/>
+				) : timeline.state === 'error' ? (
+					<PipelineStepper
+						stages={[]}
+						current={null}
+						now={timeline.now}
+						error={timeline.error}
+					/>
+				) : null
+			}
+			chronology={
+				<LeadTimeline
+					state={timeline.state}
+					errorMessage={timeline.error}
+					rounds={timeline.rounds}
+					inFlight={timeline.timeline?.in_flight ?? []}
+					steps={timeline.steps}
+					selected={timeline.selected}
+					onToggleStep={timeline.toggle}
+					onClearSteps={timeline.clear}
+				/>
+			}
 			onBack={() => {
 				void navigate({
 					to: '/leads',
@@ -175,6 +228,11 @@ export function LeadDetailFeature() {
 			refreshingCompany={refreshCompany.isPending}
 			refreshCompanyError={
 				refreshCompany.isError ? errorMessage(refreshCompany.error) : null
+			}
+			onReevaluate={() => reevaluate.mutate({ path: { lead_id: leadId } })}
+			reevaluating={reevaluate.isPending}
+			reevaluateError={
+				reevaluate.isError ? errorMessage(reevaluate.error) : null
 			}
 			changing={changeStatus.isPending}
 			changeError={

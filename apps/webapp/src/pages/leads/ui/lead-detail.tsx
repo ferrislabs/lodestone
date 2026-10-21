@@ -4,11 +4,21 @@ import type { ReactNode } from 'react'
 import { Button } from '#/components/ui/button'
 import { Skeleton } from '#/components/ui/skeleton'
 import { failureOfKind } from '#/pages/leads/lib/agent-failure'
+import {
+	canReevaluate,
+	changedSince,
+	evaluatedAtText,
+	evaluationLabel,
+	inspectionProgress,
+} from '#/pages/leads/lib/evaluation'
 import type { LeadDetailData, LeadStatus } from '#/pages/leads/lib/types'
+import { AgentStopsNotice } from './agent-stops-notice'
 import { AssessmentsList } from './assessments-list'
 import { CompanyCard } from './company-card'
 import { ContactsList } from './contacts-list'
 import { ExclusionNotice } from './exclusion-notice'
+import { LeadEcosystem } from './lead-ecosystem'
+import { LeadEvaluation } from './lead-evaluation'
 import { LeadFacts } from './lead-facts'
 import { LeadHeader } from './lead-header'
 import { LeadSummary } from './lead-summary'
@@ -25,6 +35,8 @@ interface LeadDetailProps {
 	onOpenLead: (leadId: string) => void
 	onChangeStatus: (status: LeadStatus) => void
 	rejectionDialog: ReactNode
+	pipeline?: ReactNode
+	chronology?: ReactNode
 	onOpenDraft: (assessmentId: string) => void
 	onRetrySummary: () => void
 	retryingSummary: boolean
@@ -35,6 +47,9 @@ interface LeadDetailProps {
 	onRefreshCompany: () => void
 	refreshingCompany: boolean
 	refreshCompanyError: string | null
+	onReevaluate: () => void
+	reevaluating: boolean
+	reevaluateError: string | null
 	changing: boolean
 	changeError: string | null
 }
@@ -48,6 +63,8 @@ export function LeadDetail({
 	onOpenLead,
 	onChangeStatus,
 	rejectionDialog,
+	pipeline = null,
+	chronology = null,
 	onOpenDraft,
 	onRetrySummary,
 	retryingSummary,
@@ -58,6 +75,9 @@ export function LeadDetail({
 	onRefreshCompany,
 	refreshingCompany,
 	refreshCompanyError,
+	onReevaluate,
+	reevaluating,
+	reevaluateError,
 	changing,
 	changeError,
 }: LeadDetailProps) {
@@ -92,6 +112,17 @@ export function LeadDetail({
 						changing={changing}
 						changeError={changeError}
 					/>
+					{pipeline}
+					<LeadEvaluation
+						stage={detail.lead.evaluation?.stage ?? null}
+						label={evaluationLabel(detail.lead.evaluation)}
+						evaluatedAt={evaluatedAtText(detail.lead.evaluation)}
+						changed={changedSince(detail.lead.evaluation)}
+						canReevaluate={canReevaluate(detail.lead.evaluation)}
+						reevaluating={reevaluating}
+						reevaluateError={reevaluateError}
+						onReevaluate={onReevaluate}
+					/>
 					<ExclusionNotice exclusions={detail.lead.exclusions} />
 					<CompanyCard
 						company={detail.company ?? null}
@@ -100,6 +131,13 @@ export function LeadDetail({
 						onRefresh={onRefreshCompany}
 					/>
 					{detail.facts ? <LeadFacts facts={detail.facts} /> : null}
+					{detail.ecosystem ? (
+						<LeadEcosystem
+							ecosystem={detail.ecosystem}
+							progress={inspectionProgress(detail.lead.evaluation)}
+						/>
+					) : null}
+					<AgentStopsNotice stops={detail.agent_stops ?? []} />
 					<QualificationResults
 						results={detail.qualification_results}
 						failure={failureOfKind(detail.agent_failures, 'qualification')}
@@ -125,6 +163,7 @@ export function LeadDetail({
 					/>
 					<SignalsList signals={detail.signals} />
 					<ContactsList contacts={detail.contacts} />
+					{chronology}
 					{detail.assessments.length > 1 ? (
 						<AssessmentsList assessments={detail.assessments.slice(1)} />
 					) : null}

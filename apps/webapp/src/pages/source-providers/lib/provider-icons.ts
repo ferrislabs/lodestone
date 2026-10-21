@@ -5,6 +5,7 @@ import {
 	type LucideIcon,
 	Network,
 	Radar,
+	Scale,
 	ShieldCheck,
 } from 'lucide-react'
 
@@ -14,6 +15,7 @@ import decp from '#/assets/providers/decp.svg'
 import franceTravail from '#/assets/providers/france_travail.svg'
 import hackerNewsHiring from '#/assets/providers/hacker_news_hiring.svg'
 import ted from '#/assets/providers/ted.png'
+import welcomeToTheJungle from '#/assets/providers/welcome_to_the_jungle.png'
 
 export type ProviderIcon =
 	| { kind: 'logo'; src: string }
@@ -26,11 +28,13 @@ const ICONS: Readonly<Record<string, ProviderIcon>> = {
 	france_travail: { kind: 'logo', src: franceTravail },
 	ats: { kind: 'lucide', Icon: Briefcase },
 	hacker_news_hiring: { kind: 'logo', src: hackerNewsHiring },
+	welcome_to_the_jungle: { kind: 'logo', src: welcomeToTheJungle },
 	certificate_transparency: { kind: 'lucide', Icon: ShieldCheck },
 	dns_cname: { kind: 'lucide', Icon: Network },
 	http_probe: { kind: 'lucide', Icon: Radar },
 	contacts: { kind: 'lucide', Icon: Contact },
 	company_research: { kind: 'logo', src: companyResearch },
+	bodacc: { kind: 'lucide', Icon: Scale },
 }
 
 const DEFAULT_ICON: ProviderIcon = { kind: 'lucide', Icon: Database }

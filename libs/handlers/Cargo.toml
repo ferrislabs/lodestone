@@ -15,6 +15,8 @@ rate-limit = { workspace = true }
 llm = { workspace = true }
 source-providers = { workspace = true }
 fetch = { workspace = true }
+sources = { workspace = true }
+dns = { workspace = true }
 
 axum = { workspace = true }
 http = { workspace = true }

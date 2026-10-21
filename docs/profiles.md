@@ -1,6 +1,6 @@
 # Detection profiles
 
-A detection profile describes one market: what is sold, which agents scan which sources, which qualification agents judge a lead, which scoring agents decide its score and verdict, how an aggregator sums it up, how signals are weighted and which contacts to prefer.
+A detection profile describes one market: what is sold, which sourcing agents find leads in which sources, which profile-specific settings the ecosystem inspection of every lead uses, which qualification agents judge a lead, which scoring agents decide its score and verdict, how an aggregator sums it up, how signals are weighted and which contacts to prefer.
 
 ## Storage
 
@@ -8,7 +8,7 @@ Profiles live in Postgres. Each edit creates a new revision; earlier revisions a
 
 ## Schema
 
-The JSON Schema is `docs/schemas/profile.v16.schema.json`. It is generated from `ProfileDefinition` and must not be edited by hand. Regenerate it with:
+The JSON Schema is `docs/schemas/profile.v19.schema.json`. It is generated from `ProfileDefinition` and must not be edited by hand. Regenerate it with:
 
 ```
 UPDATE_SCHEMA=1 cargo test -p lodestone-core --test profile_examples
@@ -18,17 +18,22 @@ Without `UPDATE_SCHEMA=1` the same test fails if the committed file is stale. Th
 
 ## Examples
 
-- `docs/examples/profiles/iam-ferriskey.json`: sells FerrisKey and Autharie to organizations running Keycloak or a SaaS IAM. Uses certificate transparency, HTTP probes, CNAME patterns, one search agent « Marchés publics » over the BOAMP, DECP and TED providers, and two job agents of the same kind (`ats-fr`, `ats-en`), the second with its own relevance criteria, written in the prompt of the `pertinence` agent.
-- `docs/examples/profiles/ecommerce-replatforming.json`: sells Magento migrations. Uses one HTTP probe with a version extractor, BOAMP and France Travail. It has no IAM-specific field.
+- `docs/examples/profiles/iam-ferriskey.json`: sells FerrisKey and Autharie to organizations running Keycloak or a SaaS IAM. Sourcing agents « Certificats » (certificate labels) and « DNS » (CNAME patterns), both limited to France (`countries: ["FR"]`), « Marchés publics » over BOAMP, DECP and TED and « Offres et missions » over France Travail and Hacker News. Enrichment: its own fingerprints (Keycloak, Authentik, Zitadel) probed on the lead domain and the identity subdomains, and the job keywords highlighted in the offers of every lead, whose relevance criteria are written in the prompt of the `pertinence` agent.
+- `docs/examples/profiles/ecommerce-replatforming.json`: sells Magento migrations. Search agents over BOAMP and France Travail, and its own Magento fingerprint with a version extractor, probed on `www`, `shop` and `boutique`. It has no IAM-specific field.
 
 ## Sections
 
-- `schema_version`: must be 16. See [Older versions](#older-versions).
+- `schema_version`: must be 19. See [Older versions](#older-versions).
 - `identity`: the offer and the target customer, in free text.
 - `language`: `fr` or `en`, default `fr` (was `llm.language` before 14). The language of every free-text field the LLM writes: the aggregator's summary, verdict narrative, approach angle, draft subject and body, the qualification summaries and the scoring reasons. The system prompts state it (`Write every free-text field (...) in French. Evidence quotes stay in the language of the document they come from.`), so evidence quotes stay in the source language and the verbatim check is unchanged. Changing the language changes the system prompt, hence the LLM cache key: answers are regenerated.
-- `agents`: the detection agents; at least one is required (see ADR 0005). `type` selects `search` or `signal`. `id` (slug matching `^[a-z0-9][a-z0-9-]{0,62}$`, unique in the profile), `name` (not empty) and `enabled` (default `true`, a disabled agent is kept but not run) are common.
-  - `search` agent: looks for keywords across catalog providers (ADR 0010). `providers`: at least one catalog key that supports keyword search (`boamp`, `decp`, `ted`, `france_travail`, `hacker_news_hiring`, `ats`), no duplicate; an unknown key (`UnknownProvider`) or a provider without keyword search (`ProviderCannotSearch`) is rejected, a provider that is not ready is accepted but skipped at run time. `keywords` (at least one), `exclusions`, `accept_min_keywords` and `filters` are defined once for every provider (see "Search agents").
-  - `signal` agent: reads one technical provider with its own settings. `source.provider` is its catalog key (`certificate_transparency`, `dns_cname`, `http_probe`) and the other fields of `source` are its settings (table in "Signal agents").
+- `agents`: the sourcing agents, they find leads (ADR 0005, ADR 0011). At least one is required unless the inspection is on and the profile has its own fingerprints or job keywords to highlight (`NoAgent`). `type` selects `search`, `certificates` or `dns`. `id` (slug matching `^[a-z0-9][a-z0-9-]{0,62}$`, unique in the profile), `name` (not empty) and `enabled` (default `true`, a disabled agent is kept but not run) are common.
+  - `search` agent: looks for keywords across catalog providers (ADR 0010). `providers`: at least one catalog key that supports keyword search (`boamp`, `decp`, `ted`, `france_travail`, `hacker_news_hiring`, `welcome_to_the_jungle`), no duplicate; an unknown key (`UnknownProvider`) or a provider without keyword search (`ProviderCannotSearch`, `ats` included since schema 17) is rejected, a provider that is not ready is accepted but skipped at run time. `keywords` (at least one), `exclusions`, `accept_min_keywords` and `filters` are defined once for every provider (see "Search agents").
+  - `certificates` agent: `labels`, hostname labels looked for in certificate transparency logs (lowercase labels, at least one). A matching host creates or updates a lead (see "Certificates and DNS agents").
+  - `dns` agent: `patterns`, provider names with the CNAME target suffix that identifies them (at least one).
+- `inspection`: `enabled` (default `true`), the master switch of the ecosystem inspection for the leads of the profile (ADR 0012, see "Ecosystem inspection"). Off, the leads of the profile are not inspected and qualification does not wait for the inspection.
+- `enrichment`: the settings of the inspection specific to this profile; everything else is the same for every profile (ADR 0012). The section and each field are optional, and there is no trade-specific default.
+  - `custom`: « Avancé » in the webapp. `fingerprints` (path, matchers, optional version extractor, debt markers, unique ids), `excluded_products` and `extra_subdomains` (hostname labels, no duplicate, empty by default). The fingerprints are probed on the lead domain and the extra subdomains; a match is a `product_detected` or `debt_marker` signal and a finding of « Site et stack technique ».
+  - `highlight_keywords`: « Mots-clés à mettre en avant » in the job offers of a lead. An offer with them is highlighted in « Activité de recrutement » and becomes a `job_offer` signal (at least 2 distinct keywords for a strong signal). Empty means the union of the keywords of the enabled search agents. No blank keyword.
 - `qualification_agents`: at least one (ADR 0007). Each agent evaluates every lead of the profile, from every source, from one angle.
   - `id`: slug, unique among all agents of the profile, sourcing and qualification together.
   - `name`: display name, not empty. `enabled`: defaults to `true`.
@@ -249,6 +254,7 @@ Strengths set by the sources:
 
 | Origin | Signal | Strength |
 | --- | --- | --- |
+| Certificates agent | `certificate_seen` | 0.3 |
 | HTTP probe | `product_detected` | 0.9 |
 | HTTP probe | `debt_marker` | 0.6 |
 | DNS CNAME | `saas_provider` | 0.9 |
@@ -269,7 +275,7 @@ A search agent defines its criteria once and every provider attached to it trans
 | `countries` | ISO 3166-1 alpha-2 codes in uppercase (`FR`), no duplicate. Empty means every country. |
 | `contracts` | `freelance`, `employee`, `public_contract`, `any`. Empty or containing `any` means every contract type. |
 
-`accept_min_keywords` (default 2, at least 1) is the number of distinct keywords from which a candidate is accepted without the LLM, provided no exclusion matches.
+A candidate without any keyword is rejected. `accept_min_keywords` (default 2, at least 1) is the number of distinct keywords from which a candidate gives a strong signal (route `keywords`, strength 0.7), provided no exclusion matches. Fewer keywords, or any exclusion, still keep the candidate with a weaker signal (route `keywords_ambiguous`, strength 0.5): exclusions never reject.
 
 Each provider filters natively what its API supports (`capabilities.filters` of its catalog descriptor) and the rest is applied after collection, on every candidate, by the same function for all providers (`passes_filters`, `libs/core/src/domain/triage/filters.rs`). A candidate dropped by the filters is counted as `rejected_by_filters` and never reaches the keyword routing. The signals recorded by a search agent carry its id in `agent`.
 
@@ -278,7 +284,8 @@ Each provider filters natively what its API supports (`capabilities.filters` of 
 | `france_travail` | `contracts` as `typeContrat` (`freelance`: `FRA,LIB`; `employee`: `CDD,CDI,MIS,SAI`). Keywords are queried once per distinct native filter. | `remote`, `countries`, and `contracts` again on the offer contract code and text. |
 | `ted` | `countries` as `buyer-country` (alpha-3 code derived from the alpha-2; a country without alpha-3 code is left to the post-filter). Without `countries`, the operator default `TED_BUYER_COUNTRIES` applies. | `remote` (not applicable to notices, they pass), `contracts` (a notice is a `public_contract`). |
 | `hacker_news_hiring` | none | all three filters, on the work mode, contract and country read from the post header (see "Hacker News parsing"). |
-| `boamp`, `decp`, `ats` | none | all three filters. |
+| `welcome_to_the_jungle` | none (the attributes of the jobs index are not documented) | all three filters, on the contract, remote mode and office country of each offer (see "Welcome to the Jungle"). |
+| `boamp`, `decp` | none | all three filters. |
 
 Post-filter rules, best effort on the title and text of the candidate, accents ignored:
 
@@ -287,6 +294,10 @@ Post-filter rules, best effort on the title and text of the candidate, accents i
 - `countries`: the country comes from the provider detail (TED `buyer-country`), the country-code top-level domain of the candidate, or a country name in French or English in the text. A candidate with no country evidence is kept; one whose evidence names only other countries is dropped.
 
 The editor lists, per selected provider, what it filters natively and what is applied after collection.
+
+### Welcome to the Jungle
+
+`welcome_to_the_jungle` searches the job offers of welcometothejungle.com through the search backend of its public search page (Algolia), under an authorisation the operator declares in the catalog (`authorised`, dated in `authorised_at`, and `authorisation_reference`). Scope: keyword search of offers and the company of each offer, nothing else. Every run reads `/api/env` for the application id and the public search-only key (never stored), and sends the `Referer` value the operator entered (`referer`, an https URL on welcometothejungle.com) with the Lodestone User-Agent; no other browser header is sent. The jobs index is `jobs_index` when set, otherwise it is discovered once per process in the public scripts of `/fr/jobs` (at most 8 scripts). Each distinct keyword is searched (`max_pages` pages of 30 offers, 1 to 3, default 3) and an offer found twice is kept once (by object id). The company website comes from the offer when present, otherwise from the organisation index (one lookup per company, cached, at most 60 per run); an offer without a website is counted as `skipped_no_domain`. The signal is a `job_offer` titled « offer — company » whose provenance is the offer page on welcometothejungle.com and whose date is the publication date. Requests to one host are spaced to `requests_per_minute` (default 10, 1 to 30). A `429` stops the run as rate limited; a `403` naming the referer, any other `403` or a challenge marks the provider `failing` with the reason and stops the run, without retry nor workaround.
 
 ### Hacker News parsing
 
@@ -300,15 +311,49 @@ The editor lists, per selected provider, what it filters natively and what is ap
 - The company domain is the first URL of the comment (links first, then URLs in the text, `www.` included) whose host is not `news.ycombinator.com`, a job board, an applicant tracking system, a code or social host, or a webmail. A post without such a URL is skipped and counted in `skipped_no_domain`: a company name alone cannot be a lead.
 - The signal is a `job_offer` whose provenance is `https://news.ycombinator.com/item?id=<item id>` and whose observation date is the comment date.
 
-## Signal agents
+## Certificates and DNS agents
 
-| `source.provider` | Settings |
-| --- | --- |
-| `certificate_transparency` | `labels`: hostname labels to look for in certificate logs. |
-| `http_probe` | `fingerprints` (path, matchers, optional version extractor, debt markers) and `excluded_products`. |
-| `dns_cname` | `patterns`: provider names with the CNAME target suffix that identifies them. |
+| `type` | Settings | Effect |
+| --- | --- | --- |
+| `certificates` | `labels`: hostname labels to look for in certificate logs. | A new certificate host with one of the labels in its subdomain part creates or updates the lead of its registrable domain with a `certificate_seen` signal (value: the host, `raw.labels`: the matched labels, provenance `https://crt.sh/?q=<host>`, strength 0.3). The host is recorded as a candidate host for the DNS lookup and the HTTP probe. |
+| `dns` | `patterns`: provider names with the CNAME target suffix that identifies them. | A candidate host whose CNAME chain ends with a suffix creates or updates the lead of its domain with a `saas_provider` signal. |
 
-Validation paths include the agent index, for example `agents[1].keywords[0]`, `agents[1].providers[0]`, `agents[0].source.labels[1]` or `contact_ranking.guess_local_parts[1]`.
+Both kinds take an optional `countries` (since schema 19): ISO 3166-1 alpha-2 codes, uppercase, no duplicate (`InvalidCountryCode` otherwise, path `agents[0].countries[1]`). Empty, the default, means every country. With countries, before a lead is created:
+
+- a domain whose country-code top-level domain names a listed country (`.fr` for `FR`, from the ccTLD table of `libs/core/src/domain/facts/country.rs`) is kept;
+- a domain under the ccTLD of another country is dropped, counted in `skipped_out_of_country` of the source run report;
+- a domain under a generic top-level domain (`.com`, `.io`, or a ccTLD missing from the table) is kept, unless its company dossier already gives a head office country that is not listed. Once the dossier gives such a head office, the lead is suppressed for this profile with the reason « hors pays visé » when every sourcing signal of the lead comes from a certificates or DNS agent of the profile whose countries exclude that country (a signal of another agent keeps it). A new signal of the lead from a sourcing agent of the profile whose filter admits it, or that has no filter, lifts this exclusion. A suppressed lead (`leads.excluded_reason`) leaves the list, the detail, the qualification and the inspection, like a suppressed domain, for that profile only.
+
+A host whose name is, or ends with, a SaaS tenant domain never creates a lead, whatever the countries: `crm.dev`, `force.com`, `salesforce.com`, `my.salesforce.com`, `okta.com`, `oktapreview.com`, `okta-emea.com`, `auth0.com`, `b2clogin.com`, `ciamlogin.com`, `onmicrosoft.com`, `sharepoint.com`, `zendesk.com`, `freshdesk.com`, `atlassian.net`, `myshopify.com`, `cloudfront.net`, `azurefd.net`, `herokudns.com`, `amazonaws.com` (data in code, `SAAS_TENANT_DOMAINS`, next to the hosting platforms). Such hosts are counted in `skipped_saas_tenant`. A tenant reaches a company only through a CNAME from the company's own domain, which the DNS agent reads. At startup, the existing leads of active profiles on these domains are suppressed with the reason « domaine d'un fournisseur SaaS » (idempotent).
+
+Validation paths include the agent index, for example `agents[1].keywords[0]`, `agents[1].providers[0]`, `agents[0].labels[1]`, `enrichment.custom.fingerprints[0].path` or `contact_ranking.guess_local_parts[1]`.
+
+## Ecosystem inspection
+
+Every identified lead, that is every lead with a registrable domain, gets the same ecosystem inspection whatever the profile (ADR 0012). The inspection is made of modules; the qualification agents of each profile read what they found and decide what matters.
+
+| Module | Key | What it learns | Refresh |
+| --- | --- | --- | --- |
+| Identité officielle | `official_identity` | legal name, SIREN, main activity, headcount range, head office and creation date from the official company register | 30 days |
+| Vie légale | `legal_life` | BODACC events (issue 211) | 7 days |
+| Marchés publics | `public_contracts` | DECP contracts held by the company (issue 211) | 7 days |
+| Site et stack technique | `website_stack` | home page (confirmed), `server`, `x-powered-by`, generator, and the profile fingerprints on the domain and its extra subdomains | 7 days |
+| Écosystème DNS et e-mail | `dns_email` | mail and service providers from DNS records (issue 212) | 7 days |
+| Activité de recrutement | `hiring_activity` | confirmed career pages, recruiting board (Greenhouse, Lever, Ashby), open positions and offers, highlighted ones first (at most 20) | 3 days |
+| Activité récente | `recent_activity` | recent news of the company site (issue 212) | 3 days |
+
+- **Modules of this version.** `official_identity` wraps the company dossier: it reads the stored dossier when one was built, else builds it now. `website_stack` wraps the HTTP probe with the profile fingerprints of every profile that has a lead on the domain. `hiring_activity` wraps the career page and recruiting board reader. `legal_life` reads the BODACC announcements and `public_contracts` the DECP awards of the company by SIREN; without a SIREN they report « SIREN inconnu ». The other modules are listed with « À venir » and have no status yet.
+- **Findings.** A finding has a module, a key, a kind, a French label, a value, a source URL (a confirmed link or the API URL it was read from), the time it was observed and details. Findings are stored per registrable domain in `lead_ecosystem (domain, module, finding_key)` and shared by the leads of every profile on that domain. A new run of a module replaces its findings; a failed run keeps the previous ones.
+- **Status.** `lead_ecosystem_modules (domain, module)` keeps `status` (`pending`, `done`, `not_applicable`, `failed`), `last_run`, `next_run_at`, `error`, `content_hash` (hash of the findings of the last successful run) and `changed_at` (last run whose findings differed). A module is due when it never ran for the domain or when `next_run_at` passed: its refresh interval after a run, 6 hours after a failure, at least one minute after a rate limit (the module stops for that pass and the domain keeps its status).
+- **Priority.** Each pass of a module first takes up to `INSPECTION_PRIORITY_BATCH` (default 30) due domains that were never inspected by it or have a lead created less than an hour ago, newest lead first, then up to 10 due domains to refresh, oldest `next_run_at` first.
+- **Hosting platforms.** A domain under a hosting platform (`notion.site`, `github.io`, `gitlab.io`, `vercel.app`, `netlify.app`, `pages.dev`, `webflow.io`, `wixsite.com`, `framer.website`, `carrd.co`, `herokuapp.com`, `azurewebsites.net`, `web.app`, `firebaseapp.com`, `blogspot.com`, `wordpress.com`, `substack.com`, `myshopify.com`; data in code, `HOSTING_PLATFORMS`) is flagged « Site hébergé sur une plateforme »: modules that read the site are `not_applicable` and no page is guessed. The company research listener does not read it either: its dossier gets the terminal state `hosting_platform` without any request, and the lead page shows « Site hébergé sur une plateforme : pas de dossier entreprise lu ». At startup, existing dossiers of such domains are switched to that state (idempotent).
+- **Runtime.** One continuous listener, `ecosystem_inspection` (ADR 0006), runs the modules on the due domains of the active profiles whose inspection is on, in the priority order above, through the shared polite fetcher (per-host rate limits, robots.txt, confirmed links). Each pass of a module that inspected something appends a row to `ecosystem_module_runs` (`module`, `ran_at`, `leads_inspected`, `findings_count`, `latest_example`), kept 30 days.
+- **Signals.** The HTTP probe listener and the scheduled `ats` job still produce the profile-scoped signals: `product_detected` and `debt_marker` for profiles with their own fingerprints, `job_offer` for offers with the highlighted keywords. They never create a lead. `lead_enrichments (lead_id, step, ran_at)` stays as their internal bookkeeping (which lead hosts were seeded, which domains were read); it no longer drives the qualification wait nor the API.
+- **Qualification.** A lead is due for its qualification agents as soon as it has evidence, with whatever findings and dossier exist: there is no wait for the inspection nor for the dossier. A lead whose only evidence is `certificate_seen` (contact signals from `security_txt`, `public_page` and `role_guess` do not count) is never sent to the models; it becomes due when a signal of another kind arrives.
+- **Requalification.** When a run of a module stores findings whose content differs from the previous run (the hash ignores the observation time, the order and the values relative to the pass: the days of « Fraîcheur du site » and the trend of « Recrutement »), or when the company dossier content changes, every lead of the domain gets `lead_requalifications.requalify_after = now + REQUALIFY_DEBOUNCE_SECONDS` (default 120); a later change pushes it, so several modules finishing together give one requalification. The lead is due once `requalify_after` is reached, at most `REQUALIFY_MAX_PER_DAY` (default 3) times per lead and UTC day (`daily_count`, `counted_on`); beyond, it waits for the next day. `POST /api/v1/leads/{id}/reevaluate` (users only, 403 for a service account, 404 for an unknown or suppressed lead) makes it due at once and is not counted; its qualification, scoring and aggregator calls skip the LLM cache read and refresh the cached answers. At startup, leads whose dossier `content_at` is newer than their last evaluation are marked once (idempotent). A requalification reruns the qualification agents, then the scoring agents and the aggregator, as a signal from a new source does; an edited draft stays protected. An evaluation clears the marks set before it started; marks set while it ran stay. An identical rerun of a module requalifies nothing.
+- **Agents.** The qualification, scoring and aggregator documents include, after the company dossier, one « Ecosystem » document per module and source (at most 12 findings per module), whose source is that URL. Evidence may quote them.
+- **Status.** Every lead of the list and of the detail carries `evaluation`: `stage` (`not_evaluated` « Non évalué » before the first evaluation, `certificate_only` « Certificat seul — en attente d'une autre preuve », `requalification_planned` « Réévaluation prévue à HH:MM (nouvelles informations) », `inspection_running` « Évalué — inspection en cours (3/7 modules) », `inspection_complete` « Évalué — inspection complète », `evaluated` when the inspection of the profile is off), `evaluated_at`, `modules_done` and `modules_available` (modules waiting for a catalog provider excluded), `requalify_at` and `requalify_reason` (`new_information` or `manual`), and `changed_modules`, the modules whose findings changed after the last evaluation. The list and the lead page refresh every 15 seconds while the status can still move.
+- **API.** The lead detail carries `enrichment` (`modules` with `module`, `label`, `status`, `last_run`, `changed_at`, `error`; `hosting_platform`) and `ecosystem` (`hosting_platform`, `modules` with their status and `findings`). `GET /api/v1/ecosystem/modules` lists the seven modules with their question, what they learn, `available`, `reads_site`, `refresh_days` and their activity over the last seven days (`leads_inspected`, `findings_count`, `last_run`, `latest_example`). `POST /api/v1/leads/{id}/ecosystem/dry-run?module=<key>` runs one module now on the lead domain for a user (403 for a service account), stores nothing and answers the findings, the status and `duration_ms`; 409 for a module that is not available yet, 429 when a host is rate limited, 404 for an unknown or suppressed lead.
 
 ## Provider URLs
 
@@ -316,17 +361,18 @@ The URL settings of the catalog (`boamp.base_url`, `decp.dataset_api_url`, `ted.
 
 ## Dependencies between kinds
 
-- `http_probe` probes hosts found by certificate transparency. Without a `certificate_transparency` agent, it only probes hosts imported by an operator.
-- `ats` only visits companies already detected by `certificate_transparency`, `http_probe` or `dns_cname` signals.
+- The DNS lookup and the HTTP probe read candidate hosts: hosts found in certificates, imported by an operator, or derived from the leads (origin `lead`).
+- Company job offers visit every lead domain of the profiles with keywords to highlight.
+- The ecosystem inspection visits every lead domain of the active profiles whose inspection is on.
 
 ## Run a source now
 
 Sources come in two modes (ADR 0006).
 
-- **Continuous** sources listen around the clock inside the binary: `certificate_transparency`, `dns_cname`, `http_probe`, `security_txt`, `public_page` and `role_guess`. They have no recurring job and nothing to run on demand: an edited agent is picked up on the listener's next loop (a few seconds when idle), and a new certificate or lead flows through the pipeline within minutes. A listener is active while at least one enabled agent of its kind exists in an active profile (contact finders are always active); otherwise it is "Inactif (aucun agent)". With several replicas one holds each listener at a time (Postgres advisory lock); the others show "En veille (autre instance)" and take over when it stops.
-- **Scheduled** sources (`boamp`, `decp`, `ted`, `france_travail`, `hacker_news_hiring`, `ats`) run on a recurring job, so an edited agent otherwise waits for the next interval. "Lancer maintenant" on the Sources screen (Configuration > Sources), or "Lancer la source" on an agent card, moves the pending job to the present.
+- **Continuous** sources listen around the clock inside the binary: `certificate_transparency`, `dns_cname`, `http_probe`, `security_txt`, `public_page` and `role_guess`. They have no recurring job and nothing to run on demand: an edited agent is picked up on the listener's next loop (a few seconds when idle), and a new certificate or lead flows through the pipeline within minutes. A listener is active while at least one enabled agent of its kind exists in an active profile, or for `http_probe` a profile with its own fingerprints, or for `ecosystem_inspection` a profile whose inspection is on (contact finders are always active); otherwise it is "Inactif (aucun agent)". With several replicas one holds each listener at a time (Postgres advisory lock); the others show "En veille (autre instance)" and take over when it stops.
+- **Scheduled** sources (`boamp`, `decp`, `ted`, `france_travail`, `hacker_news_hiring`, `welcome_to_the_jungle`, and `ats` for the job offers with highlighted keywords) run on a recurring job, so an edited agent otherwise waits for the next interval. "Lancer maintenant" on the Sources screen (Configuration > Sources), or "Lancer la source" on an agent card, moves the pending job to the present.
 
-The Sources screen shows continuous sources in their own "Écoute continue" group with the listener state, last activity, backlog (tiles of lag for certificate transparency, hosts to probe, contact targets), totals and last error. Agent cards of continuous kinds show an "En écoute" status line instead of the run button.
+The Sources screen shows continuous sources in their own "Écoute continue" group with the listener state, last activity, backlog (tiles of lag for certificate transparency, hosts to probe, contact targets), totals and the error of the latest pass with its time (`last_error_at`); a successful pass clears `listeners.last_error`, so a former error is no longer shown. Agent cards of continuous kinds show an "En écoute" status line instead of the run button.
 
 - `GET /api/v1/sources` lists every known source. `mode` is `continuous` or `scheduled`. A continuous source carries a `listener` object (`state`, `holder`, `last_activity_at`, `last_error`, `items_total`, `signals_total`, `backlog`) and `status` mirrors the listener state; a scheduled source carries its job state, and one without a job has `status: "unavailable"`. A source that depends on a catalog provider carries `provider` (`key`, `name`, `status`); it only runs while that status is `ready`, and `POST /api/v1/sources/{source}/run` answers `409` otherwise. Both list their latest runs; a continuous source records a run only for a loop that processed at least one item.
 - `POST /api/v1/sources/{source}/run` answers 202 with the updated job. It answers 409 when the source is already running, listens continuously or depends on a catalog provider that is not ready (French message), 404 for an unknown source or one without a job, and 403 for service accounts.
@@ -341,7 +387,7 @@ A host or domain whose lookup, probe or crawl fails is marked checked like a suc
 
 ## Older versions
 
-Stored revisions are never rewritten. Versions 1 to 15 are accepted and upgraded when read; new revisions are written in version 16. Errors on an older document keep that document's paths.
+Stored revisions are never rewritten. Versions 1 to 17 are accepted and upgraded when read; new revisions are written in version 18. Errors on an older document keep that document's paths.
 
 ### Version 1 to 2
 
@@ -416,3 +462,28 @@ The `scoring` section (weighted factors) and `evidence.reference_score` are remo
 ### Version 15 to 16
 
 `agents[]` becomes a tagged union. Every agent of a keyword kind (`boamp`, `decp`, `ted`, `france_travail`, `ats`) becomes a `search` agent whose `providers` is `[kind]`, with the same `keywords`, `exclusions` and `accept_min_keywords` and open `filters`. Agents of the signal kinds (`certificate_transparency`, `dns_cname`, `http_probe`) become `signal` agents and `source.kind` is renamed `source.provider`. Ids, names, order and `enabled` are kept. Agents with identical keywords are not merged; the operator can do it by hand. The IAM example merges its three public procurement agents into one `marches-publics` agent over `boamp`, `decp` and `ted`.
+
+### Version 16 to 17
+
+Sourcing and enrichment are separated (ADR 0011). In this order:
+
+1. `http_probe` signal agents leave `agents` for `enrichment.http_probe`: fingerprints are merged in agent order and deduplicated by id (the first wins), excluded products are merged, `extra_subdomains` takes its default, and the step is enabled when one of those agents was.
+2. `ats` is removed from the `providers` of every search agent. `enrichment.company_jobs` gets the union of the keywords of those agents (case-insensitive, first spelling kept) and the `accept_min_keywords` of the first one, and is enabled when one of them was. Their exclusions and filters are dropped. A search agent left without provider is dropped.
+3. Search agents with identical keywords and exclusions (in any order), filters, `accept_min_keywords` and `enabled` are merged into one, at the place of the first, with the union of their providers. The merged agent is named « Offres et missions » when all its providers are in the jobs and missions category, « Marchés publics » when all are public procurement, else it keeps the name of the first agent. Its id is the slug of the name (lowercase, accents removed, other characters replaced by `-`), followed by `-2`, `-3` when another agent of the profile already uses it. A lone agent keeps its id and name.
+4. `certificate_transparency` and `dns_cname` signal agents become `certificates` and `dns` agents with the same id, name, `enabled`, `labels` or `patterns`.
+
+The IAM example of version 16 upgrades to « Certificate transparency », « DNS CNAME », « Marchés publics » (BOAMP, DECP, TED) and « France Travail », with its five fingerprints and the keywords of its two job agents in the enrichment.
+
+### Version 18 to 19
+
+`countries` is added, empty, to every `certificates` and `dns` agent. Nothing else changes; an empty list filters nothing.
+
+### Version 17 to 18
+
+The enrichment steps become the profile-specific settings of the ecosystem inspection (ADR 0012).
+
+1. `inspection` is added with `enabled: true`.
+2. An enabled `enrichment.http_probe` becomes `enrichment.custom` with its `fingerprints` and `excluded_products`. Its `extra_subdomains` are kept, except the exact former default (`auth`, `sso`, `login`, `id`, `idp`, `accounts`, in any order), which is dropped unless a fingerprint looks like an identity product (its id, product or path contains `realm`, `auth`, `sso`, `oidc`, `saml`, `oauth`, `openid`, `idp` or `identity`). A disabled probe leaves an empty `custom`: it had no effect and keeping it would start probing.
+3. The `keywords` of an enabled `enrichment.company_jobs` become `enrichment.highlight_keywords`; `accept_min_keywords` is dropped (the signal keeps the default of 2). A disabled step leaves no keyword.
+
+The IAM example of version 17 upgrades to the current example: its fingerprints are identity fingerprints, so it keeps its six subdomains.

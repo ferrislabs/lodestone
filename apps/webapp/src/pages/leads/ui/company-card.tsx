@@ -9,6 +9,7 @@ import {
 	formatDay,
 	formatSiren,
 	headOfficeText,
+	ignoredLinksNote,
 	pageLabel,
 } from '#/pages/leads/lib/company'
 import { formatDateTime } from '#/pages/leads/lib/format'
@@ -49,6 +50,8 @@ export function CompanyCard({
 	const activity = official ? activityText(official) : null
 	const headOffice = official ? headOfficeText(official) : null
 	const waiting = refreshing || (company !== null && state === 'pending')
+	const read = company !== null && state !== 'pending'
+	const ignored = read ? ignoredLinksNote(company.ignored_links) : null
 	return (
 		<section
 			data-section="company"
@@ -104,16 +107,28 @@ export function CompanyCard({
 					Dernière erreur : {company.error}
 				</p>
 			) : null}
-			{company && company.pages.length > 0 ? (
+			{read ? (
 				<div className="flex flex-col gap-1 text-sm">
 					<p className="text-muted-foreground">Pages lues</p>
-					<ul data-company-pages="true" className="flex flex-col gap-0.5">
-						{company.pages.map((page) => (
-							<li key={page.url} title={pageLabel(page.url)}>
-								<ProvenanceLink provenance={page.url} />
-							</li>
-						))}
-					</ul>
+					{company.pages.length > 0 ? (
+						<ul data-company-pages="true" className="flex flex-col gap-0.5">
+							{company.pages.map((page) => (
+								<li key={page.url} title={pageLabel(page.url)}>
+									<ProvenanceLink provenance={page.url} />
+								</li>
+							))}
+						</ul>
+					) : (
+						<p data-company-no-pages="true">Aucune page exploitable trouvée</p>
+					)}
+					{ignored ? (
+						<p
+							data-company-ignored="true"
+							className="text-xs text-muted-foreground"
+						>
+							{ignored}
+						</p>
+					) : null}
 				</div>
 			) : null}
 			<p className="text-xs text-muted-foreground">

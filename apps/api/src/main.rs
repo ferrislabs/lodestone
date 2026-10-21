@@ -1,10 +1,14 @@
 use std::{error::Error, net::SocketAddr, num::NonZeroU32, sync::Arc, time::Duration};
 
 use api::{
+    crawl::keep_robots_policy_fresh,
     fetchers::ct_fetch_settings,
     internal_router::internal_router,
-    jobs::{Intervals, JobRouter, WiredSources, schedule_calibration, schedule_wired_sources},
-    listeners::{CompanyStep, ContactStep, CtStep, HostStep, QualificationStep},
+    jobs::{
+        Intervals, JobRouter, WiredSources, schedule_calibration, schedule_page_recheck,
+        schedule_timeline_purge, schedule_wired_sources,
+    },
+    listeners::{CompanyStep, ContactStep, CtStep, HostStep, InspectionStep, QualificationStep},
     logger::init_tracing_and_logging,
     providers::{CatalogAccess, ProviderSeed, provision_providers},
     router::router,
@@ -13,6 +17,7 @@ use api::{
 use args::Args;
 use axum::Router;
 use axum_server::Handle;
+use chrono::Utc;
 use clap::Parser;
 use common::{JobsConfig, LlmConfig, OutboundConfig};
 use dns::{DnsSettings, HickoryResolver};
@@ -23,6 +28,7 @@ use lodestone_core::{
     BOAMP, CERTIFICATE_TRANSPARENCY, COMPANY_RESEARCH, DECP, HACKER_NEWS_HIRING, RetryPolicy, TED,
     company::CompanyRunSettings,
     contacts::ContactRunSettings,
+    ecosystem::InspectionRunSettings,
     infrastructure::{
         candidate_host::postgres::PgCandidateHosts,
         contact_target::postgres::{PgAtsTargets, PgContactTargets},
@@ -50,12 +56,17 @@ use sources::{
     role_guess::RoleGuessFinder,
     security_txt::SecurityTxtFinder,
     ted::{TedSettings, TedSource},
+    welcome_to_the_jungle::{
+        AccessSource, DEFAULT_COMPANY_LOOKUPS, Endpoints, MAX_REQUESTS_PER_MINUTE,
+        WelcomeToTheJungleSettings, WelcomeToTheJungleSource,
+    },
 };
 use tokio::sync::watch;
 use tracing::{error, info};
 
 const DNS_BATCH_SIZE: u32 = 500;
 const COMPANY_BATCH_SIZE: u32 = 5;
+const INSPECTION_BATCH_SIZE: u32 = 10;
 const PROBE_BATCH_SIZE: u32 = 200;
 const BOAMP_MAX_BODY_BYTES: usize = 16 * 1024 * 1024;
 const BOAMP_REQUESTS_PER_MINUTE: u32 = 30;
@@ -65,6 +76,7 @@ const FRANCE_TRAVAIL_MAX_BODY_BYTES: usize = 16 * 1024 * 1024;
 const FRANCE_TRAVAIL_REQUESTS_PER_MINUTE: u32 = 180;
 const HACKER_NEWS_MAX_BODY_BYTES: usize = 8 * 1024 * 1024;
 const HACKER_NEWS_REQUESTS_PER_MINUTE: u32 = 30;
+const WELCOME_TO_THE_JUNGLE_MAX_BODY_BYTES: usize = 4 * 1024 * 1024;
 const ATS_MAX_BODY_BYTES: usize = 16 * 1024 * 1024;
 const ATS_MAX_RATE_LIMIT_WAIT: Duration = Duration::from_secs(75);
 const DECP_REQUESTS_PER_MINUTE: u32 = 120;
@@ -94,9 +106,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
             revisit_interval: outbound_config.revisit_interval,
         },
     );
-    let fetcher = Arc::new(PoliteFetcher::new(FetchSettings::from_outbound(
-        &outbound_config,
-    ))?);
+    let robots = app_state.robots.clone();
+    let fetcher = Arc::new(
+        PoliteFetcher::new(FetchSettings::from_outbound(&outbound_config))?
+            .with_robots_gate(robots.clone()),
+    );
     let mut boamp_fetch = FetchSettings::from_outbound(&outbound_config);
     boamp_fetch.max_body_bytes = BOAMP_MAX_BODY_BYTES;
     boamp_fetch.requests_per_host_per_minute = boamp_fetch
@@ -167,10 +181,22 @@ async fn main() -> Result<(), Box<dyn Error>> {
             max_pages: args.hacker_news.max_pages.get(),
         },
     );
+    let mut welcome_to_the_jungle_fetch = FetchSettings::from_outbound(&outbound_config);
+    welcome_to_the_jungle_fetch.max_body_bytes = WELCOME_TO_THE_JUNGLE_MAX_BODY_BYTES;
+    welcome_to_the_jungle_fetch.requests_per_host_per_minute =
+        NonZeroU32::new(MAX_REQUESTS_PER_MINUTE.saturating_mul(2)).unwrap_or(NonZeroU32::MIN);
+    let welcome_to_the_jungle = WelcomeToTheJungleSource::new(
+        Arc::new(PoliteFetcher::new(welcome_to_the_jungle_fetch)?),
+        WelcomeToTheJungleSettings {
+            endpoints: Endpoints::official()?,
+            access: AccessSource::Catalog(app_state.usecase.clone()),
+            max_company_lookups: DEFAULT_COMPANY_LOOKUPS,
+        },
+    );
     let mut ats_fetch = FetchSettings::from_outbound(&outbound_config);
     ats_fetch.max_body_bytes = ATS_MAX_BODY_BYTES;
     let ats = AtsSource::new(
-        Arc::new(PoliteFetcher::new(ats_fetch)?),
+        Arc::new(PoliteFetcher::new(ats_fetch)?.with_robots_gate(robots.clone())),
         PgAtsTargets::new(pool.clone()),
         AtsSettings {
             batch_size: args.ats.batch_size.get(),
@@ -297,6 +323,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             france_travail,
             ats,
             hacker_news,
+            welcome_to_the_jungle,
         },
         Intervals {
             other_sources: jobs_config.source_interval,
@@ -304,7 +331,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
             hacker_news: args.hacker_news.interval(),
         },
     )
-    .with_webhook(webhook);
+    .with_webhook(webhook)
+    .with_page_verifier(company_research.clone())
+    .with_timeline_retention(u32::from(args.jobs.lead_events_retention_days.get()));
     provision_providers(
         &app_state.usecase,
         &app_state.providers,
@@ -314,8 +343,49 @@ async fn main() -> Result<(), Box<dyn Error>> {
     .await?;
     schedule_wired_sources(&queue).await?;
     schedule_calibration(&queue).await?;
+    schedule_page_recheck(&queue, &app_state.usecase).await?;
+    schedule_timeline_purge(&queue).await?;
+    let platform_dossiers = app_state
+        .usecase
+        .settle_platform_dossiers(args.company.refresh_interval(), &SystemClock)
+        .await?;
+    if platform_dossiers > 0 {
+        info!(
+            platform_dossiers,
+            "dossiers of domains on a hosting platform no longer read their site"
+        );
+    }
+    let tenant_leads = app_state
+        .usecase
+        .exclude_saas_tenant_leads(Utc::now())
+        .await?;
+    if tenant_leads > 0 {
+        info!(
+            tenant_leads,
+            "leads on the domain of a SaaS provider suppressed"
+        );
+    }
+    let reconstructed = app_state.usecase.backfill_lead_events().await?;
+    if reconstructed > 0 {
+        info!(
+            reconstructed,
+            "timeline events reconstructed for the leads seen before the timeline"
+        );
+    }
+    let dossier_requalifications = app_state
+        .usecase
+        .backfill_dossier_requalifications(Utc::now())
+        .await?;
+    if dossier_requalifications > 0 {
+        info!(
+            dossier_requalifications,
+            "leads evaluated before their latest dossier will be requalified"
+        );
+    }
 
     let usecase = app_state.usecase.clone();
+    let robots_usecase = app_state.usecase.clone();
+    let ecosystem = Arc::clone(&app_state.ecosystem);
     let router = router(app_state)?;
     let internal_router = internal_router()?;
 
@@ -429,12 +499,27 @@ async fn main() -> Result<(), Box<dyn Error>> {
         instance.clone(),
         listener_settings,
     );
+    let inspection_listener = Listener::new(
+        InspectionStep {
+            usecase: usecase.clone(),
+            modules: ecosystem,
+            settings: InspectionRunSettings {
+                batch_size: INSPECTION_BATCH_SIZE,
+                priority_batch_size: args.enrichment.inspection_priority_batch,
+                concurrency: args.listeners.inspection_concurrency,
+            },
+        },
+        pool.clone(),
+        instance.clone(),
+        listener_settings,
+    );
     let qualification_listener = Listener::new(
         QualificationStep {
             usecase,
             cipher: AesGcmCipher::new(&llm_config.encryption_key)?,
             cache: PgLlmCache::new(pool.clone()),
             budget_cents: llm_config.run_budget_cents,
+            concurrency: args.listeners.evaluation_concurrency,
             cooldowns: Default::default(),
         },
         pool,
@@ -467,7 +552,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
         public_page_listener.run(shutdown_rx.clone()),
         role_guess_listener.run(shutdown_rx.clone()),
         company_listener.run(shutdown_rx.clone()),
-        qualification_listener.run(shutdown_rx),
+        inspection_listener.run(shutdown_rx.clone()),
+        qualification_listener.run(shutdown_rx.clone()),
+        keep_robots_policy_fresh(
+            robots_usecase,
+            robots,
+            args.crawl.robots_policy,
+            shutdown_rx
+        ),
     );
 
     observability.shutdown();

@@ -6,6 +6,7 @@ const SIGNAL_KIND_LABELS: Readonly<Record<string, string>> = {
 	public_tender: "Appel d'offres",
 	awarded_contract: 'Marché attribué',
 	role_contact_found: 'Contact par rôle trouvé',
+	certificate_seen: 'Certificat observé',
 	distinct_signals: 'Types de signaux distincts',
 }
 
@@ -20,10 +21,12 @@ const SOURCE_LABELS: Readonly<Record<string, string>> = {
 	decp: 'DECP',
 	ted: 'TED',
 	france_travail: 'France Travail',
-	ats: 'ATS',
+	ats: "Offres d'emploi de l'entreprise",
 	hacker_news_hiring: 'Hacker News — Who is hiring?',
+	welcome_to_the_jungle: 'Welcome to the Jungle',
 	qualification: 'Qualification et synthèse des leads',
 	company_research: 'Recherche entreprise (site et registre officiel)',
+	ecosystem_inspection: "Inspection de l'écosystème des leads",
 }
 
 const CONTACT_METHOD_LABELS: Readonly<Record<string, string>> = {
