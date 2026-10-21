@@ -22,7 +22,7 @@ export const LEARNED_CALIBRATION_COPY: FieldCopy = {
 		"Corrige chaque jour les probabilités de cet agent d'après vos décisions, dès 50 leads étiquetés dont au moins 10 de chaque classe.",
 }
 
-const FINGERPRINT = 'enrichment.http_probe.fingerprints[]'
+const FINGERPRINT = 'enrichment.custom.fingerprints[]'
 const MARKER = `${FINGERPRINT}.debt_markers[]`
 
 export const FIELD_COPY: Readonly<Record<string, FieldCopy>> = {
@@ -41,7 +41,7 @@ export const FIELD_COPY: Readonly<Record<string, FieldCopy>> = {
 	agents: {
 		label: 'Agents',
 		description:
-			"Agents de sourcing : ils trouvent les leads. Au moins un est requis, sauf si une étape d'enrichissement est activée.",
+			'Agents de sourcing : ils trouvent les leads. Au moins un est requis, sauf si le profil a ses propres empreintes ou des mots-clés à mettre en avant.',
 	},
 	'agents[]': {
 		label: 'Agent',
@@ -82,47 +82,43 @@ export const FIELD_COPY: Readonly<Record<string, FieldCopy>> = {
 		label: 'Suffixe cible',
 		description: 'Suffixe de la cible CNAME qui identifie le fournisseur.',
 	},
+	inspection: {
+		label: "Inspection de l'écosystème",
+		description:
+			'Chaque lead avec un domaine reçoit la même inspection, quel que soit le profil : identité officielle, vie légale, marchés publics, site et stack technique, DNS et e-mail, recrutement et activité récente.',
+	},
+	'inspection.enabled': {
+		label: "Inspecter l'écosystème des leads",
+		description:
+			"Désactivée, les leads du profil ne sont pas inspectés et la qualification n'attend pas l'inspection.",
+	},
 	enrichment: {
 		label: 'Enrichissement',
 		description:
-			"Étapes exécutées sur chaque lead du profil, quel que soit l'agent qui l'a trouvé. Un lead est qualifié une fois ses étapes passées, ou après un délai.",
+			"Réglages de l'inspection propres à ce profil. Tout le reste est identique pour chaque profil.",
 	},
-	'enrichment.http_probe': {
-		label: 'Sonde HTTP',
+	'enrichment.custom': {
+		label: 'Empreintes propres au profil',
 		description:
-			'Sonde le domaine de chaque lead, ses hôtes connus et les sous-domaines courants.',
+			'Empreintes sondées sur le site de chaque lead du profil, produits ignorés et sous-domaines sondés en plus.',
 	},
-	'enrichment.http_probe.enabled': {
-		label: 'Activée',
-		description: 'Sonde les hôtes de chaque lead.',
-	},
-	'enrichment.http_probe.extra_subdomains': {
+	'enrichment.custom.extra_subdomains': {
 		label: 'Sous-domaines supplémentaires',
 		description:
-			'Sous-domaines du domaine du lead sondés en plus, par exemple auth ou sso.',
+			'Sous-domaines du domaine du lead sondés en plus avec vos empreintes, par exemple auth ou sso. Vide par défaut.',
 	},
-	'enrichment.http_probe.fingerprints': {
+	'enrichment.custom.fingerprints': {
 		label: 'Empreintes',
-		description: 'Empreintes à sonder sur chaque hôte.',
+		description: 'Empreintes à sonder sur le site de chaque lead.',
 	},
-	'enrichment.company_jobs': {
-		label: "Offres d'emploi de l'entreprise",
+	'enrichment.custom.excluded_products': {
+		label: 'Produits exclus',
+		description: 'Produits à ignorer, par exemple les vôtres.',
+	},
+	'enrichment.highlight_keywords': {
+		label: 'Mots-clés à mettre en avant',
 		description:
-			'Lit les offres de la page carrières ou de la plateforme de recrutement de chaque lead.',
-	},
-	'enrichment.company_jobs.enabled': {
-		label: 'Activée',
-		description: 'Lit les offres de chaque lead.',
-	},
-	'enrichment.company_jobs.keywords': {
-		label: 'Mots-clés',
-		description:
-			'Vide : les mots-clés des agents de recherche activés. Sinon, seuls ces mots-clés sont cherchés dans les offres.',
-	},
-	'enrichment.company_jobs.accept_min_keywords': {
-		label: 'Mots-clés distincts pour un signal fort',
-		description:
-			"Nombre de mots-clés distincts qu'une offre doit contenir pour donner un signal fort.",
+			"Mots-clés cherchés dans les offres d'emploi des leads. Une offre qui les contient est mise en avant et devient un signal. Vide : les mots-clés des agents de recherche activés.",
 	},
 	[FINGERPRINT]: {
 		label: 'Empreinte',
@@ -193,10 +189,6 @@ export const FIELD_COPY: Readonly<Record<string, FieldCopy>> = {
 		label: 'Expression régulière',
 		description:
 			'Expression régulière avec un groupe de capture pour la version.',
-	},
-	'enrichment.http_probe.excluded_products': {
-		label: 'Produits exclus',
-		description: 'Produits à ignorer, par exemple les vôtres.',
 	},
 	'agents[].filters': {
 		label: 'Filtres',

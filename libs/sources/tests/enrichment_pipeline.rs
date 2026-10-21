@@ -4,10 +4,11 @@ use chrono::{DateTime, TimeZone, Utc};
 use fetch::{FetchSettings, PoliteFetcher};
 use httpmock::{Method::GET, MockServer};
 use lodestone_core::{
-    Clock, CreateProfileCommand, EnrichmentStatus, EnrichmentStep, FetchError, FetchRequest,
-    FetchResponse, Fetcher, LeadRepository, LodestoneUseCase, NormalizedDomain, Observation,
-    ProfileId, ProfileName, Provenance, SignalKind, SignalRepository, SourceName, UnitInterval,
-    ValidatedProfile,
+    Clock, CreateProfileCommand, EcosystemModule, EnrichmentStatus, FetchError, FetchRequest,
+    FetchResponse, Fetcher, LeadRepository, LodestoneUseCase, ModuleStatus, NormalizedDomain,
+    Observation, ProfileId, ProfileName, Provenance, SignalKind, SignalRepository, SourceName,
+    UnitInterval, ValidatedProfile,
+    ecosystem::InspectionRunSettings,
     infrastructure::{
         candidate_host::PgCandidateHosts, contact_target::postgres::PgAtsTargets,
         lead::postgres::PgLeadRepository, postgres::with_tx, signal::postgres::PgSignalRepository,
@@ -16,6 +17,9 @@ use lodestone_core::{
 use serde_json::{Value, from_str, json};
 use sources::{
     ats::{AtsSettings, AtsSource},
+    company::CompanySettings,
+    ecosystem::{EcosystemConfig, EcosystemModules, WebsiteSettings},
+    endpoint::Endpoint,
     http_probe::{HttpProbeSettings, HttpProbeSource, ProbeScheme},
 };
 use sqlx::PgPool;
@@ -24,6 +28,7 @@ use url::Url;
 mod fixtures_support;
 
 const TENDER_DOMAIN: &str = "mairie-exemple.fr";
+const HOME_PAGE: &str = r#"<html><head><title>Mairie exemple</title><meta name="generator" content="Drupal 10"></head><body><h1>Bienvenue sur le site de la mairie</h1><p>Services municipaux, démarches en ligne et actualités de la commune.</p><a href="https://jobs.lever.co/mairieexemple">Nous rejoindre</a></body></html>"#;
 const LEVER_JOBS: &str = r#"[
     {"id":"iam-1","text":"Ingénieur IAM Keycloak","hostedUrl":"https://jobs.lever.co/mairieexemple/iam-1",
      "descriptionPlain":"Exploiter notre Keycloak auto-hébergé et piloter la feuille de route IAM.",
@@ -164,7 +169,14 @@ async fn a_boamp_lead_is_enriched_by_the_http_probe_and_its_job_offers(pool: PgP
         when.method(GET).path(format!("/{TENDER_DOMAIN}/"));
         then.status(200)
             .header("content-type", "text/html")
-            .body(r#"<a href="https://jobs.lever.co/mairieexemple">Nous rejoindre</a>"#);
+            .body(HOME_PAGE);
+    });
+    let site_realm = server.mock(|when, then| {
+        when.method(GET)
+            .path(format!("/{TENDER_DOMAIN}/realms/master"));
+        then.status(realm.status)
+            .header("content-type", "application/json")
+            .body(&realm.body);
     });
     let board = server.mock(|when, then| {
         when.method(GET)
@@ -234,18 +246,92 @@ async fn a_boamp_lead_is_enriched_by_the_http_probe_and_its_job_offers(pool: PgP
     .await
     .unwrap()
     .unwrap();
+    let before = usecase.lead_detail(lead.id).await.unwrap();
+    assert_eq!(before.enrichment.status, EnrichmentStatus::TimedOut);
+    assert!(
+        before
+            .enrichment
+            .modules
+            .iter()
+            .all(|state| state.status == ModuleStatus::Pending)
+    );
+
+    let modules = EcosystemModules::new(
+        Arc::new(MockedWeb {
+            inner: polite(),
+            base: server.base_url(),
+        }),
+        EcosystemConfig {
+            company: CompanySettings {
+                entreprises_url: Endpoint::from(
+                    Url::parse(&format!("{}/entreprises", server.base_url())).unwrap(),
+                ),
+                max_pages: 2,
+                max_rate_limit_wait: Duration::from_secs(1),
+                origin: None,
+            },
+            website: WebsiteSettings {
+                max_rate_limit_wait: Duration::from_secs(1),
+                origin: None,
+            },
+            max_career_paths: 2,
+            max_rate_limit_wait: Duration::from_secs(1),
+        },
+    );
+    let inspection = usecase
+        .inspect_due_domains(
+            &modules.runners(),
+            InspectionRunSettings { batch_size: 10 },
+            &FixedClock,
+        )
+        .await
+        .unwrap();
+    assert_eq!(inspection.domains, 3);
+    assert!(site_realm.hits() >= 1);
     let detail = usecase.lead_detail(lead.id).await.unwrap();
     assert_eq!(detail.enrichment.status, EnrichmentStatus::Complete);
-    assert_eq!(
-        detail
-            .enrichment
-            .steps
+    let website: Vec<(&str, &str)> = detail
+        .ecosystem
+        .findings_of(EcosystemModule::WebsiteStack)
+        .map(|found| (found.kind.as_str(), found.value.as_str()))
+        .collect();
+    assert!(website.contains(&("generator", "Drupal 10")));
+    assert!(
+        website
             .iter()
-            .map(|step| (step.step, step.enabled, step.ran_at))
-            .collect::<Vec<_>>(),
-        [
-            (EnrichmentStep::HttpProbe, true, Some(at(100))),
-            (EnrichmentStep::CompanyJobs, true, Some(at(100))),
-        ]
+            .any(|(kind, value)| *kind == "product" && value.starts_with("keycloak"))
     );
+    let offers: Vec<(&str, bool)> = detail
+        .ecosystem
+        .findings_of(EcosystemModule::HiringActivity)
+        .filter(|found| found.kind == "job_offer")
+        .map(|found| {
+            (
+                found.value.as_str(),
+                found.details["highlighted"].as_bool().unwrap_or(false),
+            )
+        })
+        .collect();
+    assert_eq!(
+        offers,
+        [("Ingénieur IAM Keycloak", true), ("Chargé de paie", false)]
+    );
+    let again = usecase
+        .inspect_due_domains(
+            &modules.runners(),
+            InspectionRunSettings { batch_size: 10 },
+            &FixedClock,
+        )
+        .await
+        .unwrap();
+    assert_eq!(again.domains, 0);
+    let stats = usecase.ecosystem_stats(at(200)).await.unwrap();
+    let hiring = stats
+        .iter()
+        .find(|stats| stats.module == EcosystemModule::HiringActivity)
+        .unwrap();
+    assert_eq!(hiring.leads_inspected, 1);
+    assert_eq!(hiring.last_run, Some(at(100)));
+    assert!(hiring.findings_count >= 3);
+    assert!(hiring.latest_example.is_some());
 }

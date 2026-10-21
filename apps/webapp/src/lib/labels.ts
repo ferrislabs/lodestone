@@ -25,6 +25,7 @@ const SOURCE_LABELS: Readonly<Record<string, string>> = {
 	hacker_news_hiring: 'Hacker News — Who is hiring?',
 	qualification: 'Qualification et synthèse des leads',
 	company_research: 'Recherche entreprise (site et registre officiel)',
+	ecosystem_inspection: "Inspection de l'écosystème des leads",
 }
 
 const CONTACT_METHOD_LABELS: Readonly<Record<string, string>> = {

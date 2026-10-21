@@ -1,10 +1,12 @@
 use serde::Deserialize;
 
-use super::definition::{
-    Agent, AgentId, Aggregator, CertificateTransparency, CertificatesAgent, CompanyJobsEnrichment,
-    ContactRanking, DnsAgent, DnsCname, Enrichment, Escalation, EvidenceSettings, HttpProbe,
-    HttpProbeEnrichment, Identity, Language, PROFILE_SCHEMA_VERSION, ProfileDefinition,
-    QualificationAgent, ScoringAgent, SearchAgent, VerdictThresholds,
+use super::{
+    definition::{
+        Agent, AgentId, Aggregator, CertificateTransparency, CertificatesAgent, ContactRanking,
+        DnsAgent, DnsCname, Escalation, EvidenceSettings, HttpProbe, Identity, Language,
+        ProfileDefinition, QualificationAgent, ScoringAgent, SearchAgent, VerdictThresholds,
+    },
+    v17::{CompanyJobsEnrichmentV17, EnrichmentV17, HttpProbeEnrichmentV17, ProfileDefinitionV17},
 };
 use crate::domain::source_provider::{
     catalog::{ATS, descriptor},
@@ -65,7 +67,7 @@ pub(super) struct ProfileDefinitionV16 {
     pub(super) contact_ranking: ContactRanking,
 }
 
-fn merge_probe(into: &mut HttpProbeEnrichment, probe: HttpProbe, enabled: bool) {
+fn merge_probe(into: &mut HttpProbeEnrichmentV17, probe: HttpProbe, enabled: bool) {
     into.enabled |= enabled;
     for fingerprint in probe.fingerprints {
         if !into
@@ -83,7 +85,7 @@ fn merge_probe(into: &mut HttpProbeEnrichment, probe: HttpProbe, enabled: bool) 
     }
 }
 
-fn merge_company_jobs(into: &mut CompanyJobsEnrichment, agent: &SearchAgent, first: bool) {
+fn merge_company_jobs(into: &mut CompanyJobsEnrichmentV17, agent: &SearchAgent, first: bool) {
     into.enabled |= agent.enabled;
     if first {
         into.accept_min_keywords = agent.accept_min_keywords;
@@ -232,7 +234,11 @@ fn merge_search_agents(
 
 impl ProfileDefinitionV16 {
     pub(super) fn upgrade(self) -> ProfileDefinition {
-        let mut enrichment = Enrichment::default();
+        self.upgrade_to_v17().upgrade()
+    }
+
+    fn upgrade_to_v17(self) -> ProfileDefinitionV17 {
+        let mut enrichment = EnrichmentV17::default();
         let mut jobs_seen = false;
         let mut kept: Vec<Agent> = Vec::new();
         let mut searches: Vec<(usize, SearchAgent)> = Vec::new();
@@ -297,8 +303,8 @@ impl ProfileDefinitionV16 {
             .collect();
         ordered.sort_by_key(|(key, _)| *key);
         let agents: Vec<Agent> = ordered.into_iter().map(|(_, agent)| agent).collect();
-        ProfileDefinition {
-            schema_version: PROFILE_SCHEMA_VERSION,
+        ProfileDefinitionV17 {
+            _schema_version: 17,
             identity: self.identity,
             language: self.language,
             agents,
@@ -327,6 +333,7 @@ mod tests {
             .to_json();
         let object = value.as_object_mut().unwrap();
         object.remove("enrichment");
+        object.remove("inspection");
         object.insert("schema_version".to_owned(), json!(16));
         object.insert("agents".to_owned(), agents);
         value
@@ -391,9 +398,9 @@ mod tests {
                  "patterns": [{"provider": "okta", "target_suffix": "okta.com"}]}
             ])
         );
-        assert_eq!(json["schema_version"], 17);
-        assert_eq!(json["enrichment"]["http_probe"]["enabled"], false);
-        assert_eq!(json["enrichment"]["company_jobs"]["enabled"], false);
+        assert_eq!(json["schema_version"], 18);
+        assert_eq!(json["enrichment"]["custom"]["fingerprints"], json!([]));
+        assert_eq!(json["enrichment"]["highlight_keywords"], json!([]));
     }
 
     #[test]
@@ -408,8 +415,7 @@ mod tests {
                 true
             )
         ]));
-        let probe = &json["enrichment"]["http_probe"];
-        assert_eq!(probe["enabled"], true);
+        let probe = &json["enrichment"]["custom"];
         let ids: Vec<&str> = probe["fingerprints"]
             .as_array()
             .unwrap()
@@ -453,8 +459,8 @@ mod tests {
             )
         ]));
         assert_eq!(
-            json["enrichment"]["company_jobs"],
-            json!({"enabled": true, "keywords": ["Keycloak", "IAM", "SSO", "Okta"], "accept_min_keywords": 3})
+            json["enrichment"]["highlight_keywords"],
+            json!(["Keycloak", "IAM", "SSO", "Okta"])
         );
         assert_eq!(json["agents"].as_array().unwrap().len(), 1);
         assert_eq!(json["agents"][0]["id"], "mixed");
@@ -462,15 +468,11 @@ mod tests {
     }
 
     #[test]
-    fn disabled_ats_agents_keep_their_keywords_but_leave_company_jobs_disabled() {
+    fn disabled_ats_agents_leave_no_highlighted_keyword() {
         let mut agent = search("ats", "ATS", json!(["ats", "boamp"]), json!(["sso"]));
         agent["enabled"] = json!(false);
         let json = upgraded(json!([agent]));
-        assert_eq!(json["enrichment"]["company_jobs"]["enabled"], false);
-        assert_eq!(
-            json["enrichment"]["company_jobs"]["keywords"],
-            json!(["sso"])
-        );
+        assert_eq!(json["enrichment"]["highlight_keywords"], json!([]));
         assert_eq!(json["agents"][0]["providers"], json!(["boamp"]));
     }
 

@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 use crate::domain::values::SourceName;
 
-pub const PROFILE_SCHEMA_VERSION: u32 = 17;
+pub const PROFILE_SCHEMA_VERSION: u32 = 18;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -15,7 +15,7 @@ pub const PROFILE_SCHEMA_VERSION: u32 = 17;
     description = "Describes one market: what is sold, which agents scan which sources, which qualification agents judge a lead, which scoring agents decide its score and verdict, how an aggregator sums it up and which contacts to prefer."
 )]
 pub struct ProfileDefinition {
-    #[schemars(description = "Profile format version. Must be 17.")]
+    #[schemars(description = "Profile format version. Must be 18.")]
     pub schema_version: u32,
     pub identity: Identity,
     #[serde(default)]
@@ -25,9 +25,11 @@ pub struct ProfileDefinition {
     )]
     pub language: Language,
     #[schemars(
-        description = "Sourcing agents: they find leads. At least one is required unless an enrichment step is enabled."
+        description = "Sourcing agents: they find leads. At least one is required unless the profile probes its own fingerprints or highlights job keywords."
     )]
     pub agents: Vec<Agent>,
+    #[serde(default)]
+    pub inspection: Inspection,
     #[serde(default)]
     pub enrichment: Enrichment,
     #[schemars(
@@ -704,100 +706,60 @@ pub struct DnsAgent {
     pub patterns: Vec<CnamePattern>,
 }
 
-pub const DEFAULT_EXTRA_SUBDOMAINS: [&str; 6] = ["auth", "sso", "login", "id", "idp", "accounts"];
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(
+    title = "Ecosystem inspection",
+    description = "Every lead with a registrable domain gets the same ecosystem inspection, whatever the profile: official identity, legal life, public contracts, site and technical stack, DNS and e-mail, hiring and recent activity. The qualification agents read what it finds and decide what matters."
+)]
+pub struct Inspection {
+    #[serde(default = "default_enabled")]
+    #[schemars(
+        description = "When false, the leads of the profile are not inspected and qualification does not wait for the inspection. Default true."
+    )]
+    pub enabled: bool,
+}
 
-pub fn default_extra_subdomains() -> Vec<String> {
-    DEFAULT_EXTRA_SUBDOMAINS
-        .iter()
-        .map(|label| (*label).to_owned())
-        .collect()
+impl Default for Inspection {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[schemars(
     title = "Enrichment",
-    description = "Steps run on every lead of the profile, whatever the agent that found it. A lead is qualified once its enabled steps ran for it, or after a wait."
+    description = "Settings of the inspection specific to this profile. Everything else is the same for every profile."
 )]
 pub struct Enrichment {
     #[serde(default)]
-    pub http_probe: HttpProbeEnrichment,
+    pub custom: CustomInspection,
     #[serde(default)]
-    pub company_jobs: CompanyJobsEnrichment,
+    #[schemars(
+        description = "Keywords to highlight in the job offers of a lead. An offer with them becomes a job_offer signal. Empty means the keywords of the enabled search agents."
+    )]
+    pub highlight_keywords: Vec<String>,
 }
 
-impl Enrichment {
-    pub fn any_enabled(&self) -> bool {
-        self.http_probe.enabled || self.company_jobs.enabled
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[schemars(
-    title = "HTTP probe enrichment",
-    description = "Probes the hosts of every lead: its registrable domain, the candidate hosts known for it and the extra subdomains, with the fingerprints below."
+    title = "Profile-specific fingerprints",
+    description = "Fingerprints probed on the site of every lead of this profile, with the products to ignore and the extra subdomains to probe. A match becomes a product_detected or debt_marker signal."
 )]
-pub struct HttpProbeEnrichment {
+pub struct CustomInspection {
     #[serde(default)]
-    #[schemars(description = "When false, the hosts of the leads are not probed. Default false.")]
-    pub enabled: bool,
-    #[serde(default)]
-    #[schemars(description = "Fingerprints to probe on each host. At least one when enabled.")]
+    #[schemars(description = "Fingerprints to probe on each host of a lead.")]
     pub fingerprints: Vec<Fingerprint>,
     #[serde(default)]
     #[schemars(description = "Products to ignore, for example your own.")]
     pub excluded_products: Vec<String>,
-    #[serde(default = "default_extra_subdomains")]
+    #[serde(default)]
     #[schemars(
-        description = "Subdomains of the lead domain probed as well, as hostname labels. Default auth, sso, login, id, idp, accounts."
+        description = "Subdomains of the lead domain probed as well, as hostname labels. Empty by default."
     )]
     pub extra_subdomains: Vec<String>,
-}
-
-impl Default for HttpProbeEnrichment {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            fingerprints: Vec::new(),
-            excluded_products: Vec::new(),
-            extra_subdomains: default_extra_subdomains(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-#[schemars(
-    title = "Company job offers enrichment",
-    description = "Finds the careers page or the recruiting board of every lead from its domain and reads its job offers. An offer with the keywords becomes a job_offer signal."
-)]
-pub struct CompanyJobsEnrichment {
-    #[serde(default)]
-    #[schemars(
-        description = "When false, the job offers of the leads are not read. Default false."
-    )]
-    pub enabled: bool,
-    #[serde(default)]
-    #[schemars(
-        description = "Keywords looked for in the offers. Empty means the union of the keywords of the enabled search agents."
-    )]
-    pub keywords: Vec<String>,
-    #[serde(default = "default_accept_min_keywords")]
-    #[schemars(
-        description = "Distinct keywords an offer needs for a strong signal. Fewer still keeps it with a weaker signal. Default 2."
-    )]
-    pub accept_min_keywords: u8,
-}
-
-impl Default for CompanyJobsEnrichment {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            keywords: Vec::new(),
-            accept_min_keywords: default_accept_min_keywords(),
-        }
-    }
 }
 
 pub const COMPANY_JOBS_AGENT_ID: &str = "company-jobs";
@@ -806,8 +768,8 @@ pub const COMPANY_JOBS_NAME: &str = "Offres d'emploi de l'entreprise";
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum SourceTarget<'a> {
     Agent(&'a Agent),
-    HttpProbe(&'a HttpProbeEnrichment),
-    CompanyJobs(&'a CompanyJobsEnrichment),
+    HttpProbe(&'a CustomInspection),
+    CompanyJobs(&'a Enrichment),
 }
 
 impl<'a> SourceTarget<'a> {
@@ -832,7 +794,7 @@ impl<'a> SourceTarget<'a> {
         }
     }
 
-    pub fn http_probe(&self) -> Option<&'a HttpProbeEnrichment> {
+    pub fn http_probe(&self) -> Option<&'a CustomInspection> {
         match self {
             Self::HttpProbe(probe) => Some(probe),
             _ => None,
@@ -1187,13 +1149,11 @@ impl ProfileDefinition {
             .enabled_agents(source)
             .map(SourceTarget::Agent)
             .collect();
-        let http_probe = &self.enrichment.http_probe;
-        if source == SourceName::HttpProbe && http_probe.enabled {
-            targets.push(SourceTarget::HttpProbe(http_probe));
+        if source == SourceName::HttpProbe && self.probes_hosts() {
+            targets.push(SourceTarget::HttpProbe(&self.enrichment.custom));
         }
-        let company_jobs = &self.enrichment.company_jobs;
-        if source == SourceName::Ats && company_jobs.enabled {
-            targets.push(SourceTarget::CompanyJobs(company_jobs));
+        if source == SourceName::Ats && self.reads_company_jobs() {
+            targets.push(SourceTarget::CompanyJobs(&self.enrichment));
         }
         targets
     }
@@ -1202,8 +1162,16 @@ impl ProfileDefinition {
         !self.targets(source).is_empty()
     }
 
+    pub fn probes_hosts(&self) -> bool {
+        self.inspection.enabled && !self.enrichment.custom.fingerprints.is_empty()
+    }
+
+    pub fn reads_company_jobs(&self) -> bool {
+        self.inspection.enabled && !self.company_jobs_keywords().is_empty()
+    }
+
     pub fn company_jobs_keywords(&self) -> Vec<String> {
-        let own = &self.enrichment.company_jobs.keywords;
+        let own = &self.enrichment.highlight_keywords;
         if !own.is_empty() {
             return own.clone();
         }
@@ -1227,8 +1195,7 @@ impl ProfileDefinition {
     }
 
     pub fn company_jobs_rules(&self) -> Option<SearchAgent> {
-        let company_jobs = &self.enrichment.company_jobs;
-        company_jobs.enabled.then(|| SearchAgent {
+        self.reads_company_jobs().then(|| SearchAgent {
             id: AgentId::new(COMPANY_JOBS_AGENT_ID),
             name: COMPANY_JOBS_NAME.to_owned(),
             enabled: true,
@@ -1236,7 +1203,7 @@ impl ProfileDefinition {
             keywords: self.company_jobs_keywords(),
             exclusions: Vec::new(),
             filters: SearchFilters::default(),
-            accept_min_keywords: company_jobs.accept_min_keywords,
+            accept_min_keywords: default_accept_min_keywords(),
         })
     }
 }

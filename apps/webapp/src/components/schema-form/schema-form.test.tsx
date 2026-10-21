@@ -126,7 +126,7 @@ describe('SchemaForm', () => {
 		const initial = setIn(
 			setIn(
 				defaultValue(root, root, PROFILE_HINTS),
-				['enrichment', 'http_probe', 'extra_subdomains'],
+				['enrichment', 'custom', 'extra_subdomains'],
 				[],
 			),
 			['agents'],
@@ -174,9 +174,8 @@ describe('SchemaForm', () => {
 	it('toggles optional sections and omits the key when off', () => {
 		const initial = setIn(
 			defaultValue(root, root, PROFILE_HINTS),
-			['enrichment', 'http_probe'],
+			['enrichment', 'custom'],
 			{
-				enabled: true,
 				fingerprints: [
 					{
 						id: 'f',
@@ -198,13 +197,11 @@ describe('SchemaForm', () => {
 			before + 1,
 		)
 		expect(seen.mock.calls.at(-1)?.[0]).toHaveProperty(
-			'enrichment.http_probe.fingerprints.0.version',
+			'enrichment.custom.fingerprints.0.version',
 		)
 		fireEvent.click(screen.getByLabelText('Activer : Extracteur de version'))
 		const last = seen.mock.calls.at(-1)?.[0]
-		expect(last).not.toHaveProperty(
-			'enrichment.http_probe.fingerprints.0.version',
-		)
+		expect(last).not.toHaveProperty('enrichment.custom.fingerprints.0.version')
 		expect(screen.queryAllByLabelText(/Expression régulière/)).toHaveLength(
 			before,
 		)
@@ -213,9 +210,8 @@ describe('SchemaForm', () => {
 	it('switches union variants and resets their fields', () => {
 		const initial = setIn(
 			defaultValue(root, root, PROFILE_HINTS),
-			['enrichment', 'http_probe'],
+			['enrichment', 'custom'],
 			{
-				enabled: true,
 				fingerprints: [
 					{
 						id: 'a',
@@ -241,7 +237,7 @@ describe('SchemaForm', () => {
 		)
 		expect(seen.mock.calls.at(-1)?.[0]).toMatchObject({
 			enrichment: {
-				http_probe: {
+				custom: {
 					fingerprints: [{ matchers: [{ kind: 'body', pattern: '' }] }],
 				},
 			},

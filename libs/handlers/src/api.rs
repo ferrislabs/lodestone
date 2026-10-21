@@ -10,7 +10,7 @@ use utoipa::ToSchema;
 
 use crate::{
     auth::{AuthenticatedUser, auth_middleware},
-    calibration, company, drafts,
+    calibration, company, drafts, ecosystem,
     errors::ApiError,
     exports, leads, llm, profiles, quality,
     response::{DataEnvelope, Response},
@@ -139,7 +139,12 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route(
             "/leads/{lead_id}/company/refresh",
             post(company::refresh_company),
-        );
+        )
+        .route(
+            "/leads/{lead_id}/ecosystem/dry-run",
+            post(ecosystem::dry_run_ecosystem_module),
+        )
+        .route("/ecosystem/modules", get(ecosystem::list_ecosystem_modules));
 
     let callback = Router::new().route(
         "/api/v1/source-providers/oauth/callback",

@@ -1,5 +1,5 @@
 {
-  "schema_version": 17,
+  "schema_version": 18,
   "identity": {
     "offer": "Migration of Magento 1 and Magento 2 shops to a modern e-commerce platform, by a web agency",
     "target_customer": "Merchants and organizations running an outdated Magento storefront"
@@ -39,9 +39,11 @@
       ]
     }
   ],
+  "inspection": {
+    "enabled": true
+  },
   "enrichment": {
-    "http_probe": {
-      "enabled": true,
+    "custom": {
       "fingerprints": [
         {
           "id": "magento-version",
@@ -79,11 +81,7 @@
         "boutique"
       ]
     },
-    "company_jobs": {
-      "enabled": false,
-      "keywords": [],
-      "accept_min_keywords": 2
-    }
+    "highlight_keywords": []
   },
   "qualification_agents": [
     {

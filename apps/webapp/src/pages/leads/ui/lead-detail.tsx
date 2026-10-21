@@ -11,7 +11,7 @@ import { AssessmentsList } from './assessments-list'
 import { CompanyCard } from './company-card'
 import { ContactsList } from './contacts-list'
 import { ExclusionNotice } from './exclusion-notice'
-import { LeadEnrichment } from './lead-enrichment'
+import { LeadEcosystem } from './lead-ecosystem'
 import { LeadFacts } from './lead-facts'
 import { LeadHeader } from './lead-header'
 import { LeadSummary } from './lead-summary'
@@ -104,8 +104,11 @@ export function LeadDetail({
 						onRefresh={onRefreshCompany}
 					/>
 					{detail.facts ? <LeadFacts facts={detail.facts} /> : null}
-					{detail.enrichment ? (
-						<LeadEnrichment enrichment={detail.enrichment} />
+					{detail.ecosystem ? (
+						<LeadEcosystem
+							ecosystem={detail.ecosystem}
+							enrichment={detail.enrichment}
+						/>
 					) : null}
 					<AgentStopsNotice stops={detail.agent_stops ?? []} />
 					<QualificationResults

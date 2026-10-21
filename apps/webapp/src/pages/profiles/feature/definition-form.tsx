@@ -11,6 +11,7 @@ import {
 } from '#/lib/schema-form'
 import { useAgentWizard } from '#/pages/profiles/feature/use-agent-wizard'
 import { useAgentsUi } from '#/pages/profiles/feature/use-agents-ui'
+import type { EcosystemUi } from '#/pages/profiles/feature/use-ecosystem-ui'
 import { useQualificationUi } from '#/pages/profiles/feature/use-qualification-ui'
 import { useScoringAgentsUi } from '#/pages/profiles/feature/use-scoring-agents-ui'
 import {
@@ -19,10 +20,13 @@ import {
 } from '#/pages/profiles/lib/agent-calibration'
 import { dependencyNote } from '#/pages/profiles/lib/agents'
 import {
-	enrichmentStep,
+	advancedHasProblem,
+	customSection,
+	enrichmentSection,
+	inspectionEnabled,
+	moduleCards,
 	searchKeywordUnion,
-	stepHasProblem,
-	withStepEnabled,
+	withInspectionEnabled,
 } from '#/pages/profiles/lib/enrichment'
 import { PROFILE_HINTS } from '#/pages/profiles/lib/form-hints'
 import { PROFILE_SCHEMA } from '#/pages/profiles/lib/profile-schema'
@@ -66,11 +70,24 @@ interface DefinitionTabContentProps {
 	calibration?: CalibrationStates
 	agentId?: string | null
 	onAgentChange?: (id: string | null, replace: boolean) => void
+	ecosystem?: EcosystemUi
 }
 
 const NO_PROVIDERS: readonly ProviderOption[] = []
 const NO_CATALOG: readonly ProviderSummary[] = []
 const NO_OPEN = () => undefined
+const NO_ECOSYSTEM: EcosystemUi = {
+	modules: [],
+	modulesState: 'ready',
+	test: null,
+	onTest: NO_OPEN,
+	testActions: {
+		onClose: NO_OPEN,
+		onQuery: NO_OPEN,
+		onPick: NO_OPEN,
+		onRun: NO_OPEN,
+	},
+}
 
 function section(key: string) {
 	return resolve(PROFILE_SCHEMA, PROFILE_SCHEMA.properties?.[key] ?? {})
@@ -98,6 +115,7 @@ export function DefinitionTabContent({
 	calibration = NO_CALIBRATION_STATES,
 	agentId,
 	onAgentChange,
+	ecosystem = NO_ECOSYSTEM,
 }: DefinitionTabContentProps) {
 	const [localAgent, setLocalAgent] = useState<string | null>(null)
 	if (tab !== 'sourcing' && localAgent !== null) setLocalAgent(null)
@@ -185,17 +203,19 @@ export function DefinitionTabContent({
 					<div className="lg:order-1 lg:col-span-3">
 						<EnrichmentEditor
 							context={context}
-							probe={enrichmentStep(value, 'http_probe')}
-							jobs={enrichmentStep(value, 'company_jobs')}
+							enrichment={enrichmentSection(value)}
+							custom={customSection(value)}
+							enabled={inspectionEnabled(value)}
+							cards={moduleCards(ecosystem.modules, inspectionEnabled(value))}
+							modulesState={ecosystem.modulesState}
 							keywordUnion={searchKeywordUnion(value)}
-							advancedOpen={stepHasProblem(
-								problems,
-								'company_jobs',
-								'accept_min_keywords',
-							)}
-							onEnabled={(step, enabled) =>
-								onChange(withStepEnabled(value, step, enabled))
+							advancedOpen={advancedHasProblem(problems)}
+							test={ecosystem.test}
+							onEnabled={(enabled) =>
+								onChange(withInspectionEnabled(value, enabled))
 							}
+							onTest={ecosystem.onTest}
+							testActions={ecosystem.testActions}
 						/>
 					</div>
 				</div>

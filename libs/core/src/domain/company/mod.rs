@@ -1,5 +1,5 @@
 use aws_lc_rs::digest::{SHA256, digest};
-use chrono::{DateTime, NaiveDate, Utc};
+use chrono::{DateTime, Duration, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
@@ -30,6 +30,7 @@ pub enum DossierState {
     Complete,
     Partial,
     Unreachable,
+    HostingPlatform,
 }
 
 impl DossierState {
@@ -39,6 +40,7 @@ impl DossierState {
             Self::Complete => "complete",
             Self::Partial => "partial",
             Self::Unreachable => "unreachable",
+            Self::HostingPlatform => "hosting_platform",
         }
     }
 
@@ -48,6 +50,7 @@ impl DossierState {
             Self::Complete,
             Self::Partial,
             Self::Unreachable,
+            Self::HostingPlatform,
         ]
         .into_iter()
         .find(|state| state.as_str() == raw)
@@ -256,6 +259,19 @@ impl CompanyDossier {
         }
     }
 
+    pub fn on_hosting_platform(
+        domain: NormalizedDomain,
+        now: DateTime<Utc>,
+        refresh: Duration,
+    ) -> Self {
+        Self {
+            state: DossierState::HostingPlatform,
+            built_at: Some(now),
+            pages_checked_at: Some(now),
+            ..Self::pending(domain, now + refresh)
+        }
+    }
+
     pub fn reviewed(&self, review: &PageReview, now: DateTime<Utc>) -> Self {
         let pages: Vec<CompanyPage> = self
             .pages
@@ -292,7 +308,7 @@ pub fn settle(
     build: DossierBuild,
     previous: Option<&CompanyDossier>,
     now: DateTime<Utc>,
-    refresh: chrono::Duration,
+    refresh: Duration,
 ) -> CompanyDossier {
     let failure = match (&build.failure, build.reachable) {
         (Some(message), _) => Some(bounded_error(message)),
@@ -421,6 +437,7 @@ mod tests {
             DossierState::Complete,
             DossierState::Partial,
             DossierState::Unreachable,
+            DossierState::HostingPlatform,
         ] {
             assert_eq!(DossierState::parse(state.as_str()), Some(state));
         }
@@ -508,7 +525,7 @@ mod tests {
         DateTime::from_timestamp(seconds, 0).unwrap()
     }
 
-    const REFRESH: chrono::Duration = chrono::Duration::days(90);
+    const REFRESH: Duration = Duration::days(90);
 
     #[test]
     fn a_complete_build_is_refreshed_after_the_interval_and_dates_its_content() {
@@ -670,5 +687,20 @@ mod tests {
         assert!(emptied.pages.is_empty());
         assert_eq!(emptied.content_hash, None);
         assert_eq!(emptied.content_at, Some(at(2_000)));
+    }
+
+    #[test]
+    fn a_platform_dossier_is_terminal_and_reads_nothing() {
+        let now = DateTime::from_timestamp(1_000, 0).unwrap();
+        let dossier = CompanyDossier::on_hosting_platform(
+            NormalizedDomain::from_host("acme.github.io").unwrap(),
+            now,
+            REFRESH,
+        );
+        assert_eq!(dossier.state, DossierState::HostingPlatform);
+        assert_eq!(dossier.built_at, Some(now));
+        assert_eq!(dossier.next_attempt_at, now + REFRESH);
+        assert!(!dossier.has_content());
+        assert!(dossier.documents(PAGE_PROMPT_CHARS).is_empty());
     }
 }

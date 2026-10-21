@@ -30,7 +30,10 @@ export const SOURCE_GROUPS: readonly {
 		title: "Offres d'emploi",
 		sources: ['france_travail', 'hacker_news_hiring'],
 	},
-	{ title: 'Enrichissement', sources: ['http_probe', 'ats'] },
+	{
+		title: 'Enrichissement',
+		sources: ['ecosystem_inspection', 'http_probe', 'ats'],
+	},
 	{
 		title: 'Contacts',
 		sources: ['public_page', 'security_txt', 'role_guess'],

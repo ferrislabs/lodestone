@@ -1,9 +1,11 @@
 mod support;
 
 use axum::Router;
+use common::generate_uuid_v7;
 use http::{Method, StatusCode};
+use httpmock::Method as MockMethod;
 use serde_json::{Value, json};
-use sqlx::{PgPool, query};
+use sqlx::{PgPool, query, query_scalar};
 use support::{Harness, call, lazy_pool, send};
 use utoipa::OpenApi;
 
@@ -2098,7 +2100,7 @@ async fn the_agents_retry_is_for_users_and_for_known_visible_leads_only(pool: Pg
 }
 
 #[sqlx::test(migrations = "../../migrations")]
-async fn the_detail_exposes_the_enrichment_steps_status_and_waiting_reason(pool: PgPool) {
+async fn the_detail_exposes_the_module_statuses_and_the_ecosystem_findings(pool: PgPool) {
     let seed = Seed { pool: pool.clone() };
     let profile = seed.qualified_profile("keycloak-ops").await;
     let lead = seed.lead(&profile, "acme.com", "new", 3.0, 1).await;
@@ -2119,18 +2121,45 @@ async fn the_detail_exposes_the_enrichment_steps_status_and_waiting_reason(pool:
     assert_eq!(enrichment["status"], "pending");
     assert_eq!(enrichment["waiting_reason"], "awaiting_enrichment_evidence");
     assert!(enrichment["wait_until"].is_string());
+    assert!(enrichment["hosting_platform"].is_null());
+    let modules: Vec<(&str, &str)> = enrichment["modules"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|state| {
+            (
+                state["module"].as_str().unwrap(),
+                state["status"].as_str().unwrap(),
+            )
+        })
+        .collect();
     assert_eq!(
-        enrichment["steps"],
-        json!([
-            {"step": "http_probe", "enabled": false, "ran_at": null},
-            {"step": "company_jobs", "enabled": true, "ran_at": null}
-        ])
+        modules,
+        [
+            ("official_identity", "pending"),
+            ("website_stack", "pending"),
+            ("hiring_activity", "pending")
+        ]
     );
 
+    for (module, status) in [
+        ("official_identity", "done"),
+        ("website_stack", "not_applicable"),
+        ("hiring_activity", "failed"),
+    ] {
+        query(
+            "INSERT INTO lead_ecosystem_modules (domain, module, status, last_run, next_run_at, error) VALUES ('acme.com', $1, $2, now(), now(), NULL)",
+        )
+        .bind(module)
+        .bind(status)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
     query(
-        "INSERT INTO lead_enrichments (lead_id, step, ran_at) VALUES ($1::uuid, 'company_jobs', now())",
+        "INSERT INTO lead_ecosystem (domain, module, finding_key, kind, label, value, source_url, observed_at, details)
+         VALUES ('acme.com', 'official_identity', 'legal_name', 'legal_name', 'Raison sociale', 'ACME SAS', 'https://recherche-entreprises.api.gouv.fr/search?q=552100554', now(), '{}'::jsonb)",
     )
-    .bind(&lead)
     .execute(&pool)
     .await
     .unwrap();
@@ -2139,11 +2168,176 @@ async fn the_detail_exposes_the_enrichment_steps_status_and_waiting_reason(pool:
     assert_eq!(enrichment["status"], "complete");
     assert_eq!(enrichment["waiting_reason"], "awaiting_enrichment_evidence");
     assert!(enrichment["wait_until"].is_null());
-    assert!(enrichment["steps"][1]["ran_at"].is_string());
+    assert_eq!(enrichment["modules"][0]["label"], "Identité officielle");
+    assert!(enrichment["modules"][0]["last_run"].is_string());
+    let ecosystem = &body["data"]["ecosystem"];
+    assert!(ecosystem["hosting_platform"].is_null());
+    assert_eq!(ecosystem["modules"][0]["module"], "official_identity");
+    assert_eq!(ecosystem["modules"][0]["status"], "done");
+    assert_eq!(ecosystem["modules"][0]["findings"][0]["value"], "ACME SAS");
+    assert_eq!(
+        ecosystem["modules"][0]["findings"][0]["source_url"],
+        "https://recherche-entreprises.api.gouv.fr/search?q=552100554"
+    );
+    assert_eq!(ecosystem["modules"][1]["status"], "not_applicable");
+    assert_eq!(ecosystem["modules"][2]["findings"], json!([]));
 
     seed.signal(&lead, "product_detected").await;
     let (_, body) = api.get(&uri).await;
     assert!(body["data"]["enrichment"]["waiting_reason"].is_null());
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_lead_on_a_hosting_platform_is_flagged_and_its_site_modules_do_not_apply(pool: PgPool) {
+    let seed = Seed { pool: pool.clone() };
+    let profile = seed.qualified_profile("keycloak-ops").await;
+    let lead = seed.lead(&profile, "acme.github.io", "new", 3.0, 1).await;
+    let api = Api::new(pool.clone()).await;
+
+    let (status, body) = api.get(&format!("/api/v1/leads/{lead}")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["data"]["ecosystem"]["hosting_platform"], "github.io");
+    assert_eq!(body["data"]["enrichment"]["hosting_platform"], "github.io");
+
+    let (status, body, _) = send(
+        api.app(),
+        Method::POST,
+        &format!("/api/v1/leads/{lead}/ecosystem/dry-run?module=website_stack"),
+        Some(&api.bearer),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["data"]["status"], "not_applicable");
+    assert_eq!(body["data"]["hosting_platform"], "github.io");
+    assert_eq!(body["data"]["findings"], json!([]));
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_dry_run_runs_one_module_for_users_and_stores_nothing(pool: PgPool) {
+    let seed = Seed { pool: pool.clone() };
+    let profile = seed.qualified_profile("keycloak-ops").await;
+    let lead = seed.lead(&profile, "acme.com", "new", 3.0, 1).await;
+    let api = Api::new(pool.clone()).await;
+    let home = api
+        .harness
+        .server
+        .mock_async(|when, then| {
+            when.method(MockMethod::GET).path("/");
+            then.status(200)
+                .header("content-type", "text/html")
+                .header("server", "nginx")
+                .body("<html><head><title>Acme</title></head><body><h1>Acme, outils pour les collectivités</h1><p>Logiciels de gestion depuis 2004.</p></body></html>");
+        })
+        .await;
+    let uri = format!("/api/v1/leads/{lead}/ecosystem/dry-run?module=website_stack");
+
+    let client = format!("Bearer {}", api.harness.valid_client_token());
+    let (forbidden, _, _) = send(api.app(), Method::POST, &uri, Some(&client), None).await;
+    assert_eq!(forbidden, StatusCode::FORBIDDEN);
+    let (anonymous, _, _) = send(api.app(), Method::POST, &uri, None, None).await;
+    assert_eq!(anonymous, StatusCode::UNAUTHORIZED);
+    assert_eq!(home.hits_async().await, 0);
+
+    let (status, body, _) = send(api.app(), Method::POST, &uri, Some(&api.bearer), None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let data = &body["data"];
+    assert_eq!(data["module"], "website_stack");
+    assert_eq!(data["domain"], "acme.com");
+    assert_eq!(data["status"], "done");
+    assert!(data["duration_ms"].is_u64());
+    let kinds: Vec<(&str, &str)> = data["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|found| {
+            (
+                found["kind"].as_str().unwrap(),
+                found["value"].as_str().unwrap(),
+            )
+        })
+        .collect();
+    assert!(kinds.contains(&("server", "nginx")));
+    assert!(home.hits_async().await >= 1);
+    for table in [
+        "lead_ecosystem",
+        "lead_ecosystem_modules",
+        "ecosystem_module_runs",
+    ] {
+        let stored: i64 = query_scalar(&format!("SELECT COUNT(*) FROM {table}"))
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(stored, 0, "{table}");
+    }
+
+    let (unavailable, _, _) = send(
+        api.app(),
+        Method::POST,
+        &format!("/api/v1/leads/{lead}/ecosystem/dry-run?module=legal_life"),
+        Some(&api.bearer),
+        None,
+    )
+    .await;
+    assert_eq!(unavailable, StatusCode::CONFLICT);
+    let (unknown, _, _) = send(
+        api.app(),
+        Method::POST,
+        &format!("/api/v1/leads/{lead}/ecosystem/dry-run?module=astrology"),
+        Some(&api.bearer),
+        None,
+    )
+    .await;
+    assert_eq!(unknown, StatusCode::BAD_REQUEST);
+    let (missing, _, _) = send(
+        api.app(),
+        Method::POST,
+        &format!(
+            "/api/v1/leads/{}/ecosystem/dry-run?module=website_stack",
+            generate_uuid_v7()
+        ),
+        Some(&api.bearer),
+        None,
+    )
+    .await;
+    assert_eq!(missing, StatusCode::NOT_FOUND);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_module_catalog_lists_every_module_with_its_week_of_activity(pool: PgPool) {
+    query(
+        "INSERT INTO ecosystem_module_runs (id, module, ran_at, leads_inspected, findings_count, latest_example)
+         VALUES (gen_random_uuid(), 'hiring_activity', now() - interval '1 day', 4, 9,
+                 '{\"domain\": \"acme.com\", \"label\": \"Offre d''emploi\", \"value\": \"Ingénieur IAM\", \"source_url\": \"https://jobs.acme.com/1\"}'::jsonb),
+                (gen_random_uuid(), 'hiring_activity', now() - interval '10 days', 50, 50, NULL)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let api = Api::new(pool).await;
+
+    let (status, body) = api.get("/api/v1/ecosystem/modules").await;
+
+    assert_eq!(status, StatusCode::OK);
+    let modules = body["data"].as_array().unwrap();
+    assert_eq!(modules.len(), 7);
+    assert_eq!(modules[0]["module"], "official_identity");
+    assert_eq!(modules[0]["available"], true);
+    assert_eq!(
+        modules[0]["question"],
+        "Qui est officiellement cette entreprise ?"
+    );
+    assert_eq!(modules[1]["module"], "legal_life");
+    assert_eq!(modules[1]["available"], false);
+    let hiring = modules
+        .iter()
+        .find(|module| module["module"] == "hiring_activity")
+        .unwrap();
+    assert_eq!(hiring["stats"]["leads_inspected"], 4);
+    assert_eq!(hiring["stats"]["findings_count"], 9);
+    assert!(hiring["stats"]["last_run"].is_string());
+    assert_eq!(hiring["stats"]["latest_example"]["value"], "Ingénieur IAM");
+    assert_eq!(modules[0]["stats"]["leads_inspected"], 0);
 }
 
 #[sqlx::test(migrations = "../../migrations")]

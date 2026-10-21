@@ -195,7 +195,7 @@ fn probe_paths(profile: &ActiveProfile) -> Vec<String> {
         .definition
         .definition()
         .enrichment
-        .http_probe
+        .custom
         .fingerprints
         .iter()
         .map(|fingerprint| fingerprint.path.clone())

@@ -24,7 +24,7 @@ use crate::{
     state::AppState,
 };
 
-const DEFINITION_DESCRIPTION: &str = "Detection profile document, validated against docs/schemas/profile.v17.schema.json (see docs/profiles.md).";
+const DEFINITION_DESCRIPTION: &str = "Detection profile document, validated against docs/schemas/profile.v18.schema.json (see docs/profiles.md).";
 
 #[derive(Debug, Serialize, PartialEq, Eq, ToSchema)]
 pub struct ProfileRefDto {
@@ -109,7 +109,7 @@ pub struct ProfileDetailDto {
     #[serde(flatten)]
     pub profile: ProfileDto,
     pub revision: u32,
-    /// Detection profile document, see docs/schemas/profile.v17.schema.json.
+    /// Detection profile document, see docs/schemas/profile.v18.schema.json.
     #[schema(value_type = Object)]
     pub definition: Value,
 }
@@ -146,7 +146,7 @@ impl From<&ProfileRevision> for RevisionSummaryDto {
 pub struct RevisionDto {
     #[serde(flatten)]
     pub summary: RevisionSummaryDto,
-    /// Detection profile document, see docs/schemas/profile.v17.schema.json.
+    /// Detection profile document, see docs/schemas/profile.v18.schema.json.
     #[schema(value_type = Object)]
     pub definition: Value,
 }
@@ -164,14 +164,14 @@ impl From<&ProfileRevision> for RevisionDto {
 pub struct CreateProfileRequest {
     /// Unique profile name. Defaults to `identity.offer` of the definition.
     pub name: Option<String>,
-    /// Detection profile document, see docs/schemas/profile.v17.schema.json.
+    /// Detection profile document, see docs/schemas/profile.v18.schema.json.
     #[schema(value_type = Object)]
     pub definition: Value,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct UpdateProfileRequest {
-    /// Detection profile document, see docs/schemas/profile.v17.schema.json.
+    /// Detection profile document, see docs/schemas/profile.v18.schema.json.
     #[schema(value_type = Object)]
     pub definition: Value,
 }

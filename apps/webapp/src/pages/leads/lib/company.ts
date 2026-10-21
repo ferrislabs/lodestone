@@ -5,13 +5,19 @@ import type {
 	SiblingLead,
 } from './types'
 
-export type CompanyState = 'pending' | 'complete' | 'partial' | 'unreachable'
+export type CompanyState =
+	| 'pending'
+	| 'complete'
+	| 'partial'
+	| 'unreachable'
+	| 'hosting_platform'
 
 const STATE_LABELS: Readonly<Record<CompanyState, string>> = {
 	pending: 'Recherche en attente',
 	complete: 'Complète',
 	partial: 'Partielle',
 	unreachable: 'Inaccessible',
+	hosting_platform: 'Hébergé sur une plateforme',
 }
 
 export function companyState(company: Company | null): CompanyState {
@@ -19,6 +25,7 @@ export function companyState(company: Company | null): CompanyState {
 		case 'complete':
 		case 'partial':
 		case 'unreachable':
+		case 'hosting_platform':
 			return company.state
 		default:
 			return 'pending'
@@ -80,6 +87,9 @@ export function companyNotice(company: Company | null): string | null {
 	const state = companyState(company)
 	if (company === null || state === 'pending') {
 		return "La recherche n'a pas encore été faite pour ce domaine."
+	}
+	if (state === 'hosting_platform') {
+		return 'Site hébergé sur une plateforme : pas de dossier entreprise lu.'
 	}
 	if (state === 'unreachable') {
 		return "Le site de l'entreprise est inaccessible ou interdit aux robots."

@@ -488,9 +488,7 @@ pub struct QualificationResult {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct DueGates {
     pub dossier: Option<DateTime<Utc>>,
-    pub enrichment: Option<DateTime<Utc>>,
-    pub http_probe: bool,
-    pub company_jobs: bool,
+    pub inspection: Option<DateTime<Utc>>,
 }
 
 pub const SUMMARY_FAILED_AFTER: u32 = 5;

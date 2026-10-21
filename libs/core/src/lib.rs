@@ -38,10 +38,16 @@ pub use domain::{
         recipient::{NotARecipient, Recipient},
         select_for_profile,
     },
+    ecosystem::{
+        DomainEcosystem, DueDomain, EcosystemFinding, EcosystemModule, FindingExample,
+        HOSTING_PLATFORMS, InspectionSettings, InspectionTarget, ModuleOutcome, ModuleRun,
+        ModuleRunner, ModuleState, ModuleStats, ModuleStatus, ecosystem_documents,
+        hosting_platform, ports::EcosystemRepository,
+    },
     enrichment::{
-        CERTIFICATE_SEEN_KIND, EnrichmentState, EnrichmentStatus, EnrichmentStep,
-        LeadEnrichmentRecord, ListedEnrichment, StepRun, StepState, WaitingReason,
-        enrichment_state, listed_enrichment_state, only_certificates,
+        CERTIFICATE_SEEN_KIND, EnrichmentState, EnrichmentStatus, EnrichmentStep, InspectionRecord,
+        ListedEnrichment, WaitingReason, enrichment_state, listed_enrichment_state,
+        only_certificates,
     },
     facts::{
         CompanyFacts, Country, CountryBasis, Environment, HostFact, IndependentSignal, LeadFacts,

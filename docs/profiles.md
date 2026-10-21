@@ -1,6 +1,6 @@
 # Detection profiles
 
-A detection profile describes one market: what is sold, which sourcing agents find leads in which sources, which enrichment steps complete every lead, which qualification agents judge a lead, which scoring agents decide its score and verdict, how an aggregator sums it up, how signals are weighted and which contacts to prefer.
+A detection profile describes one market: what is sold, which sourcing agents find leads in which sources, which profile-specific settings the ecosystem inspection of every lead uses, which qualification agents judge a lead, which scoring agents decide its score and verdict, how an aggregator sums it up, how signals are weighted and which contacts to prefer.
 
 ## Storage
 
@@ -8,7 +8,7 @@ Profiles live in Postgres. Each edit creates a new revision; earlier revisions a
 
 ## Schema
 
-The JSON Schema is `docs/schemas/profile.v17.schema.json`. It is generated from `ProfileDefinition` and must not be edited by hand. Regenerate it with:
+The JSON Schema is `docs/schemas/profile.v18.schema.json`. It is generated from `ProfileDefinition` and must not be edited by hand. Regenerate it with:
 
 ```
 UPDATE_SCHEMA=1 cargo test -p lodestone-core --test profile_examples
@@ -18,21 +18,22 @@ Without `UPDATE_SCHEMA=1` the same test fails if the committed file is stale. Th
 
 ## Examples
 
-- `docs/examples/profiles/iam-ferriskey.json`: sells FerrisKey and Autharie to organizations running Keycloak or a SaaS IAM. Sourcing agents « Certificats » (certificate labels), « DNS » (CNAME patterns), « Marchés publics » over BOAMP, DECP and TED and « Offres et missions » over France Travail and Hacker News. Enrichment: the HTTP probe with the Keycloak, Authentik and Zitadel fingerprints, and the company job offers with the job keywords, whose relevance criteria are written in the prompt of the `pertinence` agent.
-- `docs/examples/profiles/ecommerce-replatforming.json`: sells Magento migrations. Search agents over BOAMP and France Travail, and an HTTP probe enrichment with a version extractor. It has no IAM-specific field.
+- `docs/examples/profiles/iam-ferriskey.json`: sells FerrisKey and Autharie to organizations running Keycloak or a SaaS IAM. Sourcing agents « Certificats » (certificate labels), « DNS » (CNAME patterns), « Marchés publics » over BOAMP, DECP and TED and « Offres et missions » over France Travail and Hacker News. Enrichment: its own fingerprints (Keycloak, Authentik, Zitadel) probed on the lead domain and the identity subdomains, and the job keywords highlighted in the offers of every lead, whose relevance criteria are written in the prompt of the `pertinence` agent.
+- `docs/examples/profiles/ecommerce-replatforming.json`: sells Magento migrations. Search agents over BOAMP and France Travail, and its own Magento fingerprint with a version extractor, probed on `www`, `shop` and `boutique`. It has no IAM-specific field.
 
 ## Sections
 
-- `schema_version`: must be 17. See [Older versions](#older-versions).
+- `schema_version`: must be 18. See [Older versions](#older-versions).
 - `identity`: the offer and the target customer, in free text.
 - `language`: `fr` or `en`, default `fr` (was `llm.language` before 14). The language of every free-text field the LLM writes: the aggregator's summary, verdict narrative, approach angle, draft subject and body, the qualification summaries and the scoring reasons. The system prompts state it (`Write every free-text field (...) in French. Evidence quotes stay in the language of the document they come from.`), so evidence quotes stay in the source language and the verbatim check is unchanged. Changing the language changes the system prompt, hence the LLM cache key: answers are regenerated.
-- `agents`: the sourcing agents, they find leads (ADR 0005, ADR 0011). At least one is required unless an enrichment step is enabled (`NoAgent`). `type` selects `search`, `certificates` or `dns`. `id` (slug matching `^[a-z0-9][a-z0-9-]{0,62}$`, unique in the profile), `name` (not empty) and `enabled` (default `true`, a disabled agent is kept but not run) are common.
+- `agents`: the sourcing agents, they find leads (ADR 0005, ADR 0011). At least one is required unless the inspection is on and the profile has its own fingerprints or job keywords to highlight (`NoAgent`). `type` selects `search`, `certificates` or `dns`. `id` (slug matching `^[a-z0-9][a-z0-9-]{0,62}$`, unique in the profile), `name` (not empty) and `enabled` (default `true`, a disabled agent is kept but not run) are common.
   - `search` agent: looks for keywords across catalog providers (ADR 0010). `providers`: at least one catalog key that supports keyword search (`boamp`, `decp`, `ted`, `france_travail`, `hacker_news_hiring`), no duplicate; an unknown key (`UnknownProvider`) or a provider without keyword search (`ProviderCannotSearch`, `ats` included since schema 17) is rejected, a provider that is not ready is accepted but skipped at run time. `keywords` (at least one), `exclusions`, `accept_min_keywords` and `filters` are defined once for every provider (see "Search agents").
   - `certificates` agent: `labels`, hostname labels looked for in certificate transparency logs (lowercase labels, at least one). A matching host creates or updates a lead (see "Certificates and DNS agents").
   - `dns` agent: `patterns`, provider names with the CNAME target suffix that identifies them (at least one).
-- `enrichment`: steps run on every lead of the profile, whatever the agent that found it (ADR 0011, see "Enrichment"). The section and each field are optional.
-  - `http_probe`: `enabled` (default `false`), `fingerprints` (at least one when enabled; path, matchers, optional version extractor, debt markers, unique ids), `excluded_products` and `extra_subdomains` (hostname labels, no duplicate, default `auth`, `sso`, `login`, `id`, `idp`, `accounts`).
-  - `company_jobs`: `enabled` (default `false`), `keywords` (empty means the union of the keywords of the enabled search agents; an enabled step needs at least one keyword in the end) and `accept_min_keywords` (default 2, at least 1).
+- `inspection`: `enabled` (default `true`), the master switch of the ecosystem inspection for the leads of the profile (ADR 0012, see "Ecosystem inspection"). Off, the leads of the profile are not inspected and qualification does not wait for the inspection.
+- `enrichment`: the settings of the inspection specific to this profile; everything else is the same for every profile (ADR 0012). The section and each field are optional, and there is no trade-specific default.
+  - `custom`: « Avancé » in the webapp. `fingerprints` (path, matchers, optional version extractor, debt markers, unique ids), `excluded_products` and `extra_subdomains` (hostname labels, no duplicate, empty by default). The fingerprints are probed on the lead domain and the extra subdomains; a match is a `product_detected` or `debt_marker` signal and a finding of « Site et stack technique ».
+  - `highlight_keywords`: « Mots-clés à mettre en avant » in the job offers of a lead. An offer with them is highlighted in « Activité de recrutement » and becomes a `job_offer` signal (at least 2 distinct keywords for a strong signal). Empty means the union of the keywords of the enabled search agents. No blank keyword.
 - `qualification_agents`: at least one (ADR 0007). Each agent evaluates every lead of the profile, from every source, from one angle.
   - `id`: slug, unique among all agents of the profile, sourcing and qualification together.
   - `name`: display name, not empty. `enabled`: defaults to `true`.
@@ -312,17 +313,31 @@ The editor lists, per selected provider, what it filters natively and what is ap
 | `certificates` | `labels`: hostname labels to look for in certificate logs. | A new certificate host with one of the labels in its subdomain part creates or updates the lead of its registrable domain with a `certificate_seen` signal (value: the host, `raw.labels`: the matched labels, provenance `https://crt.sh/?q=<host>`, strength 0.3). The host is recorded as a candidate host for the DNS lookup and the HTTP probe. |
 | `dns` | `patterns`: provider names with the CNAME target suffix that identifies them. | A candidate host whose CNAME chain ends with a suffix creates or updates the lead of its domain with a `saas_provider` signal. |
 
-Validation paths include the agent index, for example `agents[1].keywords[0]`, `agents[1].providers[0]`, `agents[0].labels[1]`, `enrichment.http_probe.fingerprints[0].path` or `contact_ranking.guess_local_parts[1]`.
+Validation paths include the agent index, for example `agents[1].keywords[0]`, `agents[1].providers[0]`, `agents[0].labels[1]`, `enrichment.custom.fingerprints[0].path` or `contact_ranking.guess_local_parts[1]`.
 
-## Enrichment
+## Ecosystem inspection
 
-Enrichment completes every lead of the active profiles that enable it, whatever its source (ADR 0011). Its signals carry no agent. It never creates a lead: a probe or job offer match is recorded only on the lead that already exists for that domain in the same profile, and a match on a domain without a lead in a profile is skipped for that profile (`skipped_no_lead` in the run report and the logs).
+Every identified lead, that is every lead with a registrable domain, gets the same ecosystem inspection whatever the profile (ADR 0012). The inspection is made of modules; the qualification agents of each profile read what they found and decide what matters.
 
-- **HTTP probe.** The hosts of a lead are its registrable domain, the candidate hosts known for that domain and the `extra_subdomains`. Before each pass the HTTP probe listener inserts the missing ones as candidate hosts of origin `lead` for the leads of the profile that were never seeded, then probes every due candidate host with the paths of the fingerprints of every enabled profile (revisit interval `OUTBOUND_REVISIT_INTERVAL_HOURS`, unchanged). The step has run for a lead once every candidate host of its domain has been probed.
-- **Company job offers** (catalog provider `ats`, « Offres d'emploi de l'entreprise »). The scheduled `ats` job reads the home page, then the career pages, of every lead domain of the profiles that enable the step, finds the recruiting board (Greenhouse, Lever, Ashby) and reads its offers. Offers go through the keyword routing with `enrichment.company_jobs.keywords` and `accept_min_keywords`, without exclusions or filters, and become `job_offer` signals. A domain is scanned again after the revisit interval, or earlier when one of its leads has never had the step. The step has run for a lead once its domain was scanned.
-- **State.** `lead_enrichments (lead_id, step, ran_at)` keeps the last run of each step per lead (`ran_at` is null while the probe of the seeded hosts is pending).
-- **Qualification.** A lead is due for its qualification agents once each enabled step ran for it, or once `ENRICHMENT_WAIT_MINUTES` (default 30, 0 disables the wait) have passed since `leads.created_at`. A lead whose only evidence is `certificate_seen` (contact signals from `security_txt`, `public_page` and `role_guess` do not count) is never sent to the models, whatever the wait; it becomes due when a signal of another kind arrives.
-- **API.** The lead detail carries `enrichment`: `steps` (`step`: `http_probe` or `company_jobs`, `enabled`, `ran_at`), `status` (`disabled`, `pending`, `complete`, `timed_out`), `waiting_reason` (`awaiting_enrichment`, `awaiting_enrichment_evidence` or null) and `wait_until` while pending.
+| Module | Key | What it learns | Refresh |
+| --- | --- | --- | --- |
+| Identité officielle | `official_identity` | legal name, SIREN, main activity, headcount range, head office and creation date from the official company register | 30 days |
+| Vie légale | `legal_life` | BODACC events (issue 211) | 7 days |
+| Marchés publics | `public_contracts` | DECP contracts held by the company (issue 211) | 7 days |
+| Site et stack technique | `website_stack` | home page (confirmed), `server`, `x-powered-by`, generator, and the profile fingerprints on the domain and its extra subdomains | 7 days |
+| Écosystème DNS et e-mail | `dns_email` | mail and service providers from DNS records (issue 212) | 7 days |
+| Activité de recrutement | `hiring_activity` | confirmed career pages, recruiting board (Greenhouse, Lever, Ashby), open positions and offers, highlighted ones first (at most 20) | 3 days |
+| Activité récente | `recent_activity` | recent news of the company site (issue 212) | 3 days |
+
+- **Modules of this version.** `official_identity` wraps the company dossier: it reads the stored dossier when one was built, else builds it now. `website_stack` wraps the HTTP probe with the profile fingerprints of every profile that has a lead on the domain. `hiring_activity` wraps the career page and recruiting board reader. The other modules are listed with « À venir » and have no status yet.
+- **Findings.** A finding has a module, a key, a kind, a French label, a value, a source URL (a confirmed link or the API URL it was read from), the time it was observed and details. Findings are stored per registrable domain in `lead_ecosystem (domain, module, finding_key)` and shared by the leads of every profile on that domain. A new run of a module replaces its findings; a failed run keeps the previous ones.
+- **Status.** `lead_ecosystem_modules (domain, module)` keeps `status` (`pending`, `done`, `not_applicable`, `failed`), `last_run`, `next_run_at` and `error`. A module is due when it never ran for the domain (new leads first) or when `next_run_at` passed: its refresh interval after a run, 6 hours after a failure, at least one minute after a rate limit (the module stops for that pass and the domain keeps its status).
+- **Hosting platforms.** A domain under a hosting platform (`notion.site`, `github.io`, `gitlab.io`, `vercel.app`, `netlify.app`, `pages.dev`, `webflow.io`, `wixsite.com`, `framer.website`, `carrd.co`, `herokuapp.com`, `azurewebsites.net`, `web.app`, `firebaseapp.com`, `blogspot.com`, `wordpress.com`, `substack.com`, `myshopify.com`; data in code, `HOSTING_PLATFORMS`) is flagged « Site hébergé sur une plateforme »: modules that read the site are `not_applicable` and no page is guessed. The company research listener does not read it either: its dossier gets the terminal state `hosting_platform` without any request, which releases the dossier wait at once, and the lead page shows « Site hébergé sur une plateforme : pas de dossier entreprise lu ». At startup, existing dossiers of such domains are switched to that state (idempotent).
+- **Runtime.** One continuous listener, `ecosystem_inspection` (ADR 0006), runs the modules on the due domains of the active profiles whose inspection is on, 10 domains per module and pass, through the shared polite fetcher (per-host rate limits, robots.txt, confirmed links). Each pass of a module that inspected something appends a row to `ecosystem_module_runs` (`module`, `ran_at`, `leads_inspected`, `findings_count`, `latest_example`), kept 30 days.
+- **Signals.** The HTTP probe listener and the scheduled `ats` job still produce the profile-scoped signals: `product_detected` and `debt_marker` for profiles with their own fingerprints, `job_offer` for offers with the highlighted keywords. They never create a lead. `lead_enrichments (lead_id, step, ran_at)` stays as their internal bookkeeping (which lead hosts were seeded, which domains were read); it no longer drives the qualification wait nor the API.
+- **Qualification.** A lead is due for its qualification agents once every available module has a status other than `pending` for its domain, or once `ENRICHMENT_WAIT_MINUTES` (default 30, 0 disables the wait) have passed since `leads.created_at`, or at once when the inspection of its profile is off. A lead whose only evidence is `certificate_seen` (contact signals from `security_txt`, `public_page` and `role_guess` do not count) is never sent to the models, whatever the wait; it becomes due when a signal of another kind arrives.
+- **Agents.** The qualification, scoring and aggregator documents include, after the company dossier, one « Ecosystem » document per module and source (at most 12 findings per module), whose source is that URL. Evidence may quote them.
+- **API.** The lead detail carries `enrichment` (`status`: `disabled`, `pending`, `complete`, `timed_out`; `waiting_reason`: `awaiting_enrichment`, `awaiting_enrichment_evidence` or null; `wait_until` while pending; `modules` with `module`, `label`, `status`, `last_run`, `error`; `hosting_platform`) and `ecosystem` (`hosting_platform`, `modules` with their status and `findings`). `GET /api/v1/ecosystem/modules` lists the seven modules with their question, what they learn, `available`, `reads_site`, `refresh_days` and their activity over the last seven days (`leads_inspected`, `findings_count`, `last_run`, `latest_example`). `POST /api/v1/leads/{id}/ecosystem/dry-run?module=<key>` runs one module now on the lead domain for a user (403 for a service account), stores nothing and answers the findings, the status and `duration_ms`; 409 for a module that is not available yet, 429 when a host is rate limited, 404 for an unknown or suppressed lead.
 
 ## Provider URLs
 
@@ -331,14 +346,15 @@ The URL settings of the catalog (`boamp.base_url`, `decp.dataset_api_url`, `ted.
 ## Dependencies between kinds
 
 - The DNS lookup and the HTTP probe read candidate hosts: hosts found in certificates, imported by an operator, or derived from the leads (origin `lead`).
-- Company job offers visit every lead domain of the profiles that enable them.
+- Company job offers visit every lead domain of the profiles with keywords to highlight.
+- The ecosystem inspection visits every lead domain of the active profiles whose inspection is on.
 
 ## Run a source now
 
 Sources come in two modes (ADR 0006).
 
-- **Continuous** sources listen around the clock inside the binary: `certificate_transparency`, `dns_cname`, `http_probe`, `security_txt`, `public_page` and `role_guess`. They have no recurring job and nothing to run on demand: an edited agent is picked up on the listener's next loop (a few seconds when idle), and a new certificate or lead flows through the pipeline within minutes. A listener is active while at least one enabled agent of its kind exists in an active profile, or for `http_probe` an enabled HTTP probe enrichment (contact finders are always active); otherwise it is "Inactif (aucun agent)". With several replicas one holds each listener at a time (Postgres advisory lock); the others show "En veille (autre instance)" and take over when it stops.
-- **Scheduled** sources (`boamp`, `decp`, `ted`, `france_travail`, `hacker_news_hiring`, and `ats` for the company job offers enrichment) run on a recurring job, so an edited agent otherwise waits for the next interval. "Lancer maintenant" on the Sources screen (Configuration > Sources), or "Lancer la source" on an agent card, moves the pending job to the present.
+- **Continuous** sources listen around the clock inside the binary: `certificate_transparency`, `dns_cname`, `http_probe`, `security_txt`, `public_page` and `role_guess`. They have no recurring job and nothing to run on demand: an edited agent is picked up on the listener's next loop (a few seconds when idle), and a new certificate or lead flows through the pipeline within minutes. A listener is active while at least one enabled agent of its kind exists in an active profile, or for `http_probe` a profile with its own fingerprints, or for `ecosystem_inspection` a profile whose inspection is on (contact finders are always active); otherwise it is "Inactif (aucun agent)". With several replicas one holds each listener at a time (Postgres advisory lock); the others show "En veille (autre instance)" and take over when it stops.
+- **Scheduled** sources (`boamp`, `decp`, `ted`, `france_travail`, `hacker_news_hiring`, and `ats` for the job offers with highlighted keywords) run on a recurring job, so an edited agent otherwise waits for the next interval. "Lancer maintenant" on the Sources screen (Configuration > Sources), or "Lancer la source" on an agent card, moves the pending job to the present.
 
 The Sources screen shows continuous sources in their own "Écoute continue" group with the listener state, last activity, backlog (tiles of lag for certificate transparency, hosts to probe, contact targets), totals and last error. Agent cards of continuous kinds show an "En écoute" status line instead of the run button.
 
@@ -355,7 +371,7 @@ A host or domain whose lookup, probe or crawl fails is marked checked like a suc
 
 ## Older versions
 
-Stored revisions are never rewritten. Versions 1 to 16 are accepted and upgraded when read; new revisions are written in version 17. Errors on an older document keep that document's paths.
+Stored revisions are never rewritten. Versions 1 to 17 are accepted and upgraded when read; new revisions are written in version 18. Errors on an older document keep that document's paths.
 
 ### Version 1 to 2
 
@@ -441,3 +457,13 @@ Sourcing and enrichment are separated (ADR 0011). In this order:
 4. `certificate_transparency` and `dns_cname` signal agents become `certificates` and `dns` agents with the same id, name, `enabled`, `labels` or `patterns`.
 
 The IAM example of version 16 upgrades to « Certificate transparency », « DNS CNAME », « Marchés publics » (BOAMP, DECP, TED) and « France Travail », with its five fingerprints and the keywords of its two job agents in the enrichment.
+
+### Version 17 to 18
+
+The enrichment steps become the profile-specific settings of the ecosystem inspection (ADR 0012).
+
+1. `inspection` is added with `enabled: true`.
+2. An enabled `enrichment.http_probe` becomes `enrichment.custom` with its `fingerprints` and `excluded_products`. Its `extra_subdomains` are kept, except the exact former default (`auth`, `sso`, `login`, `id`, `idp`, `accounts`, in any order), which is dropped unless a fingerprint looks like an identity product (its id, product or path contains `realm`, `auth`, `sso`, `oidc`, `saml`, `oauth`, `openid`, `idp` or `identity`). A disabled probe leaves an empty `custom`: it had no effect and keeping it would start probing.
+3. The `keywords` of an enabled `enrichment.company_jobs` become `enrichment.highlight_keywords`; `accept_min_keywords` is dropped (the signal keeps the default of 2). A disabled step leaves no keyword.
+
+The IAM example of version 17 upgrades to the current example: its fingerprints are identity fingerprints, so it keeps its six subdomains.

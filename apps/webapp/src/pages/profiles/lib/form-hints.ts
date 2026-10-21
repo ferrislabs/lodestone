@@ -18,7 +18,7 @@ export const PROFILE_HINTS: UiHints = {
 	defaults: {
 		schema_version: 6,
 		'aggregator.system_prompt': DEFAULT_AGGREGATOR_PROMPT,
-		'enrichment.http_probe.fingerprints.matchers.equals': 200,
+		'enrichment.custom.fingerprints.matchers.equals': 200,
 	},
 	labels: {
 		ats: 'ATS',
@@ -35,7 +35,7 @@ export const PROFILE_HINTS: UiHints = {
 	messages: FORM_MESSAGES,
 	layout: {
 		agents: { row: ['keywords', 'exclusions'] },
-		'enrichment.http_probe.fingerprints': {
+		'enrichment.custom.fingerprints': {
 			row: ['id', 'path', 'product'],
 			collapsed: {
 				title: 'Version et dette technique',
@@ -48,6 +48,5 @@ export const PROFILE_HINTS: UiHints = {
 	},
 	choices: {
 		'agents.accept_min_keywords': { min: 1, max: 5 },
-		'enrichment.company_jobs.accept_min_keywords': { min: 1, max: 5 },
 	},
 }

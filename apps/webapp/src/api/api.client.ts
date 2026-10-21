@@ -248,13 +248,55 @@ export namespace Schemas {
     };
     pagination?: (null | PaginationMetadata) | undefined;
   };
+  export type EcosystemModule =
+    | "official_identity"
+    | "legal_life"
+    | "public_contracts"
+    | "website_stack"
+    | "dns_email"
+    | "hiring_activity"
+    | "recent_activity";
+  export type EcosystemFindingDto = {
+    details: Record<string, unknown>;
+    key: string;
+    kind: string;
+    label: string;
+    module: EcosystemModule;
+    observed_at: string;
+    source_url: string;
+    value: string;
+  };
+  export type EcosystemModuleStatus = "pending" | "done" | "not_applicable" | "failed";
+  export type DataEnvelope_EcosystemDryRunDto = {
+    data: {
+      domain: string;
+      duration_ms: number;
+      error?: (string | null) | undefined;
+      findings: Array<EcosystemFindingDto>;
+      hosting_platform?: (string | null) | undefined;
+      module: EcosystemModule;
+      status: EcosystemModuleStatus;
+    };
+    pagination?: (null | PaginationMetadata) | undefined;
+  };
+  export type ModuleStateDto = {
+    error?: (string | null) | undefined;
+    label: string;
+    last_run?: (string | null) | undefined;
+    module: EcosystemModule;
+    status: EcosystemModuleStatus;
+  };
+  export type EcosystemModuleReportDto = ModuleStateDto & { findings: Array<EcosystemFindingDto> };
+  export type EcosystemDto = {
+    hosting_platform?: (string | null) | undefined;
+    modules: Array<EcosystemModuleReportDto>;
+  };
   export type EnrichmentStatus = "disabled" | "pending" | "complete" | "timed_out";
-  export type EnrichmentStep = "http_probe" | "company_jobs";
-  export type EnrichmentStepStateDto = { enabled: boolean; ran_at?: (string | null) | undefined; step: EnrichmentStep };
   export type EnrichmentWaitingReason = "awaiting_enrichment" | "awaiting_enrichment_evidence";
   export type EnrichmentDto = {
+    hosting_platform?: (string | null) | undefined;
+    modules: Array<ModuleStateDto>;
     status: EnrichmentStatus;
-    steps: Array<EnrichmentStepStateDto>;
     wait_until?: (string | null) | undefined;
     waiting_reason?: (null | EnrichmentWaitingReason) | undefined;
   };
@@ -429,6 +471,7 @@ export namespace Schemas {
       assessments: Array<AssessmentDto>;
       company?: (null | CompanyDto) | undefined;
       contacts: Array<ContactDto>;
+      ecosystem: EcosystemDto;
       enrichment: EnrichmentDto;
       facts: LeadFactsDto;
       lead: LeadDto;
@@ -690,6 +733,26 @@ export namespace Schemas {
     }>;
     pagination?: (null | PaginationMetadata) | undefined;
   };
+  export type FindingExampleDto = { domain: string; label: string; source_url: string; value: string };
+  export type ModuleStatsDto = {
+    findings_count: number;
+    last_run?: (string | null) | undefined;
+    latest_example?: (null | FindingExampleDto) | undefined;
+    leads_inspected: number;
+  };
+  export type DataEnvelope_Vec_EcosystemModuleInfoDto = {
+    data: Array<{
+      available: boolean;
+      label: string;
+      learns: string;
+      module: EcosystemModule;
+      question: string;
+      reads_site: boolean;
+      refresh_days: number;
+      stats: ModuleStatsDto;
+    }>;
+    pagination?: (null | PaginationMetadata) | undefined;
+  };
   export type DataEnvelope_Vec_LeadDto = {
     data: Array<{
       confidence?: (number | null) | undefined;
@@ -805,6 +868,25 @@ export namespace Schemas {
     summary: string;
     verdict_narrative: string;
   };
+  export type EcosystemDryRunDto = {
+    domain: string;
+    duration_ms: number;
+    error?: (string | null) | undefined;
+    findings: Array<EcosystemFindingDto>;
+    hosting_platform?: (string | null) | undefined;
+    module: EcosystemModule;
+    status: EcosystemModuleStatus;
+  };
+  export type EcosystemModuleInfoDto = {
+    available: boolean;
+    label: string;
+    learns: string;
+    module: EcosystemModule;
+    question: string;
+    reads_site: boolean;
+    refresh_days: number;
+    stats: ModuleStatsDto;
+  };
   export type EditDraftRequest = Partial<{ body: string | null; subject: string | null }>;
   export type ErrorBody = {
     code: string;
@@ -819,6 +901,7 @@ export namespace Schemas {
     assessments: Array<AssessmentDto>;
     company?: (null | CompanyDto) | undefined;
     contacts: Array<ContactDto>;
+    ecosystem: EcosystemDto;
     enrichment: EnrichmentDto;
     facts: LeadFactsDto;
     lead: LeadDto;
@@ -1020,6 +1103,13 @@ export namespace Endpoints {
       422: unknown;
     };
   };
+  export type get_List_ecosystem_modules = {
+    method: "GET";
+    path: "/api/v1/ecosystem/modules";
+    requestFormat: "json";
+    parameters: never;
+    responses: { 200: Schemas.DataEnvelope_Vec_EcosystemModuleInfoDto; 401: unknown };
+  };
   export type get_Lead_detail = {
     method: "GET";
     path: "/api/v1/leads/{lead_id}";
@@ -1046,6 +1136,33 @@ export namespace Endpoints {
       path: { lead_id: string };
     };
     responses: { 202: Schemas.DataEnvelope_CompanyDto; 400: unknown; 401: unknown; 403: unknown; 404: unknown };
+  };
+  export type post_Dry_run_ecosystem_module = {
+    method: "POST";
+    path: "/api/v1/leads/{lead_id}/ecosystem/dry-run";
+    requestFormat: "json";
+    parameters: {
+      query: {
+        module:
+          | "official_identity"
+          | "legal_life"
+          | "public_contracts"
+          | "website_stack"
+          | "dns_email"
+          | "hiring_activity"
+          | "recent_activity";
+      };
+      path: { lead_id: string };
+    };
+    responses: {
+      200: Schemas.DataEnvelope_EcosystemDryRunDto;
+      400: unknown;
+      401: unknown;
+      403: unknown;
+      404: unknown;
+      409: unknown;
+      429: unknown;
+    };
   };
   export type patch_Change_lead_status = {
     method: "PATCH";
@@ -1490,6 +1607,7 @@ export type EndpointByMethod = {
   get: {
     "/api/v1/drafts": Endpoints.get_List_drafts;
     "/api/v1/drafts/{assessment_id}": Endpoints.get_Get_draft;
+    "/api/v1/ecosystem/modules": Endpoints.get_List_ecosystem_modules;
     "/api/v1/leads/{lead_id}": Endpoints.get_Lead_detail;
     "/api/v1/llm/providers": Endpoints.get_List_providers;
     "/api/v1/llm/providers/{provider_id}": Endpoints.get_Get_provider;
@@ -1519,6 +1637,7 @@ export type EndpointByMethod = {
     "/api/v1/drafts/{assessment_id}/reject": Endpoints.post_Reject_draft;
     "/api/v1/leads/{lead_id}/agents/retry": Endpoints.post_Retry_lead_agents;
     "/api/v1/leads/{lead_id}/company/refresh": Endpoints.post_Refresh_company;
+    "/api/v1/leads/{lead_id}/ecosystem/dry-run": Endpoints.post_Dry_run_ecosystem_module;
     "/api/v1/leads/{lead_id}/summary/retry": Endpoints.post_Retry_lead_summary;
     "/api/v1/llm/providers": Endpoints.post_Create_provider;
     "/api/v1/llm/providers/{provider_id}/disable": Endpoints.post_Disable_provider;

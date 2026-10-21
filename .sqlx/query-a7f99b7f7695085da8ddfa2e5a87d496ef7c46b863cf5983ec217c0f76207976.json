@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, profile_id, created_at FROM leads WHERE id = ANY($1)",
+  "query": "SELECT id, profile_id, domain, created_at FROM leads WHERE id = ANY($1)",
   "describe": {
     "columns": [
       {
@@ -15,6 +15,11 @@
       },
       {
         "ordinal": 2,
+        "name": "domain",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
         "name": "created_at",
         "type_info": "Timestamptz"
       }
@@ -27,8 +32,9 @@
     "nullable": [
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "51712a8e588ec4775a5eaced1ec5c4366d13c11a3834e8ead3ad80e788de2a9c"
+  "hash": "a7f99b7f7695085da8ddfa2e5a87d496ef7c46b863cf5983ec217c0f76207976"
 }

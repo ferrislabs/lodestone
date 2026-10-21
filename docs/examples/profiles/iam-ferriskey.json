@@ -1,5 +1,5 @@
 {
-  "schema_version": 17,
+  "schema_version": 18,
   "identity": {
     "offer": "FerrisKey (open source IAM/CIAM in Rust) and Autharie (managed IAM), both by Ferrislabs",
     "target_customer": "Organizations running self-hosted Keycloak or a similar IAM, or paying for a SaaS IAM"
@@ -99,9 +99,11 @@
       "exclusions": []
     }
   ],
+  "inspection": {
+    "enabled": true
+  },
   "enrichment": {
-    "http_probe": {
-      "enabled": true,
+    "custom": {
       "fingerprints": [
         {
           "id": "keycloak-realm",
@@ -204,22 +206,18 @@
         "accounts"
       ]
     },
-    "company_jobs": {
-      "enabled": true,
-      "keywords": [
-        "Keycloak",
-        "IAM",
-        "ingénieur IAM",
-        "migration Okta",
-        "migration Auth0",
-        "gestion des identités",
-        "identity and access management",
-        "SSO",
-        "single sign-on",
-        "Okta migration"
-      ],
-      "accept_min_keywords": 2
-    }
+    "highlight_keywords": [
+      "Keycloak",
+      "IAM",
+      "ingénieur IAM",
+      "migration Okta",
+      "migration Auth0",
+      "gestion des identités",
+      "identity and access management",
+      "SSO",
+      "single sign-on",
+      "Okta migration"
+    ]
   },
   "qualification_agents": [
     {

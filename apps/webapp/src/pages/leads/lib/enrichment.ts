@@ -1,28 +1,22 @@
+import {
+	type FindingRow,
+	findingRows,
+	moduleStatusLabel,
+	type StatusTone,
+	statusTone,
+} from '#/lib/ecosystem'
 import { formatDateTime } from '#/pages/leads/lib/format'
 import type {
+	Ecosystem,
 	Enrichment,
 	EnrichmentStatus,
-	EnrichmentStep,
 	EnrichmentWaiting,
 	EnrichmentWaitingReason,
 	Signal,
 } from '#/pages/leads/lib/types'
 
-export type StepState = 'done' | 'pending' | 'disabled'
-
-const STEP_LABELS: Readonly<Record<EnrichmentStep, string>> = {
-	http_probe: 'Sonde HTTP',
-	company_jobs: "Offres d'emploi de l'entreprise",
-}
-
-const STATE_LABELS: Readonly<Record<StepState, string>> = {
-	done: 'Fait',
-	pending: 'En attente',
-	disabled: 'Désactivé',
-}
-
 const STATUS_LABELS: Readonly<Record<EnrichmentStatus, string>> = {
-	disabled: 'Aucune étape activée',
+	disabled: 'Inspection désactivée',
 	pending: 'En cours',
 	complete: 'Terminé',
 	timed_out: 'Délai dépassé',
@@ -33,30 +27,26 @@ const WAITING_LABELS: Readonly<Record<EnrichmentWaitingReason, string>> = {
 	awaiting_enrichment_evidence: "En attente de preuve d'enrichissement",
 }
 
-export interface EnrichmentRow {
-	step: EnrichmentStep
+export interface ModuleSection {
+	module: string
 	label: string
-	state: StepState
-	stateLabel: string
-	date: string | null
+	statusLabel: string
+	tone: StatusTone
+	lastRun: string | null
+	error: string | null
+	rows: FindingRow[]
 }
 
-export function enrichmentRows(enrichment: Enrichment): EnrichmentRow[] {
-	return enrichment.steps.map((item) => {
-		const ranAt = item.ran_at ?? null
-		const state: StepState = !item.enabled
-			? 'disabled'
-			: ranAt
-				? 'done'
-				: 'pending'
-		return {
-			step: item.step,
-			label: STEP_LABELS[item.step],
-			state,
-			stateLabel: STATE_LABELS[state],
-			date: state === 'done' && ranAt ? formatDateTime(ranAt) : null,
-		}
-	})
+export function moduleSections(ecosystem: Ecosystem): ModuleSection[] {
+	return ecosystem.modules.map((report) => ({
+		module: report.module,
+		label: report.label,
+		statusLabel: moduleStatusLabel(report.status),
+		tone: statusTone(report.status),
+		lastRun: report.last_run ? formatDateTime(report.last_run) : null,
+		error: report.status === 'failed' ? (report.error ?? null) : null,
+		rows: findingRows(report.findings),
+	}))
 }
 
 export function enrichmentStatusLabel(status: EnrichmentStatus): string {

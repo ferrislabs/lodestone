@@ -750,7 +750,7 @@ fn active(id: u128, company_jobs: bool) -> ActiveProfile {
     )
     .unwrap()
     .to_json();
-    value["enrichment"]["company_jobs"]["enabled"] = json!(company_jobs);
+    value["inspection"]["enabled"] = json!(company_jobs);
     let profile_id = ProfileId(Uuid::from_u128(id));
     ActiveProfile {
         profile: Profile {

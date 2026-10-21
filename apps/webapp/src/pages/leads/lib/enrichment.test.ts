@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
-	enrichmentRows,
 	enrichmentStatusLabel,
 	listWaitingLabel,
+	moduleSections,
 	signalTitle,
 	waitingBadge,
 } from '#/pages/leads/lib/enrichment'
@@ -14,61 +14,74 @@ const WAIT = '2026-10-08T10:30:00Z'
 function enrichment(overrides: Partial<Enrichment> = {}): Enrichment {
 	return {
 		status: 'pending',
-		steps: [
-			{ step: 'http_probe', enabled: true, ran_at: '2026-10-08T10:05:00Z' },
-			{ step: 'company_jobs', enabled: true, ran_at: null },
-		],
+		modules: [],
 		waiting_reason: 'awaiting_enrichment',
 		wait_until: WAIT,
 		...overrides,
 	}
 }
 
-describe('enrichmentRows', () => {
-	it('names each step with its state and date', () => {
-		expect(
-			enrichmentRows(
-				enrichment({
-					steps: [
+describe('moduleSections', () => {
+	it('groups the findings per module with their status and sources', () => {
+		const sections = moduleSections({
+			hosting_platform: null,
+			modules: [
+				{
+					module: 'official_identity',
+					label: 'Identité officielle',
+					status: 'done',
+					last_run: '2026-10-08T10:05:00Z',
+					findings: [
 						{
-							step: 'http_probe',
-							enabled: true,
-							ran_at: '2026-10-08T10:05:00Z',
+							module: 'official_identity',
+							key: 'legal_name',
+							kind: 'legal_name',
+							label: 'Raison sociale',
+							value: 'ACME SAS',
+							source_url:
+								'https://recherche-entreprises.api.gouv.fr/search?q=552100554',
+							observed_at: '2026-10-08T10:05:00Z',
+							details: {},
 						},
-						{ step: 'company_jobs', enabled: true, ran_at: null },
 					],
-				}),
-			),
-		).toEqual([
+				},
+				{
+					module: 'hiring_activity',
+					label: 'Activité de recrutement',
+					status: 'failed',
+					error: 'home page not confirmed',
+					findings: [],
+				},
+			],
+		})
+		expect(sections).toEqual([
 			{
-				step: 'http_probe',
-				label: 'Sonde HTTP',
-				state: 'done',
-				stateLabel: 'Fait',
-				date: formatDateTime('2026-10-08T10:05:00Z'),
-			},
-			{
-				step: 'company_jobs',
-				label: "Offres d'emploi de l'entreprise",
-				state: 'pending',
-				stateLabel: 'En attente',
-				date: null,
-			},
-		])
-	})
-
-	it('lists a disabled step as disabled even if it ran before', () => {
-		const rows = enrichmentRows(
-			enrichment({
-				steps: [
-					{ step: 'http_probe', enabled: false, ran_at: WAIT },
-					{ step: 'company_jobs', enabled: false },
+				module: 'official_identity',
+				label: 'Identité officielle',
+				statusLabel: 'Fait',
+				tone: 'done',
+				lastRun: formatDateTime('2026-10-08T10:05:00Z'),
+				error: null,
+				rows: [
+					{
+						key: 'legal_name',
+						label: 'Raison sociale',
+						value: 'ACME SAS',
+						sourceUrl:
+							'https://recherche-entreprises.api.gouv.fr/search?q=552100554',
+						highlighted: false,
+					},
 				],
-			}),
-		)
-		expect(rows.map((row) => [row.state, row.stateLabel])).toEqual([
-			['disabled', 'Désactivé'],
-			['disabled', 'Désactivé'],
+			},
+			{
+				module: 'hiring_activity',
+				label: 'Activité de recrutement',
+				statusLabel: 'Échec',
+				tone: 'failed',
+				lastRun: null,
+				error: 'home page not confirmed',
+				rows: [],
+			},
 		])
 	})
 })
@@ -126,7 +139,7 @@ describe('listWaitingLabel', () => {
 
 describe('enrichmentStatusLabel', () => {
 	it('translates every status', () => {
-		expect(enrichmentStatusLabel('disabled')).toBe('Aucune étape activée')
+		expect(enrichmentStatusLabel('disabled')).toBe('Inspection désactivée')
 		expect(enrichmentStatusLabel('pending')).toBe('En cours')
 		expect(enrichmentStatusLabel('complete')).toBe('Terminé')
 		expect(enrichmentStatusLabel('timed_out')).toBe('Délai dépassé')

@@ -43,6 +43,8 @@ impl Modify for SecurityAddon {
         handlers::leads::retry_lead_summary,
         handlers::leads::retry_lead_agents,
         handlers::company::refresh_company,
+        handlers::ecosystem::dry_run_ecosystem_module,
+        handlers::ecosystem::list_ecosystem_modules,
         handlers::drafts::list_drafts,
         handlers::drafts::get_draft,
         handlers::drafts::edit_draft,
