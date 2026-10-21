@@ -219,8 +219,10 @@ export function VerdictPanel({
 					domaines de la même entreprise : volume de signaux indépendants (un
 					même signal vu par la même source compte une fois, et vieillit),
 					diversité des sources et des types de signaux, environnement des hôtes
-					et force des signaux. Confiance = avis des agents × ((1 − influence) +
-					influence × solidité).
+					et force des signaux (moyenne des trois signaux indépendants les plus
+					forts, chacun avec la force donnée par sa source et diminué selon son
+					âge). Confiance = avis des agents × ((1 − influence) + influence ×
+					solidité).
 				</p>
 				<div className="flex flex-wrap gap-4">
 					<PercentInput
@@ -230,16 +232,6 @@ export function VerdictPanel({
 						value={evidence.influence}
 						invalid={invalidFor('evidence.influence')}
 						onChange={actions.setInfluence}
-					/>
-					<NumberInput
-						id="evidence-reference-score"
-						label="Score de référence"
-						help="Score des signaux qui donne une force de 100 %."
-						value={evidence.referenceScore}
-						invalid={invalidFor('evidence.reference_score')}
-						min={1}
-						suffix="pts"
-						onChange={actions.setReferenceScore}
 					/>
 				</div>
 				<div className="flex flex-wrap gap-4">

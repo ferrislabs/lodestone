@@ -1,13 +1,16 @@
 import { Label } from '#/components/ui/label'
 import { Skeleton } from '#/components/ui/skeleton'
+import { visibleProfiles } from '#/pages/quality/lib/calibration'
 import { hasDecisions } from '#/pages/quality/lib/format'
 import { PERIOD_LABELS, PERIODS, type Period } from '#/pages/quality/lib/period'
 import type {
+	Calibration,
 	ExclusionCandidate,
 	ProfileSummary,
 	Quality,
 } from '#/pages/quality/lib/types'
 import { AgentsCard } from '#/pages/quality/ui/agents-card'
+import { CalibrationCard } from '#/pages/quality/ui/calibration-card'
 import { ConfidenceHistogram } from '#/pages/quality/ui/confidence-histogram'
 import { DecisionsCard } from '#/pages/quality/ui/decisions-card'
 import { DiscardedCard } from '#/pages/quality/ui/discarded-card'
@@ -35,6 +38,11 @@ interface QualityPageProps {
 	copiedLeadId: string | null
 	copyFailed: boolean
 	onCopyExclusion: (candidate: ExclusionCandidate) => void
+	calibration: Calibration | null
+	calibrationRunning: boolean
+	calibrationNotice: string | null
+	calibrationError: string | null
+	onRecalibrate: () => void
 }
 
 export function QualityPage({
@@ -50,7 +58,23 @@ export function QualityPage({
 	copiedLeadId,
 	copyFailed,
 	onCopyExclusion,
+	calibration,
+	calibrationRunning,
+	calibrationNotice,
+	calibrationError,
+	onRecalibrate,
 }: QualityPageProps) {
+	const calibrationCard =
+		state === 'ready' && calibration !== null ? (
+			<CalibrationCard
+				calibration={calibration}
+				profiles={visibleProfiles(calibration.profiles, profileId)}
+				running={calibrationRunning}
+				notice={calibrationNotice}
+				errorMessage={calibrationError}
+				onRecalculate={onRecalibrate}
+			/>
+		) : null
 	const exclusionsCard =
 		quality !== null &&
 		(hasDecisions(quality) ||
@@ -151,6 +175,12 @@ export function QualityPage({
 						onOpenProfile={onOpenProfile}
 					/>
 				</>
+			) : null}
+			{calibrationCard}
+			{state === 'ready' && calibration === null && calibrationError ? (
+				<p role="alert" className="text-sm text-destructive">
+					{calibrationError}
+				</p>
 			) : null}
 		</div>
 	)

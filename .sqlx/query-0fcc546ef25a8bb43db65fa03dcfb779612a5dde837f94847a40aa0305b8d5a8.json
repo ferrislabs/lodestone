@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE company_dossiers\n            SET next_attempt_at = LEAST(next_attempt_at, $1),\n                attempts        = 0\n            WHERE state = 'unreachable'\n              AND error ILIKE '%robots.txt%'\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "0fcc546ef25a8bb43db65fa03dcfb779612a5dde837f94847a40aa0305b8d5a8"
+}

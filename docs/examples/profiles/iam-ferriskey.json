@@ -1,160 +1,230 @@
 {
-  "schema_version": 11,
+  "schema_version": 19,
   "identity": {
     "offer": "FerrisKey (open source IAM/CIAM in Rust) and Autharie (managed IAM), both by Ferrislabs",
     "target_customer": "Organizations running self-hosted Keycloak or a similar IAM, or paying for a SaaS IAM"
   },
+  "language": "fr",
   "agents": [
     {
-      "id": "certificate-transparency",
-      "name": "Certificate transparency",
+      "type": "certificates",
+      "id": "certificats",
+      "name": "Certificats",
       "enabled": true,
-      "source": {
-        "kind": "certificate_transparency",
-        "labels": ["auth", "sso", "login", "iam", "keycloak", "id", "accounts", "identity", "idp"]
-      }
+      "labels": [
+        "auth",
+        "sso",
+        "login",
+        "iam",
+        "keycloak",
+        "id",
+        "accounts",
+        "identity",
+        "idp"
+      ],
+      "countries": [
+        "FR"
+      ]
     },
     {
-      "id": "http-probe",
-      "name": "HTTP probe",
+      "type": "dns",
+      "id": "dns",
+      "name": "DNS",
       "enabled": true,
-      "source": {
-        "kind": "http_probe",
-        "fingerprints": [
-          {
-            "id": "keycloak-realm",
-            "path": "/realms/master",
-            "product": "keycloak",
-            "matchers": [
-              { "kind": "status", "equals": 200 },
-              { "kind": "body", "pattern": "\"realm\"\\s*:\\s*\"master\"" }
-            ]
-          },
-          {
-            "id": "keycloak-legacy-realm",
-            "path": "/auth/realms/master",
-            "product": "keycloak",
-            "matchers": [
-              { "kind": "status", "equals": 200 },
-              { "kind": "body", "pattern": "\"realm\"\\s*:\\s*\"master\"" }
-            ],
-            "debt_markers": [
-              {
-                "id": "legacy_auth_path",
-                "rule": {
-                  "kind": "matches",
-                  "matcher": { "kind": "body", "pattern": "/auth/realms/master" }
-                }
-              }
-            ]
-          },
-          {
-            "id": "authentik",
-            "path": "/-/health/live/",
-            "product": "authentik",
-            "matchers": [
-              { "kind": "status", "equals": 200 },
-              { "kind": "header", "name": "x-powered-by", "pattern": "^authentik$" }
-            ]
-          },
-          {
-            "id": "zitadel",
-            "path": "/ui/console",
-            "product": "zitadel",
-            "matchers": [
-              { "kind": "status", "equals": 200 },
-              { "kind": "body", "pattern": "<title>ZITADEL" }
-            ]
-          },
-          {
-            "id": "ferriskey",
-            "path": "/realms/master",
-            "product": "ferriskey",
-            "matchers": [
-              { "kind": "status", "equals": 401 },
-              { "kind": "body", "pattern": "\"code\"\\s*:\\s*\"E_UNAUTHORIZED\"" }
-            ]
-          }
-        ],
-        "excluded_products": ["ferriskey"]
-      }
+      "patterns": [
+        {
+          "provider": "auth0",
+          "target_suffix": "auth0.com"
+        },
+        {
+          "provider": "okta",
+          "target_suffix": "okta.com"
+        },
+        {
+          "provider": "okta",
+          "target_suffix": "oktapreview.com"
+        },
+        {
+          "provider": "azure_ad_b2c",
+          "target_suffix": "b2clogin.com"
+        },
+        {
+          "provider": "entra_external_id",
+          "target_suffix": "ciamlogin.com"
+        }
+      ],
+      "countries": [
+        "FR"
+      ]
     },
     {
-      "id": "dns-cname",
-      "name": "DNS CNAME",
+      "type": "search",
+      "id": "marches-publics",
+      "name": "Marchés publics",
       "enabled": true,
-      "source": {
-        "kind": "dns_cname",
-        "patterns": [
-          { "provider": "auth0", "target_suffix": "auth0.com" },
-          { "provider": "okta", "target_suffix": "okta.com" },
-          { "provider": "okta", "target_suffix": "oktapreview.com" },
-          { "provider": "azure_ad_b2c", "target_suffix": "b2clogin.com" },
-          { "provider": "entra_external_id", "target_suffix": "ciamlogin.com" }
-        ]
-      }
+      "providers": [
+        "boamp",
+        "decp",
+        "ted"
+      ],
+      "keywords": [
+        "SSO",
+        "IAM",
+        "gestion des identités et des accès",
+        "fédération d'identité",
+        "annuaire",
+        "MFA",
+        "Keycloak",
+        "authentification"
+      ],
+      "exclusions": [
+        "badge",
+        "contrôle d'accès physique",
+        "annuaire téléphonique"
+      ]
     },
     {
-      "id": "boamp",
-      "name": "BOAMP",
+      "type": "search",
+      "id": "offres-et-missions",
+      "name": "Offres et missions",
       "enabled": true,
-      "source": {
-        "kind": "boamp",
-        "keywords": ["SSO", "IAM", "gestion des identités et des accès", "fédération d'identité", "annuaire", "MFA", "Keycloak", "authentification"],
-        "exclusions": ["badge", "contrôle d'accès physique", "annuaire téléphonique"]
-      }
-    },
-    {
-      "id": "decp",
-      "name": "DECP",
-      "enabled": true,
-      "source": {
-        "kind": "decp",
-        "keywords": ["SSO", "IAM", "gestion des identités et des accès", "fédération d'identité", "annuaire", "MFA", "Keycloak", "authentification"],
-        "exclusions": ["badge", "contrôle d'accès physique", "annuaire téléphonique"]
-      }
-    },
-    {
-      "id": "ted",
-      "name": "TED",
-      "enabled": true,
-      "source": {
-        "kind": "ted",
-        "keywords": ["SSO", "IAM", "gestion des identités et des accès", "fédération d'identité", "annuaire", "MFA", "Keycloak", "authentification"],
-        "exclusions": ["badge", "contrôle d'accès physique", "annuaire téléphonique"]
-      }
-    },
-    {
-      "id": "france-travail",
-      "name": "France Travail",
-      "enabled": true,
-      "source": {
-        "kind": "france_travail",
-        "keywords": ["Keycloak", "IAM", "ingénieur IAM", "migration Okta", "migration Auth0", "gestion des identités"]
-      }
-    },
-    {
-      "id": "ats-fr",
-      "name": "Job offers (French)",
-      "enabled": true,
-      "source": {
-        "kind": "ats",
-        "keywords": ["Keycloak", "IAM", "ingénieur IAM", "migration Okta", "migration Auth0", "gestion des identités"]
-      }
-    },
-    {
-      "id": "ats-en",
-      "name": "Job offers (English)",
-      "enabled": true,
-      "source": {
-        "kind": "ats",
-        "keywords": ["identity and access management", "IAM", "SSO", "single sign-on", "Keycloak", "Okta migration"]
-      },
-      "llm": {
-        "relevance_criteria": "The job offer is for an engineer, architect or administrator who builds or runs the organization's own identity infrastructure, for example Keycloak, or who migrates it from a SaaS IAM. Offers that only require using SSO as an end user, or roles in physical access control, are not relevant."
-      }
+      "providers": [
+        "france_travail",
+        "hacker_news_hiring"
+      ],
+      "keywords": [
+        "Keycloak",
+        "IAM",
+        "ingénieur IAM",
+        "migration Okta",
+        "migration Auth0",
+        "gestion des identités",
+        "identity and access management",
+        "single sign-on"
+      ],
+      "exclusions": []
     }
   ],
+  "inspection": {
+    "enabled": true
+  },
+  "enrichment": {
+    "custom": {
+      "fingerprints": [
+        {
+          "id": "keycloak-realm",
+          "path": "/realms/master",
+          "product": "keycloak",
+          "matchers": [
+            {
+              "kind": "status",
+              "equals": 200
+            },
+            {
+              "kind": "body",
+              "pattern": "\"realm\"\\s*:\\s*\"master\""
+            }
+          ]
+        },
+        {
+          "id": "keycloak-legacy-realm",
+          "path": "/auth/realms/master",
+          "product": "keycloak",
+          "matchers": [
+            {
+              "kind": "status",
+              "equals": 200
+            },
+            {
+              "kind": "body",
+              "pattern": "\"realm\"\\s*:\\s*\"master\""
+            }
+          ],
+          "debt_markers": [
+            {
+              "id": "legacy_auth_path",
+              "rule": {
+                "kind": "matches",
+                "matcher": {
+                  "kind": "body",
+                  "pattern": "/auth/realms/master"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "id": "authentik",
+          "path": "/-/health/live/",
+          "product": "authentik",
+          "matchers": [
+            {
+              "kind": "status",
+              "equals": 200
+            },
+            {
+              "kind": "header",
+              "name": "x-powered-by",
+              "pattern": "^authentik$"
+            }
+          ]
+        },
+        {
+          "id": "zitadel",
+          "path": "/ui/console",
+          "product": "zitadel",
+          "matchers": [
+            {
+              "kind": "status",
+              "equals": 200
+            },
+            {
+              "kind": "body",
+              "pattern": "<title>ZITADEL"
+            }
+          ]
+        },
+        {
+          "id": "ferriskey",
+          "path": "/realms/master",
+          "product": "ferriskey",
+          "matchers": [
+            {
+              "kind": "status",
+              "equals": 401
+            },
+            {
+              "kind": "body",
+              "pattern": "\"code\"\\s*:\\s*\"E_UNAUTHORIZED\""
+            }
+          ]
+        }
+      ],
+      "excluded_products": [
+        "ferriskey"
+      ],
+      "extra_subdomains": [
+        "auth",
+        "sso",
+        "login",
+        "id",
+        "idp",
+        "accounts"
+      ]
+    },
+    "highlight_keywords": [
+      "Keycloak",
+      "IAM",
+      "ingénieur IAM",
+      "migration Okta",
+      "migration Auth0",
+      "gestion des identités",
+      "identity and access management",
+      "SSO",
+      "single sign-on",
+      "Okta migration"
+    ]
+  },
   "qualification_agents": [
     {
       "id": "pertinence",
@@ -162,8 +232,7 @@
       "description": "La pertinence du lead pour l'offre : le prospect exploite-t-il ou prépare-t-il ce que le profil cible ?",
       "enabled": true,
       "provider_id": null,
-      "system_prompt": "You judge whether a company is a relevant prospect for the offer, using the relevance criteria. Base your answers only on what the documents state.\n\nRelevance criteria: The organization operates its own identity infrastructure, such as a self-hosted Keycloak, or pays for a SaaS IAM, and shows signs of migration, staffing or procurement around it. Physical access control and unrelated directories are not relevant.",
-      "weight": 5,
+      "system_prompt": "You judge whether a company is a relevant prospect for the offer, using the relevance criteria. Base your answers only on what the documents state.\n\nRelevance criteria: The organization operates its own identity infrastructure, such as a self-hosted Keycloak, or pays for a SaaS IAM, and shows signs of migration, staffing or procurement around it. Physical access control and unrelated directories are not relevant.\n\nCriteria for job offers: The job offer is for an engineer, architect or administrator who builds or runs the organization's own identity infrastructure, for example Keycloak, or who migrates it from a SaaS IAM. Offers that only require using SSO as an end user, or roles in physical access control, are not relevant.",
       "exclusion_threshold": 0.6,
       "samples": 3,
       "sampling_temperature": 0.7,
@@ -212,7 +281,6 @@
       "enabled": true,
       "provider_id": null,
       "system_prompt": "You assess how the company runs its identity infrastructure from the signals and documents. Self-hosted and ageing Keycloak, or custom authentication code, means high debt and a strong opportunity. A recent SaaS IAM means a weaker one. Answer unknown when nothing shows it.",
-      "weight": 5,
       "exclusion_threshold": 0.6,
       "samples": 3,
       "sampling_temperature": 0.7,
@@ -247,14 +315,13 @@
         }
       ]
     },
-{
+    {
       "id": "environnement",
       "name": "Environnement",
       "description": "L'environnement des preuves : systèmes en production ou environnements de dev, test et démo, et réalité de l'usage.",
       "enabled": true,
       "provider_id": null,
       "system_prompt": "Tu évalues si les preuves d'un lead viennent de systèmes réellement utilisés. Appuie-toi sur le bloc « Faits » (environnement par hôte, part de production, sources) et sur les documents. Des hôtes de production, une instance publique stable ou des offres d'emploi qui parlent d'exploitation indiquent un usage réel. Des hôtes nommés dev, test, staging ou demo, un projet de démonstration ou un dépôt d'exemple indiquent de la non-production. Ne déduis pas l'environnement d'un simple nom de domaine sans indice. Réponds « inconnu » quand rien ne permet de trancher.",
-      "weight": 4,
       "exclusion_threshold": 0.6,
       "samples": 3,
       "sampling_temperature": 0.7,
@@ -331,7 +398,6 @@
       "enabled": true,
       "provider_id": null,
       "system_prompt": "Tu classes l'organisation par type et par taille à partir des documents et du bloc « Faits ». Le secteur public achète par appels d'offres, un grand compte a ses équipes et ses processus d'achat, une ETI décide plus vite, une PME ou une startup a peu de moyens dédiés. Appuie-toi sur ce que les documents disent de l'effectif, du chiffre d'affaires, du statut ou du secteur. Ne devine pas la taille d'après le nom. Réponds « inconnu » quand rien ne permet de trancher. L'opérateur ajuste les scores selon sa cible.",
-      "weight": 3,
       "exclusion_threshold": 0.6,
       "samples": 3,
       "sampling_temperature": 0.7,
@@ -429,7 +495,6 @@
       "enabled": true,
       "provider_id": null,
       "system_prompt": "Zone visée : France et Europe francophone.\n\nTu évalues si l'entreprise appartient à la zone visée ci-dessus et si elle travaille dans la langue du marché. Appuie-toi sur le pays déduit des domaines dans le bloc « Faits » (extension de pays), sur l'adresse, la langue des documents et les offres d'emploi. Une extension de pays seule est un indice, pas une preuve : une extension .com ne dit rien. Une entreprise voisine de la zone, ou présente dans la zone par une filiale, est « proche ». Réponds « inconnu » quand rien ne permet de trancher. Modifie la première phrase pour changer de zone.",
-      "weight": 4,
       "exclusion_threshold": 0.6,
       "samples": 3,
       "sampling_temperature": 0.7,
@@ -506,7 +571,6 @@
       "enabled": true,
       "provider_id": null,
       "system_prompt": "Tu évalues si le lead a une raison d'agir maintenant, à partir des signaux et des documents. Cherche une migration annoncée ou probable, une dette technique visible (versions anciennes, fin de support, contournements), le coût ou les limites du SaaS actuel (prix, dépendance, conformité, hébergement des données) et des offres d'emploi sur le sujet de l'offre. Un projet de migration en cours ou un déclencheur explicite est fort. L'absence de signal n'est pas un signal négatif : réponds « inconnu » ou « aucun » selon ce que disent les documents, sans rien supposer.",
-      "weight": 6,
       "exclusion_threshold": 0.6,
       "samples": 3,
       "sampling_temperature": 0.7,
@@ -590,7 +654,6 @@
       "enabled": true,
       "provider_id": null,
       "system_prompt": "Tu évalues l'entreprise à partir de sa fiche entreprise. Les documents « Company dossier » contiennent les données officielles du registre français (raison sociale, activité NAF, tranche d'effectif, siège, date de création) et le texte de pages du site de l'entreprise (accueil, à propos, mentions légales). Les données officielles sont fiables ; le texte du site est ce que l'entreprise dit d'elle-même. Appuie-toi uniquement sur cette fiche et sur le bloc « Faits ». Si la fiche est absente, ou si elle indique que le SIREN est introuvable, réponds « inconnu » : ne devine ni l'activité ni l'effectif d'après le nom de domaine. Évalue si l'activité de l'entreprise est pertinente pour l'offre, si sa taille correspond à la cible et si elle a de vrais enjeux d'identité et d'accès (clients, collaborateurs ou partenaires à authentifier, données sensibles, conformité). Ajuste la cible de taille dans ce prompt selon ton marché.",
-      "weight": 4,
       "exclusion_threshold": 0.6,
       "samples": 3,
       "sampling_temperature": 0.7,
@@ -702,7 +765,6 @@
       "enabled": true,
       "provider_id": null,
       "system_prompt": "Tu décides si une entreprise doit être écartée des prospects. Tu n'évalues pas son intérêt : tu cherches uniquement une raison explicite de l'exclure. Choisis une option qui exclut seulement quand une phrase des documents le dit explicitement et copie cette phrase mot pour mot comme preuve. Un nom proche d'une entreprise de la liste, une simple ressemblance ou une impression ne suffisent pas : réponds alors « non » ou « inconnu ». Quand rien dans les documents ne permet de trancher, réponds « inconnu ».\n\nLes listes suivantes sont maintenues par l'opérateur. Modifie-les pour adapter l'agent à ton marché.\n\nClients actuels : (liste à compléter)\nConcurrents : Okta, Auth0, Ping Identity, ForgeRock, Microsoft Entra, Keycloak, Red Hat\nÉditeurs et intégrateurs du domaine : Thales, Wallix, Ilex, Inwebo, Ubble, IDnow, Evidian, Eviden, Atos, Capgemini, Sopra Steria, Wavestone\n\nPour « hébergeur ou agence », exclus seulement quand le signal détecté concerne un client de l'entreprise (elle héberge ou opère le site d'un tiers) et non l'entreprise elle-même. Pour « domaine parqué ou inactif », exclus seulement quand les documents montrent une page de parking, un site en vente ou un domaine sans activité.",
-      "weight": 1,
       "exclusion_threshold": 0.6,
       "samples": 3,
       "sampling_temperature": 0.7,
@@ -987,8 +1049,12 @@
   },
   "evidence": {
     "influence": 0.6,
-    "reference_score": 50,
-    "weights": { "volume": 1, "diversity": 1, "environment": 1, "strength": 1 },
+    "weights": {
+      "volume": 1,
+      "diversity": 1,
+      "environment": 1,
+      "strength": 1
+    },
     "half_life_days": {
       "awarded_contract": 365,
       "contact": 365,
@@ -1001,24 +1067,18 @@
       "saas_provider": 365
     }
   },
-  "scoring": {
-    "factors": [
-      { "signal": "product_detected", "value": "keycloak", "weight": 10 },
-      { "signal": "debt_marker", "value": "legacy_auth_path", "weight": 5 },
-      { "signal": "saas_provider", "weight": 3 },
-      { "signal": "job_offer", "weight": 8 },
-      { "signal": "public_tender", "weight": 7 },
-      { "signal": "role_contact_found", "weight": 2 },
-      { "signal": "distinct_signals", "weight": 2 }
-    ]
-  },
   "contact_ranking": {
-    "preferred_local_parts": ["security", "it", "dsi", "tech", "contact", "info"],
-    "guess_local_parts": ["contact", "info"]
-  },
-  "llm": {
-    "qualification_threshold": 40,
-    "relevance_criteria": "The organization operates its own identity infrastructure, such as a self-hosted Keycloak, or pays for a SaaS IAM, and shows signs of migration, staffing or procurement around it. Physical access control and unrelated directories are not relevant.",
-    "language": "fr"
+    "preferred_local_parts": [
+      "security",
+      "it",
+      "dsi",
+      "tech",
+      "contact",
+      "info"
+    ],
+    "guess_local_parts": [
+      "contact",
+      "info"
+    ]
   }
 }

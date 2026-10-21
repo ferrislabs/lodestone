@@ -8,6 +8,11 @@ import { Label } from '#/components/ui/label'
 import { Switch } from '#/components/ui/switch'
 import { Textarea } from '#/components/ui/textarea'
 import type { JsonValue, Problem } from '#/lib/schema-form'
+import {
+	type AgentCalibrationState,
+	agentLearnsCalibration,
+	calibrationStateLines,
+} from '#/pages/profiles/lib/agent-calibration'
 import { agentEnabled, agentField } from '#/pages/profiles/lib/agents'
 import {
 	agentProvider,
@@ -28,6 +33,7 @@ import {
 	scoringTemperatureOf,
 } from '#/pages/profiles/lib/scoring-agents'
 import { AxisCard } from '#/pages/profiles/ui/axis-card'
+import { LearnedCalibrationField } from '#/pages/profiles/ui/learned-calibration-field'
 import { ProviderSelect } from '#/pages/profiles/ui/provider-select'
 import { ScoringContractPreview } from '#/pages/profiles/ui/scoring-contract-preview'
 import { WeightPicker } from '#/pages/profiles/ui/weight-picker'
@@ -37,6 +43,8 @@ interface ScoringAgentFormProps {
 	index: number
 	problems: readonly Problem[]
 	providers: readonly ProviderOption[]
+	showWeight: boolean
+	calibration: AgentCalibrationState | undefined
 	previewing: boolean
 	actions: ScoringActions
 }
@@ -73,10 +81,16 @@ export function ScoringAgentForm({
 	index,
 	problems,
 	providers,
+	showWeight,
+	calibration,
 	previewing,
 	actions,
 }: ScoringAgentFormProps) {
 	const base = `scoring_agents[${index}]`
+	const calibrationLines = calibrationStateLines(
+		agentLearnsCalibration(agent),
+		calibration,
+	)
 	const key = `sa-${index}`
 	const criteria = criteriaOf(agent)
 	const prompt = agentField(agent, 'system_prompt')
@@ -172,19 +186,28 @@ export function ScoringAgentForm({
 					/>
 					<FieldErrors id={`${key}-provider`} problems={providerProblems} />
 				</div>
-				<div className="flex flex-col gap-1.5">
-					<Label id={`${key}-weight-label`}>Poids de l'agent</Label>
-					<p className="text-xs text-muted-foreground">
-						Poids de cet agent dans le score et le verdict du lead, de 1 à 10.
-					</p>
-					<WeightPicker
-						labelledBy={`${key}-weight-label`}
-						value={agentWeight(agent)}
-						invalid={weightProblems.length > 0}
-						onChange={(weight) => actions.setWeight(index, weight)}
-					/>
-					<FieldErrors id={`${key}-weight`} problems={weightProblems} />
-				</div>
+				{showWeight ? (
+					<div className="flex flex-col gap-1.5">
+						<Label id={`${key}-weight-label`}>Poids de l'agent</Label>
+						<p className="text-xs text-muted-foreground">
+							Part de cet agent dans la moyenne pondérée du score et du verdict
+							du lead, de 1 à 10. Plus le poids est élevé, plus son avis compte.
+						</p>
+						<WeightPicker
+							labelledBy={`${key}-weight-label`}
+							value={agentWeight(agent)}
+							invalid={weightProblems.length > 0}
+							onChange={(weight) => actions.setWeight(index, weight)}
+						/>
+						<FieldErrors id={`${key}-weight`} problems={weightProblems} />
+					</div>
+				) : null}
+				<LearnedCalibrationField
+					id={`${key}-learned-calibration`}
+					learned={agentLearnsCalibration(agent)}
+					lines={calibrationLines}
+					onChange={(learned) => actions.setLearnedCalibration(index, learned)}
+				/>
 				<div className="flex flex-wrap gap-4">
 					<div className="flex max-w-56 flex-col gap-1.5">
 						<Label htmlFor={`${key}-samples`}>Échantillons</Label>

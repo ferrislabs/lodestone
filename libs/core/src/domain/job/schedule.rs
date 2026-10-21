@@ -2,6 +2,7 @@ use chrono::{DateTime, Utc};
 use common::CoreError;
 
 use crate::domain::{
+    agent_work::CancelReason,
     job::{JobKind, JobStatus},
     profile::ProfileId,
     run::RunStatus,
@@ -32,6 +33,7 @@ pub struct SourceRunRecord {
     pub error: Option<String>,
     pub started_at: DateTime<Utc>,
     pub finished_at: Option<DateTime<Utc>>,
+    pub cancel_reason: Option<CancelReason>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

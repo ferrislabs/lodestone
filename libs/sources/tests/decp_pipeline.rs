@@ -4,13 +4,15 @@ use chrono::{DateTime, TimeZone, Utc};
 use lodestone_core::{
     Clock, CreateProfileCommand, FetchError, FetchRequest, FetchResponse, Fetcher, LeadRepository,
     LodestoneUseCase, NormalizedDomain, Partner, PartnerRepository, ProfileId, ProfileName,
-    ValidatedProfile,
+    SourceName, ValidatedProfile,
     infrastructure::{
         lead::postgres::PgLeadRepository, partner::postgres::PgPartnerRepository, postgres::with_tx,
     },
 };
 use serde_json::json;
-use sources::decp::{DecpSettings, DecpSource, partner_awards};
+use sources::decp::{
+    ANNUAIRE_URL, DATASET_API_URL, DecpSettings, DecpSource, ENTREPRISES_URL, partner_awards,
+};
 use sqlx::PgPool;
 use url::Url;
 
@@ -69,9 +71,9 @@ impl Fetcher for FixtureFetcher {
 
 fn settings() -> DecpSettings {
     DecpSettings {
-        dataset_api_url: Url::parse(sources::decp::DATASET_API_URL).unwrap(),
-        annuaire_url: Url::parse(sources::decp::ANNUAIRE_URL).unwrap(),
-        entreprises_url: Url::parse(sources::decp::ENTREPRISES_URL).unwrap(),
+        dataset_api_url: Url::parse(DATASET_API_URL).unwrap().into(),
+        annuaire_url: Url::parse(ANNUAIRE_URL).unwrap(),
+        entreprises_url: Url::parse(ENTREPRISES_URL).unwrap().into(),
         lookback_days: 31,
         notified_within_days: 31,
         max_body_bytes: 1024 * 1024,
@@ -121,7 +123,7 @@ async fn run_job(pool: &PgPool, source: &DecpSource<FixtureFetcher>) {
             .revision
             .definition
             .definition()
-            .enabled_keyword_rules(lodestone_core::SourceName::Decp)
+            .enabled_search_agents(SourceName::Decp)
             .next()
         else {
             continue;

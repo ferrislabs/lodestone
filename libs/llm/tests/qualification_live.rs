@@ -91,7 +91,7 @@ async fn the_pertinence_agent_answers_the_contract_live() {
         },
         base_delay: Duration::from_secs(2),
     };
-    let mut budget = RunBudget::new(NonZeroU32::new(10).unwrap());
+    let budget = RunBudget::new(NonZeroU32::new(10).unwrap());
     let mut checked = 0;
     let mut failed: Vec<String> = Vec::new();
     for agent in profile
@@ -113,6 +113,7 @@ async fn the_pertinence_agent_answers_the_contract_live() {
                 domain: lodestone_core::NormalizedDomain::from_host("acme-keycloak.com").unwrap(),
                 agent: Some(agent.id.clone()),
                 sample,
+                fresh: false,
             };
             let mut instruction = built.instruction.clone();
             let mut attempt = 0;
@@ -135,7 +136,7 @@ async fn the_pertinence_agent_answers_the_contract_live() {
                     call,
                     |output| validate_answers(agent, output, &documents).is_ok(),
                     settings,
-                    &mut budget,
+                    &budget,
                 )
                 .await
                 .unwrap();

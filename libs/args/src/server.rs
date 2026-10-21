@@ -69,6 +69,23 @@ metrics and has no authentication, so it defaults to the loopback address."
         long_help = "The port to run the internal application on (health, metrics, ...)"
     )]
     pub internal_port: u16,
+    #[arg(
+        long = "server-public-url",
+        env = "SERVER_PUBLIC_URL",
+        name = "SERVER_PUBLIC_URL",
+        default_value = "http://localhost:3456",
+        long_help = "Base URL of this API as a browser reaches it. The OAuth redirect URI \
+registered at a source provider is this URL followed by /api/v1/source-providers/oauth/callback."
+    )]
+    pub public_url: String,
+    #[arg(
+        long = "server-webapp-url",
+        env = "SERVER_WEBAPP_URL",
+        name = "SERVER_WEBAPP_URL",
+        default_value = "http://localhost:3000",
+        long_help = "Base URL of the web UI. The OAuth callback redirects the browser to the provider page under this URL."
+    )]
+    pub webapp_url: String,
 }
 
 impl Default for ServerArgs {
@@ -81,6 +98,8 @@ impl Default for ServerArgs {
             port: 3333,
             internal_host: "127.0.0.1".to_string(),
             internal_port: 3334,
+            public_url: "http://localhost:3456".to_string(),
+            webapp_url: "http://localhost:3000".to_string(),
         }
     }
 }
@@ -103,6 +122,23 @@ mod tests {
         assert_eq!(args.port, 3333);
         assert_eq!(args.internal_port, 3334);
         assert!(args.allowed_origins.is_empty());
+    }
+
+    #[test]
+    fn public_and_webapp_urls_default_to_local_development() {
+        let cmd = Cmd::try_parse_from(["cmd"]).unwrap();
+        assert_eq!(cmd.server.public_url, "http://localhost:3456");
+        assert_eq!(cmd.server.webapp_url, "http://localhost:3000");
+        let cmd = Cmd::try_parse_from([
+            "cmd",
+            "--server-public-url",
+            "https://api.example.com",
+            "--server-webapp-url",
+            "https://app.example.com",
+        ])
+        .unwrap();
+        assert_eq!(cmd.server.public_url, "https://api.example.com");
+        assert_eq!(cmd.server.webapp_url, "https://app.example.com");
     }
 
     #[test]

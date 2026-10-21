@@ -1,19 +1,26 @@
+use std::borrow::Cow;
+
 use chrono::{DateTime, Utc};
 use common::{CoreError, generate_uuid_v7};
 use lodestone_macros::transactional;
 use serde_json::json;
 
 use crate::{
-    application::{LodestoneUseCase, sources::SourceRunError},
+    application::{
+        LodestoneUseCase,
+        sources::{Collected, LeadCreation, SourceRunError, collect_until},
+    },
     domain::{
+        agent_work::{AgentWork, CancelReason, WorkKind, WorkTarget},
+        enrichment::EnrichmentStep,
         job::ports::Clock,
         profile::{
             ActiveProfile,
-            definition::{Agent, KeywordSource},
+            definition::{AgentId, ProfileDefinition, SearchAgent},
         },
         run::{Run, RunId, RunOutcome, ports::RunRepository},
         source::{Observation, SourceError},
-        triage::{Candidate, Route, route},
+        triage::{Candidate, Route, passes_filters, route},
         values::{SourceName, UnitInterval},
     },
 };
@@ -38,11 +45,22 @@ pub struct TriageReport {
     pub accepted_by_rules: u64,
     pub accepted_ambiguous: u64,
     pub rejected_by_rules: u64,
+    pub rejected_by_filters: u64,
+    pub skipped_no_lead: u64,
+    pub runs: u64,
+    pub cancelled: u64,
+    pub cancel_reason: Option<CancelReason>,
 }
 
 impl TriageReport {
     pub fn accepted(&self) -> u64 {
         self.accepted_by_rules + self.accepted_ambiguous
+    }
+
+    pub fn all_cancelled(&self) -> Option<CancelReason> {
+        (self.runs > 0 && self.cancelled == self.runs)
+            .then_some(self.cancel_reason)
+            .flatten()
     }
 }
 
@@ -62,9 +80,42 @@ fn candidate_text(candidate: &Candidate) -> String {
     format!("{}\n\n{}", candidate.title, candidate.text)
 }
 
+struct KeywordTarget<'a> {
+    agent: Option<&'a AgentId>,
+    rules: Cow<'a, SearchAgent>,
+}
+
+impl KeywordTarget<'_> {
+    fn work_target(&self) -> WorkTarget {
+        match self.agent {
+            Some(agent) => WorkTarget::new(WorkKind::Sourcing, agent),
+            None => WorkTarget::enrichment(EnrichmentStep::CompanyJobs),
+        }
+    }
+}
+
+fn keyword_targets(definition: &ProfileDefinition, source: SourceName) -> Vec<KeywordTarget<'_>> {
+    let mut targets: Vec<KeywordTarget<'_>> = definition
+        .enabled_search_agents(source)
+        .map(|agent| KeywordTarget {
+            agent: Some(&agent.id),
+            rules: Cow::Borrowed(agent),
+        })
+        .collect();
+    if source == SourceName::Ats
+        && let Some(rules) = definition.company_jobs_rules()
+    {
+        targets.push(KeywordTarget {
+            agent: None,
+            rules: Cow::Owned(rules),
+        });
+    }
+    targets
+}
+
 fn observation(
     candidate: &Candidate,
-    agent: &Agent,
+    agent: Option<&AgentId>,
     matched: &[String],
     excluded: Option<&[String]>,
     route: &str,
@@ -87,25 +138,29 @@ fn observation(
         provenance: candidate.provenance.clone(),
         strength: self::strength(strength)?,
         observed_at: candidate.observed_at,
-        agent: Some(agent.id.clone()),
+        agent: agent.cloned(),
     })
 }
 
 fn decide(
-    agent: &Agent,
-    rules: &KeywordSource,
+    target: &KeywordTarget<'_>,
     candidates: &[Candidate],
     report: &mut TriageReport,
 ) -> Result<Vec<Observation>, CoreError> {
+    let agent = target.rules.as_ref();
     let mut observations = Vec::new();
     for candidate in candidates {
-        match route(&candidate_text(candidate), rules) {
+        if !passes_filters(&agent.filters, candidate) {
+            report.rejected_by_filters += 1;
+            continue;
+        }
+        match route(&candidate_text(candidate), agent) {
             Route::Reject => report.rejected_by_rules += 1,
             Route::Accept { matched } => {
                 report.accepted_by_rules += 1;
                 observations.push(observation(
                     candidate,
-                    agent,
+                    target.agent,
                     &matched,
                     None,
                     "keywords",
@@ -116,7 +171,7 @@ fn decide(
                 report.accepted_ambiguous += 1;
                 observations.push(observation(
                     candidate,
-                    agent,
+                    target.agent,
                     &matched,
                     Some(&excluded),
                     "keywords_ambiguous",
@@ -140,55 +195,65 @@ impl LodestoneUseCase {
     {
         let name = source.name();
         let profiles: Vec<ActiveProfile> = self
-            .list_active_profiles()
+            .refreshed_active_profiles()
             .await?
             .into_iter()
             .filter(|active| {
-                active
-                    .revision
-                    .definition
-                    .definition()
-                    .enabled_keyword_rules(name)
-                    .next()
-                    .is_some()
+                !keyword_targets(active.revision.definition.definition(), name).is_empty()
             })
             .collect();
-        let targets: Vec<(&ActiveProfile, &Agent, &KeywordSource)> = profiles
+        let targets: Vec<(&ActiveProfile, KeywordTarget<'_>)> = profiles
             .iter()
             .flat_map(|active| {
-                active
-                    .revision
-                    .definition
-                    .definition()
-                    .enabled_agents(name)
-                    .filter_map(move |agent| {
-                        agent
-                            .source
-                            .keyword_rules()
-                            .map(|rules| (active, agent, rules))
-                    })
+                keyword_targets(active.revision.definition.definition(), name)
+                    .into_iter()
+                    .map(move |target| (active, target))
             })
             .collect();
         if targets.is_empty() {
             return Ok(TriageReport::default());
         }
+        let works: Vec<AgentWork> = targets
+            .iter()
+            .map(|(active, target)| self.agent_work(active, target.work_target()))
+            .collect();
 
         let started_at = clock.now();
         let runs: Vec<Run> = targets
             .iter()
-            .map(|(active, agent, _)| {
+            .map(|(active, target)| {
                 Run::start(
                     RunId(generate_uuid_v7()),
                     active.profile.id,
                     name,
-                    Some(agent.id.clone()),
+                    target.agent.cloned(),
                     started_at,
                 )
             })
             .collect();
         self.insert_triage_runs(&runs).await?;
 
-        let candidates = match source.collect(&profiles, started_at).await {
+        let collected = match collect_until(&works, source.collect(&profiles, started_at)).await {
+            Collected::Items(collected) => collected,
+            Collected::Stopped(reason) => {
+                for (run, work) in runs.iter().zip(&works) {
+                    let outcome = RunOutcome::Cancelled {
+                        volume: 0,
+                        signals: 0,
+                        reason: work.stop_reason().unwrap_or(reason),
+                    };
+                    self.finish_triage_run(run.id, &outcome, clock.now())
+                        .await?;
+                }
+                return Ok(TriageReport {
+                    runs: count(runs.len()),
+                    cancelled: count(runs.len()),
+                    cancel_reason: Some(reason),
+                    ..TriageReport::default()
+                });
+            }
+        };
+        let candidates = match collected {
             Ok(candidates) => candidates,
             Err(error) => {
                 let outcome = RunOutcome::Failed {
@@ -207,11 +272,12 @@ impl LodestoneUseCase {
         let volume = count(candidates.len());
         let mut report = TriageReport {
             candidates: volume,
+            runs: count(runs.len()),
             ..TriageReport::default()
         };
         let mut first_error: Option<CoreError> = None;
-        for ((active, agent, rules), run) in targets.iter().zip(&runs) {
-            let observations = match decide(agent, rules, &candidates, &mut report) {
+        for (((active, target), run), work) in targets.iter().zip(&runs).zip(&works) {
+            let observations = match decide(target, &candidates, &mut report) {
                 Ok(observations) => observations,
                 Err(error) => {
                     let outcome = RunOutcome::Failed {
@@ -225,10 +291,24 @@ impl LodestoneUseCase {
                     continue;
                 }
             };
-            let signals = count(observations.len());
-            let recorded = self.record_observations(active, name, &observations).await;
+            let creation = match target.agent {
+                Some(_) => LeadCreation::Create,
+                None => LeadCreation::ExistingOnly,
+            };
+            let recorded = self
+                .record_until_stopped(
+                    active,
+                    name,
+                    observations
+                        .into_iter()
+                        .map(|observation| vec![observation]),
+                    work,
+                    creation,
+                    clock,
+                )
+                .await;
             let outcome = match &recorded {
-                Ok(()) => RunOutcome::Succeeded { volume, signals },
+                Ok(recorded) => recorded.outcome(volume),
                 Err(error) => RunOutcome::Failed {
                     volume,
                     signals: 0,
@@ -237,8 +317,17 @@ impl LodestoneUseCase {
             };
             self.finish_triage_run(run.id, &outcome, clock.now())
                 .await?;
-            if let Err(error) = recorded {
-                first_error.get_or_insert(error);
+            match recorded {
+                Ok(recorded) => {
+                    report.skipped_no_lead += recorded.skipped.no_lead;
+                    if let Some(reason) = recorded.stopped {
+                        report.cancelled += 1;
+                        report.cancel_reason.get_or_insert(reason);
+                    }
+                }
+                Err(error) => {
+                    first_error.get_or_insert(error);
+                }
             }
         }
         match first_error {

@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT module,\n                COALESCE(SUM(leads_inspected), 0)::bigint AS \"leads_inspected!\",\n                COALESCE(SUM(findings_count), 0)::bigint AS \"findings_count!\"\n            FROM ecosystem_module_runs\n            WHERE ran_at >= $1\n            GROUP BY module\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "module",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "leads_inspected!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "findings_count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false,
+      null,
+      null
+    ]
+  },
+  "hash": "ee6d64be147d920ce7d3a7c4d18abd902f12370be7a70c6155c70a5f4b8cf489"
+}

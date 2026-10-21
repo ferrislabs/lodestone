@@ -8,24 +8,37 @@ use std::{
 use chrono::{TimeZone, Utc};
 use common::Secret;
 use fetch::{FetchSettings, PoliteFetcher};
-use httpmock::{
-    Method::{GET, POST},
-    MockServer,
-};
+use httpmock::{Method::GET, MockServer};
 use lodestone_core::{
-    ActiveProfile, Profile, ProfileId, ProfileName, ProfileRevision, RevisionNumber,
+    ActiveProfile, Profile, ProfileId, ProfileName, ProfileRevision, RevisionNumber, SourceError,
     ValidatedProfile,
 };
-use serde_json::json;
-use sources::france_travail::{FranceTravailSettings, FranceTravailSource};
+use serde_json::{Value, json};
+use sources::france_travail::{
+    AccessProvider, FranceTravailAccess, FranceTravailSettings, FranceTravailSource,
+};
+use tracing::callsite::rebuild_interest_cache;
 use tracing_subscriber::fmt::MakeWriter;
 use url::Url;
 use uuid::Uuid;
 
 const SEARCH: &str = include_str!("fixtures/france_travail/offres-search.synthetic.json");
-const TOKEN: &str = include_str!("fixtures/france_travail/token.synthetic.json");
-const CLIENT_ID: &str = "pipeline-client-id";
-const CLIENT_SECRET: &str = "pipeline-client-secret";
+const ACCESS_TOKEN: &str = "synthetic-access-token-0001";
+
+struct StaticAccess {
+    api_base_url: Url,
+}
+
+impl AccessProvider for StaticAccess {
+    async fn access(&self) -> Result<FranceTravailAccess, SourceError> {
+        Ok(FranceTravailAccess {
+            token: Secret::new(ACCESS_TOKEN),
+            api_base_url: self.api_base_url.clone(),
+        })
+    }
+
+    fn invalidate(&self) {}
+}
 
 #[derive(Clone, Default)]
 struct Sink(Arc<Mutex<Vec<u8>>>);
@@ -49,15 +62,22 @@ impl<'a> MakeWriter<'a> for Sink {
     }
 }
 
-fn profile() -> ActiveProfile {
-    let value = json!({
+fn legacy_value() -> Value {
+    json!({
         "schema_version": 1,
         "identity": {"offer": "Managed IAM", "target_customer": "Companies"},
         "sources": {"france_travail": {"keywords": ["keycloak"]}},
         "scoring": {"factors": [{"signal": "saas_provider", "weight": 10.0}]},
         "contact_ranking": {"preferred_local_parts": ["security"]},
         "llm": {"qualification_threshold": 50.0, "relevance_criteria": "Uses an IAM"}
-    });
+    })
+}
+
+fn profile() -> ActiveProfile {
+    active(ValidatedProfile::parse(legacy_value()).unwrap())
+}
+
+fn active(definition: ValidatedProfile) -> ActiveProfile {
     let profile_id = ProfileId(Uuid::from_u128(1));
     let epoch = Utc.timestamp_opt(0, 0).unwrap();
     ActiveProfile {
@@ -71,7 +91,7 @@ fn profile() -> ActiveProfile {
         revision: ProfileRevision {
             profile_id,
             number: RevisionNumber::new(1).unwrap(),
-            definition: ValidatedProfile::parse(value).unwrap(),
+            definition,
             created_by: None,
             created_at: epoch,
         },
@@ -79,29 +99,15 @@ fn profile() -> ActiveProfile {
 }
 
 #[tokio::test]
-async fn the_source_talks_oauth_and_search_over_http_and_never_logs_secrets() {
+async fn the_source_searches_over_http_with_its_access_and_never_logs_the_token() {
     let sink = Sink::default();
     let subscriber = tracing_subscriber::fmt()
         .with_writer(sink.clone())
         .with_max_level(tracing::Level::TRACE)
         .finish();
     let _guard = tracing::subscriber::set_default(subscriber);
+    rebuild_interest_cache();
     let server = MockServer::start_async().await;
-    let token = server
-        .mock_async(|when, then| {
-            when.method(POST)
-                .path("/token")
-                .query_param("realm", "/partenaire")
-                .header("content-type", "application/x-www-form-urlencoded")
-                .body_contains("grant_type=client_credentials")
-                .body_contains(format!("client_id={CLIENT_ID}"))
-                .body_contains(format!("client_secret={CLIENT_SECRET}"))
-                .body_contains("scope=api_offresdemploiv2+o2dsoffre");
-            then.status(200)
-                .header("content-type", "application/json")
-                .body(TOKEN);
-        })
-        .await;
     let search = server
         .mock_async(|when, then| {
             when.method(GET)
@@ -130,11 +136,10 @@ async fn the_source_talks_oauth_and_search_over_http_and_never_logs_secrets() {
     );
     let source = FranceTravailSource::new(
         fetcher,
-        FranceTravailSettings {
-            token_url: Url::parse(&server.url("/token?realm=%2Fpartenaire")).unwrap(),
+        StaticAccess {
             api_base_url: Url::parse(&server.url("/v2")).unwrap(),
-            client_id: Secret::new(CLIENT_ID),
-            client_secret: Secret::new(CLIENT_SECRET),
+        },
+        FranceTravailSettings {
             published_since_days: 7,
             max_pages: 5,
         },
@@ -142,11 +147,11 @@ async fn the_source_talks_oauth_and_search_over_http_and_never_logs_secrets() {
     let (candidates, stats) = source.collect_with_stats(&[profile()]).await.unwrap();
     assert_eq!(candidates.len(), 3);
     assert_eq!(stats.skipped_no_domain, 2);
-    token.assert_hits_async(1).await;
     search.assert_hits_async(1).await;
     let logged = String::from_utf8(sink.0.lock().unwrap().clone()).unwrap();
     assert!(logged.contains("france travail fetch finished"));
-    for secret in [CLIENT_ID, CLIENT_SECRET, "synthetic-access-token-0001"] {
-        assert!(!logged.contains(secret), "{secret} leaked into the logs");
-    }
+    assert!(
+        !logged.contains(ACCESS_TOKEN),
+        "the token leaked into the logs"
+    );
 }

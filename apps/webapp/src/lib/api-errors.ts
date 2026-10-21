@@ -20,6 +20,9 @@ export interface ParsedApiError {
 const EXACT_MESSAGES: Readonly<Record<string, string>> = {
 	'must not be empty': 'Ne doit pas être vide',
 	'at least one agent is required': 'Au moins un agent est requis',
+	'at least one provider is required': 'Au moins un fournisseur est requis',
+	'must be an ISO 3166-1 alpha-2 country code in uppercase':
+		'Doit être un code pays ISO à deux lettres en majuscules',
 	'at least one qualification agent is required':
 		'Au moins un agent de qualification est requis',
 	'must be lowercase letters, digits, hyphens and underscores, at most 63 characters':
@@ -73,6 +76,17 @@ const EXACT_MESSAGES: Readonly<Record<string, string>> = {
 		'Doit être `triage` ou `qualification`',
 	'unknown field': 'Champ inconnu',
 	'unknown provider': 'Fournisseur inconnu',
+	'is a secret and cannot be set as a setting':
+		'Secret : à saisir dans son champ masqué',
+	'is not a secret field of this provider':
+		"Ce champ n'est pas un secret de cette source",
+	'must be a boolean': 'Doit être vrai ou faux',
+	'must be an https URL': 'Doit être une URL https',
+	'must be provided again when a URL setting changes':
+		'À ressaisir : une URL a changé, les secrets doivent être fournis à nouveau',
+	'the provider is not configured yet': "La source n'est pas encore configurée",
+	'the provider does not use this authentication mode':
+		"Cette source n'utilise pas ce mode d'authentification",
 	'is required': 'Champ obligatoire',
 	'is required to reject': 'Choisissez une raison de rejet',
 	'is required when the reason is autre':
@@ -186,6 +200,15 @@ const RULES: readonly Rule[] = [
 		(m) =>
 			`Version de schéma ${m[1]} non prise en charge, attendu : 1, 2 ou ${m[2]}`,
 	],
+	[
+		/^unknown source provider `(.*)`$/,
+		(m) => `Fournisseur inconnu : \`${m[1]}\``,
+	],
+	[
+		/^provider `(.*)` does not support keyword search$/,
+		(m) =>
+			`Le fournisseur \`${m[1]}\` ne prend pas en charge la recherche par mots-clés`,
+	],
 	[/^duplicate value `(.*)`$/, (m) => `Valeur en double : \`${m[1]}\``],
 	[
 		/^must be at most (\d+) characters$/,
@@ -219,8 +242,15 @@ const RULES: readonly Rule[] = [
 			`${m[1]} leads correspondent, plus que les ${m[2]} qu'un export peut contenir : affinez les filtres`,
 	],
 	[
-		/^The provider answered with status (\d+)\.$/,
-		(m) => `Le fournisseur a répondu avec le statut ${m[1]}.`,
+		/^The provider answered with status (\d+)(?:\.|: (.+))$/s,
+		(m) =>
+			m[2] === undefined
+				? `Le fournisseur a répondu avec le statut ${m[1]}.`
+				: `Le fournisseur a répondu avec le statut ${m[1]} : ${m[2]}`,
+	],
+	[
+		/^The provider rejected the credentials: (.+)$/s,
+		(m) => `Le fournisseur a refusé les identifiants : ${m[1]}`,
 	],
 	[
 		/^Insufficient permissions: required scope `(.*)`$/,

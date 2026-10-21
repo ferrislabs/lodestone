@@ -36,7 +36,7 @@ async fn a_real_french_company_site_gives_a_dossier() {
     let research = CompanyResearch::new(
         fetcher,
         CompanySettings {
-            entreprises_url: Url::parse(ENTREPRISES_URL).unwrap(),
+            entreprises_url: Url::parse(ENTREPRISES_URL).unwrap().into(),
             max_pages: 5,
             max_rate_limit_wait: Duration::from_secs(75),
             origin: None,

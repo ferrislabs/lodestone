@@ -72,8 +72,8 @@ export function useQualificationUi(
 					providerId === '' ? null : providerId,
 				),
 			),
-		setWeight: (index, weight) =>
-			onChange(setAgentField(value, index, 'weight', weight)),
+		setLearnedCalibration: (index, learned) =>
+			onChange(setAgentField(value, index, 'learned_calibration', learned)),
 		setExclusionThreshold: (index, percent) =>
 			onChange(
 				setAgentField(value, index, 'exclusion_threshold', toFraction(percent)),
@@ -158,8 +158,6 @@ export function useQualificationUi(
 			onChange(setVerdictField(value, 'min_evidence', toFraction(percent))),
 		setInfluence: (percent) =>
 			onChange(setEvidenceField(value, 'influence', toFraction(percent))),
-		setReferenceScore: (score) =>
-			onChange(setEvidenceField(value, 'reference_score', score)),
 		setEvidenceWeight: (key, weight) =>
 			onChange(setEvidenceWeight(value, key, weight)),
 		setHalfLife: (key, days) => onChange(setHalfLife(value, key, days)),

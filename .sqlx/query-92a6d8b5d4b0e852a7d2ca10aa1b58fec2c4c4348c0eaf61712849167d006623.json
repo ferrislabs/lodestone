@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE leads SET excluded_reason = $3, excluded_at = $4\n            WHERE profile_id = ANY($1)\n              AND excluded_reason IS NULL\n              AND EXISTS (\n                  SELECT 1 FROM UNNEST($2::text[]) AS tenant(suffix)\n                  WHERE leads.domain = tenant.suffix\n                     OR right(leads.domain, length(tenant.suffix) + 1) = '.' || tenant.suffix\n              )\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "UuidArray",
+        "TextArray",
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "92a6d8b5d4b0e852a7d2ca10aa1b58fec2c4c4348c0eaf61712849167d006623"
+}

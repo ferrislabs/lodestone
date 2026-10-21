@@ -1,0 +1,64 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            DELETE FROM source_provider_oauth_states\n            WHERE state = $1\n            RETURNING state, provider_key, user_id, code_verifier_nonce, code_verifier_cipher,\n                      redirect_uri, created_at, expires_at\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "state",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "provider_key",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "user_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "code_verifier_nonce",
+        "type_info": "Bytea"
+      },
+      {
+        "ordinal": 4,
+        "name": "code_verifier_cipher",
+        "type_info": "Bytea"
+      },
+      {
+        "ordinal": 5,
+        "name": "redirect_uri",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 7,
+        "name": "expires_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "c724c03e92a4c4e9d58e30a54e7c3b6d507ad9a89f59094510790c0528998895"
+}

@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM source_provider_configurations WHERE provider_key = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "cb7ec1df9add046818549788c7b28edffd8034701f549d288c51b5dc602e22c1"
+}

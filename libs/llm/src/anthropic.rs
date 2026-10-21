@@ -10,6 +10,8 @@ use serde_json::Value;
 use tracing::{Instrument, Span, field, info_span};
 use url::Url;
 
+use crate::provider_message;
+
 const API_VERSION: &str = "2023-06-01";
 
 pub struct AnthropicProvider {
@@ -127,7 +129,7 @@ impl AnthropicProvider {
             .map_err(transport_error)?;
         let status = response.status();
         if !status.is_success() {
-            return Err(status_error(status, &response));
+            return Err(status_error(status, response, self.api_key.expose()).await);
         }
         let bytes = response.bytes().await.map_err(transport_error)?;
         let wire: WireResponse = serde_json::from_slice(&bytes)
@@ -158,7 +160,7 @@ impl AnthropicProvider {
     }
 }
 
-fn status_error(status: StatusCode, response: &reqwest::Response) -> LlmError {
+async fn status_error(status: StatusCode, response: reqwest::Response, key: &str) -> LlmError {
     match status.as_u16() {
         429 => LlmError::RateLimited {
             retry_after: response
@@ -169,7 +171,10 @@ fn status_error(status: StatusCode, response: &reqwest::Response) -> LlmError {
                 .map(Duration::from_secs),
         },
         529 => LlmError::RateLimited { retry_after: None },
-        code => LlmError::Status { status: code },
+        code => LlmError::Status {
+            status: code,
+            message: provider_message::read(response, Some(key)).await,
+        },
     }
 }
 

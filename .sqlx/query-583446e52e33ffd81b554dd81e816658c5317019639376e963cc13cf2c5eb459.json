@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO source_provider_configurations (\n                provider_key, settings, status, last_test_at, last_test_message,\n                connected_account, created_at, updated_at\n            )\n            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)\n            ON CONFLICT (provider_key) DO UPDATE\n            SET settings = EXCLUDED.settings,\n                status = EXCLUDED.status,\n                last_test_at = EXCLUDED.last_test_at,\n                last_test_message = EXCLUDED.last_test_message,\n                connected_account = EXCLUDED.connected_account,\n                updated_at = EXCLUDED.updated_at\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Jsonb",
+        "Text",
+        "Timestamptz",
+        "Text",
+        "Jsonb",
+        "Timestamptz",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "583446e52e33ffd81b554dd81e816658c5317019639376e963cc13cf2c5eb459"
+}

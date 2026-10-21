@@ -29,6 +29,7 @@ import {
 	scoringTemperatureOf,
 	setScoringField,
 	validateScoringAgents,
+	weightsApply,
 } from '#/pages/profiles/lib/scoring-agents'
 
 function profile(): JsonObject {
@@ -132,12 +133,24 @@ describe('scoring defaults', () => {
 			provider_id: 'p',
 			samples: 3,
 		}
-		expect(scoringSummary(agent, providers)).toBe(
+		expect(scoringSummary(agent, providers, true)).toBe(
 			'3 critères · fournisseur : Laya · poids 5 · 3 échantillons',
 		)
-		expect(scoringSummary(newScoringAgent(new Set()), [])).toBe(
+		expect(scoringSummary(newScoringAgent(new Set()), [], true)).toBe(
 			'3 critères · fournisseur : par défaut · poids 5 · 1 échantillon',
 		)
+	})
+
+	it('leaves the weight out of the summary unless asked', () => {
+		expect(scoringSummary(newScoringAgent(new Set()), [], false)).toBe(
+			'3 critères · fournisseur : par défaut · 1 échantillon',
+		)
+	})
+
+	it('applies weights from two scoring agents', () => {
+		expect(weightsApply(0)).toBe(false)
+		expect(weightsApply(1)).toBe(false)
+		expect(weightsApply(2)).toBe(true)
 	})
 })
 

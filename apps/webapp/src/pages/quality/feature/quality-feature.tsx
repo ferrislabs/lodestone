@@ -1,12 +1,15 @@
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useSearch } from '@tanstack/react-router'
 import { useMemo, useState } from 'react'
 
 import { errorMessage, lodestoneApi } from '#/api/lodestone'
+import { recalibrationNotice } from '#/pages/quality/lib/calibration'
 import { clipboardText } from '#/pages/quality/lib/exclusions'
 import { periodOf, queryFor, searchFor } from '#/pages/quality/lib/period'
 import type { ExclusionCandidate } from '#/pages/quality/lib/types'
 import { QualityPage } from '#/pages/quality/ui/quality-page'
+
+const NO_PARAMETERS = {} as never
 
 export function QualityFeature() {
 	const search = useSearch({ from: '/_app/quality/' })
@@ -33,6 +36,18 @@ export function QualityFeature() {
 	const qualityQuery = useQuery(
 		lodestoneApi().get('/api/v1/quality', { query }).queryOptions,
 	)
+	const calibrationQuery = useQuery(
+		lodestoneApi().get('/api/v1/quality/calibration').queryOptions,
+	)
+	const queryClient = useQueryClient()
+	const recalibrate = useMutation({
+		...lodestoneApi().mutation('post', '/api/v1/quality/calibration/run')
+			.mutationOptions,
+		onSuccess: () =>
+			queryClient.invalidateQueries({
+				queryKey: [{ _id: '/api/v1/quality/calibration' }],
+			}),
+	})
 	const state = qualityQuery.isError
 		? 'error'
 		: qualityQuery.isPending
@@ -58,6 +73,21 @@ export function QualityFeature() {
 			copiedLeadId={copiedLeadId}
 			copyFailed={copyFailed}
 			onCopyExclusion={copyExclusion}
+			calibration={calibrationQuery.data?.data ?? null}
+			calibrationRunning={recalibrate.isPending}
+			calibrationNotice={
+				recalibrate.isSuccess
+					? recalibrationNotice(recalibrate.data.data.queued)
+					: null
+			}
+			calibrationError={
+				recalibrate.isError
+					? errorMessage(recalibrate.error)
+					: calibrationQuery.isError
+						? errorMessage(calibrationQuery.error)
+						: null
+			}
+			onRecalibrate={() => recalibrate.mutate(NO_PARAMETERS)}
 			onOpenProfile={(profileId) =>
 				void navigate({
 					to: '/profiles/$profileId',

@@ -8,14 +8,16 @@ use chrono::{DateTime, Datelike, Duration as ChronoDuration, NaiveDate, Utc};
 use lodestone_core::{
     ActiveProfile, Candidate, FetchError, FetchPurpose, FetchRequest, FetchResponse, Fetcher,
     NormalizedDomain, PartnerAward, Provenance, Route, SignalKind, Siret, SourceError, SourceName,
-    definition::KeywordSource, route, triage::CandidateSource,
+    definition::SearchAgent, route, triage::CandidateSource,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
 use tracing::{debug, info, warn};
 use url::Url;
 
-use crate::buyer_domain::domain_of_url;
+use crate::{buyer_domain::domain_of_url, endpoint::Endpoint, search::search_agents};
+
+pub mod holders;
 
 pub const DATASET_API_URL: &str = "https://www.data.gouv.fr/api/1/datasets/donnees-essentielles-de-la-commande-publique-fichiers-consolides/";
 pub const ANNUAIRE_URL: &str = "https://api-lannuaire.service-public.fr/api/explore/v2.1/catalog/datasets/api-lannuaire-administration/records";
@@ -25,11 +27,11 @@ pub const DEFAULT_NOTIFIED_WITHIN_DAYS: u32 = 180;
 const RESOURCE_BASE: &str = "https://www.data.gouv.fr/fr/datasets/r/";
 const LOOKUP_ATTEMPTS: usize = 5;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct DecpSettings {
-    pub dataset_api_url: Url,
+    pub dataset_api_url: Endpoint,
     pub annuaire_url: Url,
-    pub entreprises_url: Url,
+    pub entreprises_url: Endpoint,
     pub lookback_days: u32,
     pub notified_within_days: u32,
     pub max_body_bytes: usize,
@@ -248,17 +250,8 @@ fn months_newest_first(since: NaiveDate, today: NaiveDate) -> Vec<(i32, u32)> {
     months
 }
 
-fn rules_of(profiles: &[ActiveProfile]) -> Vec<&KeywordSource> {
-    profiles
-        .iter()
-        .flat_map(|active| {
-            active
-                .revision
-                .definition
-                .definition()
-                .enabled_keyword_rules(SourceName::Decp)
-        })
-        .collect()
+fn rules_of(profiles: &[ActiveProfile]) -> Vec<&SearchAgent> {
+    search_agents(profiles, SourceName::Decp).collect()
 }
 
 fn candidate_content(title: &str, text: &str) -> String {
@@ -269,7 +262,7 @@ fn midnight(date: NaiveDate) -> Option<DateTime<Utc>> {
     date.and_hms_opt(0, 0, 0).map(|naive| naive.and_utc())
 }
 
-pub fn partner_awards(rules: &KeywordSource, contracts: &[AwardedContract]) -> Vec<PartnerAward> {
+pub fn partner_awards(rules: &SearchAgent, contracts: &[AwardedContract]) -> Vec<PartnerAward> {
     let mut awards = Vec::new();
     for contract in contracts {
         let matched = match route(&contract.content, rules) {
@@ -295,6 +288,7 @@ pub fn partner_awards(rules: &KeywordSource, contracts: &[AwardedContract]) -> V
 
 #[derive(Default)]
 struct Lookups {
+    entreprises_url: Option<Url>,
     domains: HashMap<Siret, Option<NormalizedDomain>>,
     names: HashMap<Siret, Option<String>>,
     requests: u64,
@@ -470,7 +464,7 @@ impl<F: Fetcher> DecpSource<F> {
         if let Some(known) = lookups.names.get(siret) {
             return known.clone();
         }
-        let mut url = self.settings.entreprises_url.clone();
+        let mut url = lookups.entreprises_url.clone()?;
         url.query_pairs_mut()
             .append_pair("q", siret.as_str())
             .append_pair("per_page", "1");
@@ -517,7 +511,7 @@ impl<F: Fetcher> DecpSource<F> {
         &self,
         resource: &Resource,
         body: &[u8],
-        rules: &[&KeywordSource],
+        rules: &[&SearchAgent],
         window: &Window,
         state: &mut RunState,
     ) -> Result<(), SourceError> {
@@ -639,11 +633,13 @@ impl<F: Fetcher> DecpSource<F> {
         };
         let files_since =
             (now - ChronoDuration::days(i64::from(self.settings.lookback_days))).date_naive();
+        let dataset_url = self.settings.dataset_api_url.resolve().await?;
         let dataset: Dataset = self
-            .fetch_json(self.settings.dataset_api_url.clone())
+            .fetch_json(dataset_url)
             .await
             .map_err(|error| upstream(format!("decp dataset listing: {error}")))?;
         let mut state = RunState::default();
+        state.lookups.entreprises_url = Some(self.settings.entreprises_url.resolve().await?);
         for (year, month) in months_newest_first(files_since, window.today) {
             let title = resource_title(year, month);
             let Some(resource) = dataset

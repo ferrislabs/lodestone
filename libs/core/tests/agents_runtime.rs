@@ -7,7 +7,7 @@ use lodestone_core::{
     ActiveProfile, Clock, CreateProfileCommand, LeadRepository, LodestoneUseCase, Observation,
     ProfileId, ProfileName, Provenance, RunRepository, SignalKind, SignalRepository, Source,
     SourceError, SourceName, UnitInterval, ValidatedProfile,
-    definition::{Agent, AgentId},
+    definition::{AgentId, SourceTarget},
     infrastructure::{
         lead::postgres::PgLeadRepository, postgres::with_tx, run::postgres::PgRunRepository,
         signal::postgres::PgSignalRepository,
@@ -29,12 +29,18 @@ impl Clock for FixedClock {
 
 struct AgentSource {
     collects: AtomicUsize,
+    name: SourceName,
 }
 
 impl AgentSource {
     fn new() -> Self {
+        Self::named(SourceName::CertificateTransparency)
+    }
+
+    fn named(name: SourceName) -> Self {
         Self {
             collects: AtomicUsize::new(0),
+            name,
         }
     }
 }
@@ -43,7 +49,7 @@ impl Source for AgentSource {
     type Item = &'static str;
 
     fn name(&self) -> SourceName {
-        SourceName::HttpProbe
+        self.name
     }
 
     async fn collect(
@@ -55,15 +61,15 @@ impl Source for AgentSource {
         Ok(vec!["sso.acme.com", "auth.beta.io"])
     }
 
-    fn serves(&self, item: &Self::Item, agent: &Agent) -> bool {
-        agent.id.as_str() != "probe-b" || item.contains("beta")
+    fn serves(&self, item: &Self::Item, target: &SourceTarget<'_>) -> bool {
+        target.agent_id().map(AgentId::as_str) != Some("probe-b") || item.contains("beta")
     }
 
     fn evaluate(
         &self,
         item: &Self::Item,
         _profile: &ActiveProfile,
-        _agent: &Agent,
+        _target: &SourceTarget<'_>,
     ) -> Vec<Observation> {
         vec![Observation {
             domain: domain(item),
@@ -80,18 +86,11 @@ impl Source for AgentSource {
 
 fn probe_agent(id: &str, enabled: bool) -> Value {
     json!({
+        "type": "certificates",
         "id": id,
         "name": id,
         "enabled": enabled,
-        "source": {
-            "kind": "http_probe",
-            "fingerprints": [{
-                "id": "kc",
-                "path": "/realms/master",
-                "product": "keycloak",
-                "matchers": [{"kind": "status", "equals": 200}]
-            }]
-        }
+        "labels": ["sso", "auth"]
     })
 }
 
@@ -238,4 +237,69 @@ async fn a_profile_with_only_disabled_agents_of_the_kind_is_not_run(pool: PgPool
     assert!(report.runs.is_empty());
     assert_eq!(source.collects.load(Ordering::SeqCst), 0);
     assert!(runs(&pool).await.is_empty());
+}
+
+async fn has_lead(pool: &PgPool, profile: ProfileId, host: &str) -> bool {
+    with_tx(pool, async |shared| {
+        PgLeadRepository::new(&shared)
+            .find_by_domain(profile, &domain(host))
+            .await
+    })
+    .await
+    .unwrap()
+    .is_some()
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_http_probe_enrichment_only_completes_leads_of_its_own_profile(pool: PgPool) {
+    let first = activate(&pool, "iam-a", vec![probe_agent("probe-a", true)]).await;
+    let second = activate(&pool, "iam-b", vec![probe_agent("probe-a", true)]).await;
+    let usecase = LodestoneUseCase::new(pool.clone());
+    let active = usecase.list_active_profiles().await.unwrap();
+    let owner = active
+        .iter()
+        .find(|candidate| candidate.profile.id == first)
+        .unwrap();
+    usecase
+        .record_observations_at(
+            owner,
+            SourceName::CertificateTransparency,
+            &[Observation {
+                domain: domain("sso.acme.com"),
+                kind: SignalKind::parse("certificate_seen").unwrap(),
+                value: Some("sso.acme.com".to_owned()),
+                raw: json!({ "host": "sso.acme.com" }),
+                provenance: Provenance::parse("https://crt.sh/?q=sso.acme.com").unwrap(),
+                strength: UnitInterval::new(0.3).unwrap(),
+                observed_at: at(10),
+                agent: None,
+            }],
+            at(10),
+        )
+        .await
+        .unwrap();
+    let source = AgentSource::named(SourceName::HttpProbe);
+
+    let report = usecase.run_source(&source, &FixedClock).await.unwrap();
+
+    assert_eq!(report.runs.len(), 2);
+    assert_eq!(report.signals, 1);
+    assert_eq!(report.skipped_no_lead, 3);
+    let recorded = runs(&pool).await;
+    assert!(recorded.iter().all(|run| run.agent.is_none()));
+    assert!(
+        recorded
+            .iter()
+            .all(|run| run.source == SourceName::HttpProbe && run.volume == 2)
+    );
+    let found = signals_of(&pool, first, "acme.com").await;
+    let kinds: Vec<(&str, Option<&AgentId>)> = found
+        .iter()
+        .map(|signal| (signal.kind.as_str(), signal.agent.as_ref()))
+        .collect();
+    assert_eq!(kinds.len(), 2);
+    assert!(kinds.contains(&("product_detected", None)));
+    assert!(!has_lead(&pool, first, "beta.io").await);
+    assert!(!has_lead(&pool, second, "acme.com").await);
+    assert!(!has_lead(&pool, second, "beta.io").await);
 }

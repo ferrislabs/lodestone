@@ -1,4 +1,7 @@
-use std::time::Duration;
+use std::{
+    sync::atomic::{AtomicBool, Ordering},
+    time::Duration,
+};
 
 use chrono::Utc;
 use common::CoreError;
@@ -22,6 +25,12 @@ pub trait ListenerStep: Send + Sync {
     fn name(&self) -> &str;
 
     fn is_active(&self) -> impl Future<Output = Result<bool, CoreError>> + Send;
+
+    fn blocking_provider(
+        &self,
+    ) -> impl Future<Output = Result<Option<&'static str>, CoreError>> + Send {
+        async { Ok(None) }
+    }
 
     fn run_once(&self) -> impl Future<Output = Result<StepOutcome, SourceRunError>> + Send;
 }
@@ -51,11 +60,19 @@ impl ListenerSettings {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Ending<'a> {
+    Succeeded,
+    Skipped,
+    Failed(&'a str),
+}
+
 pub struct Listener<S: ListenerStep> {
     step: S,
     pool: PgPool,
     instance: String,
     settings: ListenerSettings,
+    blocked: AtomicBool,
 }
 
 async fn pause(shutdown: &mut watch::Receiver<bool>, duration: Duration) -> bool {
@@ -72,6 +89,7 @@ impl<S: ListenerStep> Listener<S> {
             pool,
             instance,
             settings,
+            blocked: AtomicBool::new(false),
         }
     }
 
@@ -157,10 +175,35 @@ impl<S: ListenerStep> Listener<S> {
                 statuses,
                 ListenerState::IdleNoAgent,
                 StepOutcome::default(),
-                None,
+                Ending::Skipped,
             )
             .await;
             return Some(self.settings.idle);
+        }
+        match self.step.blocking_provider().await {
+            Ok(None) => {
+                self.blocked.store(false, Ordering::Relaxed);
+            }
+            Ok(Some(provider)) => {
+                if !self.blocked.swap(true, Ordering::Relaxed) {
+                    info!(
+                        listener = name,
+                        provider, "provider not ready, the listener waits"
+                    );
+                }
+                *failures = 0;
+                self.record(
+                    statuses,
+                    ListenerState::Idle,
+                    StepOutcome::default(),
+                    Ending::Skipped,
+                )
+                .await;
+                return Some(self.settings.idle);
+            }
+            Err(error) => {
+                return Some(self.fail(statuses, failures, &error.to_string()).await);
+            }
         }
         if let Err(error) = statuses
             .record_started(name, &self.instance, Utc::now())
@@ -198,7 +241,8 @@ impl<S: ListenerStep> Listener<S> {
                 } else {
                     ListenerState::Idle
                 };
-                self.record(statuses, state, outcome, None).await;
+                self.record(statuses, state, outcome, Ending::Succeeded)
+                    .await;
                 Some(if outcome.processed > 0 {
                     self.settings.yield_pause
                 } else {
@@ -222,7 +266,7 @@ impl<S: ListenerStep> Listener<S> {
             statuses,
             ListenerState::Error,
             StepOutcome::default(),
-            Some(message),
+            Ending::Failed(message),
         )
         .await;
         wait
@@ -233,14 +277,18 @@ impl<S: ListenerStep> Listener<S> {
         statuses: &PgListenerStatuses,
         state: ListenerState,
         outcome: StepOutcome,
-        error: Option<&str>,
+        ending: Ending<'_>,
     ) {
         let update = StatusUpdate {
             name: self.step.name(),
             holder: &self.instance,
             state,
             outcome,
-            error,
+            error: match ending {
+                Ending::Failed(message) => Some(message),
+                Ending::Succeeded | Ending::Skipped => None,
+            },
+            succeeded: ending == Ending::Succeeded,
             at: Utc::now(),
         };
         if let Err(error) = statuses.record(&update).await {
@@ -251,15 +299,11 @@ impl<S: ListenerStep> Listener<S> {
 
 impl LodestoneUseCase {
     pub async fn has_enabled_agent(&self, source: SourceName) -> Result<bool, CoreError> {
-        Ok(self.list_active_profiles().await?.iter().any(|active| {
-            active
-                .revision
-                .definition
-                .definition()
-                .enabled_agents(source)
-                .next()
-                .is_some()
-        }))
+        Ok(self
+            .list_active_profiles()
+            .await?
+            .iter()
+            .any(|active| active.revision.definition.definition().has_targets(source)))
     }
 
     pub async fn list_listener_statuses(&self) -> Result<Vec<ListenerStatus>, CoreError> {

@@ -48,20 +48,22 @@ describe('resolve', () => {
 })
 
 describe('classify', () => {
-	const unions = ['Matcher', 'VersionExtractor', 'DebtRule', 'AgentSource']
+	const unions = ['Matcher', 'VersionExtractor', 'DebtRule', 'Agent']
 
 	it('classifies every $def of the committed schema', () => {
 		const names = Object.keys(root.$defs ?? {})
-		expect(names.length).toBe(25)
+		expect(names.length).toBe(27)
 		for (const name of names) {
 			const node = classify(root, { $ref: `#/$defs/${name}` })
 			const expected = unions.includes(name)
 				? 'union'
 				: name === 'AgentId'
 					? 'string'
-					: name === 'Language'
-						? 'enum'
-						: 'object'
+					: name === 'CountryCode'
+						? 'string'
+						: ['Language', 'RemoteFilter', 'ContractFilter'].includes(name)
+							? 'enum'
+							: 'object'
 			expect(node.kind, name).toBe(expected)
 		}
 	})
@@ -96,9 +98,7 @@ describe('classify', () => {
 	})
 
 	it('treats anyOf null and type arrays as nullable', () => {
-		const llm = def('Agent').properties?.llm ?? {}
-		expect(classify(root, llm).kind).toBe('nullable')
-		const value = def('ScoringFactor').properties?.value ?? {}
+		const value = def('Escalation').properties?.provider ?? {}
 		const node = classify(root, value)
 		expect(node.kind).toBe('nullable')
 		if (node.kind === 'nullable') expect(node.inner.type).toBe('string')
@@ -112,7 +112,7 @@ describe('classify', () => {
 			expect(node.integer).toBe(true)
 			expect(node.schema.maximum).toBe(65535)
 		}
-		const weight = def('ScoringFactor').properties?.weight ?? {}
+		const weight = def('ScoringAgent').properties?.weight ?? {}
 		const weightNode = classify(root, weight)
 		if (weightNode.kind === 'number') {
 			expect(weightNode.integer).toBe(true)
@@ -153,35 +153,36 @@ describe('defaultValue', () => {
 			evidence: {
 				half_life_days: {},
 				influence: 0.6,
-				reference_score: 50,
 				weights: { volume: 1, diversity: 1, environment: 1, strength: 1 },
 			},
-			scoring: { factors: [] },
 			contact_ranking: { preferred_local_parts: [], guess_local_parts: [] },
-			llm: {
-				qualification_threshold: 50,
-				relevance_criteria: '',
-				language: 'fr',
+			inspection: { enabled: true },
+			enrichment: {
+				custom: {
+					fingerprints: [],
+					excluded_products: [],
+					extra_subdomains: [],
+				},
+				highlight_keywords: [],
 			},
+			language: 'fr',
 		})
 		for (const key of root.required ?? []) expect(value).toHaveProperty(key)
 	})
 
 	it('fills schema defaults for keyword sources', () => {
-		const source = defaultValue(
-			root,
-			{ $ref: '#/$defs/AgentSource' },
-			PROFILE_HINTS,
-		)
-		expect(source).toEqual({
-			kind: 'certificate_transparency',
+		const certificates = def('Agent').oneOf?.[1] ?? {}
+		expect(defaultValue(root, certificates, PROFILE_HINTS)).toMatchObject({
+			type: 'certificates',
 			labels: [],
 		})
-		const boamp = def('AgentSource').oneOf?.[3] ?? {}
-		expect(defaultValue(root, boamp, PROFILE_HINTS)).toEqual({
-			kind: 'boamp',
+		const search = def('Agent').oneOf?.[0] ?? {}
+		expect(defaultValue(root, search, PROFILE_HINTS)).toMatchObject({
+			type: 'search',
+			providers: [],
 			keywords: [],
 			exclusions: [],
+			filters: { remote: 'any', countries: [], contracts: [] },
 			accept_min_keywords: 2,
 		})
 	})
@@ -189,9 +190,8 @@ describe('defaultValue', () => {
 	it('starts unions on their first variant with the discriminator set', () => {
 		expect(
 			defaultValue(root, { $ref: '#/$defs/Matcher' }, PROFILE_HINTS, [
-				'agents',
-				0,
-				'source',
+				'enrichment',
+				'custom',
 				'fingerprints',
 				0,
 				'matchers',
@@ -204,10 +204,16 @@ describe('defaultValue', () => {
 	})
 
 	it('gives an optional section its enabled value', () => {
-		const llm = def('Agent').properties?.llm ?? {}
+		const version = def('Fingerprint').properties?.version ?? {}
 		expect(
-			enabledValue(root, llm, PROFILE_HINTS, ['agents', 0, 'llm']),
-		).toEqual({})
+			enabledValue(root, version, PROFILE_HINTS, [
+				'enrichment',
+				'custom',
+				'fingerprints',
+				0,
+				'version',
+			]),
+		).toEqual(expect.objectContaining({ from: 'header' }))
 	})
 })
 
@@ -220,16 +226,15 @@ describe('paths', () => {
 		)
 		expect(
 			formatPath([
-				'agents',
-				0,
-				'source',
+				'enrichment',
+				'custom',
 				'fingerprints',
 				0,
 				'matchers',
 				1,
 				'pattern',
 			]),
-		).toBe('agents[0].source.fingerprints[0].matchers[1].pattern')
+		).toBe('enrichment.custom.fingerprints[0].matchers[1].pattern')
 		expect(formatPath(['agents', 1, 'source', 'labels', 1])).toBe(
 			'agents[1].source.labels[1]',
 		)
@@ -292,31 +297,21 @@ describe('validateValue', () => {
 			message: 'must not be empty',
 		})
 		const bad = setIn(
-			setIn(value, ['scoring', 'factors'], [{ signal: 's', weight: null }]),
-			['agents'],
+			setIn(value, ['evidence', 'influence'], 3),
+			['enrichment', 'custom', 'fingerprints'],
 			[
 				{
 					id: 'x',
-					name: 'n',
-					enabled: true,
-					source: {
-						kind: 'http_probe',
-						fingerprints: [
-							{
-								id: 'x',
-								path: '/',
-								product: 'p',
-								matchers: [{ kind: 'status', equals: 70000 }],
-							},
-						],
-					},
+					path: '/',
+					product: 'p',
+					matchers: [{ kind: 'status', equals: 70000 }],
 				},
 			],
 		)
 		const paths = validateValue(root, root, bad).map((p) => p.path)
-		expect(paths).toContain('scoring.factors[0].weight')
+		expect(paths).toContain('evidence.influence')
 		expect(paths).toContain(
-			'agents[0].source.fingerprints[0].matchers[0].equals',
+			'enrichment.custom.fingerprints[0].matchers[0].equals',
 		)
 	})
 
@@ -329,14 +324,14 @@ describe('validateValue', () => {
 describe('fieldPaths', () => {
 	it('covers rendered fields so problems map onto them', () => {
 		const value = defaultValue(root, root, PROFILE_HINTS)
-		const withFactor = setIn(
+		const withAgent = setIn(
 			value,
-			['scoring', 'factors'],
-			[{ signal: 's', weight: 1 }],
+			['scoring_agents'],
+			[{ id: 's', name: 'n', weight: 1 }],
 		)
-		const paths = fieldPaths(root, root, withFactor)
-		expect(paths.has('scoring.factors[0].weight')).toBe(true)
-		expect(paths.has('scoring.factors[0].value')).toBe(true)
+		const paths = fieldPaths(root, root, withAgent)
+		expect(paths.has('scoring_agents[0].weight')).toBe(true)
+		expect(paths.has('scoring_agents[0].name')).toBe(true)
 		expect(paths.has('identity.offer')).toBe(true)
 		expect(paths.has('agents')).toBe(true)
 		expect(paths.has('$')).toBe(true)

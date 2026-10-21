@@ -3,7 +3,7 @@ use std::{fs, num::NonZeroU32, path::PathBuf, time::Duration};
 use chrono::DateTime;
 use llm::openai::OpenAiCompatibleProvider;
 use lodestone_core::{
-    AgentDecision, CacheScope, CachedOutput, EvidenceComponents, EvidenceStrength,
+    AgentDecision, CacheScope, CachedOutput, Calibrations, EvidenceComponents, EvidenceStrength,
     GenerationParams, LeadId, LlmCache, ProfileId, ProviderDefinition, ProviderKind,
     QualificationResult, ReasoningEffort, ResultId, ResultStatus, RevisionNumber, RunProvenance,
     ScoringOutput, TokenPricing, UntrustedDocument, ValidatedProfile, combine,
@@ -200,7 +200,7 @@ async fn the_scoring_agent_answers_the_imposed_contract_live() {
         },
         base_delay: Duration::from_secs(2),
     };
-    let mut budget = RunBudget::new(NonZeroU32::new(10).unwrap());
+    let budget = RunBudget::new(NonZeroU32::new(10).unwrap());
     let scope = CacheScope {
         profile_id: NIL.parse::<ProfileId>().unwrap(),
         revision: RevisionNumber::FIRST,
@@ -208,6 +208,7 @@ async fn the_scoring_agent_answers_the_imposed_contract_live() {
         domain: lodestone_core::NormalizedDomain::from_host("example-retail.fr").unwrap(),
         agent: Some(agent.id.clone()),
         sample: 0,
+        fresh: false,
     };
     let mut instruction = built.instruction.clone();
     let mut attempt = 0;
@@ -231,7 +232,7 @@ async fn the_scoring_agent_answers_the_imposed_contract_live() {
             call,
             |value| validate_scoring(agent, value, &grounding).is_ok(),
             settings,
-            &mut budget,
+            &budget,
         )
         .await
         .unwrap();
@@ -280,6 +281,7 @@ async fn the_scoring_agent_answers_the_imposed_contract_live() {
             score: output.score,
             probabilities: output.verdict.probabilities,
         }],
+        &Calibrations::none(),
         Vec::new(),
     );
     println!("combination: {combined:#?}");

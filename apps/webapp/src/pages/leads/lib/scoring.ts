@@ -56,3 +56,7 @@ export function scoringProviderText(result: ScoringResult): string {
 export function scoringWeightLabel(weight: number | null | undefined): string {
 	return weight == null ? '' : `poids ${weight}`
 }
+
+export function calibrationLabel(n: number): string {
+	return `Calibré (n = ${formatNumber(n)})`
+}

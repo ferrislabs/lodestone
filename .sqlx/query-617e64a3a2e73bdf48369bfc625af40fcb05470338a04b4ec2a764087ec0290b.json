@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT module, MAX(ran_at) AS last_run FROM ecosystem_module_runs GROUP BY module",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "module",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "last_run",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      null
+    ]
+  },
+  "hash": "617e64a3a2e73bdf48369bfc625af40fcb05470338a04b4ec2a764087ec0290b"
+}

@@ -22,33 +22,31 @@ describe('prepareSave', () => {
 
 	it('accepts a filled definition', () => {
 		const filled = {
-			schema_version: 6,
+			schema_version: 14,
 			identity: { offer: 'o', target_customer: 't' },
-			agents: [newAgent('ats', [])],
+			agents: [newAgent('search', [], ['boamp'])],
 			qualification_agents: [newQualificationAgent('pertinence', new Set())],
 			aggregator: { provider_id: null, system_prompt: 'p' },
 			verdict: { reliable_from: 70, discard_below: 30 },
-			scoring: { factors: [] },
 			contact_ranking: { preferred_local_parts: [] },
-			llm: { qualification_threshold: 50, relevance_criteria: 'r' },
+			language: 'fr',
 		}
 		expect(prepareSave(filled).ok).toBe(true)
 	})
 
 	it('blocks a scoring agent that breaks the rules the server enforces', () => {
 		const filled = {
-			schema_version: 11,
+			schema_version: 14,
 			identity: { offer: 'o', target_customer: 't' },
-			agents: [newAgent('ats', [])],
+			agents: [newAgent('search', [], ['boamp'])],
 			qualification_agents: [newQualificationAgent('pertinence', new Set())],
 			scoring_agents: [
 				{ ...newScoringAgent(new Set(['ats'])), id: 'pertinence' },
 			],
 			aggregator: { provider_id: null, system_prompt: 'p' },
 			verdict: { reliable_from: 70, discard_below: 30 },
-			scoring: { factors: [] },
 			contact_ranking: { preferred_local_parts: [] },
-			llm: { qualification_threshold: 50, relevance_criteria: 'r' },
+			language: 'fr',
 		}
 		const attempt = prepareSave(filled)
 		expect(attempt.ok).toBe(false)

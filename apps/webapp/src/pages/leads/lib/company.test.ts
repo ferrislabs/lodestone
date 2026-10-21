@@ -9,6 +9,7 @@ import {
 	formatDay,
 	formatSiren,
 	headOfficeText,
+	ignoredLinksNote,
 	pageLabel,
 } from './company'
 import type { Company, CompanyOfficial } from './types'
@@ -33,6 +34,7 @@ function company(overrides: Partial<Company> = {}): Company {
 		siren: '552081317',
 		official,
 		pages: [],
+		ignored_links: 0,
 		built_at: '2026-10-06T10:00:00Z',
 		next_attempt_at: '2027-01-04T10:00:00Z',
 		error: null,
@@ -52,6 +54,12 @@ describe('company dossier helpers', () => {
 		expect(companyState(company({ state: 'weird' }))).toBe('pending')
 		expect(companyStateLabel(companyState(company()))).toBe('Complète')
 		expect(companyStateLabel('unreachable')).toBe('Inaccessible')
+		expect(companyState(company({ state: 'hosting_platform' }))).toBe(
+			'hosting_platform',
+		)
+		expect(companyStateLabel('hosting_platform')).toBe(
+			'Hébergé sur une plateforme',
+		)
 	})
 
 	it('joins the activity code and its label', () => {
@@ -86,6 +94,11 @@ describe('company dossier helpers', () => {
 			'inaccessible',
 		)
 		expect(
+			companyNotice(
+				company({ state: 'hosting_platform', official: null, siren: null }),
+			),
+		).toBe('Site hébergé sur une plateforme : pas de dossier entreprise lu.')
+		expect(
 			companyNotice(company({ state: 'partial', siren: null, official: null })),
 		).toContain('SIREN introuvable')
 		expect(
@@ -99,6 +112,16 @@ describe('company dossier helpers', () => {
 		expect(pageLabel('https://acme.fr/')).toBe('acme.fr')
 		expect(pageLabel('https://acme.fr/a-propos')).toBe('acme.fr/a-propos')
 		expect(pageLabel('not a url')).toBe('not a url')
+	})
+
+	it('counts the ignored links in French and stays silent without any', () => {
+		expect(ignoredLinksNote(0)).toBeNull()
+		expect(ignoredLinksNote(1)).toBe(
+			'1 lien ignoré : page introuvable, vide ou redirigée vers l’accueil.',
+		)
+		expect(ignoredLinksNote(4)).toBe(
+			'4 liens ignorés : pages introuvables, vides ou redirigées vers l’accueil.',
+		)
 	})
 
 	it('names the basis of the probable country', () => {

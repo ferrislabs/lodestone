@@ -14,6 +14,7 @@ export const EMPTY_PROVIDER_VALUES: ProviderFormValues = {
 	base_url: '',
 	model: '',
 	max_retries: '',
+	max_concurrency: '',
 	timeout_seconds: '',
 	input_cents_per_mtok: '',
 	output_cents_per_mtok: '',
@@ -24,6 +25,18 @@ export const EMPTY_PROVIDER_VALUES: ProviderFormValues = {
 	frequency_penalty: '',
 	presence_penalty: '',
 	repeat_penalty: '',
+}
+
+const LOCAL_HOSTS = ['localhost', '127.0.0.1', '[::1]']
+const LOCAL_CONCURRENCY = 2
+const REMOTE_CONCURRENCY = 4
+
+export function defaultConcurrency(kind: string, baseUrl: string): number {
+	if (kind !== 'openai_compatible' || !URL.canParse(baseUrl)) {
+		return REMOTE_CONCURRENCY
+	}
+	const host = new URL(baseUrl).hostname.toLowerCase()
+	return LOCAL_HOSTS.includes(host) ? LOCAL_CONCURRENCY : REMOTE_CONCURRENCY
 }
 
 function text(value: number | null | undefined): string {
@@ -37,6 +50,7 @@ export function valuesFromProvider(provider: Provider): ProviderFormValues {
 		base_url: provider.base_url,
 		model: provider.model,
 		max_retries: String(provider.max_retries),
+		max_concurrency: String(provider.max_concurrency),
 		timeout_seconds: String(provider.timeout_seconds),
 		input_cents_per_mtok: String(provider.pricing.input_cents_per_mtok),
 		output_cents_per_mtok: String(provider.pricing.output_cents_per_mtok),
@@ -52,6 +66,7 @@ export function valuesFromProvider(provider: Provider): ProviderFormValues {
 
 const NUMERIC_FIELDS: readonly ProviderFieldName[] = [
 	'max_retries',
+	'max_concurrency',
 	'timeout_seconds',
 	'input_cents_per_mtok',
 	'output_cents_per_mtok',
@@ -73,6 +88,7 @@ const FIELD_PATHS: Record<ProviderFieldName, string> = {
 	base_url: 'base_url',
 	model: 'model',
 	max_retries: 'max_retries',
+	max_concurrency: 'max_concurrency',
 	timeout_seconds: 'timeout_seconds',
 	input_cents_per_mtok: 'pricing.input_cents_per_mtok',
 	output_cents_per_mtok: 'pricing.output_cents_per_mtok',
@@ -164,6 +180,7 @@ interface CommonBody {
 	base_url: string
 	model: string
 	max_retries?: number
+	max_concurrency?: number
 	timeout_seconds?: number
 	pricing?: {
 		input_cents_per_mtok?: number
@@ -180,6 +197,8 @@ function commonBody(values: ProviderFormValues): CommonBody {
 	}
 	const retries = optionalNumber(values.max_retries)
 	if (retries !== undefined) body.max_retries = retries
+	const concurrency = optionalNumber(values.max_concurrency)
+	if (concurrency !== undefined) body.max_concurrency = concurrency
 	const timeout = optionalNumber(values.timeout_seconds)
 	if (timeout !== undefined) body.timeout_seconds = timeout
 	const input = optionalNumber(values.input_cents_per_mtok)

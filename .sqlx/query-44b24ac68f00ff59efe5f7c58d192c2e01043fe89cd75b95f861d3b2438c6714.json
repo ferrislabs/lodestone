@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE lead_enrichments e SET ran_at = $2\n            FROM leads\n            WHERE e.lead_id = leads.id\n              AND e.step = $3\n              AND e.ran_at IS NULL\n              AND leads.profile_id = $1\n              AND NOT EXISTS (\n                  SELECT 1 FROM candidate_hosts h\n                  LEFT JOIN host_source_checks c ON c.host = h.host AND c.source = $4\n                  WHERE h.domain = leads.domain AND c.checked_at IS NULL\n              )\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Timestamptz",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "44b24ac68f00ff59efe5f7c58d192c2e01043fe89cd75b95f861d3b2438c6714"
+}

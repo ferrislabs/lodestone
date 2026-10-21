@@ -22,6 +22,17 @@ impl AnyProvider {
     }
 }
 
+impl AnyProvider {
+    pub fn reporting_from_definition(definition: &ProviderDefinition) -> Result<Self, LlmError> {
+        match Self::from_definition(definition)? {
+            Self::OpenAiCompatible(provider) => {
+                Ok(Self::OpenAiCompatible(provider.without_fallback()))
+            }
+            other => Ok(other),
+        }
+    }
+}
+
 impl LlmProvider for AnyProvider {
     async fn complete(&self, request: &LlmRequest<'_>) -> Result<LlmResponse, LlmError> {
         match self {

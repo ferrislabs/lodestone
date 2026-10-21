@@ -6,14 +6,16 @@ use tracing::info;
 use crate::{
     application::LodestoneUseCase,
     domain::{
-        lead::Lead,
+        calibration::{Calibrations, opinion_score},
+        lead::{Lead, Score, ports::LeadRepository},
         profile::ActiveProfile,
         profile::definition::ProfileDefinition,
         qualification::{
             AgentOpinion, EvidenceStrength, LeadScoring, QualificationResult, Rescoring, ResultId,
-            ResultStatus, SCORING_VERSION, VerdictSource, agent_score, exclusions, judge,
+            ResultStatus, SCORING_VERSION, VerdictSource, exclusions, judge,
             ports::QualificationRepository, stored_answers,
         },
+        scoring::strength_score,
         scoring_agent::{Decision, decide, ports::ScoringRepository},
     },
 };
@@ -21,6 +23,7 @@ use crate::{
 pub(crate) fn stored_opinions(
     definition: &ProfileDefinition,
     results: &[QualificationResult],
+    calibrations: &Calibrations,
 ) -> (Vec<AgentOpinion>, Vec<(ResultId, f64)>) {
     let mut opinions = Vec::new();
     let mut agent_scores = Vec::new();
@@ -38,9 +41,13 @@ pub(crate) fn stored_opinions(
         let Some(answers) = stored_answers(agent, &result.answers) else {
             continue;
         };
-        let score = agent_score(agent, &answers, definition.verdict.calibration_floor);
+        let score = opinion_score(
+            agent,
+            &answers,
+            definition.verdict.calibration_floor,
+            calibrations,
+        );
         opinions.push(AgentOpinion {
-            weight: agent.weight,
             score,
             axes: answers.0.len(),
         });
@@ -97,9 +104,10 @@ impl LodestoneUseCase {
         let results = self.lead_qualification_results(lead.id).await?;
         let scoring_results = self.lead_scoring_results(lead.id).await?;
         let (_, facts, _) = self.signals_with_facts(lead).await?;
-        let (opinions, agent_scores) = stored_opinions(definition, &results);
-        let evidence =
-            EvidenceStrength::compute(&facts, lead.score.get(), &definition.evidence, now);
+        let calibrations = self.profile_calibrations(active).await?;
+        let (opinions, agent_scores) = stored_opinions(definition, &results, &calibrations);
+        let evidence = EvidenceStrength::compute(&facts, &definition.evidence, now);
+        let score = strength_score(evidence.components.strength);
         let found = exclusions(&results, &definition.qualification_agents);
         let rescoring = Rescoring {
             lead_id: lead.id,
@@ -115,9 +123,16 @@ impl LodestoneUseCase {
             agent_scores,
         };
         let scored = !scoring_results.is_empty() && self.has_scoring_verdict(lead).await?;
-        let decision = (scored || !found.is_empty())
-            .then(|| decide(&definition.scoring_agents, &scoring_results, found));
-        self.store_rescoring(&rescoring, decision.as_ref()).await
+        let decision = (scored || !found.is_empty()).then(|| {
+            decide(
+                &definition.scoring_agents,
+                &scoring_results,
+                &calibrations,
+                found,
+            )
+        });
+        self.store_rescoring(&rescoring, score, decision.as_ref())
+            .await
     }
 
     async fn has_scoring_verdict(&self, lead: &Lead) -> Result<bool, CoreError> {
@@ -156,14 +171,19 @@ impl LodestoneUseCase {
             .await
     }
 
-    #[transactional(qualification, scoring_agent)]
+    #[transactional(lead, qualification, scoring_agent)]
     async fn store_rescoring(
         &self,
         rescoring: &Rescoring,
+        score: Score,
         decision: Option<&Decision>,
     ) -> Result<(), CoreError> {
+        let mut leads = lead_repository;
         let mut qualification = qualification_repository;
         let mut scoring = scoring_agent_repository;
+        leads
+            .update_score(rescoring.lead_id, score, rescoring.scored_at)
+            .await?;
         qualification.rescore(rescoring).await?;
         if let Some(decision) = decision {
             scoring.apply_decision(rescoring.lead_id, decision).await?;

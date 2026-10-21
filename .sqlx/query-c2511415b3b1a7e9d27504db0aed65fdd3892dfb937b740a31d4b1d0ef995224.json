@@ -1,0 +1,88 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT id, profile_id, domain, status, score, confidence, verdict, llm_score, qualified_at, first_seen_at, last_seen_at, updated_at\n            FROM leads\n            WHERE id = $1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "profile_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "domain",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "status",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "score",
+        "type_info": "Float8"
+      },
+      {
+        "ordinal": 5,
+        "name": "confidence",
+        "type_info": "Float8"
+      },
+      {
+        "ordinal": 6,
+        "name": "verdict",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "llm_score",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 8,
+        "name": "qualified_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 9,
+        "name": "first_seen_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 10,
+        "name": "last_seen_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 11,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "c2511415b3b1a7e9d27504db0aed65fdd3892dfb937b740a31d4b1d0ef995224"
+}

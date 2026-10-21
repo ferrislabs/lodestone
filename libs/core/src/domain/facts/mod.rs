@@ -7,14 +7,14 @@ use crate::domain::{
     company::{CompanyDossier, DossierState},
     host::{CandidateHost, Hostname},
     lead::{Lead, Signal},
-    values::{SignalKind, SourceName},
+    values::{SignalKind, SourceName, UnitInterval},
 };
 
 mod country;
 mod environment;
 mod sentence;
 
-pub use country::Country;
+pub use country::{Country, country_of};
 pub use environment::{Environment, environment_of};
 pub use sentence::signal_sentence;
 
@@ -57,9 +57,10 @@ pub struct CompanyFacts {
     pub official: Option<OfficialFacts>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct IndependentSignal {
     pub kind: SignalKind,
+    pub strength: UnitInterval,
     pub observed_at: DateTime<Utc>,
 }
 
@@ -118,6 +119,9 @@ impl CompanyFacts {
                     parts.join("; ")
                 )
             }
+            (None, DossierState::HostingPlatform) => {
+                "- company dossier: none, the domain is hosted on a platform, no company site was read".to_owned()
+            }
             (None, DossierState::Unreachable) => {
                 "- company dossier: unreachable, the company site could not be read".to_owned()
             }
@@ -137,8 +141,10 @@ fn normalised_value(value: Option<&str>) -> String {
         .unwrap_or_default()
 }
 
-fn independent_signals<'a>(signals: impl Iterator<Item = &'a Signal>) -> Vec<IndependentSignal> {
-    let mut latest: BTreeMap<(&str, String, &str), (&SignalKind, DateTime<Utc>)> = BTreeMap::new();
+pub fn independent_signals<'a>(
+    signals: impl Iterator<Item = &'a Signal>,
+) -> Vec<IndependentSignal> {
+    let mut latest: BTreeMap<(&str, String, &str), &Signal> = BTreeMap::new();
     for signal in signals {
         let key = (
             signal.kind.as_str(),
@@ -147,14 +153,22 @@ fn independent_signals<'a>(signals: impl Iterator<Item = &'a Signal>) -> Vec<Ind
         );
         latest
             .entry(key)
-            .and_modify(|(_, seen)| *seen = (*seen).max(signal.observed_at))
-            .or_insert((&signal.kind, signal.observed_at));
+            .and_modify(|kept| {
+                if (signal.observed_at, signal.strength.get())
+                    .partial_cmp(&(kept.observed_at, kept.strength.get()))
+                    .is_some_and(std::cmp::Ordering::is_gt)
+                {
+                    *kept = signal;
+                }
+            })
+            .or_insert(signal);
     }
     latest
         .into_values()
-        .map(|(kind, observed_at)| IndependentSignal {
-            kind: kind.clone(),
-            observed_at,
+        .map(|signal| IndependentSignal {
+            kind: signal.kind.clone(),
+            strength: signal.strength,
+            observed_at: signal.observed_at,
         })
         .collect()
 }
@@ -401,7 +415,6 @@ mod tests {
             domain: NormalizedDomain::from_host(domain).unwrap(),
             status: LeadStatus::New,
             score: Score::default(),
-            score_breakdown: Vec::new(),
             confidence: None,
             verdict: None,
             llm_score: None,
@@ -696,6 +709,14 @@ mod tests {
             unreachable
                 .render()
                 .contains("unreachable, the company site could not be read")
+        );
+        let hosted =
+            base.clone()
+                .with_dossier(Some(&dossier(DossierState::HostingPlatform, None, false)));
+        assert!(
+            hosted
+                .render()
+                .contains("the domain is hosted on a platform, no company site was read")
         );
     }
 

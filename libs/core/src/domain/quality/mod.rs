@@ -200,7 +200,6 @@ mod tests {
             domain: NormalizedDomain::from_host("example.com").unwrap(),
             status: LeadStatus::Qualified,
             score: Score::new(1.0).unwrap(),
-            score_breakdown: Vec::new(),
             confidence: Some(72.5),
             verdict: Some(Verdict::ToCheck),
             llm_score: Some(68),

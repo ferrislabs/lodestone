@@ -5,12 +5,13 @@ use axum::{
     extract::{Path, Query, State, rejection::JsonRejection},
 };
 use lodestone_core::{
-    Assessment, ContactEmail, DraftMessage, DraftReview, DraftStatus, Exclusion, Lead, LeadDetail,
-    LeadFacts, LeadId, LeadQuery, LeadScoring, LeadSort, LeadStatus, LlmProviderRecord, Profile,
-    ProfileId, QualificationResult, Rejection, RejectionProblem, ResultStatus, RunProvenance,
-    SUMMARY_FAILED_AFTER, ScoreContribution, ScoringResult, Signal, SignalKind, SummaryState,
-    Verdict, VerdictAnswer, VerdictCap, VerdictFilter, VerdictProbabilities, VerdictReason,
-    VerdictSource,
+    AGENT_FAILED_AFTER, AgentFailure, AgentKind, AgentStop, Assessment, Calibrations, ContactEmail,
+    DraftMessage, DraftReview, DraftStatus, EcosystemReadiness, EnrichmentState, EvaluationStage,
+    EvaluationStatus, Exclusion, Lead, LeadDetail, LeadFacts, LeadId, LeadQuery, LeadScoring,
+    LeadSort, LeadStatus, LlmProviderRecord, Profile, ProfileId, QualificationResult, Rejection,
+    RejectionProblem, ResultStatus, RunProvenance, SUMMARY_FAILED_AFTER, ScoringResult, Signal,
+    SignalKind, SummaryState, Verdict, VerdictAnswer, VerdictCap, VerdictFilter,
+    VerdictProbabilities, VerdictReason, VerdictSource, WorkKind, calibrate_verdict,
     definition::{QualificationAgent, Question, ScoringAgent},
     signal_sentence,
 };
@@ -21,6 +22,7 @@ use utoipa::{IntoParams, ToSchema};
 use crate::{
     auth::AuthenticatedUser,
     company::CompanyDto,
+    ecosystem::{EcosystemDto, ModuleStateDto},
     errors::{ApiError, ErrorDetail},
     profiles::ProfileRefDto,
     response::Response,
@@ -187,11 +189,11 @@ pub struct EvidenceComponentsDto {
     pub diversity: f64,
     /// Share of production hosts among the hosts carrying signals; 50 when no signal names a host.
     pub environment: f64,
-    /// Signal score, weighted by the mean freshness of the independent signals, against the profile reference score, capped at 100.
+    /// Signal strength: mean of the three strongest independent signals, each given by its source and decayed by its age, in percent from 0 to 100.
     pub strength: f64,
 }
 
-/// Strength of the evidence behind a lead, computed in code from its facts and signal score.
+/// Strength of the evidence behind a lead, computed in code from its facts and the strength of its signals.
 #[derive(Debug, Serialize, PartialEq, ToSchema)]
 pub struct EvidenceStrengthDto {
     /// Weighted mean of the components, in percent from 0 to 100.
@@ -205,6 +207,7 @@ pub struct EvidenceStrengthDto {
     pub decayed_signals: f64,
     pub source_count: u32,
     pub kind_count: u32,
+    /// Signal strength of the lead in percent from 0 to 100, as stored in `score` when the evidence was computed.
     pub signal_score: f64,
     pub only_non_production: bool,
 }
@@ -237,6 +240,7 @@ pub struct LeadDto {
     pub profile: ProfileRefDto,
     pub domain: String,
     pub status: LeadStatusDto,
+    /// Signal strength in percent from 0 to 100: mean of the three strongest independent signals, each given by its source and decayed by its age. Not a verdict score, see `llm_score`.
     pub score: f64,
     /// Confidence of the verdict in percent from 0 to 100: the probability of the winning verdict in the weighted mean of the scoring agents, 100 when a qualification agent excluded the lead. Absent while the verdict is pending.
     pub confidence: Option<f64>,
@@ -272,6 +276,77 @@ pub struct LeadDto {
     pub last_seen_at: String,
     #[schema(format = DateTime)]
     pub updated_at: String,
+    pub evaluation: Option<EvaluationDto>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "snake_case")]
+#[schema(as = EvaluationStage)]
+pub enum EvaluationStageDto {
+    NotEvaluated,
+    CertificateOnly,
+    RequalificationPlanned,
+    InspectionRunning,
+    InspectionComplete,
+    Evaluated,
+}
+
+impl From<EvaluationStage> for EvaluationStageDto {
+    fn from(stage: EvaluationStage) -> Self {
+        match stage {
+            EvaluationStage::NotEvaluated => Self::NotEvaluated,
+            EvaluationStage::CertificateOnly => Self::CertificateOnly,
+            EvaluationStage::RequalificationPlanned => Self::RequalificationPlanned,
+            EvaluationStage::InspectionRunning => Self::InspectionRunning,
+            EvaluationStage::InspectionComplete => Self::InspectionComplete,
+            EvaluationStage::Evaluated => Self::Evaluated,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "snake_case")]
+#[schema(as = RequalifyReason)]
+pub enum RequalifyReasonDto {
+    NewInformation,
+    Manual,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq, ToSchema)]
+pub struct EvaluationDto {
+    pub stage: EvaluationStageDto,
+    #[schema(format = DateTime)]
+    pub evaluated_at: Option<String>,
+    pub modules_done: u32,
+    pub modules_available: u32,
+    #[schema(format = DateTime)]
+    pub requalify_at: Option<String>,
+    pub requalify_reason: Option<RequalifyReasonDto>,
+    pub changed_modules: Vec<ModuleStateDto>,
+}
+
+impl From<&EvaluationStatus> for EvaluationDto {
+    fn from(status: &EvaluationStatus) -> Self {
+        Self {
+            stage: status.stage.into(),
+            evaluated_at: status.evaluated_at.map(|at| at.to_rfc3339()),
+            modules_done: status.modules_done,
+            modules_available: status.modules_available,
+            requalify_at: status.requalify_at.map(|at| at.to_rfc3339()),
+            requalify_reason: status.requalify_at.map(|_| {
+                if status.requalify_forced {
+                    RequalifyReasonDto::Manual
+                } else {
+                    RequalifyReasonDto::NewInformation
+                }
+            }),
+            changed_modules: status
+                .changed_modules
+                .iter()
+                .map(ModuleStateDto::from)
+                .collect(),
+        }
+    }
 }
 
 #[derive(Debug, Serialize, PartialEq, ToSchema)]
@@ -300,6 +375,11 @@ impl From<&Lead> for GroupedLeadDto {
 impl LeadDto {
     fn grouped(mut self, members: &[Lead]) -> Self {
         self.grouped_leads = members.iter().map(GroupedLeadDto::from).collect();
+        self
+    }
+
+    fn evaluated(mut self, status: Option<&EvaluationStatus>) -> Self {
+        self.evaluation = status.map(EvaluationDto::from);
         self
     }
 
@@ -340,6 +420,7 @@ impl LeadDto {
             first_seen_at: lead.first_seen_at.to_rfc3339(),
             last_seen_at: lead.last_seen_at.to_rfc3339(),
             updated_at: lead.updated_at.to_rfc3339(),
+            evaluation: None,
         }
     }
 }
@@ -448,6 +529,8 @@ pub struct DraftDto {
     /// Set when the summary was rewritten after a human edit, so the suggestion is newer than the draft.
     #[schema(format = DateTime)]
     pub outdated_at: Option<String>,
+    /// Increases on each edit; send it back as `expected_revision` to refuse a stale write.
+    pub revision: u32,
 }
 
 impl DraftDto {
@@ -479,6 +562,7 @@ impl DraftDto {
                 .as_ref()
                 .map(|suggestion| suggestion.body.clone()),
             outdated_at: review.outdated_at.map(|at| at.to_rfc3339()),
+            revision: review.revision.get(),
         }
     }
 }
@@ -582,27 +666,6 @@ impl From<&Assessment> for AssessmentDto {
                 .as_ref()
                 .map(|draft| DraftDto::new(draft, assessment.draft_review.as_ref())),
             created_at: assessment.created_at.to_rfc3339(),
-        }
-    }
-}
-
-#[derive(Debug, Serialize, PartialEq, ToSchema)]
-pub struct ScoreContributionDto {
-    pub signal: String,
-    pub value: Option<String>,
-    pub weight: f64,
-    pub measure: f64,
-    pub contribution: f64,
-}
-
-impl From<&ScoreContribution> for ScoreContributionDto {
-    fn from(contribution: &ScoreContribution) -> Self {
-        Self {
-            signal: contribution.signal.clone(),
-            value: contribution.value.clone(),
-            weight: contribution.weight,
-            measure: contribution.measure,
-            contribution: contribution.contribution,
         }
     }
 }
@@ -792,6 +855,15 @@ impl From<&VerdictAnswer> for ScoringVerdictDto {
     }
 }
 
+/// Correction learned from the human decisions that was applied to the verdict probabilities of a scoring agent.
+#[derive(Debug, Serialize, PartialEq, ToSchema)]
+pub struct ScoringCalibrationDto {
+    /// Labelled leads the correction was learned from.
+    pub n: u64,
+    /// Probabilities after the correction, in percent from 0 to 100. The raw ones are in `verdict`.
+    pub probabilities: VerdictProbabilitiesDto,
+}
+
 #[derive(Debug, Serialize, PartialEq, ToSchema)]
 pub struct ScoringResultDto {
     pub agent_id: String,
@@ -809,6 +881,8 @@ pub struct ScoringResultDto {
     /// Score from 0 to 100, absent when the result is invalid.
     pub score: Option<u8>,
     pub verdict: Option<ScoringVerdictDto>,
+    /// Present when a learned calibration corrects the probabilities of this agent in the combined verdict of the lead.
+    pub calibration: Option<ScoringCalibrationDto>,
     /// One to five short sentences, in the profile language, that explain the score and the verdict.
     pub reasons: Vec<String>,
     pub criteria: Vec<QualificationAnswerDto>,
@@ -821,9 +895,23 @@ impl ScoringResultDto {
     fn new(
         result: &ScoringResult,
         agents: &[ScoringAgent],
+        calibrations: &Calibrations,
         providers: &[LlmProviderRecord],
     ) -> Self {
         let agent = agents.iter().find(|agent| agent.id == result.agent_id);
+        let calibration = agent
+            .zip(result.verdict.as_ref())
+            .and_then(|(agent, answer)| {
+                let applied = calibrations.scoring(&agent.id)?;
+                Some(ScoringCalibrationDto {
+                    n: applied.n,
+                    probabilities: VerdictProbabilitiesDto::from(&calibrate_verdict(
+                        answer.probabilities,
+                        agent,
+                        calibrations,
+                    )),
+                })
+            });
         let provider = result
             .provenance
             .provider_id
@@ -845,6 +933,7 @@ impl ScoringResultDto {
             status: result.status.as_str().to_owned(),
             score: result.score,
             verdict: result.verdict.as_ref().map(ScoringVerdictDto::from),
+            calibration,
             reasons: result.reasons.clone(),
             criteria: agent
                 .map(|agent| answers_from(&result.criteria, &agent.criteria))
@@ -875,6 +964,122 @@ impl SummaryStateDto {
             error: state.error.clone(),
             next_attempt_at: state.next_attempt_at.map(|at| at.to_rfc3339()),
         })
+    }
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq, ToSchema)]
+pub struct EnrichmentDto {
+    pub modules: Vec<ModuleStateDto>,
+    pub hosting_platform: Option<String>,
+}
+
+impl From<&EnrichmentState> for EnrichmentDto {
+    fn from(state: &EnrichmentState) -> Self {
+        Self {
+            modules: state.modules.iter().map(ModuleStateDto::from).collect(),
+            hosting_platform: state.hosting_platform.map(str::to_owned),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "snake_case")]
+#[schema(as = AgentKind)]
+pub enum AgentKindDto {
+    Qualification,
+    Scoring,
+}
+
+impl From<AgentKind> for AgentKindDto {
+    fn from(kind: AgentKind) -> Self {
+        match kind {
+            AgentKind::Qualification => Self::Qualification,
+            AgentKind::Scoring => Self::Scoring,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, PartialEq, ToSchema)]
+pub struct AgentFailureDto {
+    pub kind: AgentKindDto,
+    /// Identifier of the agent whose model call failed.
+    pub agent_id: String,
+    /// Display name of that agent, its identifier when the profile no longer defines it.
+    pub agent_name: String,
+    /// Consecutive failed attempts of the model call for this lead and agent kind.
+    pub attempts: u32,
+    /// True from 5 consecutive failures; the agents then retry every 6 hours.
+    pub failed: bool,
+    /// Reason of the last failure, in French, with the provider message when there is one.
+    pub error: String,
+    #[schema(format = DateTime)]
+    pub next_attempt_at: Option<String>,
+}
+
+impl AgentFailureDto {
+    fn new(failure: &AgentFailure, detail: &LeadDetail) -> Self {
+        let name = match failure.kind {
+            AgentKind::Qualification => detail
+                .qualification_agents
+                .iter()
+                .find(|agent| agent.id.as_str() == failure.agent_id)
+                .map(|agent| agent.name.clone()),
+            AgentKind::Scoring => detail
+                .scoring_agents
+                .iter()
+                .find(|agent| agent.id.as_str() == failure.agent_id)
+                .map(|agent| agent.name.clone()),
+        };
+        Self {
+            kind: failure.kind.into(),
+            agent_id: failure.agent_id.clone(),
+            agent_name: name.unwrap_or_else(|| failure.agent_id.clone()),
+            attempts: failure.attempts,
+            failed: failure.attempts >= AGENT_FAILED_AFTER,
+            error: failure.error.clone(),
+            next_attempt_at: failure.next_attempt_at.map(|at| at.to_rfc3339()),
+        }
+    }
+}
+
+#[derive(Debug, Serialize, PartialEq, ToSchema)]
+pub struct AgentStopDto {
+    /// One of `sourcing`, `enrichment`, `qualification`, `scoring`, `aggregator`.
+    pub kind: String,
+    pub agent_id: String,
+    /// Display name of the agent, its identifier when the profile no longer defines it.
+    pub agent_name: String,
+    /// One of `agent_removed`, `agent_disabled`, `profile_deactivated`, `profile_deleted`.
+    pub reason: String,
+    pub profile_revision: u32,
+    #[schema(format = DateTime)]
+    pub stopped_at: String,
+}
+
+impl AgentStopDto {
+    fn new(stop: &AgentStop, detail: &LeadDetail) -> Self {
+        let agent = stop.target.agent.as_str();
+        let name = match stop.target.kind {
+            WorkKind::Qualification => detail
+                .qualification_agents
+                .iter()
+                .find(|known| known.id.as_str() == agent)
+                .map(|known| known.name.clone()),
+            WorkKind::Scoring => detail
+                .scoring_agents
+                .iter()
+                .find(|known| known.id.as_str() == agent)
+                .map(|known| known.name.clone()),
+            WorkKind::Sourcing | WorkKind::Enrichment | WorkKind::Aggregator => None,
+        };
+        Self {
+            kind: stop.target.kind.as_str().to_owned(),
+            agent_id: agent.to_owned(),
+            agent_name: name.unwrap_or_else(|| agent.to_owned()),
+            reason: stop.reason.as_str().to_owned(),
+            profile_revision: stop.revision.get(),
+            stopped_at: stop.stopped_at.to_rfc3339(),
+        }
     }
 }
 
@@ -1003,7 +1208,6 @@ impl From<&LeadFacts> for LeadFactsDto {
 pub struct LeadDetailDto {
     pub lead: LeadDto,
     pub facts: LeadFactsDto,
-    pub score_breakdown: Vec<ScoreContributionDto>,
     pub signals: Vec<SignalDto>,
     pub contacts: Vec<ContactDto>,
     pub assessments: Vec<AssessmentDto>,
@@ -1013,8 +1217,14 @@ pub struct LeadDetailDto {
     pub scoring_results: Vec<ScoringResultDto>,
     /// Present while the summary of the lead failed at least once since the agents last answered.
     pub summary_state: Option<SummaryStateDto>,
+    /// Qualification and scoring agents whose model call failed and is waiting for a new attempt; empty when none is.
+    pub agent_failures: Vec<AgentFailureDto>,
+    /// Agents whose work on this lead stopped because they were removed or disabled, or because the profile was deactivated; empty when none did.
+    pub agent_stops: Vec<AgentStopDto>,
     /// Company dossier of the lead domain; null until the company research listener has seen the domain.
     pub company: Option<CompanyDto>,
+    pub enrichment: EnrichmentDto,
+    pub ecosystem: EcosystemDto,
 }
 
 fn ordered_results(
@@ -1048,14 +1258,41 @@ fn ordered_scoring(detail: &LeadDetail, providers: &[LlmProviderRecord]) -> Vec<
     results.sort_by_key(|result| position(result));
     results
         .into_iter()
-        .map(|result| ScoringResultDto::new(result, &detail.scoring_agents, providers))
+        .map(|result| {
+            ScoringResultDto::new(
+                result,
+                &detail.scoring_agents,
+                &detail.calibrations,
+                providers,
+            )
+        })
         .collect()
 }
 
 impl LeadDetailDto {
-    pub fn new(detail: &LeadDetail, providers: &[LlmProviderRecord]) -> Self {
+    pub fn new(
+        detail: &LeadDetail,
+        providers: &[LlmProviderRecord],
+        readiness: &EcosystemReadiness,
+    ) -> Self {
         Self {
+            enrichment: EnrichmentDto::from(&detail.enrichment),
+            ecosystem: EcosystemDto::new(
+                &detail.ecosystem,
+                detail.enrichment.hosting_platform,
+                readiness,
+            ),
             summary_state: detail.summary_state.as_ref().and_then(SummaryStateDto::new),
+            agent_failures: detail
+                .agent_failures
+                .iter()
+                .map(|failure| AgentFailureDto::new(failure, detail))
+                .collect(),
+            agent_stops: detail
+                .agent_stops
+                .iter()
+                .map(|stop| AgentStopDto::new(stop, detail))
+                .collect(),
             company: detail.company.as_ref().map(|dossier| {
                 CompanyDto::from(dossier).with_entity(detail.entity.as_ref(), &detail.siblings)
             }),
@@ -1069,13 +1306,8 @@ impl LeadDetailDto {
                     .first()
                     .map(|assessment| assessment.summary.as_str()),
                 detail.scoring.as_ref(),
-            ),
-            score_breakdown: detail
-                .lead
-                .score_breakdown
-                .iter()
-                .map(ScoreContributionDto::from)
-                .collect(),
+            )
+            .evaluated(Some(&detail.evaluation)),
             facts: LeadFactsDto::from(&detail.facts),
             signals: detail.signals.iter().map(SignalDto::from).collect(),
             contacts: detail.contacts.iter().map(ContactDto::from).collect(),
@@ -1095,7 +1327,7 @@ pub struct ListLeadsParams {
     /// Minimum confidence in percent, inclusive. Leads without a confidence are left out.
     #[param(value_type = Option<f64>, minimum = 0, maximum = 100)]
     pub(crate) min_confidence: Option<String>,
-    /// Minimum score, inclusive. Must be a non-negative number.
+    /// Minimum signal strength from 0 to 100, inclusive. Must be a non-negative number.
     #[param(value_type = Option<f64>, minimum = 0)]
     pub(crate) min_score: Option<String>,
     /// Case-insensitive substring of the lead domain.
@@ -1104,7 +1336,7 @@ pub struct ListLeadsParams {
     pub(crate) signal: Option<String>,
     /// `company` to show one row per company, the best-confidence lead standing for its sibling domains; `none` (default) lists every lead.
     pub(crate) group_by: Option<String>,
-    /// One of confidence_desc (default), confidence_asc, score_desc, score_asc (signal score), llm_score_desc, llm_score_asc (score decided by the scoring agents, leads without one last), last_seen_desc, first_seen_desc, domain_asc.
+    /// One of confidence_desc (default), confidence_asc, score_desc, score_asc (signal strength), llm_score_desc, llm_score_asc (score decided by the scoring agents, leads without one last), last_seen_desc, first_seen_desc, domain_asc.
     pub(crate) sort: Option<String>,
     /// Page number, starting at 1.
     #[param(value_type = Option<u64>, minimum = 1)]
@@ -1336,6 +1568,7 @@ pub async fn list_leads(
                     .get(&lead.id)
                     .map_or(&[], Vec::as_slice),
             )
+            .evaluated(listing.evaluations.get(&lead.id))
         })
         .collect();
     let meta = PaginationMetadata::new(
@@ -1354,7 +1587,7 @@ pub async fn list_leads(
     security(("bearer_auth" = [])),
     params(("lead_id" = String, Path, description = "Lead identifier (UUID)")),
     responses(
-        (status = 200, description = "The lead with its profile, signals, contacts, assessments and score breakdown", body = crate::response::DataEnvelope<LeadDetailDto>),
+        (status = 200, description = "The lead with its profile, signals, contacts, and assessments", body = crate::response::DataEnvelope<LeadDetailDto>),
         (status = 400, description = "Malformed lead identifier"),
         (status = 401, description = "Missing, malformed, invalid or expired bearer token"),
         (status = 404, description = "Unknown lead, or its domain is suppressed"),
@@ -1370,7 +1603,10 @@ pub async fn lead_detail(
     } else {
         state.usecase.list_llm_providers().await?
     };
-    Ok(Response::OK(LeadDetailDto::new(&detail, &providers)))
+    let readiness = state.usecase.ecosystem_readiness().await?;
+    Ok(Response::OK(LeadDetailDto::new(
+        &detail, &providers, &readiness,
+    )))
 }
 
 #[utoipa::path(
@@ -1466,4 +1702,80 @@ pub async fn retry_lead_summary(
         summary,
         detail.scoring.as_ref(),
     )))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/leads/{lead_id}/agents/retry",
+    tag = "leads",
+    security(("bearer_auth" = [])),
+    params(("lead_id" = String, Path, description = "Lead identifier (UUID)")),
+    responses(
+        (status = 200, description = "The failure counters of the qualification and scoring agents in failure are reset; they try again on their next loop. Nothing changes when no agent is in failure", body = crate::response::DataEnvelope<LeadDto>),
+        (status = 400, description = "Malformed lead identifier"),
+        (status = 401, description = "Missing, malformed, invalid or expired bearer token"),
+        (status = 403, description = "The caller is not a user"),
+        (status = 404, description = "Unknown lead, or its domain is suppressed"),
+    )
+)]
+pub async fn retry_lead_agents(
+    State(state): State<AppState>,
+    user: Option<Extension<AuthenticatedUser>>,
+    Path(lead_id_raw): Path<String>,
+) -> Result<Response<LeadDto>, ApiError> {
+    if user.is_none() {
+        return Err(ApiError::Forbidden);
+    }
+    let lead = state
+        .usecase
+        .retry_lead_agents(lead_id(&lead_id_raw)?)
+        .await?;
+    let detail = state.usecase.lead_detail(lead.id).await?;
+    let summary = detail
+        .assessments
+        .first()
+        .map(|assessment| assessment.summary.as_str());
+    Ok(Response::OK(LeadDto::new(
+        &lead,
+        &detail.profile,
+        summary,
+        detail.scoring.as_ref(),
+    )))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/leads/{lead_id}/reevaluate",
+    tag = "leads",
+    security(("bearer_auth" = [])),
+    params(("lead_id" = String, Path, description = "Lead identifier (UUID)")),
+    responses(
+        (status = 200, description = "The lead is due for a new evaluation by its qualification, scoring and aggregator agents at once, beyond the daily cap of automatic requalifications", body = crate::response::DataEnvelope<LeadDto>),
+        (status = 400, description = "Malformed lead identifier"),
+        (status = 401, description = "Missing, malformed, invalid or expired bearer token"),
+        (status = 403, description = "The caller is not a user"),
+        (status = 404, description = "Unknown lead, or its domain is suppressed"),
+    )
+)]
+pub async fn reevaluate_lead(
+    State(state): State<AppState>,
+    user: Option<Extension<AuthenticatedUser>>,
+    Path(lead_id_raw): Path<String>,
+) -> Result<Response<LeadDto>, ApiError> {
+    if user.is_none() {
+        return Err(ApiError::Forbidden);
+    }
+    let lead = state
+        .usecase
+        .request_lead_reevaluation(lead_id(&lead_id_raw)?)
+        .await?;
+    let detail = state.usecase.lead_detail(lead.id).await?;
+    let summary = detail
+        .assessments
+        .first()
+        .map(|assessment| assessment.summary.as_str());
+    Ok(Response::OK(
+        LeadDto::new(&lead, &detail.profile, summary, detail.scoring.as_ref())
+            .evaluated(Some(&detail.evaluation)),
+    ))
 }

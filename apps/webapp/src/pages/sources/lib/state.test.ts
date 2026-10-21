@@ -6,10 +6,13 @@ import {
 	canRun,
 	groupedSources,
 	isSettled,
+	providerReady,
 	runDisabledReason,
 	runSummary,
 	shortError,
 	shouldPoll,
+	sourceState,
+	stateLabel,
 	TRIGGER_TTL_MS,
 } from './state'
 
@@ -51,13 +54,49 @@ describe('groupedSources', () => {
 			source('role_guess'),
 		])
 		expect(groups.map((group) => group.title)).toEqual([
-			'Infrastructure',
 			'Marchés publics',
+			'Enrichissement',
 			'Contacts',
 			'Qualification',
 		])
-		expect(groups[0]?.sources.map((item) => item.source)).toEqual([
+		expect(groups[1]?.sources.map((item) => item.source)).toEqual([
 			'http_probe',
+		])
+	})
+
+	it('lists Hacker News and Welcome to the Jungle with the job offer sources', () => {
+		const groups = groupedSources([
+			source('welcome_to_the_jungle'),
+			source('hacker_news_hiring'),
+			source('france_travail'),
+		])
+		expect(groups.map((group) => group.title)).toEqual(["Offres d'emploi"])
+		expect(groups[0]?.sources.map((item) => item.source)).toEqual([
+			'france_travail',
+			'hacker_news_hiring',
+			'welcome_to_the_jungle',
+		])
+	})
+
+	it('groups the inspection, the company job offers and the HTTP probe under Enrichissement', () => {
+		const groups = groupedSources([
+			source('ats'),
+			source('france_travail'),
+			source('http_probe'),
+			source('certificate_transparency'),
+			source('ecosystem_inspection', {
+				kind: 'listener.ecosystem_inspection',
+			}),
+		])
+		expect(groups.map((group) => group.title)).toEqual([
+			'Infrastructure',
+			"Offres d'emploi",
+			'Enrichissement',
+		])
+		expect(groups[2]?.sources.map((item) => item.source)).toEqual([
+			'ecosystem_inspection',
+			'http_probe',
+			'ats',
 		])
 	})
 
@@ -112,15 +151,33 @@ describe('run availability', () => {
 		expect(runDisabledReason(source('boamp'))).toBeNull()
 	})
 
-	it('explains missing credentials', () => {
-		expect(
-			runDisabledReason(
-				source('france_travail', {
-					status: 'unavailable',
-					unavailable_reason: 'missing_credentials',
-				}),
-			),
-		).toBe('Identifiants manquants : la source est désactivée')
+	it('a source whose job was stopped is shown stopped and cannot be run', () => {
+		const stopped = source('boamp', { status: 'cancelled' })
+		expect(sourceState(stopped)).toBe('cancelled')
+		expect(stateLabel('cancelled')).toBe('Arrêté')
+		expect(canRun(stopped)).toBe(false)
+		expect(runDisabledReason(stopped)).toBe(
+			"La tâche a été arrêtée : plus aucun agent actif n'utilise cette source",
+		)
+	})
+
+	it('a source whose provider is not ready cannot be run', () => {
+		for (const status of ['not_configured', 'untested', 'failing']) {
+			const blocked = source('boamp', {
+				provider: { key: 'boamp', name: 'BOAMP', status },
+			})
+			expect(providerReady(blocked)).toBe(false)
+			expect(canRun(blocked)).toBe(false)
+			expect(runDisabledReason(blocked)).toBe(
+				'Le fournisseur doit être prêt dans le catalogue',
+			)
+		}
+		const ready = source('boamp', {
+			provider: { key: 'boamp', name: 'BOAMP', status: 'ready' },
+		})
+		expect(providerReady(ready)).toBe(true)
+		expect(canRun(ready)).toBe(true)
+		expect(providerReady(source('qualification'))).toBe(true)
 	})
 })
 
@@ -177,6 +234,22 @@ describe('runSummary', () => {
 		expect(summary.error?.length).toBe(80)
 		expect(summary.error?.endsWith('…')).toBe(true)
 		expect(shortError('a\n b')).toBe('a b')
+	})
+
+	it('says why a cancelled run stopped', () => {
+		const summary = runSummary(
+			run({ status: 'cancelled', cancel_reason: 'agent_removed', volume: 2 }),
+			NOW,
+		)
+		expect(summary.statusLabel).toBe('Arrêté : agent supprimé')
+		expect(summary.failed).toBe(false)
+		expect(summary.counts).toBe('2 éléments, 1 signal')
+		expect(
+			runSummary(
+				run({ status: 'cancelled', cancel_reason: 'profile_deactivated' }),
+				NOW,
+			).statusLabel,
+		).toBe('Arrêté : profil désactivé')
 	})
 
 	it('has no counts while running', () => {

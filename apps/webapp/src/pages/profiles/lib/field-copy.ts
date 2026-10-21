@@ -16,7 +16,13 @@ const MATCHER_EQUALS: FieldCopy = {
 	description: 'Code de statut HTTP attendu dans la réponse.',
 }
 
-const FINGERPRINT = 'agents[].source.fingerprints[]'
+export const LEARNED_CALIBRATION_COPY: FieldCopy = {
+	label: 'Calibration apprise',
+	description:
+		"Corrige chaque jour les probabilités de cet agent d'après vos décisions, dès 50 leads étiquetés dont au moins 10 de chaque classe.",
+}
+
+const FINGERPRINT = 'enrichment.custom.fingerprints[]'
 const MARKER = `${FINGERPRINT}.debt_markers[]`
 
 export const FIELD_COPY: Readonly<Record<string, FieldCopy>> = {
@@ -34,11 +40,13 @@ export const FIELD_COPY: Readonly<Record<string, FieldCopy>> = {
 	},
 	agents: {
 		label: 'Agents',
-		description: 'Agents de détection. Au moins un est requis.',
+		description:
+			'Agents de sourcing : ils trouvent les leads. Au moins un est requis, sauf si le profil a ses propres empreintes ou des mots-clés à mettre en avant.',
 	},
 	'agents[]': {
 		label: 'Agent',
-		description: 'Recherche une source avec ses propres réglages.',
+		description:
+			'Un agent de recherche interroge des fournisseurs du catalogue, un agent Certificats lit les journaux de certificats, un agent DNS reconnaît des fournisseurs par la cible CNAME.',
 	},
 	'agents[].id': {
 		label: 'Identifiant',
@@ -52,49 +60,76 @@ export const FIELD_COPY: Readonly<Record<string, FieldCopy>> = {
 		label: 'Activé',
 		description: "Un agent désactivé est conservé mais n'est pas exécuté.",
 	},
-	'agents[].source': {
-		label: 'Source',
-		description: 'La source interrogée et ses réglages.',
-	},
-	'agents[].llm': {
-		label: "Réglages LLM de l'agent",
-		description: 'Réglages LLM propres à cet agent.',
-	},
-	'agents[].llm.relevance_criteria': {
-		label: 'Critères de pertinence',
-		description:
-			"Critères donnés au LLM pour trier les candidats de cet agent. Les critères du profil s'appliquent à défaut.",
-	},
-	'agents[].source.labels': {
+	'agents[].labels': {
 		label: 'Libellés',
 		description:
 			"Libellés de nom d'hôte à rechercher, par exemple auth ou sso.",
 	},
-	'agents[].source.patterns': {
+	'agents[].countries': {
+		label: 'Pays',
+		description:
+			"Pays visés. Un hôte sous l'extension d'un autre pays ne crée pas de lead ; une extension générique en crée un, retiré du profil si le siège de l'entreprise est ailleurs.",
+	},
+	'agents[].patterns': {
 		label: 'Motifs CNAME',
 		description: 'Couples fournisseur et suffixe de cible.',
 	},
-	'agents[].source.patterns[]': {
+	'agents[].patterns[]': {
 		label: 'Motif CNAME',
 		description: "Un fournisseur et le suffixe de cible CNAME qui l'identifie.",
 		add: 'Ajouter un motif',
 	},
-	'agents[].source.patterns[].provider': {
+	'agents[].patterns[].provider': {
 		label: 'Fournisseur',
 		description: 'Nom du fournisseur.',
 	},
-	'agents[].source.patterns[].target_suffix': {
+	'agents[].patterns[].target_suffix': {
 		label: 'Suffixe cible',
 		description: 'Suffixe de la cible CNAME qui identifie le fournisseur.',
 	},
-	'agents[].source.fingerprints': {
+	inspection: {
+		label: "Inspection de l'écosystème",
+		description:
+			'Chaque lead avec un domaine reçoit la même inspection, quel que soit le profil : identité officielle, vie légale, marchés publics, site et stack technique, DNS et e-mail, recrutement et activité récente.',
+	},
+	'inspection.enabled': {
+		label: "Inspecter l'écosystème des leads",
+		description:
+			"Désactivée, les leads du profil ne sont pas inspectés et la qualification n'attend pas l'inspection.",
+	},
+	enrichment: {
+		label: 'Enrichissement',
+		description:
+			"Réglages de l'inspection propres à ce profil. Tout le reste est identique pour chaque profil.",
+	},
+	'enrichment.custom': {
+		label: 'Empreintes propres au profil',
+		description:
+			'Empreintes sondées sur le site de chaque lead du profil, produits ignorés et sous-domaines sondés en plus.',
+	},
+	'enrichment.custom.extra_subdomains': {
+		label: 'Sous-domaines supplémentaires',
+		description:
+			'Sous-domaines du domaine du lead sondés en plus avec vos empreintes, par exemple auth ou sso. Vide par défaut.',
+	},
+	'enrichment.custom.fingerprints': {
 		label: 'Empreintes',
-		description: 'Empreintes à sonder sur chaque domaine.',
+		description: 'Empreintes à sonder sur le site de chaque lead.',
+	},
+	'enrichment.custom.excluded_products': {
+		label: 'Produits exclus',
+		description: 'Produits à ignorer, par exemple les vôtres.',
+	},
+	'enrichment.highlight_keywords': {
+		label: 'Mots-clés à mettre en avant',
+		description:
+			"Mots-clés cherchés dans les offres d'emploi des leads. Une offre qui les contient est mise en avant et devient un signal. Vide : les mots-clés des agents de recherche activés.",
 	},
 	[FINGERPRINT]: {
 		label: 'Empreinte',
 		description:
 			"Empreinte d'un produit : chemin à requêter, conditions, extracteur de version facultatif et marqueurs de dette.",
+		add: 'Ajouter une empreinte',
 	},
 	[`${FINGERPRINT}.id`]: {
 		label: 'Identifiant',
@@ -160,24 +195,47 @@ export const FIELD_COPY: Readonly<Record<string, FieldCopy>> = {
 		description:
 			'Expression régulière avec un groupe de capture pour la version.',
 	},
-	'agents[].source.excluded_products': {
-		label: 'Produits exclus',
-		description: 'Produits à ignorer, par exemple les vôtres.',
-	},
-	'agents[].source.keywords': {
-		label: 'Mots-clés',
-		description: 'Mots-clés à rechercher.',
-	},
-	'agents[].source.accept_min_keywords': {
-		label: 'Mots-clés distincts pour accepter sans LLM',
+	'agents[].filters': {
+		label: 'Filtres',
 		description:
-			"Nombre de mots-clés distincts requis pour accepter un candidat sans le LLM. En dessous, ou en présence d'une exclusion, il passe au tri par le LLM.",
+			"Critères communs à tous les fournisseurs de l'agent. Chaque fournisseur filtre ce que son API permet, le reste est appliqué après la collecte.",
 	},
-	'agents[].source.exclusions': {
+	'agents[].filters.remote': {
+		label: 'Télétravail',
+		description:
+			"Indifférent, full remote uniquement, ou remote et hybride. Ne concerne que les offres d'emploi.",
+	},
+	'agents[].filters.contracts': {
+		label: 'Contrat',
+		description:
+			'Types de contrat acceptés. Sans choix, ou avec « Tous les contrats », aucun filtre.',
+	},
+	'agents[].providers': {
+		label: 'Fournisseurs',
+		description:
+			'Fournisseurs du catalogue interrogés par cet agent. Au moins un est requis.',
+	},
+	'agents[].filters.countries': {
+		label: 'Pays',
+		description:
+			'Codes pays ISO à deux lettres en majuscules, par exemple FR. Vide : tous les pays.',
+	},
+	'agents[].keywords': {
+		label: 'Mots-clés',
+		description:
+			'Une annonce est gardée si elle contient au moins un de ces mots-clés, en mot entier.',
+	},
+	'agents[].accept_min_keywords': {
+		label: 'Mots-clés distincts pour un signal fort',
+		description:
+			"Nombre de mots-clés distincts qu'une annonce doit contenir pour donner un signal fort. En dessous, ou si une exclusion y figure, l'annonce est gardée avec un signal plus faible. Une annonce sans aucun mot-clé est écartée.",
+	},
+	'agents[].exclusions': {
 		label: 'Exclusions',
 		description:
-			"Mots-clés qui envoient un candidat au tri par le LLM lorsqu'ils sont présents.",
+			"Mots qui affaiblissent le signal d'une annonce lorsqu'ils y figurent. Ils ne l'écartent pas : seule une annonce sans aucun mot-clé est écartée.",
 	},
+	'qualification_agents[].learned_calibration': LEARNED_CALIBRATION_COPY,
 	qualification_agents: {
 		label: 'Agents de qualification',
 		description:
@@ -214,11 +272,6 @@ export const FIELD_COPY: Readonly<Record<string, FieldCopy>> = {
 	'qualification_agents[].system_prompt': {
 		label: 'Prompt système',
 		description: 'Consigne donnée au modèle, 8000 caractères au maximum.',
-	},
-	'qualification_agents[].weight': {
-		label: "Poids de l'agent",
-		description:
-			'Poids entier de 1 à 10 de cet agent dans la confiance du lead.',
 	},
 	'qualification_agents[].exclusion_threshold': {
 		label: "Seuil d'exclusion",
@@ -289,6 +342,7 @@ export const FIELD_COPY: Readonly<Record<string, FieldCopy>> = {
 		description:
 			"Quand l'agent choisit cette option avec une preuve vérifiée et une probabilité au moins égale au seuil d'exclusion, le lead est écarté. Jamais sur l'option « inconnu ».",
 	},
+	'scoring_agents[].learned_calibration': LEARNED_CALIBRATION_COPY,
 	scoring_agents: {
 		label: 'Agents de scoring',
 		description:
@@ -325,7 +379,7 @@ export const FIELD_COPY: Readonly<Record<string, FieldCopy>> = {
 	'scoring_agents[].weight': {
 		label: "Poids de l'agent",
 		description:
-			'Poids entier de 1 à 10 de cet agent dans le score et le verdict du lead.',
+			'Poids entier de 1 à 10 de cet agent dans la moyenne pondérée du score et du verdict du lead. Affiché à partir de deux agents de scoring.',
 	},
 	'scoring_agents[].system_prompt': {
 		label: 'Prompt système',
@@ -463,11 +517,6 @@ export const FIELD_COPY: Readonly<Record<string, FieldCopy>> = {
 		description:
 			"Confiance = avis des agents × ((1 − influence) + influence × solidité des preuves). 0 % ignore les preuves, 100 % multiplie l'avis par elles.",
 	},
-	'evidence.reference_score': {
-		label: 'Score de référence',
-		description:
-			'Score des signaux à partir duquel la force des signaux vaut 100 %. Au moins 1.',
-	},
 	'evidence.weights': {
 		label: 'Poids des composantes',
 		description:
@@ -490,76 +539,40 @@ export const FIELD_COPY: Readonly<Record<string, FieldCopy>> = {
 	},
 	'evidence.weights.strength': {
 		label: 'Force des signaux',
-		description: 'Poids du score des signaux du lead, de 0 à 10.',
+		description:
+			'Poids de la force des signaux : moyenne des trois signaux indépendants les plus forts, chacun avec la force donnée par sa source et diminué selon son âge, de 0 à 10.',
 	},
 	'evidence.half_life_days': {
 		label: 'Demi-vie des signaux (jours)',
 		description:
 			"Âge en jours auquel un signal ne compte plus que pour moitié dans le volume et la force des preuves, par type de signal. « default » s'applique aux types non listés.",
 	},
-	scoring: {
-		label: 'Scoring',
-		description:
-			"Facteurs pondérés. Le score d'un lead est la somme du poids multiplié par la mesure de chaque facteur.",
-	},
-	'scoring.factors': {
-		label: 'Facteurs',
-		description: 'Facteurs pondérés.',
-	},
-	'scoring.factors[]': {
-		label: 'Facteur',
-		description: 'Un type de signal pondéré.',
-	},
-	'scoring.factors[].signal': {
-		label: 'Signal',
-		description:
-			"Type de signal. Le type réservé distinct_signals mesure le nombre de types de signaux distincts d'un lead.",
-	},
-	'scoring.factors[].value': {
-		label: 'Valeur',
-		description: 'Valeur du signal à retenir. Toute valeur si absente.',
-	},
-	'scoring.factors[].weight': {
-		label: 'Poids',
-		description: 'Poids entier de 1 à 10 appliqué à la mesure du signal.',
-	},
 	contact_ranking: {
-		label: 'Classement des contacts',
+		label: 'Contacts',
 		description:
-			"Parties locales d'adresses e-mail préférées, la plus préférée en premier.",
+			'Quelles adresses e-mail retenir pour contacter une entreprise détectée.',
 	},
 	'contact_ranking.preferred_local_parts': {
-		label: 'Parties locales préférées',
+		label: 'Adresses à privilégier',
 		description:
-			"Parties locales d'adresses e-mail préférées, la plus préférée en premier.",
+			"Débuts d'adresse e-mail (la partie avant le @, par exemple security ou contact) à retenir en priorité parmi celles trouvées, la plus recherchée en premier.",
 	},
 	'contact_ranking.guess_local_parts': {
-		label: 'Parties locales à deviner',
+		label: 'Adresses à deviner',
 		description:
-			"Parties locales à deviner lorsqu'aucune adresse n'est trouvée.",
+			"Débuts d'adresse e-mail à essayer lorsqu'aucune adresse n'est trouvée. Chacun doit aussi figurer dans les adresses à privilégier.",
 	},
-	llm: {
-		label: 'LLM',
-		description:
-			'Seuil de qualification, critères de pertinence et langue des réponses donnés au modèle.',
-	},
-	'llm.qualification_threshold': {
-		label: 'Seuil de qualification',
-		description:
-			'Pourcentage du score maximal possible à partir duquel un lead est qualifié.',
-	},
-	'llm.relevance_criteria': {
-		label: 'Critères de pertinence',
-		description: "Critères donnés au LLM pour juger la pertinence d'un lead.",
-	},
-	'llm.language': {
-		label: 'Langue des réponses du LLM',
+	language: {
+		label: 'Langue des réponses',
 		description:
 			"Langue du bilan, de l'angle d'approche, du brouillon et des raisons de tri. Les citations restent dans la langue de la source.",
 	},
 }
 
 export const VARIANT_TITLES: Readonly<Record<string, string>> = {
+	search: 'Recherche',
+	certificates: 'Certificats',
+	dns: 'DNS',
 	certificate_transparency: 'Transparence des certificats',
 	dns_cname: 'DNS CNAME',
 	http_probe: 'Sonde HTTP',

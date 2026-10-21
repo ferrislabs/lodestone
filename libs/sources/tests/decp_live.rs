@@ -3,7 +3,7 @@ use std::{num::NonZeroU32, sync::Arc, time::Duration};
 use chrono::{TimeZone, Utc};
 use fetch::{FetchSettings, PoliteFetcher};
 use lodestone_core::{
-    ActiveProfile, Profile, ProfileId, ProfileName, ProfileRevision, RevisionNumber,
+    ActiveProfile, Profile, ProfileId, ProfileName, ProfileRevision, RevisionNumber, SourceName,
     ValidatedProfile,
 };
 use sources::decp::{
@@ -68,9 +68,9 @@ async fn iam_profile_against_the_real_decp_dataset() {
     let source = DecpSource::new(
         fetcher,
         DecpSettings {
-            dataset_api_url: Url::parse(DATASET_API_URL).unwrap(),
+            dataset_api_url: Url::parse(DATASET_API_URL).unwrap().into(),
             annuaire_url: Url::parse(ANNUAIRE_URL).unwrap(),
-            entreprises_url: Url::parse(ENTREPRISES_URL).unwrap(),
+            entreprises_url: Url::parse(ENTREPRISES_URL).unwrap().into(),
             lookback_days: DEFAULT_LOOKBACK_DAYS,
             notified_within_days: days(
                 "LODESTONE_DECP_NOTIFIED_WITHIN_DAYS",
@@ -85,7 +85,7 @@ async fn iam_profile_against_the_real_decp_dataset() {
         .revision
         .definition
         .definition()
-        .enabled_keyword_rules(lodestone_core::SourceName::Decp)
+        .enabled_search_agents(SourceName::Decp)
         .next()
         .cloned()
         .unwrap();

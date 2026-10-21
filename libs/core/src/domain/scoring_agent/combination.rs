@@ -1,5 +1,6 @@
 use super::{ScoringResult, VerdictProbabilities};
 use crate::domain::{
+    calibration::{Calibrations, calibrate_verdict},
     profile::{contract::MAX_SCORE, definition::ScoringAgent},
     qualification::{Exclusion, Verdict, VerdictReason},
 };
@@ -11,13 +12,6 @@ pub fn round_score(value: f64) -> u8 {
     (0..=MAX_SCORE)
         .find(|candidate| f64::from(*candidate) >= rounded)
         .unwrap_or(MAX_SCORE)
-}
-
-pub fn calibrate_verdict(
-    probabilities: VerdictProbabilities,
-    _agent: &ScoringAgent,
-) -> VerdictProbabilities {
-    probabilities
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -48,7 +42,11 @@ fn percent(probability: f64) -> f64 {
     (probability * 1000.0).round() / 10.0
 }
 
-pub fn combine(inputs: &[AgentDecision<'_>], exclusions: Vec<Exclusion>) -> Decision {
+pub fn combine(
+    inputs: &[AgentDecision<'_>],
+    calibrations: &Calibrations,
+    exclusions: Vec<Exclusion>,
+) -> Decision {
     let weights: Vec<f64> = inputs
         .iter()
         .map(|input| f64::from(input.agent.weight))
@@ -65,7 +63,12 @@ pub fn combine(inputs: &[AgentDecision<'_>], exclusions: Vec<Exclusion>) -> Deci
     let calibrated: Vec<(f64, VerdictProbabilities)> = inputs
         .iter()
         .zip(&weights)
-        .map(|(input, weight)| (*weight, calibrate_verdict(input.probabilities, input.agent)))
+        .map(|(input, weight)| {
+            (
+                *weight,
+                calibrate_verdict(input.probabilities, input.agent, calibrations),
+            )
+        })
         .collect();
     let probabilities = VerdictProbabilities::weighted_mean(&calibrated);
     if !exclusions.is_empty() {
@@ -107,6 +110,7 @@ pub fn combine(inputs: &[AgentDecision<'_>], exclusions: Vec<Exclusion>) -> Deci
 pub fn decide(
     agents: &[ScoringAgent],
     results: &[ScoringResult],
+    calibrations: &Calibrations,
     exclusions: Vec<Exclusion>,
 ) -> Decision {
     let inputs: Vec<AgentDecision<'_>> = agents
@@ -122,5 +126,5 @@ pub fn decide(
             })
         })
         .collect();
-    combine(&inputs, exclusions)
+    combine(&inputs, calibrations, exclusions)
 }

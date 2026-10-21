@@ -1,3 +1,4 @@
+import { stopReasonLabel } from '#/lib/agent-stop'
 import { formatDateTime, formatRelative } from '#/lib/format'
 import { sourceLabel } from '#/lib/labels'
 import {
@@ -22,10 +23,17 @@ export const SOURCE_GROUPS: readonly {
 }[] = [
 	{
 		title: 'Infrastructure',
-		sources: ['certificate_transparency', 'dns_cname', 'http_probe'],
+		sources: ['certificate_transparency', 'dns_cname'],
 	},
 	{ title: 'Marchés publics', sources: ['boamp', 'decp', 'ted'] },
-	{ title: "Offres d'emploi", sources: ['france_travail', 'ats'] },
+	{
+		title: "Offres d'emploi",
+		sources: ['france_travail', 'hacker_news_hiring', 'welcome_to_the_jungle'],
+	},
+	{
+		title: 'Enrichissement',
+		sources: ['ecosystem_inspection', 'http_probe', 'ats'],
+	},
 	{
 		title: 'Contacts',
 		sources: ['public_page', 'security_txt', 'role_guess'],
@@ -41,6 +49,7 @@ const STATE_LABELS: Readonly<Record<SourceState, string>> = {
 	running: 'En cours',
 	failed: 'Échec',
 	succeeded: 'Terminé',
+	cancelled: 'Arrêté',
 	unavailable: 'Indisponible',
 }
 
@@ -49,6 +58,7 @@ export function sourceState(source: Source): SourceState {
 		case 'running':
 		case 'failed':
 		case 'succeeded':
+		case 'cancelled':
 		case 'unavailable':
 			return source.status
 		default:
@@ -60,24 +70,32 @@ export function stateLabel(state: SourceState): string {
 	return STATE_LABELS[state]
 }
 
+export const PROVIDER_NOT_READY_LABEL = 'Provider non prêt'
+
+export function providerReady(source: Source): boolean {
+	return source.provider == null || source.provider.status === 'ready'
+}
+
 export function canRun(source: Source): boolean {
-	return sourceState(source) === 'pending'
+	return sourceState(source) === 'pending' && providerReady(source)
 }
 
 export function runDisabledReason(source: Source): string | null {
 	switch (sourceState(source)) {
 		case 'pending':
-			return null
+			return providerReady(source)
+				? null
+				: 'Le fournisseur doit être prêt dans le catalogue'
 		case 'running':
 			return 'La source est déjà en cours'
 		case 'unavailable':
-			return source.unavailable_reason === 'missing_credentials'
-				? 'Identifiants manquants : la source est désactivée'
-				: "Aucune tâche n'est planifiée pour cette source"
+			return "Aucune tâche n'est planifiée pour cette source"
 		case 'failed':
 			return 'La tâche a échoué définitivement et ne sera plus planifiée'
 		case 'succeeded':
 			return "La tâche est terminée et n'est plus planifiée"
+		case 'cancelled':
+			return "La tâche a été arrêtée : plus aucun agent actif n'utilise cette source"
 	}
 }
 
@@ -195,7 +213,10 @@ export function runSummary(run: SourceRun, now: number): RunSummary {
 	const running = run.status === 'running'
 	return {
 		status: run.status,
-		statusLabel: RUN_STATUS_LABELS[run.status] ?? run.status,
+		statusLabel:
+			run.status === 'cancelled'
+				? stopReasonLabel(run.cancel_reason)
+				: (RUN_STATUS_LABELS[run.status] ?? run.status),
 		failed: run.status === 'failed',
 		counts: running
 			? null

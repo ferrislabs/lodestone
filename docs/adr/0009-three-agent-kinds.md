@@ -37,7 +37,7 @@ The scoring agents are implemented in issue 172 and the verdict part of ADR 0007
 Profile schema 11 adds `scoring_agents`. The contract, the inputs, the combination, the storage and the due logic are specified in `docs/profiles.md` ("Scoring agents"). The decisions:
 
 - **Imposed contract.** `criteria` (same shape and grounding as qualification answers, no exclusion), an integer `score`, a `verdict` with `choice`, `confidence` and probabilities for `fiable`, `a_verifier` and `ecarte`, and 1 to 5 `reasons`. Validated like a qualification answer, one retry, an invalid answer makes the agent result missing.
-- **Combination.** Weighted mean of the scores, rounded; argmax of the weighted mean of the verdict probabilities with prudent ties (`a_verifier`, then `ecarte`, then `fiable`); the confidence of the verdict is the probability of the winner. Qualification exclusions force `ecarte` with confidence 100. No valid scoring result: verdict `null` and reason `awaiting_scoring`. `calibrate_verdict` is the identity until issue 171.
+- **Combination.** Weighted mean of the scores, rounded; argmax of the weighted mean of the verdict probabilities with prudent ties (`a_verifier`, then `ecarte`, then `fiable`); the confidence of the verdict is the probability of the winner. Qualification exclusions force `ecarte` with confidence 100. No valid scoring result: verdict `null` and reason `awaiting_scoring`. `calibrate_verdict` is the identity until a learned calibration applies to the agent (issue 171, "Learned calibration" in `docs/profiles.md`).
 - **Pipeline.** qualification agents (escalation included), scoring agents, aggregator. A lead is due for scoring when its qualification results changed or its profile revision changed; the aggregator waits for the scoring of the lead.
 - **Rescoring.** The loop without model call refreshes the indicators and the decay and no longer decides; it recombines stored scoring results, and only exclusions can change a verdict.
 - **Migration.** A lead keeps the verdict computed by the former formula (`verdict_source` `indicators`) until its first scoring.
@@ -64,3 +64,16 @@ The indicators are computed in code without any model call and must be reliable 
 - A company with several domains is one entity in evidence and in the list (grouped rows), while each domain keeps its own lead, status and decisions.
 - Decay is computed when a lead is scored; between two rescorings the stored evidence ages. A lead that nothing touches keeps the strength it had at its last scoring.
 - The decision is taken by the scoring agents; the ADR 0007 formula, fed by the corrected indicators, is kept as the indicators they are given.
+
+## Amendment: no signal weights (#180)
+
+With the scoring agents deciding the score and the verdict, the weighted `scoring.factors` of the profile only computed `leads.score`. Profile schema 13 removes `scoring` and `evidence.reference_score`; the upgrade from 12 discards them. The strength of the signals comes only from the sources, which already give each signal a `strength` from 0 to 1.
+
+- **Signal strength.** The mean of the three highest `strength x decay` among the independent signals of the lead and its siblings of the same profile (fewer when there are fewer, 0 when none). It is the `strength` component of the evidence (replacing `signal score x freshness / reference score`), and `leads.score` = round(strength x 100, 1).
+- **Where it is written.** At each recording of signals (sources, contact finder), with the clock of the run, and by the rescoring loop for every lead it rescores, since decay changes it with the days.
+- **Staleness.** A lead is stale when its scoring version is older, its stored evidence is older than a day or missing, or the number of signals it aggregates changed. The comparison of the stored signal score with `leads.score` is gone: the score is a function of the signals and of the date, refreshed with them.
+- **Public meaning.** `min_score`, the score sorts, the `score` field of exports and webhooks and the lead page show the signal strength from 0 to 100, labelled "Force des signaux" in the webapp. `score_breakdown` is removed.
+
+## Amendment: weights only between scoring agents (#184)
+
+Scoring agents keep their `weight`: the lead score and the verdict are the weighted means of their answers. The weight is meaningless with a single scoring agent, so the editor shows it (card and sheet) only when the profile declares two or more scoring agents, and keeps the stored value when it is hidden. Qualification agents lose their weight (profile schema 15, ADR 0007 amendment).

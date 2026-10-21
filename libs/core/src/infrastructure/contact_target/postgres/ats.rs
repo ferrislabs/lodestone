@@ -1,17 +1,12 @@
 use chrono::{DateTime, Utc};
 use common::CoreError;
-use sqlx::PgPool;
+use sqlx::{PgPool, query};
 
 use crate::{
-    NormalizedDomain, SourceName, domain::ats_target::AtsTargets,
+    NormalizedDomain, ProfileId, SourceName,
+    domain::{ats_target::AtsTargets, enrichment::EnrichmentStep},
     infrastructure::postgres::error::map_sqlx_error,
 };
-
-const PASSIVE_SOURCES: [SourceName; 3] = [
-    SourceName::CertificateTransparency,
-    SourceName::HttpProbe,
-    SourceName::DnsCname,
-];
 
 #[derive(Clone)]
 pub struct PgAtsTargets {
@@ -28,40 +23,36 @@ impl AtsTargets for PgAtsTargets {
     #[tracing::instrument(skip(self), fields(db.system = "postgresql", db.operation = "select", db.table = "leads"), err)]
     async fn list_due(
         &self,
+        profiles: &[ProfileId],
         checked_before: DateTime<Utc>,
         limit: u32,
     ) -> Result<Vec<NormalizedDomain>, CoreError> {
-        let passive: Vec<String> = PASSIVE_SOURCES
-            .iter()
-            .map(|source| source.as_str().to_owned())
-            .collect();
+        if profiles.is_empty() {
+            return Ok(Vec::new());
+        }
+        let profiles: Vec<uuid::Uuid> = profiles.iter().map(|profile| profile.0).collect();
         let rows = sqlx::query_scalar!(
             r#"
             SELECT l.domain AS "domain!"
             FROM (
                 SELECT DISTINCT leads.domain
                 FROM leads
-                JOIN profiles ON profiles.id = leads.profile_id AND profiles.active
-                JOIN LATERAL (
-                    SELECT definition FROM profile_revisions
-                    WHERE profile_id = profiles.id
-                    ORDER BY revision DESC
-                    LIMIT 1
-                ) r ON (
-                    jsonb_typeof(r.definition #> '{sources,ats}') = 'object'
-                    OR EXISTS (
-                        SELECT 1 FROM jsonb_array_elements(COALESCE(r.definition -> 'agents', '[]'::jsonb)) agent
-                        WHERE agent #>> '{source,kind}' = 'ats'
-                          AND COALESCE((agent ->> 'enabled')::boolean, true)
-                    )
-                )
-                WHERE EXISTS (
-                    SELECT 1 FROM signals s
-                    WHERE s.lead_id = leads.id AND s.source = ANY($3::text[])
-                )
+                WHERE leads.profile_id = ANY($3::uuid[])
             ) l
             LEFT JOIN lead_domain_checks c ON c.domain = l.domain AND c.source = $1
-            WHERE (c.checked_at IS NULL OR c.checked_at < $2)
+            WHERE (
+                c.checked_at IS NULL
+                OR c.checked_at < $2
+                OR EXISTS (
+                    SELECT 1 FROM leads fresh
+                    WHERE fresh.domain = l.domain
+                      AND fresh.profile_id = ANY($3::uuid[])
+                      AND NOT EXISTS (
+                          SELECT 1 FROM lead_enrichments e
+                          WHERE e.lead_id = fresh.id AND e.step = $5 AND e.ran_at IS NOT NULL
+                      )
+                )
+            )
               AND NOT EXISTS (
                   SELECT 1 FROM suppression_list s WHERE s.kind = 'domain' AND s.value = l.domain
               )
@@ -70,8 +61,9 @@ impl AtsTargets for PgAtsTargets {
             "#,
             SourceName::Ats.as_str(),
             checked_before,
-            &passive,
+            &profiles,
             i64::from(limit),
+            EnrichmentStep::CompanyJobs.as_str(),
         )
         .fetch_all(&self.pool)
         .await
@@ -99,6 +91,19 @@ impl AtsTargets for PgAtsTargets {
             "#,
             &domains,
             SourceName::Ats.as_str(),
+            at,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+        query!(
+            r#"
+            INSERT INTO lead_enrichments (lead_id, step, ran_at)
+            SELECT leads.id, $2, $3 FROM leads WHERE leads.domain = ANY($1::text[])
+            ON CONFLICT (lead_id, step) DO UPDATE SET ran_at = EXCLUDED.ran_at
+            "#,
+            &domains,
+            EnrichmentStep::CompanyJobs.as_str(),
             at,
         )
         .execute(&self.pool)

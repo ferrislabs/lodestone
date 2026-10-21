@@ -339,7 +339,7 @@ impl Fetcher for PagedFetcher {
 
 fn settings(max_pages: u32) -> BoampSettings {
     BoampSettings {
-        base_url: Url::parse("https://example.test/records").unwrap(),
+        base_url: Url::parse("https://example.test/records").unwrap().into(),
         lookback_days: 7,
         max_pages,
     }
@@ -486,7 +486,7 @@ async fn gzip_pages_are_read_through_the_polite_fetcher_without_robots() {
     let source = BoampSource::new(
         fetcher,
         BoampSettings {
-            base_url: Url::parse(&server.url("/api/records")).unwrap(),
+            base_url: Url::parse(&server.url("/api/records")).unwrap().into(),
             lookback_days: 7,
             max_pages: 20,
         },

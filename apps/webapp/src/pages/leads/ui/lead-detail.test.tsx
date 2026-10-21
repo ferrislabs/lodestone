@@ -1,6 +1,8 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { formatClock } from '#/pages/leads/lib/evaluation'
+import { formatDateTime } from '#/pages/leads/lib/format'
 import type { LeadDetailData, ScoringResult } from '#/pages/leads/lib/types'
 import { LeadDetail } from './lead-detail'
 
@@ -112,6 +114,10 @@ const detail: LeadDetailData = {
 		qualified_at: '2026-02-01T00:00:00Z',
 	},
 	scoring_results: [],
+	agent_failures: [],
+	agent_stops: [],
+	enrichment: { modules: [] },
+	ecosystem: { modules: [] },
 	qualification_results: [
 		{
 			agent_id: 'pertinence',
@@ -183,15 +189,6 @@ const detail: LeadDetailData = {
 		last_seen_at: '2026-02-01T00:00:00Z',
 		probable_country: { code: 'FR', name: 'France' },
 	},
-	score_breakdown: [
-		{
-			signal: 'hiring_page',
-			value: 'careers',
-			weight: 3,
-			measure: 1,
-			contribution: 3,
-		},
-	],
 	signals: [
 		{
 			id: 's1',
@@ -236,7 +233,12 @@ const detail: LeadDetailData = {
 				model: 'model-x',
 				prompt_version: 'v2',
 			},
-			draft: { subject: 'Hello', body: 'Body text', status: 'pending' },
+			draft: {
+				subject: 'Hello',
+				body: 'Body text',
+				status: 'pending',
+				revision: 0,
+			},
 			created_at: '2026-02-01T00:00:00Z',
 		},
 	],
@@ -259,9 +261,15 @@ function renderDetail(
 			onRetrySummary={() => {}}
 			retryingSummary={false}
 			retrySummaryError={null}
+			onRetryAgents={() => {}}
+			retryingAgents={false}
+			retryAgentsError={null}
 			onRefreshCompany={() => {}}
 			refreshingCompany={false}
 			refreshCompanyError={null}
+			onReevaluate={() => {}}
+			reevaluating={false}
+			reevaluateError={null}
 			changing={false}
 			changeError={null}
 			{...overrides}
@@ -269,7 +277,175 @@ function renderDetail(
 	)
 }
 
+const scoringFailure = {
+	kind: 'scoring' as const,
+	agent_id: 'score-global',
+	agent_name: 'Score global',
+	attempts: 2,
+	failed: false,
+	error:
+		"Échec de l'appel au modèle : llm provider answered with status 400: reasoning_effort is not enabled for this model",
+	next_attempt_at: '2026-02-01T00:05:00Z',
+}
+
+const pendingScoring = {
+	...detail.lead,
+	verdict: null,
+	confidence: null,
+	llm_score: null,
+	verdict_probabilities: null,
+	verdict_reason: 'awaiting_scoring' as const,
+}
+
 describe('LeadDetail', () => {
+	it('shows a scoring call failure with its provider message and the next attempt', () => {
+		const { container } = renderDetail({
+			detail: {
+				...detail,
+				lead: pendingScoring,
+				agent_failures: [scoringFailure],
+			},
+		})
+		const notice = container.querySelector(
+			'[data-section="scoring"] [data-agent-failure="scoring"]',
+		)
+		expect(notice?.getAttribute('data-failed')).toBe('false')
+		expect(notice?.textContent).toContain('Agent « Score global »')
+		expect(notice?.textContent).toContain(
+			'reasoning_effort is not enabled for this model',
+		)
+		expect(
+			notice?.querySelector('[data-part="failure-status"]')?.textContent,
+		).toMatch(/^Nouvelle tentative : /)
+		expect(notice?.querySelector('button')).toBeNull()
+		expect(
+			container.querySelector('[data-part="combined"] [data-verdict-reason]')
+				?.textContent,
+		).toMatch(/^En attente : appel au modèle en échec, nouvelle tentative /)
+	})
+
+	it('offers to retry once the agents are failed', () => {
+		const onRetryAgents = vi.fn()
+		const { container } = renderDetail({
+			onRetryAgents,
+			detail: {
+				...detail,
+				lead: pendingScoring,
+				agent_failures: [
+					{
+						...scoringFailure,
+						attempts: 5,
+						failed: true,
+						next_attempt_at: '2026-02-01T06:00:00Z',
+					},
+				],
+			},
+		})
+		const notice = container.querySelector('[data-agent-failure="scoring"]')
+		expect(notice?.getAttribute('data-failed')).toBe('true')
+		expect(
+			notice?.querySelector('[data-part="failure-status"]')?.textContent,
+		).toBe('En échec après 5 tentatives')
+		expect(
+			container.querySelector('[data-part="combined"] [data-verdict-reason]')
+				?.textContent,
+		).toBe('En attente : appel au modèle en échec après 5 tentatives')
+		fireEvent.click(screen.getByRole('button', { name: 'Réessayer' }))
+		expect(onRetryAgents).toHaveBeenCalled()
+	})
+
+	it('disables the agents retry while it runs and shows its error', () => {
+		renderDetail({
+			retryingAgents: true,
+			retryAgentsError: 'refusé',
+			detail: {
+				...detail,
+				agent_failures: [{ ...scoringFailure, attempts: 5, failed: true }],
+			},
+		})
+		expect(
+			(screen.getByRole('button', { name: 'Réessayer' }) as HTMLButtonElement)
+				.disabled,
+		).toBe(true)
+		expect(screen.getByRole('alert').textContent).toBe('refusé')
+	})
+
+	it('shows a qualification call failure in the qualification section only', () => {
+		const { container } = renderDetail({
+			detail: {
+				...detail,
+				qualification_results: [],
+				agent_failures: [
+					{
+						...scoringFailure,
+						kind: 'qualification',
+						agent_id: 'pertinence',
+						agent_name: 'Pertinence',
+					},
+				],
+			},
+		})
+		expect(
+			container.querySelector(
+				'[data-section="agents"] [data-agent-failure="qualification"]',
+			)?.textContent,
+		).toContain('Agent « Pertinence »')
+		expect(
+			container.querySelector('[data-section="scoring"] [data-agent-failure]'),
+		).toBeNull()
+	})
+
+	it('says which agents stopped on this lead and why', () => {
+		const { container } = renderDetail({
+			detail: {
+				...detail,
+				agent_stops: [
+					{
+						kind: 'qualification',
+						agent_id: 'marche',
+						agent_name: 'Marché',
+						reason: 'agent_removed',
+						profile_revision: 2,
+						stopped_at: '2026-02-01T00:00:00Z',
+					},
+					{
+						kind: 'scoring',
+						agent_id: 'score-global',
+						agent_name: 'Score global',
+						reason: 'profile_deactivated',
+						profile_revision: 2,
+						stopped_at: '2026-02-01T00:00:00Z',
+					},
+				],
+			},
+		})
+		const stops = container.querySelectorAll('[data-agent-stop]')
+		expect(stops).toHaveLength(2)
+		expect(stops[0].getAttribute('data-agent-stop')).toBe('qualification')
+		expect(stops[0].textContent).toContain('Agent « Marché »')
+		expect(stops[0].textContent).toContain('Arrêté : agent supprimé')
+		expect(stops[1].textContent).toContain('Arrêté : profil désactivé')
+		expect(stops[1].textContent).toContain(
+			formatDateTime('2026-02-01T00:00:00Z'),
+		)
+	})
+
+	it('shows no stop notice when every agent ran', () => {
+		const { container } = renderDetail()
+		expect(container.querySelector('[data-section="agent-stops"]')).toBeNull()
+	})
+
+	it('keeps the usual wording when no call failed', () => {
+		const { container } = renderDetail({
+			detail: { ...detail, lead: pendingScoring },
+		})
+		expect(container.querySelector('[data-agent-failure]')).toBeNull()
+		expect(
+			container.querySelector('[data-part="combined"] [data-verdict-reason]')
+				?.textContent,
+		).toBe("En attente : aucun agent de scoring n'a répondu")
+	})
+
 	it('shows the facts block with its environments, sources, dates and country', () => {
 		const { container } = renderDetail()
 		const facts = container.querySelector('[data-section="facts"]')
@@ -281,6 +457,580 @@ describe('LeadDetail', () => {
 		expect(facts?.textContent).toContain('Première détection')
 		expect(facts?.textContent).toContain('Dernière détection')
 		expect(facts?.textContent).toContain('Pays probableFrance')
+	})
+
+	it('shows the ecosystem findings per module with their sources next to the facts', () => {
+		const { container } = renderDetail({
+			detail: {
+				...detail,
+				lead: {
+					...detail.lead,
+					evaluation: {
+						stage: 'inspection_running',
+						evaluated_at: '2026-02-01T10:00:00Z',
+						modules_done: 3,
+						modules_available: 7,
+						changed_modules: [],
+					},
+				},
+				ecosystem: {
+					hosting_platform: null,
+					modules: [
+						{
+							module: 'official_identity',
+							provider_ready: true,
+							label: 'Identité officielle',
+							status: 'done',
+							last_run: '2026-02-01T10:00:00Z',
+							findings: [
+								{
+									module: 'official_identity',
+									key: 'legal_name',
+									kind: 'legal_name',
+									label: 'Raison sociale',
+									value: 'ACME SAS',
+									source_url:
+										'https://recherche-entreprises.api.gouv.fr/search?q=552100554',
+									observed_at: '2026-02-01T10:00:00Z',
+									details: {},
+								},
+							],
+						},
+						{
+							module: 'hiring_activity',
+							provider_ready: true,
+							label: 'Activité de recrutement',
+							status: 'done',
+							last_run: '2026-02-01T10:00:00Z',
+							findings: [
+								{
+									module: 'hiring_activity',
+									key: 'job_offer:https://jobs.acme.test/2',
+									kind: 'job_offer',
+									label: "Offre d'emploi",
+									value: 'Ingénieur IAM',
+									source_url: 'https://jobs.acme.test/2',
+									observed_at: '2026-02-01T10:00:00Z',
+									details: { highlighted: true },
+								},
+							],
+						},
+						{
+							module: 'website_stack',
+							provider_ready: true,
+							label: 'Site et stack technique',
+							status: 'pending',
+							findings: [],
+						},
+					],
+				},
+			},
+		})
+		const facts = container.querySelector('[data-section="facts"]')
+		const block = container.querySelector('[data-section="ecosystem"]')
+		expect(block).toBeTruthy()
+		expect(block?.textContent).toContain('Écosystème')
+		expect(
+			facts && block
+				? facts.compareDocumentPosition(block) &
+						Node.DOCUMENT_POSITION_FOLLOWING
+				: 0,
+		).toBeTruthy()
+		const identity = block?.querySelector('[data-module="official_identity"]')
+		expect(identity?.textContent).toContain('Identité officielle')
+		expect(identity?.textContent).toContain('Fait')
+		expect(identity?.textContent).toContain('ACME SAS')
+		expect(identity?.textContent).toContain(
+			`Dernier passage : ${formatDateTime('2026-02-01T10:00:00Z')}`,
+		)
+		expect(identity?.querySelector('a')?.getAttribute('href')).toBe(
+			'https://recherche-entreprises.api.gouv.fr/search?q=552100554',
+		)
+		const hiring = block?.querySelector('[data-module="hiring_activity"]')
+		expect(hiring?.textContent).toContain('Mis en avant')
+		const website = block?.querySelector('[data-module="website_stack"]')
+		expect(website?.textContent).toContain('En attente')
+		expect(website?.textContent).toContain('Aucun élément trouvé.')
+		expect(block?.querySelector('[data-notice="hosting-platform"]')).toBeNull()
+		expect(
+			block?.querySelector('[data-part="inspection-progress"]')?.textContent,
+		).toBe('3/7 modules inspectés')
+	})
+
+	it('renders the stack by category, the hiring trend, the latest news and the DNS summary', () => {
+		const observed = '2026-10-08T09:00:00Z'
+		const { container } = renderDetail({
+			detail: {
+				...detail,
+				ecosystem: {
+					hosting_platform: null,
+					modules: [
+						{
+							module: 'website_stack',
+							provider_ready: true,
+							label: 'Site et stack technique',
+							status: 'done',
+							findings: [
+								{
+									module: 'website_stack',
+									key: 'technology:wordpress',
+									kind: 'technology',
+									label: 'CMS',
+									value: 'WordPress 6.4',
+									source_url: 'https://acme.test/',
+									observed_at: observed,
+									details: {
+										category: 'cms',
+										name: 'WordPress',
+										version: '6.4',
+										evidence: 'balise meta generator',
+									},
+								},
+								{
+									module: 'website_stack',
+									key: 'technology:cloudflare',
+									kind: 'technology',
+									label: 'Hébergement et CDN',
+									value: 'Cloudflare',
+									source_url: 'https://acme.test/',
+									observed_at: observed,
+									details: { category: 'hosting_cdn', name: 'Cloudflare' },
+								},
+							],
+						},
+						{
+							module: 'dns_email',
+							provider_ready: true,
+							label: 'Écosystème DNS et e-mail',
+							status: 'done',
+							findings: [
+								{
+									module: 'dns_email',
+									key: 'mail_provider:Microsoft 365',
+									kind: 'mail_provider',
+									label: 'Messagerie',
+									value: 'Microsoft 365 (MX)',
+									source_url: 'dns:acme.test?type=MX',
+									observed_at: observed,
+									details: {},
+								},
+								{
+									module: 'dns_email',
+									key: 'dmarc',
+									kind: 'dmarc',
+									label: 'DMARC',
+									value: 'p=reject (rejet)',
+									source_url: 'dns:_dmarc.acme.test?type=TXT',
+									observed_at: observed,
+									details: {},
+								},
+							],
+						},
+						{
+							module: 'hiring_activity',
+							provider_ready: true,
+							label: 'Activité de recrutement',
+							status: 'done',
+							findings: [
+								{
+									module: 'hiring_activity',
+									key: 'hiring_summary',
+									kind: 'hiring_summary',
+									label: 'Recrutement',
+									value: '12 offres ouvertes',
+									source_url: 'https://jobs.acme.test',
+									observed_at: observed,
+									details: {
+										count: 12,
+										delta: 4,
+										functions: [
+											{ function: 'engineering', count: 7 },
+											{ function: 'sales', count: 3 },
+										],
+									},
+								},
+							],
+						},
+						{
+							module: 'recent_activity',
+							provider_ready: true,
+							label: 'Activité récente',
+							status: 'done',
+							findings: [
+								{
+									module: 'recent_activity',
+									key: 'latest_news',
+									kind: 'latest_news',
+									label: 'Dernière actualité',
+									value: 'Sortie de la version 5 (2026-10-02)',
+									source_url: 'https://acme.test/actualites/v5',
+									observed_at: observed,
+									details: {},
+								},
+								{
+									module: 'recent_activity',
+									key: 'recent_item:https://acme.test/actualites/v5',
+									kind: 'recent_item',
+									label: 'Publication',
+									value: 'Sortie de la version 5',
+									source_url: 'https://acme.test/actualites/v5',
+									observed_at: observed,
+									details: { date: '2026-10-02' },
+								},
+							],
+						},
+					],
+				},
+			},
+		})
+		const website = container.querySelector('[data-module="website_stack"]')
+		expect(
+			website?.querySelector('[data-category="cms"]')?.textContent,
+		).toContain('WordPress 6.4')
+		expect(
+			website?.querySelector('[data-category="hosting_cdn"]')?.textContent,
+		).toContain('Hébergement et CDN')
+		const dns = container.querySelector('[data-module="dns_email"]')
+		expect(dns?.querySelector('[data-dns="mail_provider"]')?.textContent).toBe(
+			'MessagerieMicrosoft 365 (MX)',
+		)
+		expect(dns?.textContent).toContain('p=reject (rejet)')
+		const hiring = container.querySelector('[data-module="hiring_activity"]')
+		expect(hiring?.textContent).toContain('12 offres ouvertes')
+		expect(hiring?.querySelector('[data-trend="up"]')?.textContent).toBe(
+			'+4 depuis le dernier passage',
+		)
+		expect(
+			hiring?.querySelector('[data-hiring="functions"]')?.textContent,
+		).toContain('7 Tech et ingénierie')
+		const recent = container.querySelector('[data-module="recent_activity"]')
+		expect(recent?.querySelector('[data-latest]')?.textContent).toBe(
+			'Dernière actualité : Sortie de la version 5 (2026-10-02)',
+		)
+		const item = recent?.querySelector(
+			'[data-recent-item="https://acme.test/actualites/v5"]',
+		)
+		expect(item?.textContent).toContain('2 oct. 2026')
+		expect(item?.querySelector('a')?.getAttribute('href')).toBe(
+			'https://acme.test/actualites/v5',
+		)
+	})
+
+	it('renders legal announcements and public contracts with dates, amounts and badges', () => {
+		const { container } = renderDetail({
+			detail: {
+				...detail,
+				ecosystem: {
+					hosting_platform: null,
+					modules: [
+						{
+							module: 'legal_life',
+							provider_ready: true,
+							label: 'Vie légale',
+							status: 'done',
+							last_run: '2026-10-08T09:00:00Z',
+							findings: [
+								{
+									module: 'legal_life',
+									key: 'bodacc:A202601733059',
+									kind: 'collective_proceeding',
+									label: 'Procédure collective',
+									value: "Jugement d'ouverture de redressement judiciaire",
+									source_url:
+										'https://bodacc-datadila.opendatasoft.com/api/explore/v2.1/catalog/datasets/annonces-commerciales/records',
+									observed_at: '2026-09-10T00:00:00Z',
+									details: {
+										date: '2026-09-10',
+										court: 'Greffe du Tribunal de commerce de Lyon',
+										collective: true,
+										link: 'https://www.bodacc.fr/pages/annonces-commerciales-detail/?q.id=id:A202601733059',
+									},
+								},
+								{
+									module: 'legal_life',
+									key: 'bodacc:C1',
+									kind: 'accounts_filing',
+									label: 'Dépôt des comptes',
+									value: 'Comptes annuels et rapports, clôture le 2025-12-31',
+									source_url:
+										'https://bodacc-datadila.opendatasoft.com/api/explore/v2.1/catalog/datasets/annonces-commerciales/records',
+									observed_at: '2026-06-02T00:00:00Z',
+									details: { date: '2026-06-02', collective: false },
+								},
+							],
+						},
+						{
+							module: 'public_contracts',
+							provider_ready: true,
+							label: 'Marchés publics',
+							status: 'done',
+							last_run: '2026-10-08T09:00:00Z',
+							findings: [
+								{
+									module: 'public_contracts',
+									key: 'contract:1',
+									kind: 'contract',
+									label: 'Marché remporté',
+									value: 'Diagnostic des réseaux',
+									source_url:
+										'https://tabular-api.data.gouv.fr/api/resources/r/data/?titulaire_id__contains=552100554',
+									observed_at: '2026-08-10T00:00:00Z',
+									details: {
+										date: '2026-08-10',
+										buyer: 'Commune de Lorient',
+										amount_eur: 400000,
+										procedure: 'Procédure adaptée',
+									},
+								},
+							],
+						},
+						{
+							module: 'official_identity',
+							provider: 'company_research',
+							provider_ready: false,
+							label: 'Identité officielle',
+							status: 'not_applicable',
+							last_run: '2026-10-08T09:00:00Z',
+							error: 'SIREN inconnu',
+							findings: [],
+						},
+					],
+				},
+			},
+		})
+		const legal = container.querySelector('[data-module="legal_life"]')
+		const collective = legal?.querySelector(
+			'[data-finding="bodacc:A202601733059"]',
+		)
+		expect(
+			collective?.querySelector('[data-badge="collective"]')?.textContent,
+		).toBe('Procédure collective')
+		expect(collective?.textContent).toContain(
+			'10 sept. 2026 · Greffe du Tribunal de commerce de Lyon',
+		)
+		expect(
+			screen
+				.getAllByRole('link', { name: "Voir l'annonce" })[0]
+				.getAttribute('href'),
+		).toBe(
+			'https://www.bodacc.fr/pages/annonces-commerciales-detail/?q.id=id:A202601733059',
+		)
+		const accounts = legal?.querySelector('[data-finding="bodacc:C1"]')
+		expect(accounts?.querySelector('[data-badge]')).toBeNull()
+		expect(accounts?.textContent).toContain('2 juin 2026')
+		const award = container.querySelector(
+			'[data-module="public_contracts"] [data-finding="contract:1"]',
+		)
+		expect(award?.textContent?.replace(/\s/g, ' ')).toContain(
+			'10 août 2026 · 400 000 € · Commune de Lorient · Procédure adaptée',
+		)
+		expect(award?.querySelector('a')?.getAttribute('href')).toBe(
+			'https://tabular-api.data.gouv.fr/api/resources/r/data/?titulaire_id__contains=552100554',
+		)
+		const identity = container.querySelector(
+			'[data-module="official_identity"]',
+		)
+		expect(identity?.textContent).toContain('Non applicable')
+		expect(
+			identity?.querySelector('[data-module-note="official_identity"]')
+				?.textContent,
+		).toBe('SIREN inconnu')
+		const notReady = identity?.querySelector('[data-provider-not-ready]')
+		expect(notReady?.textContent).toBe('Fournisseur non prêt')
+		expect(notReady?.getAttribute('href')).toBe(
+			'/sources/providers/company_research',
+		)
+		expect(
+			container.querySelector(
+				'[data-module="legal_life"] [data-provider-not-ready]',
+			),
+		).toBeNull()
+	})
+
+	it('flags a site hosted on a platform', () => {
+		const { container } = renderDetail({
+			detail: {
+				...detail,
+				ecosystem: {
+					hosting_platform: 'github.io',
+					modules: [
+						{
+							module: 'website_stack',
+							provider_ready: true,
+							label: 'Site et stack technique',
+							status: 'not_applicable',
+							findings: [],
+						},
+					],
+				},
+			},
+		})
+		expect(
+			container.querySelector('[data-notice="hosting-platform"]')?.textContent,
+		).toBe(
+			"Site hébergé sur une plateforme (github.io) : les modules qui lisent le site ne s'appliquent pas.",
+		)
+		expect(
+			container.querySelector('[data-module="website_stack"]')?.textContent,
+		).toContain('Non applicable')
+	})
+
+	it('says no company dossier is read for a site on a hosting platform', () => {
+		const { container } = renderDetail({
+			detail: {
+				...detail,
+				company: {
+					...completeCompany,
+					state: 'hosting_platform',
+					official: null,
+					siren: null,
+					pages: [],
+				},
+			},
+		})
+		expect(container.querySelector('[data-company-state]')?.textContent).toBe(
+			'Hébergé sur une plateforme',
+		)
+		expect(container.querySelector('[data-company-notice]')?.textContent).toBe(
+			'Site hébergé sur une plateforme : pas de dossier entreprise lu.',
+		)
+	})
+
+	it('flags a certificate-only lead waiting for other evidence', () => {
+		const { container } = renderDetail({
+			detail: {
+				...detail,
+				lead: {
+					...pendingScoring,
+					evaluation: {
+						stage: 'certificate_only',
+						modules_done: 7,
+						modules_available: 7,
+						changed_modules: [],
+					},
+				},
+			},
+		})
+		expect(
+			container.querySelector('[data-section="evaluation"] [data-evaluation]')
+				?.textContent,
+		).toBe("Certificat seul — en attente d'une autre preuve")
+		expect(container.querySelector('[data-verdict]')?.textContent).toBe(
+			'En attente du scoring',
+		)
+		expect(
+			screen
+				.getByRole('button', { name: 'Réévaluer' })
+				.hasAttribute('disabled'),
+		).toBe(true)
+	})
+
+	it('shows the evaluation, what changed since and reevaluates on demand', () => {
+		const onReevaluate = vi.fn()
+		const { container } = renderDetail({
+			onReevaluate,
+			detail: {
+				...detail,
+				lead: {
+					...detail.lead,
+					evaluation: {
+						stage: 'inspection_running',
+						evaluated_at: '2026-02-01T10:00:00Z',
+						modules_done: 3,
+						modules_available: 7,
+						changed_modules: [
+							{
+								module: 'dns_email',
+								label: 'Écosystème DNS et e-mail',
+								status: 'done',
+								last_run: '2026-02-01T10:05:00Z',
+								changed_at: '2026-02-01T10:05:00Z',
+							},
+						],
+					},
+				},
+			},
+		})
+		const block = container.querySelector('[data-section="evaluation"]')
+		expect(block?.querySelector('[data-evaluation]')?.textContent).toBe(
+			'Évalué — inspection en cours (3/7 modules)',
+		)
+		expect(block?.textContent).toContain(
+			`Dernière évaluation le ${formatDateTime('2026-02-01T10:00:00Z')}`,
+		)
+		expect(
+			block?.querySelector('[data-changed-module="dns_email"]')?.textContent,
+		).toBe(
+			`Écosystème DNS et e-mail (${formatDateTime('2026-02-01T10:05:00Z')})`,
+		)
+		fireEvent.click(screen.getByRole('button', { name: 'Réévaluer' }))
+		expect(onReevaluate).toHaveBeenCalledTimes(1)
+	})
+
+	it('shows a planned requalification and the reevaluation error', () => {
+		const { container } = renderDetail({
+			reevaluateError: 'HTTP 404',
+			detail: {
+				...detail,
+				lead: {
+					...detail.lead,
+					evaluation: {
+						stage: 'requalification_planned',
+						evaluated_at: '2026-02-01T10:00:00Z',
+						modules_done: 7,
+						modules_available: 7,
+						requalify_at: '2026-02-01T10:32:00Z',
+						requalify_reason: 'new_information',
+						changed_modules: [],
+					},
+				},
+			},
+		})
+		expect(
+			container.querySelector('[data-section="evaluation"] [data-evaluation]')
+				?.textContent,
+		).toBe(
+			`Réévaluation prévue à ${formatClock('2026-02-01T10:32:00Z')} (nouvelles informations)`,
+		)
+		expect(screen.getByRole('alert').textContent).toBe(
+			'Réévaluation impossible : HTTP 404',
+		)
+	})
+
+	it('shows no evaluation badge before the list or detail carries one', () => {
+		const { container } = renderDetail()
+		expect(
+			container.querySelector('[data-section="evaluation"] [data-evaluation]'),
+		).toBeNull()
+		expect(
+			container.querySelector('[data-part="inspection-progress"]'),
+		).toBeNull()
+	})
+
+	it('names the host of a certificate signal', () => {
+		renderDetail({
+			detail: {
+				...detail,
+				signals: [
+					{
+						id: 'c1',
+						kind: 'certificate_seen',
+						value: 'sso.acme.test',
+						sentence:
+							'sso.acme.test apparaît dans les certificats publics (Certificate Transparency)',
+						source: 'certificate_transparency',
+						agent: 'certificats',
+						provenance: 'https://crt.sh/?q=sso.acme.test',
+						strength: 0.3,
+						observed_at: '2026-02-01T00:00:00Z',
+						raw: {},
+					},
+				],
+			},
+		})
+		expect(
+			screen.getByText('Certificat observé pour sso.acme.test'),
+		).toBeTruthy()
 	})
 
 	it('warns when no signal comes from a production host', () => {
@@ -358,11 +1108,11 @@ describe('LeadDetail', () => {
 		).toBeTruthy()
 	})
 
-	it('renders header, breakdown, signals, contacts and assessments', () => {
+	it('renders header, signals, contacts and assessments without a score breakdown', () => {
 		renderDetail()
 		expect(screen.getByRole('heading', { name: 'acme.test' })).toBeTruthy()
 		expect(screen.getByText('Fintech')).toBeTruthy()
-		expect(screen.getByText('Détail du score')).toBeTruthy()
+		expect(screen.queryByText('Détail du score')).toBeNull()
 		expect(screen.getByText('Source : crawler')).toBeTruthy()
 		expect(screen.getByText('ats-fr')).toBeTruthy()
 		expect(screen.getByText('jane@acme.test')).toBeTruthy()
@@ -390,12 +1140,16 @@ describe('LeadDetail', () => {
 		).toBe('68 / 100')
 	})
 
-	it('names the signal score apart from the score of the scoring agents', () => {
+	it('names the signal strength apart from the score of the scoring agents', () => {
 		renderDetail()
-		expect(screen.getByText('Score des signaux')).toBeTruthy()
-		expect(screen.getByText('Score des signaux').nextSibling?.textContent).toBe(
-			'42,5',
-		)
+		expect(screen.queryByText('Score des signaux')).toBeNull()
+		expect(
+			screen.getByText('Force des signaux', { selector: 'dt' }),
+		).toBeTruthy()
+		expect(
+			screen.getByText('Force des signaux', { selector: 'dt' }).nextSibling
+				?.textContent,
+		).toBe('42,5 / 100')
 	})
 
 	it('puts the indicators, opinion by evidence, in the calculation', () => {
@@ -587,6 +1341,36 @@ describe('LeadDetail', () => {
 		expect(onOpenDraft).toHaveBeenCalledWith('a1')
 	})
 
+	it('labels the link to a decided draft "Ouvrir le brouillon"', () => {
+		const first = detail.assessments[0]
+		if (!first) throw new Error('fixture without assessment')
+		const onOpenDraft = vi.fn()
+		renderDetail({
+			onOpenDraft,
+			detail: {
+				...detail,
+				assessments: [
+					{
+						...first,
+						draft: {
+							subject: 'Hello',
+							body: 'Body text',
+							status: 'approved',
+							revision: 0,
+						},
+					},
+				],
+			},
+		})
+		expect(
+			screen.queryByRole('button', {
+				name: 'Ouvrir dans la file de validation',
+			}),
+		).toBeNull()
+		fireEvent.click(screen.getByRole('button', { name: 'Ouvrir le brouillon' }))
+		expect(onOpenDraft).toHaveBeenCalledWith('a1')
+	})
+
 	it('shows a failed summary with its reason and a retry button', () => {
 		const onRetrySummary = vi.fn()
 		const { container } = renderDetail({
@@ -744,7 +1528,7 @@ describe('LeadDetail', () => {
 		expect(card?.getAttribute('data-status')).toBe('valid')
 		expect(card?.textContent).toContain('Score global')
 		expect(card?.textContent).toContain('Valide')
-		expect(card?.textContent).toContain('poids 5')
+		expect(card?.textContent).not.toContain('poids')
 		expect(card?.querySelector('[data-part="agent-score"]')?.textContent).toBe(
 			'72 / 100',
 		)
@@ -777,6 +1561,67 @@ describe('LeadDetail', () => {
 		expect(
 			card?.querySelector('[data-part="declared"]')?.textContent,
 		).toContain('Verdict annoncé par le modèle : Fiable')
+	})
+
+	it('shows the raw and the calibrated verdict probabilities of a calibrated agent', () => {
+		const { container } = renderDetail({
+			detail: {
+				...detail,
+				scoring_results: [
+					{
+						...scoringResult,
+						calibration: {
+							n: 80,
+							probabilities: { fiable: 10, a_verifier: 60, ecarte: 30 },
+						},
+					},
+				],
+			},
+		})
+		const card = container.querySelector(
+			'article[data-scoring-agent="score-global"]',
+		)
+		expect(
+			card?.querySelector('[data-part="calibration-badge"]')?.textContent,
+		).toBe('Calibré (n = 80)')
+		const widths = (part: string) =>
+			Array.from(
+				card?.querySelectorAll(
+					`[data-part="${part}"] [data-verdict-probability]`,
+				) ?? [],
+			).map((bar) => bar.getAttribute('style'))
+		expect(widths('verdict-probabilities-raw')).toEqual([
+			'width: 30%;',
+			'width: 60%;',
+			'width: 10%;',
+		])
+		expect(widths('verdict-probabilities-calibrated')).toEqual([
+			'width: 10%;',
+			'width: 60%;',
+			'width: 30%;',
+		])
+		expect(
+			card?.querySelector('[data-part="verdict-probabilities"]'),
+		).toBeNull()
+		expect(card?.textContent).toContain('Probabilités brutes de l')
+		expect(card?.textContent).toContain('Probabilités calibrées')
+	})
+
+	it('shows no calibration mark on an agent that is not calibrated', () => {
+		const { container } = renderDetail({
+			detail: {
+				...detail,
+				scoring_results: [{ ...scoringResult, calibration: null }],
+			},
+		})
+		const card = container.querySelector(
+			'article[data-scoring-agent="score-global"]',
+		)
+		expect(card?.querySelector('[data-part="calibration"]')).toBeNull()
+		expect(card?.textContent).not.toContain('Calibré')
+		expect(
+			card?.querySelectorAll('[data-part="verdict-probabilities"]'),
+		).toHaveLength(1)
 	})
 
 	it('shows the criteria with their quotes and flags the ungrounded ones', () => {
@@ -1071,6 +1916,7 @@ describe('LeadDetail', () => {
 			{ url: 'https://acme.test/' },
 			{ url: 'https://acme.test/mentions-legales' },
 		],
+		ignored_links: 0,
 		built_at: '2026-10-06T10:00:00Z',
 		next_attempt_at: '2027-01-04T10:00:00Z',
 		error: null,
@@ -1107,6 +1953,58 @@ describe('LeadDetail', () => {
 			'https://acme.test/mentions-legales',
 		])
 		expect(text).toContain('Dernière mise à jour')
+	})
+
+	it('lists only the confirmed pages and counts the ignored links', () => {
+		const { container } = renderDetail({
+			detail: {
+				...detail,
+				company: {
+					...completeCompany,
+					pages: [{ url: 'https://acme.test/' }],
+					ignored_links: 4,
+				},
+			},
+		})
+		const card = container.querySelector('[data-section="company"]')
+		const pages = card?.querySelectorAll('[data-company-pages] a') ?? []
+		expect([...pages].map((link) => link.getAttribute('href'))).toEqual([
+			'https://acme.test/',
+		])
+		expect(card?.querySelector('[data-company-ignored]')?.textContent).toBe(
+			'4 liens ignorés : pages introuvables, vides ou redirigées vers l’accueil.',
+		)
+		expect(card?.querySelector('[data-company-no-pages]')).toBeNull()
+	})
+
+	it('says that no usable page was found when none was confirmed', () => {
+		const { container } = renderDetail({
+			detail: {
+				...detail,
+				company: { ...completeCompany, pages: [], ignored_links: 2 },
+			},
+		})
+		const card = container.querySelector('[data-section="company"]')
+		expect(card?.querySelector('[data-company-pages]')).toBeNull()
+		expect(card?.querySelector('[data-company-no-pages]')?.textContent).toBe(
+			'Aucune page exploitable trouvée',
+		)
+		expect(card?.textContent).toContain('Pages lues')
+		expect(card?.querySelector('[data-company-ignored]')?.textContent).toBe(
+			'2 liens ignorés : pages introuvables, vides ou redirigées vers l’accueil.',
+		)
+	})
+
+	it('does not announce missing pages while the dossier is pending', () => {
+		const { container } = renderDetail({
+			detail: {
+				...detail,
+				company: { ...completeCompany, state: 'pending', pages: [] },
+			},
+		})
+		const card = container.querySelector('[data-section="company"]')
+		expect(card?.querySelector('[data-company-no-pages]')).toBeNull()
+		expect(card?.querySelector('[data-company-ignored]')).toBeNull()
 	})
 
 	it('shows an explicit notice when the SIREN was not found', () => {
@@ -1335,6 +2233,7 @@ describe('LeadDetail', () => {
 			legal_name: 'ACME SAS',
 			official: null,
 			pages: [],
+			ignored_links: 0,
 			built_at: '2026-10-06T10:00:00Z',
 			next_attempt_at: '2027-01-04T10:00:00Z',
 			error: null,

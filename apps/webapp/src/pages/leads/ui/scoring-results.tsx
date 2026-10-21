@@ -1,9 +1,11 @@
 import { Badge } from '#/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '#/components/ui/card'
 import { cn } from '#/lib/utils'
+import { awaitingFailureLabel } from '#/pages/leads/lib/agent-failure'
 import { verdictReasonLabel } from '#/pages/leads/lib/confidence'
 import { formatDateTime } from '#/pages/leads/lib/format'
 import {
+	calibrationLabel,
 	declaredChoiceNote,
 	formatLlmScore,
 	formatPercentValue,
@@ -12,14 +14,24 @@ import {
 	type VerdictProbabilityRow,
 	verdictProbabilityRows,
 } from '#/pages/leads/lib/scoring'
-import type { Lead, ScoringResult, Verdict } from '#/pages/leads/lib/types'
+import type {
+	AgentFailure,
+	Lead,
+	ScoringResult,
+	Verdict,
+} from '#/pages/leads/lib/types'
 import { formatConfidence } from '#/pages/leads/lib/verdict'
+import { AgentFailureNotice } from '#/pages/leads/ui/agent-failure-notice'
 import { AnswerMeasure } from '#/pages/leads/ui/answer-measure'
 import { VerdictBadge } from '#/pages/leads/ui/verdict-badge'
 
 interface ScoringResultsProps {
 	results: readonly ScoringResult[]
 	lead: Lead
+	failure: AgentFailure | null
+	onRetry: () => void
+	retrying: boolean
+	retryError: string | null
 }
 
 const BAR_STYLES: Record<Verdict, string> = {
@@ -28,9 +40,15 @@ const BAR_STYLES: Record<Verdict, string> = {
 	ecarte: 'bg-red-500',
 }
 
-function VerdictBars({ rows }: { rows: readonly VerdictProbabilityRow[] }) {
+function VerdictBars({
+	rows,
+	part = 'verdict-probabilities',
+}: {
+	rows: readonly VerdictProbabilityRow[]
+	part?: string
+}) {
 	return (
-		<ul className="flex flex-col gap-1" data-part="verdict-probabilities">
+		<ul className="flex flex-col gap-1" data-part={part}>
 			{rows.map((row) => (
 				<li key={row.key} className="flex items-center gap-2 text-xs">
 					<span className="w-20 shrink-0">{row.label}</span>
@@ -51,10 +69,17 @@ function VerdictBars({ rows }: { rows: readonly VerdictProbabilityRow[] }) {
 	)
 }
 
-function AgentScoring({ result }: { result: ScoringResult }) {
+function AgentScoring({
+	result,
+	showWeight,
+}: {
+	result: ScoringResult
+	showWeight: boolean
+}) {
 	const valid = result.status === 'valid'
 	const verdict = result.verdict ?? null
 	const note = verdict ? declaredChoiceNote(verdict) : null
+	const calibration = result.calibration ?? null
 	return (
 		<article
 			className="flex flex-col gap-3 rounded-lg border p-4"
@@ -67,7 +92,7 @@ function AgentScoring({ result }: { result: ScoringResult }) {
 					<Badge variant={valid ? 'secondary' : 'destructive'}>
 						{valid ? 'Valide' : 'Invalide'}
 					</Badge>
-					{result.weight != null ? (
+					{showWeight && result.weight != null ? (
 						<span className="text-xs text-muted-foreground">
 							{scoringWeightLabel(result.weight)}
 						</span>
@@ -102,7 +127,29 @@ function AgentScoring({ result }: { result: ScoringResult }) {
 							probabilité {formatConfidence(verdict.confidence)}
 						</span>
 					</div>
-					<VerdictBars rows={verdictProbabilityRows(verdict.probabilities)} />
+					{calibration ? (
+						<div className="flex flex-col gap-2" data-part="calibration">
+							<Badge variant="outline" data-part="calibration-badge">
+								{calibrationLabel(calibration.n)}
+							</Badge>
+							<p className="text-xs font-medium text-muted-foreground">
+								Probabilités brutes de l'agent
+							</p>
+							<VerdictBars
+								rows={verdictProbabilityRows(verdict.probabilities)}
+								part="verdict-probabilities-raw"
+							/>
+							<p className="text-xs font-medium text-muted-foreground">
+								Probabilités calibrées, utilisées dans le résultat combiné
+							</p>
+							<VerdictBars
+								rows={verdictProbabilityRows(calibration.probabilities)}
+								part="verdict-probabilities-calibrated"
+							/>
+						</div>
+					) : (
+						<VerdictBars rows={verdictProbabilityRows(verdict.probabilities)} />
+					)}
 					{note ? (
 						<p className="text-xs text-muted-foreground" data-part="declared">
 							{note}
@@ -142,7 +189,13 @@ function AgentScoring({ result }: { result: ScoringResult }) {
 	)
 }
 
-function Combined({ lead }: { lead: Lead }) {
+function Combined({
+	lead,
+	failure,
+}: {
+	lead: Lead
+	failure: AgentFailure | null
+}) {
 	const rows = verdictProbabilityRows(lead.verdict_probabilities)
 	const reason = lead.verdict_reason ?? null
 	return (
@@ -175,25 +228,44 @@ function Combined({ lead }: { lead: Lead }) {
 			{rows.length > 0 ? <VerdictBars rows={rows} /> : null}
 			{reason ? (
 				<p data-verdict-reason={reason} className="text-sm text-amber-700">
-					{verdictReasonLabel(reason)}
+					{reason === 'awaiting_scoring' && failure
+						? awaitingFailureLabel(failure)
+						: verdictReasonLabel(reason)}
 				</p>
 			) : null}
 		</section>
 	)
 }
 
-export function ScoringResults({ results, lead }: ScoringResultsProps) {
+export function ScoringResults({
+	results,
+	lead,
+	failure,
+	onRetry,
+	retrying,
+	retryError,
+}: ScoringResultsProps) {
 	return (
 		<Card data-section="scoring">
 			<CardHeader>
 				<CardTitle>Scoring ({results.length})</CardTitle>
 				<p className="text-sm text-muted-foreground">
 					Chaque agent de scoring décide d'un score et d'un verdict à partir des
-					rapports de qualification et des indicateurs. Le résultat combiné est
-					la moyenne pondérée par le poids des agents.
+					rapports de qualification et des indicateurs.
+					{results.length > 1
+						? ' Le résultat combiné est la moyenne pondérée par le poids des agents.'
+						: ''}
 				</p>
 			</CardHeader>
 			<CardContent className="flex flex-col gap-4">
+				{failure ? (
+					<AgentFailureNotice
+						failure={failure}
+						onRetry={onRetry}
+						retrying={retrying}
+						retryError={retryError}
+					/>
+				) : null}
 				{results.length === 0 ? (
 					<p className="text-sm text-muted-foreground">
 						Aucun agent de scoring n'a répondu pour le moment.
@@ -201,11 +273,15 @@ export function ScoringResults({ results, lead }: ScoringResultsProps) {
 				) : (
 					<div className="grid gap-4 lg:grid-cols-2">
 						{results.map((result) => (
-							<AgentScoring key={result.agent_id} result={result} />
+							<AgentScoring
+								key={result.agent_id}
+								result={result}
+								showWeight={results.length > 1}
+							/>
 						))}
 					</div>
 				)}
-				<Combined lead={lead} />
+				<Combined lead={lead} failure={failure} />
 			</CardContent>
 		</Card>
 	)

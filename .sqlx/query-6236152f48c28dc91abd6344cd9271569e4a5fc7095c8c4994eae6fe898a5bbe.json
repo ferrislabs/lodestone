@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT lead_id, requalify_after, forced, daily_count, counted_on FROM lead_requalifications WHERE lead_id = ANY($1)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "lead_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "requalify_after",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 2,
+        "name": "forced",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 3,
+        "name": "daily_count",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 4,
+        "name": "counted_on",
+        "type_info": "Date"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "6236152f48c28dc91abd6344cd9271569e4a5fc7095c8c4994eae6fe898a5bbe"
+}

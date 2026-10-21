@@ -16,6 +16,8 @@ const provider: Provider = {
 	enabled: true,
 	has_api_key: true,
 	max_retries: 2,
+	max_concurrency: 4,
+	in_flight: 0,
 	timeout_seconds: 30,
 	pricing: { input_cents_per_mtok: 300, output_cents_per_mtok: 1500 },
 	reasoning_effort: null,
@@ -34,6 +36,7 @@ function renderForm(
 ) {
 	const props = {
 		title: 'Modifier Claude',
+		defaultConcurrency: 4,
 		editing: true,
 		hasApiKey: true,
 		values: valuesFromProvider(provider),
@@ -132,6 +135,11 @@ describe('ProviderForm', () => {
 		expect(
 			screen.getByText(/La réflexion du modèle n'est jamais affichée/),
 		).toBeTruthy()
+		expect(
+			screen.getByText(
+				/Laissez « Par défaut \(non envoyé\) » pour un modèle sans raisonnement réglable \(ex\. Ministral\)\./,
+			),
+		).toBeTruthy()
 	})
 
 	it('shows the generation parameters with their French labels and help', () => {
@@ -199,5 +207,23 @@ describe('ProviderForm', () => {
 		expect(select.value).toBe('low')
 		fireEvent.change(select, { target: { value: 'none' } })
 		expect(props.onChange).toHaveBeenCalledWith('reasoning_effort', 'none')
+	})
+
+	it('shows the simultaneous requests field with its Ollama help', () => {
+		const props = renderForm()
+		const input = screen.getByLabelText(
+			'Requêtes simultanées',
+		) as HTMLInputElement
+		expect(input.value).toBe('4')
+		expect(screen.getByText(/OLLAMA_NUM_PARALLEL/)).toBeTruthy()
+		fireEvent.change(input, { target: { value: '8' } })
+		expect(props.onChange).toHaveBeenCalledWith('max_concurrency', '8')
+	})
+
+	it('shows the server error of the simultaneous requests field', () => {
+		renderForm({
+			fieldErrors: { max_concurrency: 'doit être entre 1 et 32' },
+		})
+		expect(screen.getByText('doit être entre 1 et 32')).toBeTruthy()
 	})
 })

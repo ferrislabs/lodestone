@@ -62,6 +62,8 @@ export function useScoringAgentsUi(
 			),
 		setWeight: (index, weight) =>
 			onChange(setScoringField(value, index, 'weight', weight)),
+		setLearnedCalibration: (index, learned) =>
+			onChange(setScoringField(value, index, 'learned_calibration', learned)),
 		setSamples: (index, samples) =>
 			onChange(setScoringField(value, index, 'samples', samples)),
 		setSamplingTemperature: (index, temperature) =>

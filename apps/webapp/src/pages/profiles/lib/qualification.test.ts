@@ -28,7 +28,6 @@ import {
 	qualificationList,
 	qualificationSummary,
 	questionsOf,
-	REFERENCE_SCORE_ERROR,
 	removeOption,
 	removeQuestion,
 	renameQualificationAgent,
@@ -52,7 +51,7 @@ import {
 
 function profile(): JsonObject {
 	return {
-		agents: [newAgent('ats', [])],
+		agents: [newAgent('search', [])],
 		qualification_agents: [newQualificationAgent('pertinence', new Set())],
 		aggregator: { provider_id: null, system_prompt: DEFAULT_AGGREGATOR_PROMPT },
 		verdict: { reliable_from: 70, discard_below: 30 },
@@ -131,8 +130,8 @@ describe('templates', () => {
 			description: "La pertinence du lead pour l'offre du profil.",
 			enabled: true,
 			provider_id: null,
-			weight: 5,
 		})
+		expect(agent).not.toHaveProperty('weight')
 		const [question] = questionsOf(agent)
 		expect(question).toMatchObject({
 			id: 'pertinence',
@@ -171,15 +170,15 @@ describe('templates', () => {
 		])
 	})
 
-	it('builds the exclusions agent with excluding options and a low weight', () => {
+	it('builds the exclusions agent with excluding options', () => {
 		const agent = newQualificationAgent('exclusions', new Set())
 		expect(agent).toMatchObject({
 			id: 'exclusions',
 			name: 'Exclusions',
 			enabled: true,
-			weight: 1,
 			exclusion_threshold: 0.6,
 		})
+		expect(agent).not.toHaveProperty('weight')
 		expect(String(agent.system_prompt)).toContain('Clients actuels :')
 		expect(String(agent.system_prompt)).toContain('Concurrents :')
 		expect(String(agent.system_prompt)).toContain(
@@ -325,7 +324,7 @@ describe('templates', () => {
 	it('keeps ids unique across sourcing and qualification agents', () => {
 		const value = profile()
 		const taken = allAgentIds(value)
-		expect(taken).toEqual(new Set(['ats', 'pertinence']))
+		expect(taken).toEqual(new Set(['recherche', 'pertinence']))
 		const second = newQualificationAgent('pertinence', taken)
 		expect(second.id).toBe('pertinence-2')
 		const clash = newQualificationAgent('vide', new Set(['nouvel-agent']))
@@ -353,7 +352,7 @@ describe('agent and question edits', () => {
 	it('does not reuse the id of a sourcing agent', () => {
 		const value = {
 			...profile(),
-			agents: [{ ...newAgent('ats', []), id: 'autre' }],
+			agents: [{ ...newAgent('search', []), id: 'autre' }],
 		}
 		const renamed = renameQualificationAgent(value, 0, 'Autre')
 		expect(qualificationList(renamed)[0]).toMatchObject({ id: 'autre-2' })
@@ -507,17 +506,17 @@ describe('contractSchema', () => {
 describe('summary', () => {
 	const agent = newQualificationAgent('pertinence', new Set())
 
-	it('counts questions, names the provider and shows the weight', () => {
+	it('counts questions and names the provider without a weight', () => {
 		expect(qualificationSummary(agent, [])).toBe(
-			"1 axe d'analyse · fournisseur : par défaut · poids 5",
+			"1 axe d'analyse · fournisseur : par défaut",
 		)
-		const provider = { ...agent, provider_id: 'p1', weight: 8 }
+		const provider = { ...agent, provider_id: 'p1' }
 		const two = addQuestion(withQualification(profile(), [provider]), 0)
 		expect(
 			qualificationSummary(qualificationList(two)[0], [
 				{ id: 'p1', name: 'Ollama local', enabled: true },
 			]),
-		).toBe("2 axes d'analyse · fournisseur : Ollama local · poids 8")
+		).toBe("2 axes d'analyse · fournisseur : Ollama local")
 		expect(qualificationSummary(provider, [])).toContain('introuvable')
 	})
 })
@@ -566,7 +565,6 @@ describe('evidence settings', () => {
 			calibrationFloor: 5,
 			minEvidence: 50,
 			influence: 60,
-			referenceScore: 50,
 			weights: { volume: 1, diversity: 1, environment: 1, strength: 1 },
 			halfLives: DEFAULT_HALF_LIVES,
 		})
@@ -578,7 +576,6 @@ describe('evidence settings', () => {
 			verdict: { calibration_floor: 0.1, min_evidence: 0.7 },
 			evidence: {
 				influence: 0.25,
-				reference_score: 30,
 				weights: { volume: 3, diversity: 0, environment: 2, strength: 1 },
 				half_life_days: { job_offer: 30, default: 60 },
 			},
@@ -587,7 +584,6 @@ describe('evidence settings', () => {
 			calibrationFloor: 10,
 			minEvidence: 70,
 			influence: 25,
-			referenceScore: 30,
 			weights: { volume: 3, diversity: 0, environment: 2, strength: 1 },
 			halfLives: { ...DEFAULT_HALF_LIVES, job_offer: 30, default: 60 },
 		})
@@ -653,17 +649,15 @@ describe('evidence settings', () => {
 		).toEqual([])
 	})
 
-	it('rejects a floor above 20 %, an empty percentage and a small reference', () => {
+	it('rejects a floor above 20 % and an empty percentage', () => {
 		const settings = {
 			...evidenceSettingsOf({}),
 			calibrationFloor: 25,
 			minEvidence: null,
-			referenceScore: 0,
 		}
 		expect(evidenceProblems(settings)).toEqual([
 			{ path: 'verdict.calibration_floor', message: FLOOR_ERROR },
 			{ path: 'verdict.min_evidence', message: PERCENT_ERROR },
-			{ path: 'evidence.reference_score', message: REFERENCE_SCORE_ERROR },
 		])
 	})
 
@@ -725,7 +719,7 @@ describe('validateQualification', () => {
 
 	it('requires ids unique across both agent lists', () => {
 		const value = withQualification(profile(), [
-			{ ...newQualificationAgent('pertinence', new Set()), id: 'ats' },
+			{ ...newQualificationAgent('pertinence', new Set()), id: 'recherche' },
 		])
 		expect(paths(value)).toEqual(['qualification_agents[0].id'])
 	})

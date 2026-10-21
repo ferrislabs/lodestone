@@ -22,8 +22,8 @@ async fn profile(pool: &PgPool, name: &str) -> String {
 async fn lead(pool: &PgPool, profile: &str, domain: &str, status: &str) -> String {
     let id = common::generate_uuid_v7();
     sqlx::query(
-        "INSERT INTO leads (id, profile_id, domain, status, score, score_breakdown, first_seen_at, last_seen_at, updated_at)
-         VALUES ($1, $2::uuid, $3, $4, 1, '[]'::jsonb, now(), now(), now())",
+        "INSERT INTO leads (id, profile_id, domain, status, score, first_seen_at, last_seen_at, updated_at)
+         VALUES ($1, $2::uuid, $3, $4, 1, now(), now(), now())",
     )
     .bind(id)
     .bind(profile)
@@ -589,4 +589,161 @@ async fn rejecting_a_lead_with_a_reason_stores_it_on_the_label(pool: PgPool) {
 fn openapi_documents_the_quality_path() {
     let spec = serde_json::to_value(api::openapi::ApiDoc::openapi()).expect("spec");
     assert!(spec["paths"]["/api/v1/quality"]["get"].is_object());
+}
+
+const CALIBRATED_PROFILE: &str = r#"{
+    "schema_version": 5,
+    "identity": {"offer": "Managed IAM", "target_customer": "Companies running Keycloak"},
+    "agents": [{"id": "ats-a", "name": "ATS", "source": {"kind": "ats", "keywords": ["sso"]}}],
+    "qualification_agents": [
+        {"id": "pertinence", "name": "Pertinence", "description": "La pertinence du lead.", "system_prompt": "p", "weight": 5,
+         "questions": [{"id": "pertinence", "wording": "Pertinent ?", "weight": 5,
+            "options": [
+                {"value": "forte", "label": "Forte", "score": 1.0},
+                {"value": "faible", "label": "Faible", "score": 0.0}]}]}
+    ],
+    "aggregator": {"system_prompt": "a"},
+    "scoring": {"factors": [{"signal": "product_detected", "weight": 10}]},
+    "contact_ranking": {"preferred_local_parts": ["security"]},
+    "llm": {"qualification_threshold": 50, "relevance_criteria": "c"}
+}"#;
+
+async fn calibrated_profile(pool: &PgPool, name: &str) -> String {
+    let id = profile(pool, name).await;
+    sqlx::query(
+        "INSERT INTO profile_revisions (profile_id, revision, definition, created_at) VALUES ($1::uuid, 1, $2, now())",
+    )
+    .bind(&id)
+    .bind(serde_json::from_str::<Value>(CALIBRATED_PROFILE).expect("definition"))
+    .execute(pool)
+    .await
+    .expect("revision");
+    id
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_calibration_lists_every_agent_with_its_state(pool: PgPool) {
+    let alpha = calibrated_profile(&pool, "alpha").await;
+    sqlx::query(
+        "INSERT INTO calibrations (profile_id, kind, agent_id, points, n, positives, brier_before, brier_after, reliability, fitted_at, enabled)
+         VALUES ($1::uuid, 'scoring', 'score-global', $2, 80, 30, 0.31, 0.22, $3, now(), true)",
+    )
+    .bind(&alpha)
+    .bind(json!([{"x": 0.1, "y": 0.2}, {"x": 0.8, "y": 0.7}]))
+    .bind(json!([{"n": 40, "predicted": 0.2, "observed": 0.1}, {"n": 40, "predicted": 0.85, "observed": 0.6}]))
+    .execute(&pool)
+    .await
+    .expect("calibration");
+    let api = Api::new(pool).await;
+
+    let (status, body) = api.get("/api/v1/quality/calibration").await;
+
+    assert_eq!(status, StatusCode::OK);
+    let data = &body["data"];
+    assert_eq!(data["required"], 50);
+    assert_eq!(data["required_per_class"], 10);
+    let profiles = data["profiles"].as_array().unwrap();
+    assert_eq!(profiles.len(), 1);
+    assert_eq!(profiles[0]["profile_id"], alpha);
+    let agents = profiles[0]["agents"].as_array().unwrap();
+    assert_eq!(agents.len(), 2);
+    assert_eq!(agents[0]["kind"], "scoring");
+    assert_eq!(agents[0]["agent_id"], "score-global");
+    assert_eq!(agents[0]["status"], "active");
+    assert_eq!(agents[0]["n"], 80);
+    assert_eq!(agents[0]["positives"], 30);
+    assert_eq!(agents[0]["brier_before"], 0.31);
+    assert_eq!(agents[0]["brier_after"], 0.22);
+    assert_eq!(agents[0]["reliability"].as_array().unwrap().len(), 2);
+    assert_eq!(agents[0]["reliability"][1]["observed"], 0.6);
+    assert_eq!(agents[1]["kind"], "qualification");
+    assert_eq!(agents[1]["status"], "insufficient");
+    assert_eq!(agents[1]["n"], 0);
+    assert_eq!(agents[1]["brier_before"], Value::Null);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn an_agent_that_does_not_learn_is_reported_as_disabled(pool: PgPool) {
+    let alpha = profile(&pool, "alpha").await;
+    let mut definition: Value = serde_json::from_str(CALIBRATED_PROFILE).unwrap();
+    definition["schema_version"] = json!(5);
+    let parsed = lodestone_core::ValidatedProfile::parse(definition).unwrap();
+    let mut current = parsed.to_json();
+    current["scoring_agents"][0]["learned_calibration"] = json!(false);
+    sqlx::query(
+        "INSERT INTO profile_revisions (profile_id, revision, definition, created_at) VALUES ($1::uuid, 1, $2, now())",
+    )
+    .bind(&alpha)
+    .bind(current)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let api = Api::new(pool).await;
+
+    let (_, body) = api.get("/api/v1/quality/calibration").await;
+
+    let agents = body["data"]["profiles"][0]["agents"].as_array().unwrap();
+    assert_eq!(agents[0]["kind"], "scoring");
+    assert_eq!(agents[0]["status"], "disabled");
+    assert_eq!(agents[1]["kind"], "qualification");
+    assert_eq!(agents[1]["status"], "insufficient");
+}
+
+async fn run_calibration(api: &Api) -> (StatusCode, Value, String) {
+    send(
+        api.harness.public(),
+        Method::POST,
+        "/api/v1/quality/calibration/run",
+        Some(&api.bearer),
+        None,
+    )
+    .await
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn running_the_calibration_queues_one_job_at_a_time(pool: PgPool) {
+    let api = Api::new(pool.clone()).await;
+    let (first, body, _) = run_calibration(&api).await;
+    assert_eq!(first, StatusCode::ACCEPTED);
+    assert_eq!(body["data"]["queued"], true);
+    let (second, again, _) = run_calibration(&api).await;
+    assert_eq!(second, StatusCode::ACCEPTED);
+    assert_eq!(again["data"]["queued"], false);
+
+    let jobs: Vec<(String, Value, String)> =
+        sqlx::query_as("SELECT kind, payload, status FROM jobs")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(jobs.len(), 1);
+    assert_eq!(jobs[0].0, "quality.calibrate");
+    assert_eq!(jobs[0].1["recurring"], false);
+    assert_eq!(jobs[0].2, "pending");
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_calibration_is_for_authenticated_users_only(pool: PgPool) {
+    let harness = Harness::new(pool.clone()).await;
+    let client = format!("Bearer {}", harness.valid_client_token());
+    for (method, uri) in [
+        (Method::GET, "/api/v1/quality/calibration"),
+        (Method::POST, "/api/v1/quality/calibration/run"),
+    ] {
+        let (anonymous, _, _) = send(harness.public(), method.clone(), uri, None, None).await;
+        assert_eq!(anonymous, StatusCode::UNAUTHORIZED, "{uri}");
+        let (service, _, _) = send(harness.public(), method, uri, Some(&client), None).await;
+        assert_eq!(service, StatusCode::FORBIDDEN, "{uri}");
+    }
+    let queued: i64 = sqlx::query_scalar("SELECT count(*) FROM jobs")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(queued, 0);
+}
+
+#[test]
+fn openapi_documents_the_calibration_paths() {
+    let spec = serde_json::to_value(api::openapi::ApiDoc::openapi()).expect("spec");
+    assert!(spec["paths"]["/api/v1/quality/calibration"]["get"].is_object());
+    assert!(spec["paths"]["/api/v1/quality/calibration/run"]["post"].is_object());
 }

@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO lead_enrichments (lead_id, step, ran_at)\n            SELECT leads.id, $2, $3 FROM leads WHERE leads.domain = ANY($1::text[])\n            ON CONFLICT (lead_id, step) DO UPDATE SET ran_at = EXCLUDED.ran_at\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "TextArray",
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "2654cca1df887bc67e6a240ee8a25bfd00dabc2fa4a21796c08ac18f19af2e49"
+}

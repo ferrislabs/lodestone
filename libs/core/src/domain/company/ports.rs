@@ -3,7 +3,7 @@ use common::CoreError;
 
 use crate::domain::{
     NormalizedDomain,
-    company::{CompanyDossier, CompanyEntity, SiblingLead},
+    company::{CompanyDossier, CompanyEntity, DossierState, SiblingLead},
     lead::LeadId,
 };
 
@@ -30,11 +30,34 @@ pub trait CompanyRepository: Send {
         dossier: &CompanyDossier,
     ) -> impl Future<Output = Result<(), CoreError>> + Send;
 
+    fn unchecked_domains(
+        &mut self,
+        limit: u32,
+    ) -> impl Future<Output = Result<Vec<NormalizedDomain>, CoreError>> + Send;
+
+    fn domains_except(
+        &mut self,
+        state: DossierState,
+    ) -> impl Future<Output = Result<Vec<NormalizedDomain>, CoreError>> + Send;
+
+    fn count_unchecked(&mut self) -> impl Future<Output = Result<u64, CoreError>> + Send;
+
+    fn save_review(
+        &mut self,
+        dossier: &CompanyDossier,
+        built_at: Option<DateTime<Utc>>,
+    ) -> impl Future<Output = Result<bool, CoreError>> + Send;
+
     fn request_refresh(
         &mut self,
         domain: &NormalizedDomain,
         now: DateTime<Utc>,
     ) -> impl Future<Output = Result<(), CoreError>> + Send;
+
+    fn retry_robots_unreachable(
+        &mut self,
+        now: DateTime<Utc>,
+    ) -> impl Future<Output = Result<u64, CoreError>> + Send;
 
     fn entity_of(
         &mut self,

@@ -14,7 +14,10 @@ const SELECT_CLASS =
 	'h-9 w-full rounded-md border bg-transparent px-3 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50'
 
 const REASONING_HELP =
-	"Pour les modèles qui raisonnent avant de répondre (Ollama, OpenAI o-series…). « Désactivé » accélère les réponses et évite les réponses vides. La réflexion du modèle n'est jamais affichée ni enregistrée : seule la réponse finale est utilisée."
+	"Pour les modèles qui raisonnent avant de répondre (Ollama, OpenAI o-series…). « Désactivé » accélère les réponses et évite les réponses vides. La réflexion du modèle n'est jamais affichée ni enregistrée : seule la réponse finale est utilisée. Laissez « Par défaut (non envoyé) » pour un modèle sans raisonnement réglable (ex. Ministral)."
+
+const CONCURRENCY_HELP =
+	"Appels au modèle traités en même temps par ce fournisseur, de 1 à 32, toutes analyses confondues. Laissé vide : 2 pour un serveur compatible OpenAI local (localhost), 4 sinon. Avec Ollama, ne dépassez pas sa variable OLLAMA_NUM_PARALLEL : les requêtes en trop attendent côté serveur et risquent d'expirer."
 
 const GENERATION_INTRO =
 	"Laissés vides, ces paramètres ne sont pas envoyés et le modèle garde ses valeurs par défaut. Anthropic n'utilise que les tokens maximum et la température ; les pénalités concernent les fournisseurs compatibles OpenAI (Ollama, Mistral…)."
@@ -73,6 +76,7 @@ const KEY_MODES: { mode: KeyMode; label: string }[] = [
 
 interface ProviderFormProps {
 	title: string
+	defaultConcurrency: number
 	editing: boolean
 	hasApiKey: boolean
 	values: ProviderFormValues
@@ -150,6 +154,7 @@ function TextField({
 
 export function ProviderForm({
 	title,
+	defaultConcurrency,
 	editing,
 	hasApiKey,
 	values,
@@ -217,6 +222,14 @@ export function ProviderForm({
 						label="Nombre max. de tentatives"
 						placeholder="2"
 						inputMode="numeric"
+						{...common}
+					/>
+					<TextField
+						field="max_concurrency"
+						label="Requêtes simultanées"
+						placeholder={String(defaultConcurrency)}
+						inputMode="numeric"
+						help={CONCURRENCY_HELP}
 						{...common}
 					/>
 					<TextField

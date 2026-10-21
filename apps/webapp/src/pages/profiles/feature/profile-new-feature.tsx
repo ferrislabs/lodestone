@@ -11,7 +11,9 @@ import {
 } from '#/pages/profiles/feature/definition-form'
 import { invalidateProfiles } from '#/pages/profiles/feature/invalidate'
 import { useDefinitionEditor } from '#/pages/profiles/feature/use-definition-editor'
+import { useEcosystemUi } from '#/pages/profiles/feature/use-ecosystem-ui'
 import { useProviderOptions } from '#/pages/profiles/feature/use-provider-options'
+import { useSourceCatalog } from '#/pages/profiles/feature/use-source-catalog'
 import { agentList } from '#/pages/profiles/lib/agents'
 import { PROFILE_HINTS } from '#/pages/profiles/lib/form-hints'
 import {
@@ -37,6 +39,8 @@ export function ProfileNewFeature() {
 	const tab = asEditorTab(search.tab)
 	const queryClient = useQueryClient()
 	const providers = useProviderOptions()
+	const catalog = useSourceCatalog()
+	const ecosystem = useEcosystemUi(null)
 	const [name, setName] = useState('')
 	const [initial] = useState(() =>
 		withQualification(
@@ -118,11 +122,12 @@ export function ProfileNewFeature() {
 							value={editor.value}
 							problems={problems}
 							providers={providers}
-							onNavigate={(next) =>
+							catalog={catalog}
+							ecosystem={ecosystem}
+							onOpenProvider={(key) =>
 								void navigate({
-									to: '/profiles/new',
-									search: { tab: next },
-									replace: true,
+									to: '/sources/providers/$key',
+									params: { key },
 								})
 							}
 							onChange={(next) => {

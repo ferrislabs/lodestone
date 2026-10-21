@@ -1,11 +1,17 @@
 mod support;
 
+use api::openapi::ApiDoc;
 use axum::Router;
+use chrono::Utc;
+use common::generate_uuid_v7;
 use http::{Method, StatusCode};
+use httpmock::Method as MockMethod;
 use serde_json::{Value, json};
-use sqlx::PgPool;
+use sqlx::{PgPool, query, query_scalar};
 use support::{Harness, call, lazy_pool, send};
 use utoipa::OpenApi;
+
+const IAM: &str = include_str!("../../../docs/examples/profiles/iam-ferriskey.json");
 
 struct Seed {
     pool: PgPool,
@@ -42,15 +48,14 @@ impl Seed {
     ) -> String {
         let id = common::generate_uuid_v7();
         sqlx::query(
-            "INSERT INTO leads (id, profile_id, domain, status, score, score_breakdown, first_seen_at, last_seen_at, updated_at)
-             VALUES ($1, $2::uuid, $3, $4, $5, $6, now() - make_interval(days => $7 + 10), now() - make_interval(days => $7), now())",
+            "INSERT INTO leads (id, profile_id, domain, status, score, first_seen_at, last_seen_at, updated_at)
+             VALUES ($1, $2::uuid, $3, $4, $5, now() - make_interval(days => $6 + 10), now() - make_interval(days => $6), now())",
         )
         .bind(id)
         .bind(profile)
         .bind(domain)
         .bind(status)
         .bind(score)
-        .bind(json!([{"signal": "product_detected", "value": "keycloak", "weight": 10.0, "measure": 0.8, "contribution": 8.0}]))
         .bind(seen_day)
         .execute(&self.pool)
         .await
@@ -234,6 +239,145 @@ async fn leads_are_listed_by_score_with_their_profile_and_pagination(pool: PgPoo
 }
 
 #[sqlx::test(migrations = "../../migrations")]
+async fn each_listed_lead_carries_its_evaluation_status(pool: PgPool) {
+    let seed = Seed { pool: pool.clone() };
+    let profile = seed.profile("keycloak-ops").await;
+    let certificate = seed.lead(&profile, "cert.com", "new", 30.0, 1).await;
+    let probed = seed.lead(&profile, "probe.com", "new", 20.0, 1).await;
+    let evaluated = seed.lead(&profile, "eval.com", "new", 10.0, 1).await;
+    seed.host_signal(
+        &certificate,
+        "certificate_seen",
+        "sso.cert.com",
+        "certificate_transparency",
+        "sso.cert.com",
+    )
+    .await;
+    seed.host_signal(
+        &certificate,
+        "role_contact_found",
+        "security@cert.com",
+        "role_guess",
+        "cert.com",
+    )
+    .await;
+    seed.signal(&probed, "product_detected").await;
+    seed.signal(&evaluated, "product_detected").await;
+    query(
+        "INSERT INTO profile_revisions (profile_id, revision, definition, created_at) SELECT id, 3, $1::jsonb, now() FROM profiles",
+    )
+    .bind(IAM)
+        .execute(&pool)
+        .await
+        .unwrap();
+    query(
+        "UPDATE leads SET qualified_at = now() - interval '1 hour' WHERE domain IN ('eval.com', 'probe.com')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    query(
+        "INSERT INTO lead_ecosystem_modules (domain, module, status, last_run, next_run_at, changed_at)
+         VALUES ('eval.com', 'website_stack', 'done', now() - interval '2 hours', now() + interval '7 days', now() - interval '2 hours'),
+                ('eval.com', 'dns_email', 'done', now(), now() + interval '7 days', now()),
+                ('probe.com', 'website_stack', 'done', now(), now() + interval '7 days', now())",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    query(
+        "INSERT INTO lead_requalifications (lead_id, requalify_after, marked_at)
+         SELECT id, '2030-01-01T10:02:00Z', now() FROM leads WHERE domain = 'probe.com'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let api = Api::new(pool).await;
+
+    let (status, body) = api.get(&format!("/api/v1/profiles/{profile}/leads")).await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(domains(&body), ["cert.com", "probe.com", "eval.com"]);
+    assert_eq!(body["data"][0]["evaluation"]["stage"], "certificate_only");
+    assert_eq!(body["data"][0]["evaluation"]["evaluated_at"], Value::Null);
+    let planned = &body["data"][1]["evaluation"];
+    assert_eq!(planned["stage"], "requalification_planned");
+    assert_eq!(planned["requalify_reason"], "new_information");
+    assert!(
+        planned["requalify_at"]
+            .as_str()
+            .unwrap()
+            .starts_with("2030-01-01T10:02:00")
+    );
+    let running = &body["data"][2]["evaluation"];
+    assert_eq!(running["stage"], "inspection_running");
+    assert_eq!(running["modules_done"], 2);
+    assert_eq!(running["modules_available"], 4);
+    assert_eq!(running["requalify_at"], Value::Null);
+    assert_eq!(running["changed_modules"].as_array().unwrap().len(), 1);
+    assert_eq!(running["changed_modules"][0]["module"], "dns_email");
+    assert_eq!(
+        running["changed_modules"][0]["label"],
+        "Écosystème DNS et e-mail"
+    );
+    let (_, detail) = api.get(&format!("/api/v1/leads/{evaluated}")).await;
+    assert_eq!(detail["data"]["lead"]["evaluation"], *running);
+    assert_eq!(
+        detail["data"]["enrichment"]["modules"]
+            .as_array()
+            .unwrap()
+            .len(),
+        7
+    );
+    let (_, changed) = api.patch_status(&probed, "qualified").await;
+    assert_eq!(changed["data"]["evaluation"], Value::Null);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_user_can_ask_for_a_reevaluation_beyond_the_daily_cap(pool: PgPool) {
+    let seed = Seed { pool: pool.clone() };
+    let profile = seed.profile("keycloak-ops").await;
+    let lead = seed.lead(&profile, "acme.com", "new", 5.0, 1).await;
+    seed.signal(&lead, "product_detected").await;
+    query("UPDATE leads SET qualified_at = now() - interval '1 hour'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    query(
+        "INSERT INTO lead_requalifications (lead_id, daily_count, counted_on)
+         SELECT id, 3, (now() AT TIME ZONE 'UTC')::date FROM leads",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let api = Api::new(pool.clone()).await;
+    let client = format!("Bearer {}", api.harness.valid_client_token());
+    let uri = format!("/api/v1/leads/{lead}/reevaluate");
+
+    let (forbidden, _, _) = send(api.app(), Method::POST, &uri, Some(&client), None).await;
+    assert_eq!(forbidden, StatusCode::FORBIDDEN);
+    let (anonymous, _, _) = send(api.app(), Method::POST, &uri, None, None).await;
+    assert_eq!(anonymous, StatusCode::UNAUTHORIZED);
+    let missing = format!("/api/v1/leads/{}/reevaluate", generate_uuid_v7());
+    let (not_found, _, _) = send(api.app(), Method::POST, &missing, Some(&api.bearer), None).await;
+    assert_eq!(not_found, StatusCode::NOT_FOUND);
+
+    let (status, body, _) = send(api.app(), Method::POST, &uri, Some(&api.bearer), None).await;
+
+    assert_eq!(status, StatusCode::OK);
+    let evaluation = &body["data"]["evaluation"];
+    assert_eq!(evaluation["stage"], "requalification_planned");
+    assert_eq!(evaluation["requalify_reason"], "manual");
+    let forced: bool =
+        query_scalar("SELECT forced FROM lead_requalifications WHERE lead_id = $1::uuid")
+            .bind(&lead)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(forced);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
 async fn each_filter_narrows_the_list(pool: PgPool) {
     let (_seed, profile) = listing_fixture(&pool).await;
     let api = Api::new(pool).await;
@@ -406,9 +550,7 @@ async fn detail_carries_profile_signals_contacts_assessments_and_breakdown(pool:
     assert_eq!(data["lead"]["profile"]["id"], profile);
     assert_eq!(data["lead"]["profile"]["name"], "keycloak-ops");
 
-    assert_eq!(data["score_breakdown"][0]["signal"], "product_detected");
-    assert_eq!(data["score_breakdown"][0]["value"], "keycloak");
-    assert_eq!(data["score_breakdown"][0]["contribution"], 8.0);
+    assert!(data.get("score_breakdown").is_none());
 
     let signal = &data["signals"][0];
     assert_eq!(signal["kind"], "product_detected");
@@ -1175,6 +1317,74 @@ async fn detail_lists_the_scoring_results_and_the_combined_decision(pool: PgPool
 }
 
 #[sqlx::test(migrations = "../../migrations")]
+async fn detail_shows_the_raw_and_calibrated_probabilities_of_a_calibrated_agent(pool: PgPool) {
+    let seed = Seed { pool: pool.clone() };
+    let profile = seed.qualified_profile("keycloak-ops").await;
+    let calibrated = seed.lead(&profile, "calibrated.com", "new", 8.0, 1).await;
+    let plain = seed.lead(&profile, "plain.com", "new", 7.0, 2).await;
+    for lead in [&calibrated, &plain] {
+        seed.result(
+            lead,
+            SeededResult {
+                agent: "pertinence",
+                provider: None,
+                status: "valid",
+                summary: None,
+                answers: json!({}),
+                score: Some(0.5),
+                error: None,
+            },
+        )
+        .await;
+        sqlx::query(
+            "INSERT INTO scoring_results (id, lead_id, profile_id, profile_revision, agent_id, model, prompt_version, status, criteria, score, verdict, reasons, created_at, provider_name, samples)
+             SELECT $1, l.id, l.profile_id, 2, 'score-global', 'gemma_laya', 'scoring-agent@hash', 'valid', '{}'::jsonb, 72, $3, '[\"r\"]'::jsonb, now(), 'Synthèse', 1
+             FROM leads l WHERE l.id = $2::uuid",
+        )
+        .bind(common::generate_uuid_v7())
+        .bind(lead)
+        .bind(json!({"choice": "fiable", "confidence": 0.7,
+            "probabilities": {"fiable": 0.7, "a_verifier": 0.2, "ecarte": 0.1}}))
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+    let api = Api::new(pool.clone()).await;
+
+    let (_, before) = api.get(&format!("/api/v1/leads/{calibrated}")).await;
+    assert!(before["data"]["scoring_results"][0]["calibration"].is_null());
+
+    sqlx::query(
+        "INSERT INTO calibrations (profile_id, kind, agent_id, points, n, positives, brier_before, brier_after, fitted_at, enabled)
+         VALUES ($1::uuid, 'scoring', 'score-global', $2, 80, 30, 0.3, 0.2, now(), true)",
+    )
+    .bind(&profile)
+    .bind(json!([{"x": 0.0, "y": 0.4}]))
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let (status, body) = api.get(&format!("/api/v1/leads/{calibrated}")).await;
+
+    assert_eq!(status, StatusCode::OK);
+    let result = &body["data"]["scoring_results"][0];
+    assert_eq!(result["verdict"]["probabilities"]["fiable"], 70.0);
+    assert_eq!(result["verdict"]["probabilities"]["a_verifier"], 20.0);
+    let calibration = &result["calibration"];
+    assert_eq!(calibration["n"], 80);
+    assert_eq!(calibration["probabilities"]["fiable"], 30.0);
+    assert_eq!(calibration["probabilities"]["a_verifier"], 20.0);
+    assert_eq!(calibration["probabilities"]["ecarte"], 50.0);
+
+    sqlx::query("UPDATE calibrations SET enabled = false")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (_, disabled) = api.get(&format!("/api/v1/leads/{plain}")).await;
+    assert!(disabled["data"]["scoring_results"][0]["calibration"].is_null());
+}
+
+#[sqlx::test(migrations = "../../migrations")]
 async fn an_unscored_lead_waits_for_its_scoring_and_the_list_sorts_by_llm_score(pool: PgPool) {
     let seed = Seed { pool: pool.clone() };
     let profile = seed.profile("keycloak-ops").await;
@@ -1398,8 +1608,8 @@ const OFFICIAL: &str = r#"{
 async fn seed_dossier(pool: &PgPool, domain: &str, state: &str, with_official: bool) {
     let official: Option<Value> = with_official.then(|| serde_json::from_str(OFFICIAL).unwrap());
     sqlx::query(
-        "INSERT INTO company_dossiers (domain, state, siren, official, pages, built_at, next_attempt_at)
-         VALUES ($1, $2, $3, $4, $5, now(), now() + interval '90 days')",
+        "INSERT INTO company_dossiers (domain, state, siren, official, pages, built_at, next_attempt_at, ignored_links, pages_checked_at)
+         VALUES ($1, $2, $3, $4, $5, now(), now() + interval '90 days', 3, now())",
     )
     .bind(domain)
     .bind(state)
@@ -1446,6 +1656,7 @@ async fn the_detail_carries_the_company_dossier_and_the_official_facts(pool: PgP
             {"url": "https://acme.com/mentions-legales"}
         ])
     );
+    assert_eq!(company["ignored_links"], 3);
     assert!(company["built_at"].is_string());
     let facts = &body["data"]["facts"];
     assert_eq!(facts["official"]["legal_name"], "ELECTRICITE DE FRANCE");
@@ -1484,7 +1695,7 @@ async fn the_company_refresh_is_for_users_and_makes_the_dossier_due_now(pool: Pg
     assert_eq!(created, StatusCode::ACCEPTED);
     assert_eq!(body["data"]["state"], "pending");
     let due: bool = sqlx::query_scalar(
-        "SELECT next_attempt_at <= now() FROM company_dossiers WHERE domain = 'acme.com'",
+        "SELECT next_attempt_at <= now() + interval '1 minute' FROM company_dossiers WHERE domain = 'acme.com'",
     )
     .fetch_one(&pool)
     .await
@@ -1498,10 +1709,12 @@ async fn the_company_refresh_is_for_users_and_makes_the_dossier_due_now(pool: Pg
     let (again, body, _) = send(api.app(), Method::POST, &uri, Some(&api.bearer), None).await;
     assert_eq!(again, StatusCode::ACCEPTED);
     assert_eq!(body["data"]["state"], "complete");
-    let due: bool = sqlx::query_scalar("SELECT next_attempt_at <= now() FROM company_dossiers")
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+    let due: bool = sqlx::query_scalar(
+        "SELECT next_attempt_at <= now() + interval '1 minute' FROM company_dossiers",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     assert!(due);
 
     let unknown = format!(
@@ -1873,4 +2086,858 @@ async fn the_list_is_flat_by_default_and_rejects_an_unknown_grouping(pool: PgPoo
     assert_eq!(flat, none);
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert_eq!(flat["data"][0]["grouped_leads"], json!([]));
+}
+
+async fn seed_retry(pool: &PgPool, lead: &str, kind: &str, attempts: i32, error: &str) {
+    sqlx::query(
+        "INSERT INTO lead_agent_retries (lead_id, kind, profile_revision, agent_id, attempts, next_attempt_at, error, updated_at)
+         VALUES ($1::uuid, $2, 1, 'pertinence', $3, now() + interval '6 hours', $4, now())",
+    )
+    .bind(lead)
+    .bind(kind)
+    .bind(attempts)
+    .bind(error)
+    .execute(pool)
+    .await
+    .expect("retry");
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_detail_reports_failing_agents_and_the_retry_resets_the_failed_ones(pool: PgPool) {
+    let seed = Seed { pool: pool.clone() };
+    let profile = seed.qualified_profile("keycloak-ops").await;
+    let lead = seed.lead(&profile, "acme.com", "new", 5.0, 1).await;
+    seed_retry(
+        &pool,
+        &lead,
+        "scoring",
+        5,
+        "Échec de l'appel au modèle : status 400",
+    )
+    .await;
+    seed_retry(
+        &pool,
+        &lead,
+        "qualification",
+        2,
+        "Échec de l'appel au modèle : timeout",
+    )
+    .await;
+    let api = Api::new(pool.clone()).await;
+
+    let (_, body) = api.get(&format!("/api/v1/leads/{lead}")).await;
+    let failures = body["data"]["agent_failures"]
+        .as_array()
+        .unwrap_or_else(|| panic!("{body}"));
+    assert_eq!(failures.len(), 2);
+    let scoring = failures
+        .iter()
+        .find(|f| f["kind"] == "scoring")
+        .expect("scoring");
+    assert_eq!(scoring["attempts"], 5);
+    assert_eq!(scoring["failed"], true);
+    assert_eq!(scoring["agent_id"], "pertinence");
+    assert_eq!(scoring["error"], "Échec de l'appel au modèle : status 400");
+    assert!(scoring["next_attempt_at"].is_string());
+    let qualification = failures
+        .iter()
+        .find(|f| f["kind"] == "qualification")
+        .expect("qualification");
+    assert_eq!(qualification["failed"], false);
+    assert_eq!(qualification["agent_name"], "Pertinence");
+
+    let uri = format!("/api/v1/leads/{lead}/agents/retry");
+    let (status, _, _) = send(api.app(), Method::POST, &uri, Some(&api.bearer), None).await;
+    assert_eq!(status, StatusCode::OK);
+
+    let rows: Vec<(String, i32, Option<chrono::DateTime<chrono::Utc>>)> = sqlx::query_as(
+        "SELECT kind, attempts, next_attempt_at FROM lead_agent_retries ORDER BY kind",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(rows[0].0, "qualification");
+    assert_eq!(rows[0].1, 2);
+    assert!(rows[0].2.is_some());
+    assert_eq!(rows[1].0, "scoring");
+    assert_eq!(rows[1].1, 0);
+    assert!(rows[1].2.is_none());
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_agents_retry_is_for_users_and_for_known_visible_leads_only(pool: PgPool) {
+    let seed = Seed { pool: pool.clone() };
+    let profile = seed.profile("keycloak-ops").await;
+    let lead = seed.lead(&profile, "acme.com", "new", 5.0, 1).await;
+    seed_retry(&pool, &lead, "scoring", 5, "x").await;
+    let api = Api::new(pool.clone()).await;
+    let client = format!("Bearer {}", api.harness.valid_client_token());
+
+    let uri = format!("/api/v1/leads/{lead}/agents/retry");
+    let (forbidden, _, _) = send(api.app(), Method::POST, &uri, Some(&client), None).await;
+    assert_eq!(forbidden, StatusCode::FORBIDDEN);
+    let (anonymous, _, _) = send(api.app(), Method::POST, &uri, None, None).await;
+    assert_eq!(anonymous, StatusCode::UNAUTHORIZED);
+    let attempts: i32 = sqlx::query_scalar("SELECT attempts FROM lead_agent_retries")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(attempts, 5);
+
+    let uri = format!("/api/v1/leads/{}/agents/retry", common::generate_uuid_v7());
+    let (missing, _, _) = send(api.app(), Method::POST, &uri, Some(&api.bearer), None).await;
+    assert_eq!(missing, StatusCode::NOT_FOUND);
+    let (malformed, _, _) = send(
+        api.app(),
+        Method::POST,
+        "/api/v1/leads/nope/agents/retry",
+        Some(&api.bearer),
+        None,
+    )
+    .await;
+    assert_eq!(malformed, StatusCode::BAD_REQUEST);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_detail_exposes_the_module_statuses_and_the_ecosystem_findings(pool: PgPool) {
+    let seed = Seed { pool: pool.clone() };
+    let profile = seed.qualified_profile("keycloak-ops").await;
+    let lead = seed.lead(&profile, "acme.com", "new", 3.0, 1).await;
+    seed.host_signal(
+        &lead,
+        "certificate_seen",
+        "sso.acme.com",
+        "certificate_transparency",
+        "sso.acme.com",
+    )
+    .await;
+    let api = Api::new(pool.clone()).await;
+    let uri = format!("/api/v1/leads/{lead}");
+
+    let (status, body) = api.get(&uri).await;
+    assert_eq!(status, StatusCode::OK);
+    let enrichment = &body["data"]["enrichment"];
+    assert_eq!(
+        body["data"]["lead"]["evaluation"]["stage"],
+        "certificate_only"
+    );
+    assert!(enrichment["hosting_platform"].is_null());
+    let modules: Vec<(&str, &str)> = enrichment["modules"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|state| {
+            (
+                state["module"].as_str().unwrap(),
+                state["status"].as_str().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        modules,
+        [
+            ("official_identity", "pending"),
+            ("legal_life", "pending"),
+            ("public_contracts", "pending"),
+            ("website_stack", "pending"),
+            ("dns_email", "pending"),
+            ("hiring_activity", "pending"),
+            ("recent_activity", "pending")
+        ]
+    );
+
+    for (module, status, note) in [
+        ("official_identity", "done", None),
+        ("legal_life", "not_applicable", Some("SIREN inconnu")),
+        ("public_contracts", "not_applicable", Some("SIREN inconnu")),
+        ("website_stack", "not_applicable", None),
+        ("dns_email", "done", None),
+        ("hiring_activity", "failed", Some("boom")),
+        ("recent_activity", "done", None),
+    ] {
+        query(
+            "INSERT INTO lead_ecosystem_modules (domain, module, status, last_run, next_run_at, error) VALUES ('acme.com', $1, $2, now(), now(), $3)",
+        )
+        .bind(module)
+        .bind(status)
+        .bind(note)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+    query(
+        "INSERT INTO lead_ecosystem (domain, module, finding_key, kind, label, value, source_url, observed_at, details)
+         VALUES ('acme.com', 'official_identity', 'legal_name', 'legal_name', 'Raison sociale', 'ACME SAS', 'https://recherche-entreprises.api.gouv.fr/search?q=552100554', now(), '{}'::jsonb)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let (_, body) = api.get(&uri).await;
+    let enrichment = &body["data"]["enrichment"];
+    let evaluation = &body["data"]["lead"]["evaluation"];
+    assert_eq!(evaluation["stage"], "certificate_only");
+    assert_eq!(evaluation["modules_done"], evaluation["modules_available"]);
+    assert_eq!(enrichment["modules"][0]["label"], "Identité officielle");
+    assert!(enrichment["modules"][0]["last_run"].is_string());
+    let ecosystem = &body["data"]["ecosystem"];
+    assert!(ecosystem["hosting_platform"].is_null());
+    assert_eq!(ecosystem["modules"][0]["module"], "official_identity");
+    assert_eq!(ecosystem["modules"][0]["status"], "done");
+    assert_eq!(ecosystem["modules"][0]["findings"][0]["value"], "ACME SAS");
+    assert_eq!(
+        ecosystem["modules"][0]["findings"][0]["source_url"],
+        "https://recherche-entreprises.api.gouv.fr/search?q=552100554"
+    );
+    assert_eq!(ecosystem["modules"][1]["module"], "legal_life");
+    assert_eq!(ecosystem["modules"][1]["status"], "not_applicable");
+    assert_eq!(ecosystem["modules"][1]["error"], "SIREN inconnu");
+    assert_eq!(ecosystem["modules"][2]["module"], "public_contracts");
+    assert_eq!(ecosystem["modules"][3]["status"], "not_applicable");
+    assert_eq!(ecosystem["modules"][4]["findings"], json!([]));
+
+    seed.signal(&lead, "product_detected").await;
+    let (_, body) = api.get(&uri).await;
+    assert_eq!(body["data"]["lead"]["evaluation"]["stage"], "not_evaluated");
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_lead_on_a_hosting_platform_is_flagged_and_its_site_modules_do_not_apply(pool: PgPool) {
+    let seed = Seed { pool: pool.clone() };
+    let profile = seed.qualified_profile("keycloak-ops").await;
+    let lead = seed.lead(&profile, "acme.github.io", "new", 3.0, 1).await;
+    let api = Api::new(pool.clone()).await;
+
+    let (status, body) = api.get(&format!("/api/v1/leads/{lead}")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["data"]["ecosystem"]["hosting_platform"], "github.io");
+    assert_eq!(body["data"]["enrichment"]["hosting_platform"], "github.io");
+
+    let (status, body, _) = send(
+        api.app(),
+        Method::POST,
+        &format!("/api/v1/leads/{lead}/ecosystem/dry-run?module=website_stack"),
+        Some(&api.bearer),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["data"]["status"], "not_applicable");
+    assert_eq!(body["data"]["hosting_platform"], "github.io");
+    assert_eq!(body["data"]["findings"], json!([]));
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_dry_run_runs_one_module_for_users_and_stores_nothing(pool: PgPool) {
+    let seed = Seed { pool: pool.clone() };
+    let profile = seed.qualified_profile("keycloak-ops").await;
+    let lead = seed.lead(&profile, "acme.com", "new", 3.0, 1).await;
+    let api = Api::new(pool.clone()).await;
+    let home = api
+        .harness
+        .server
+        .mock_async(|when, then| {
+            when.method(MockMethod::GET).path("/");
+            then.status(200)
+                .header("content-type", "text/html")
+                .header("server", "nginx")
+                .body("<html><head><title>Acme</title></head><body><h1>Acme, outils pour les collectivités</h1><p>Logiciels de gestion depuis 2004.</p></body></html>");
+        })
+        .await;
+    let uri = format!("/api/v1/leads/{lead}/ecosystem/dry-run?module=website_stack");
+
+    let client = format!("Bearer {}", api.harness.valid_client_token());
+    let (forbidden, _, _) = send(api.app(), Method::POST, &uri, Some(&client), None).await;
+    assert_eq!(forbidden, StatusCode::FORBIDDEN);
+    let (anonymous, _, _) = send(api.app(), Method::POST, &uri, None, None).await;
+    assert_eq!(anonymous, StatusCode::UNAUTHORIZED);
+    assert_eq!(home.hits_async().await, 0);
+
+    let (status, body, _) = send(api.app(), Method::POST, &uri, Some(&api.bearer), None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let data = &body["data"];
+    assert_eq!(data["module"], "website_stack");
+    assert_eq!(data["domain"], "acme.com");
+    assert_eq!(data["status"], "done");
+    assert!(data["duration_ms"].is_u64());
+    let kinds: Vec<(&str, &str)> = data["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|found| {
+            (
+                found["kind"].as_str().unwrap(),
+                found["value"].as_str().unwrap(),
+            )
+        })
+        .collect();
+    assert!(kinds.contains(&("technology", "Nginx")));
+    assert!(home.hits_async().await >= 1);
+    for table in [
+        "lead_ecosystem",
+        "lead_ecosystem_modules",
+        "ecosystem_module_runs",
+    ] {
+        let stored: i64 = query_scalar(&format!("SELECT COUNT(*) FROM {table}"))
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(stored, 0, "{table}");
+    }
+
+    let today = Utc::now().date_naive();
+    api.harness
+        .server
+        .mock_async(|when, then| {
+            when.method(MockMethod::GET).path("/sitemap.xml");
+            then.status(200)
+                .header("content-type", "application/xml")
+                .body(format!(
+                    "<urlset><url><loc>https://acme.com/news/launch</loc><lastmod>{today}</lastmod></url></urlset>"
+                ));
+        })
+        .await;
+    api.harness
+        .server
+        .mock_async(|when, then| {
+            when.method(MockMethod::GET).path("/news/launch");
+            then.status(200)
+                .header("content-type", "text/html")
+                .body("<html><head><title>Lancement de la version 5</title></head><body><h1>Lancement de la version 5</h1><p>Notre nouvelle version est disponible pour toutes les collectivités.</p></body></html>");
+        })
+        .await;
+    let (status, body, _) = send(
+        api.app(),
+        Method::POST,
+        &format!("/api/v1/leads/{lead}/ecosystem/dry-run?module=recent_activity"),
+        Some(&api.bearer),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["data"]["status"], "done");
+    let recent: Vec<(&str, &str)> = body["data"]["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|found| {
+            (
+                found["kind"].as_str().unwrap(),
+                found["value"].as_str().unwrap(),
+            )
+        })
+        .collect();
+    assert!(recent.contains(&(
+        "latest_news",
+        &*format!("Lancement de la version 5 ({today})")
+    )));
+    assert!(recent.contains(&("recent_pages", "1")));
+    let (unknown, _, _) = send(
+        api.app(),
+        Method::POST,
+        &format!("/api/v1/leads/{lead}/ecosystem/dry-run?module=astrology"),
+        Some(&api.bearer),
+        None,
+    )
+    .await;
+    assert_eq!(unknown, StatusCode::BAD_REQUEST);
+    let (missing, _, _) = send(
+        api.app(),
+        Method::POST,
+        &format!(
+            "/api/v1/leads/{}/ecosystem/dry-run?module=website_stack",
+            generate_uuid_v7()
+        ),
+        Some(&api.bearer),
+        None,
+    )
+    .await;
+    assert_eq!(missing, StatusCode::NOT_FOUND);
+}
+
+async fn ready_providers(pool: &PgPool) {
+    for key in ["company_research", "bodacc", "decp"] {
+        query(
+            "INSERT INTO source_provider_configurations (provider_key, settings, status, created_at, updated_at) VALUES ($1, '{}'::jsonb, 'ready', now(), now()) ON CONFLICT (provider_key) DO UPDATE SET status = 'ready'",
+        )
+        .bind(key)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+}
+
+async fn record_identity(pool: &PgPool, status: &str, siren: Option<&str>) {
+    query(
+        "INSERT INTO lead_ecosystem_modules (domain, module, status, last_run, next_run_at, error) VALUES ('acme.com', 'official_identity', $1, now(), now() + interval '30 days', NULL)",
+    )
+    .bind(status)
+    .execute(pool)
+    .await
+    .unwrap();
+    if let Some(siren) = siren {
+        query(
+            "INSERT INTO lead_ecosystem (domain, module, finding_key, kind, label, value, source_url, observed_at, details)
+             VALUES ('acme.com', 'official_identity', 'siren', 'siren', 'SIREN', $1, 'https://acme.com/mentions-legales', now(), 'null'::jsonb)",
+        )
+        .bind(siren)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+}
+
+async fn dry_run(api: &Api, lead: &str, module: &str) -> Value {
+    let (status, body, _) = send(
+        api.app(),
+        Method::POST,
+        &format!("/api/v1/leads/{lead}/ecosystem/dry-run?module={module}"),
+        Some(&api.bearer),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    body["data"].clone()
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_dry_run_reads_the_legal_life_and_the_public_contracts_by_siren(pool: PgPool) {
+    let seed = Seed { pool: pool.clone() };
+    let profile = seed.qualified_profile("keycloak-ops").await;
+    let lead = seed.lead(&profile, "acme.com", "new", 3.0, 1).await;
+    record_identity(&pool, "done", Some("552100554")).await;
+    ready_providers(&pool).await;
+    let api = Api::new(pool.clone()).await;
+    let bodacc = api
+        .harness
+        .server
+        .mock_async(|when, then| {
+            when.method(MockMethod::GET)
+                .path("/bodacc/annonces/records")
+                .query_param("where", "registre=\"552100554\"")
+                .query_param("order_by", "dateparution desc")
+                .query_param("limit", "20");
+            then.status(200).json_body(json!({"total_count": 1, "results": [{
+                "id": "A202601733059",
+                "dateparution": "2026-09-10",
+                "familleavis": "collective",
+                "familleavis_lib": "Procédures collectives",
+                "typeavis": "annonce",
+                "typeavis_lib": "Avis initial",
+                "tribunal": "Greffe du Tribunal des Activités Economiques de Nanterre",
+                "registre": ["552100554", "552 100 554"],
+                "jugement": "{\"famille\": \"Jugement d'ouverture\", \"nature\": \"Jugement d'ouverture de liquidation judiciaire\", \"date\": \"2026-09-01\"}",
+                "url_complete": "https://www.bodacc.fr/pages/annonces-commerciales-detail/?q.id=id:A202601733059"
+            }]}));
+        })
+        .await;
+    let holders = api
+        .harness
+        .server
+        .mock_async(|when, then| {
+            when.method(MockMethod::GET)
+                .path("/decp/holders/")
+                .query_param("titulaire_id__contains", "552100554");
+            then.status(200).json_body(json!({"data": [{
+                "uid": "24290007400251A25052S",
+                "id": "A25052S",
+                "acheteur_id": "24290007400251",
+                "acheteur_nom": "COMMUNAUTE DE COMMUNES DU PAYS D IROISE",
+                "titulaire_id": "55210055400047",
+                "titulaire_typeIdentifiant": "SIRET",
+                "objet": "Diagnostic des réseaux",
+                "montant": 400000,
+                "procedure": "Procédure adaptée",
+                "dateNotification": "2026-08-10",
+                "donneesActuelles": true
+            }]}));
+        })
+        .await;
+
+    let legal = dry_run(&api, &lead, "legal_life").await;
+    assert_eq!(legal["status"], "done");
+    let announcement = &legal["findings"][0];
+    assert_eq!(announcement["kind"], "collective_proceeding");
+    assert_eq!(announcement["label"], "Procédure collective");
+    assert_eq!(
+        announcement["value"],
+        "Jugement d'ouverture de liquidation judiciaire"
+    );
+    assert_eq!(announcement["details"]["date"], "2026-09-10");
+    assert_eq!(announcement["details"]["collective"], true);
+    assert_eq!(
+        announcement["details"]["link"],
+        "https://www.bodacc.fr/pages/annonces-commerciales-detail/?q.id=id:A202601733059"
+    );
+    let contracts = dry_run(&api, &lead, "public_contracts").await;
+    assert_eq!(contracts["status"], "done");
+    let award = &contracts["findings"][0];
+    assert_eq!(award["kind"], "contract");
+    assert_eq!(award["value"], "Diagnostic des réseaux");
+    assert_eq!(
+        award["details"]["buyer"],
+        "COMMUNAUTE DE COMMUNES DU PAYS D IROISE"
+    );
+    assert_eq!(award["details"]["amount_eur"], 400000.0);
+    assert_eq!(award["details"]["date"], "2026-08-10");
+    assert!(
+        award["source_url"]
+            .as_str()
+            .unwrap()
+            .contains("titulaire_id__contains=552100554")
+    );
+    bodacc.assert_async().await;
+    holders.assert_async().await;
+    let stored: i64 = query_scalar("SELECT COUNT(*) FROM lead_ecosystem")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(stored, 1);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_dry_run_reports_an_unknown_siren_and_a_registry_failure(pool: PgPool) {
+    let seed = Seed { pool: pool.clone() };
+    let profile = seed.qualified_profile("keycloak-ops").await;
+    let lead = seed.lead(&profile, "acme.com", "new", 3.0, 1).await;
+    record_identity(&pool, "not_applicable", None).await;
+    ready_providers(&pool).await;
+    let api = Api::new(pool.clone()).await;
+    let bodacc = api
+        .harness
+        .server
+        .mock_async(|when, then| {
+            when.method(MockMethod::GET)
+                .path("/bodacc/annonces/records");
+            then.status(500);
+        })
+        .await;
+
+    for module in ["legal_life", "public_contracts"] {
+        let data = dry_run(&api, &lead, module).await;
+        assert_eq!(data["status"], "not_applicable", "{module}");
+        assert_eq!(data["error"], "SIREN inconnu", "{module}");
+        assert_eq!(data["findings"], json!([]));
+    }
+    assert_eq!(bodacc.hits_async().await, 0);
+
+    query("DELETE FROM lead_ecosystem_modules")
+        .execute(&pool)
+        .await
+        .unwrap();
+    record_identity(&pool, "done", Some("552100554")).await;
+    let failed = dry_run(&api, &lead, "legal_life").await;
+    assert_eq!(failed["status"], "failed");
+    assert!(
+        failed["error"]
+            .as_str()
+            .unwrap()
+            .contains("BODACC answered 500")
+    );
+    assert_eq!(bodacc.hits_async().await, 1);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_dry_run_of_the_official_identity_finds_the_siren_on_the_legal_notice(pool: PgPool) {
+    let seed = Seed { pool: pool.clone() };
+    let profile = seed.qualified_profile("keycloak-ops").await;
+    let lead = seed.lead(&profile, "acme.com", "new", 3.0, 1).await;
+    ready_providers(&pool).await;
+    let api = Api::new(pool.clone()).await;
+    let server = &api.harness.server;
+    server
+        .mock_async(|when, then| {
+            when.method(MockMethod::GET).path("/");
+            then.status(200)
+                .header("content-type", "text/html")
+                .body("<html><head><title>Acme</title></head><body><h1>Acme, outils pour les collectivités</h1><p>Logiciels de gestion depuis 2004.</p><a href=\"/mentions-legales\">Mentions légales</a></body></html>");
+        })
+        .await;
+    server
+        .mock_async(|when, then| {
+            when.method(MockMethod::GET).path("/mentions-legales");
+            then.status(200)
+                .header("content-type", "text/html")
+                .body("<html><head><title>Mentions légales</title></head><body><h1>Mentions légales</h1><p>ACME SAS, société par actions simplifiée, SIREN 552 100 554, RCS Lyon. Directeur de la publication : la présidence.</p></body></html>");
+        })
+        .await;
+    server
+        .mock_async(|when, then| {
+            when.method(MockMethod::GET)
+                .path("/entreprises")
+                .query_param("q", "552100554");
+            then.status(200).json_body(json!({"results": [{
+                "siren": "552100554",
+                "nom_complet": "ACME SAS",
+                "activite_principale": "62.01Z",
+                "section_activite_principale": "J",
+                "tranche_effectif_salarie": "12",
+                "date_creation": "2004-06-09",
+                "siege": {"code_postal": "69002", "libelle_commune": "LYON"}
+            }]}));
+        })
+        .await;
+
+    let data = dry_run(&api, &lead, "official_identity").await;
+    assert_eq!(data["status"], "done", "{data}");
+    let findings = data["findings"].as_array().unwrap();
+    let pairs: Vec<(&str, &str)> = findings
+        .iter()
+        .map(|found| {
+            (
+                found["kind"].as_str().unwrap(),
+                found["value"].as_str().unwrap(),
+            )
+        })
+        .collect();
+    assert!(pairs.contains(&("legal_name", "ACME SAS")));
+    assert!(pairs.contains(&("siren", "552100554")));
+    assert!(pairs.contains(&("created_on", "2004-06-09")));
+    assert!(pairs.contains(&("head_office", "69002 LYON France")));
+    let siren = findings
+        .iter()
+        .find(|found| found["kind"] == "siren")
+        .unwrap();
+    assert!(
+        siren["source_url"]
+            .as_str()
+            .unwrap()
+            .ends_with("/mentions-legales")
+    );
+    let name = findings
+        .iter()
+        .find(|found| found["kind"] == "legal_name")
+        .unwrap();
+    assert_eq!(
+        name["source_url"],
+        "https://recherche-entreprises.api.gouv.fr/search?q=552100554"
+    );
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_module_whose_provider_is_not_ready_is_flagged_and_cannot_be_tested(pool: PgPool) {
+    let seed = Seed { pool: pool.clone() };
+    let profile = seed.qualified_profile("keycloak-ops").await;
+    let lead = seed.lead(&profile, "acme.com", "new", 3.0, 1).await;
+    ready_providers(&pool).await;
+    query("UPDATE source_provider_configurations SET status = 'failing' WHERE provider_key = 'bodacc'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let api = Api::new(pool.clone()).await;
+
+    let (status, body, _) = send(
+        api.app(),
+        Method::POST,
+        &format!("/api/v1/leads/{lead}/ecosystem/dry-run?module=legal_life"),
+        Some(&api.bearer),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert!(
+        body.to_string().contains("Fournisseur non prêt : bodacc"),
+        "{body}"
+    );
+
+    let (_, body) = api.get(&format!("/api/v1/leads/{lead}")).await;
+    let modules = body["data"]["ecosystem"]["modules"].as_array().unwrap();
+    let legal = modules
+        .iter()
+        .find(|module| module["module"] == "legal_life")
+        .unwrap();
+    assert_eq!(legal["provider"], "bodacc");
+    assert_eq!(legal["provider_ready"], false);
+    let contracts = modules
+        .iter()
+        .find(|module| module["module"] == "public_contracts")
+        .unwrap();
+    assert_eq!(contracts["provider"], "decp");
+    assert_eq!(contracts["provider_ready"], true);
+    let website = modules
+        .iter()
+        .find(|module| module["module"] == "website_stack")
+        .unwrap();
+    assert!(website["provider"].is_null());
+    assert_eq!(website["provider_ready"], true);
+
+    let (_, body) = api.get("/api/v1/ecosystem/modules").await;
+    let listed = body["data"].as_array().unwrap();
+    let legal = listed
+        .iter()
+        .find(|module| module["module"] == "legal_life")
+        .unwrap();
+    assert_eq!(legal["provider"], "bodacc");
+    assert_eq!(legal["provider_ready"], false);
+    let identity = listed
+        .iter()
+        .find(|module| module["module"] == "official_identity")
+        .unwrap();
+    assert_eq!(identity["provider_ready"], true);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_module_catalog_lists_every_module_with_its_week_of_activity(pool: PgPool) {
+    query(
+        "INSERT INTO ecosystem_module_runs (id, module, ran_at, leads_inspected, findings_count, latest_example)
+         VALUES (gen_random_uuid(), 'hiring_activity', now() - interval '1 day', 4, 9,
+                 '{\"domain\": \"acme.com\", \"label\": \"Offre d''emploi\", \"value\": \"Ingénieur IAM\", \"source_url\": \"https://jobs.acme.com/1\"}'::jsonb),
+                (gen_random_uuid(), 'hiring_activity', now() - interval '10 days', 50, 50, NULL)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let api = Api::new(pool).await;
+
+    let (status, body) = api.get("/api/v1/ecosystem/modules").await;
+
+    assert_eq!(status, StatusCode::OK);
+    let modules = body["data"].as_array().unwrap();
+    assert_eq!(modules.len(), 7);
+    assert_eq!(modules[0]["module"], "official_identity");
+    assert_eq!(modules[0]["available"], true);
+    assert_eq!(
+        modules[0]["question"],
+        "Qui est officiellement cette entreprise ?"
+    );
+    assert_eq!(modules[1]["module"], "legal_life");
+    assert_eq!(modules[1]["available"], true);
+    assert_eq!(modules[1]["refresh_days"], 7);
+    assert_eq!(modules[2]["module"], "public_contracts");
+    assert_eq!(modules[2]["available"], true);
+    assert_eq!(modules[2]["refresh_days"], 14);
+    assert!(modules.iter().all(|module| module["available"] == true));
+    let dns = modules
+        .iter()
+        .find(|module| module["module"] == "dns_email")
+        .unwrap();
+    assert_eq!(dns["reads_site"], false);
+    assert!(dns["provider"].is_null());
+    let hiring = modules
+        .iter()
+        .find(|module| module["module"] == "hiring_activity")
+        .unwrap();
+    assert_eq!(hiring["stats"]["leads_inspected"], 4);
+    assert_eq!(hiring["stats"]["findings_count"], 9);
+    assert!(hiring["stats"]["last_run"].is_string());
+    assert_eq!(hiring["stats"]["latest_example"]["value"], "Ingénieur IAM");
+    assert_eq!(modules[0]["stats"]["leads_inspected"], 0);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_detail_reports_agents_whose_work_was_stopped(pool: PgPool) {
+    let seed = Seed { pool: pool.clone() };
+    let profile = seed.qualified_profile("keycloak-ops").await;
+    let lead = seed.lead(&profile, "acme.com", "new", 5.0, 1).await;
+    query(
+        "INSERT INTO lead_agent_stops (lead_id, kind, agent_id, profile_revision, reason, stopped_at)
+         VALUES ($1::uuid, 'qualification', 'pertinence', 1, 'agent_disabled', now())",
+    )
+    .bind(&lead)
+    .execute(&pool)
+    .await
+    .expect("stop");
+    let api = Api::new(pool.clone()).await;
+
+    let (_, body) = api.get(&format!("/api/v1/leads/{lead}")).await;
+
+    let stops = body["data"]["agent_stops"]
+        .as_array()
+        .unwrap_or_else(|| panic!("{body}"));
+    assert_eq!(stops.len(), 1);
+    assert_eq!(stops[0]["kind"], "qualification");
+    assert_eq!(stops[0]["agent_id"], "pertinence");
+    assert_eq!(stops[0]["reason"], "agent_disabled");
+    assert_eq!(stops[0]["profile_revision"], 1);
+    assert!(stops[0]["stopped_at"].is_string());
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_timeline_of_a_lead_is_for_users_with_its_pipeline(pool: PgPool) {
+    let seed = Seed { pool: pool.clone() };
+    let profile = generate_uuid_v7().to_string();
+    query("INSERT INTO profiles (id, name, active, created_at, updated_at) VALUES ($1::uuid, 'iam', true, now(), now())")
+        .bind(&profile)
+        .execute(&pool)
+        .await
+        .unwrap();
+    query("INSERT INTO profile_revisions (profile_id, revision, definition, created_at) VALUES ($1::uuid, 1, $2::jsonb, now())")
+        .bind(&profile)
+        .bind(IAM)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let lead = seed.lead(&profile, "acme.com", "new", 5.0, 1).await;
+    seed.signal(&lead, "product_detected").await;
+    query(
+        "INSERT INTO lead_events (id, lead_id, profile_id, round, step, kind, status, actor, detail, started_at, finished_at, dedupe_key)
+         VALUES ($1, $2::uuid, $3::uuid, 1, 'qualification', 'agent', 'succeeded', '{\"agent_id\": \"stack\", \"model\": \"qwen\"}', '{}', now() - interval '3 seconds', now(), 'agent:end'),
+                ($4, $2::uuid, $3::uuid, 1, 'detection', 'signal', 'succeeded', '{\"source\": \"http_probe\"}', '{\"reconstructed\": true}', now() - interval '1 minute', NULL, 'signal')",
+    )
+    .bind(generate_uuid_v7())
+    .bind(&lead)
+    .bind(&profile)
+    .bind(generate_uuid_v7())
+    .execute(&pool)
+    .await
+    .unwrap();
+    let api = Api::new(pool.clone()).await;
+    let client = format!("Bearer {}", api.harness.valid_client_token());
+    let uri = format!("/api/v1/leads/{lead}/timeline");
+
+    let (forbidden, _, _) = call(api.app(), &uri, Some(&client)).await;
+    assert_eq!(forbidden, StatusCode::FORBIDDEN);
+    let (anonymous, _, _) = call(api.app(), &uri, None).await;
+    assert_eq!(anonymous, StatusCode::UNAUTHORIZED);
+    let (not_found, _) = api
+        .get(&format!("/api/v1/leads/{}/timeline", generate_uuid_v7()))
+        .await;
+    assert_eq!(not_found, StatusCode::NOT_FOUND);
+    let (malformed, _) = api.get("/api/v1/leads/nope/timeline").await;
+    assert_eq!(malformed, StatusCode::BAD_REQUEST);
+
+    let (status, body) = api.get(&uri).await;
+
+    assert_eq!(status, StatusCode::OK);
+    let data = &body["data"];
+    assert_eq!(data["lead_id"], lead.as_str());
+    let labels: Vec<&str> = data["pipeline"]["stages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|stage| stage["label"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        labels,
+        [
+            "Détection",
+            "Inspection",
+            "Qualification",
+            "Scoring",
+            "Synthèse",
+            "Brouillon",
+            "Décision"
+        ]
+    );
+    assert_eq!(data["pipeline"]["stages"][0]["status"], "done");
+    assert_eq!(data["pipeline"]["stages"][2]["status"], "waiting");
+    assert_eq!(data["pipeline"]["stages"][2]["reason_code"], "queued");
+    let round = &data["rounds"][0];
+    assert_eq!(round["number"], 1);
+    let events = round["events"].as_array().unwrap();
+    assert_eq!(events.len(), 2);
+    assert_eq!(events[0]["step"], "qualification");
+    assert_eq!(events[0]["actor"]["model"], "qwen");
+    assert!(events[0]["duration_ms"].as_i64().unwrap() >= 2_000);
+    assert_eq!(events[1]["reconstructed"], true);
+    assert_eq!(data["in_flight"], json!([]));
+}
+
+#[test]
+fn the_timeline_is_documented() {
+    let spec = ApiDoc::openapi();
+    assert!(
+        spec.paths
+            .paths
+            .contains_key("/api/v1/leads/{lead_id}/timeline")
+    );
 }

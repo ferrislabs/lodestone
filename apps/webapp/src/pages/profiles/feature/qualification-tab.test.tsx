@@ -10,6 +10,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 
 import type { JsonObject } from '#/lib/schema-form'
 import { DefinitionTabContent } from '#/pages/profiles/feature/definition-form'
+import type { CalibrationStates } from '#/pages/profiles/lib/agent-calibration'
 import { newAgent } from '#/pages/profiles/lib/agents'
 import {
 	DEFAULT_AGGREGATOR_PROMPT,
@@ -54,17 +55,16 @@ const PROVIDERS: ProviderOption[] = [
 
 function base(): JsonObject {
 	return {
-		schema_version: 6,
+		schema_version: 14,
 		identity: { offer: 'o', target_customer: 't' },
-		agents: [newAgent('ats', [])],
+		agents: [newAgent('search', [])],
 		qualification_agents: [
 			newQualificationAgent('pertinence', new Set(['ats'])),
 		],
 		aggregator: { provider_id: null, system_prompt: DEFAULT_AGGREGATOR_PROMPT },
 		verdict: { reliable_from: 70, discard_below: 30 },
-		scoring: { factors: [] },
 		contact_ranking: { preferred_local_parts: [] },
-		llm: { qualification_threshold: 50, relevance_criteria: 'r' },
+		language: 'fr',
 	}
 }
 
@@ -72,11 +72,13 @@ function Harness({
 	initial = base(),
 	problems = [],
 	startTab = 'qualification',
+	calibration,
 	onValue,
 }: {
 	initial?: JsonObject
 	problems?: readonly Problem[]
 	startTab?: EditorTab
+	calibration?: CalibrationStates
 	onValue?: (value: JsonObject) => void
 }) {
 	const [value, setValue] = useState(initial)
@@ -89,6 +91,7 @@ function Harness({
 				value={value}
 				problems={problems}
 				providers={PROVIDERS}
+				calibration={calibration}
 				onChange={(next) => {
 					setValue(next)
 					onValue?.(next)
@@ -119,9 +122,9 @@ describe('qualification tab', () => {
 		expect(labels).toEqual([
 			TAB_LABELS.identity,
 			'Sourcing',
+			'Enrichissement',
 			'Qualification',
 			'Scoring',
-			'Réglages',
 		])
 	})
 
@@ -145,7 +148,7 @@ describe('qualification tab', () => {
 		const card = document.querySelector('[data-qualification-agent="0"]')
 		expect(card?.textContent).toContain('Pertinence')
 		expect(card?.textContent).toContain(
-			"1 axe d'analyse · fournisseur : par défaut · poids 5",
+			"1 axe d'analyse · fournisseur : par défaut",
 		)
 		expect(
 			screen.getByRole('button', { name: 'Ajouter un agent de qualification' }),
@@ -206,7 +209,8 @@ describe('qualification tab', () => {
 			).getByText('Marché'),
 		)
 		const agent = qualificationList(lastValue(seen))[1]
-		expect(agent).toMatchObject({ id: 'marche', name: 'Marché', weight: 5 })
+		expect(agent).toMatchObject({ id: 'marche', name: 'Marché' })
+		expect(agent).not.toHaveProperty('weight')
 		expect(questionsOf(agent)).toHaveLength(2)
 		expect(sheet().getByLabelText('Nom')).toHaveProperty('value', 'Marché')
 		expect(sheet().getByLabelText('Axe 1')).toBeTruthy()
@@ -232,7 +236,7 @@ describe('qualification tab', () => {
 		expect(optionsOf(questionsOf(agent)[0])).toHaveLength(3)
 	})
 
-	it('edits name, enabled, weight and prompt', () => {
+	it('edits name, enabled and prompt, without a weight field', () => {
 		const seen = vi.fn()
 		render(<Harness onValue={seen} />)
 		fireEvent.click(screen.getByRole('button', { name: 'Modifier Pertinence' }))
@@ -253,9 +257,10 @@ describe('qualification tab', () => {
 		expect(qualificationList(lastValue(seen))[0]).toMatchObject({
 			enabled: false,
 		})
-		const group = sheet().getByRole('radiogroup', { name: "Poids de l'agent" })
-		fireEvent.click(within(group).getByRole('radio', { name: '8' }))
-		expect(qualificationList(lastValue(seen))[0]).toMatchObject({ weight: 8 })
+		expect(
+			sheet().queryByRole('radiogroup', { name: "Poids de l'agent" }),
+		).toBeNull()
+		expect(sheet().queryByText("Poids de l'agent")).toBeNull()
 		fireEvent.change(
 			sheet().getByLabelText('Prompt système', { selector: 'textarea' }),
 			{ target: { value: 'Nouveau prompt' } },
@@ -296,7 +301,7 @@ describe('qualification tab', () => {
 		]
 		render(<Harness initial={initial} />)
 		expect(
-			screen.getByText("1 axe d'analyse · fournisseur : introuvable · poids 5"),
+			screen.getByText("1 axe d'analyse · fournisseur : introuvable"),
 		).toBeTruthy()
 		fireEvent.click(screen.getByRole('button', { name: 'Modifier Pertinence' }))
 		const select = sheet().getByLabelText(
@@ -912,10 +917,7 @@ describe('evidence settings panel', () => {
 			'value',
 			'60',
 		)
-		expect(screen.getByLabelText('Score de référence')).toHaveProperty(
-			'value',
-			'50',
-		)
+		expect(screen.queryByLabelText('Score de référence')).toBeNull()
 		for (const label of [
 			'Poids : volume de signaux',
 			'Poids : diversité des sources',
@@ -947,17 +949,13 @@ describe('evidence settings panel', () => {
 		expect(lastValue(seen).evidence).toEqual({ influence: 0.4 })
 	})
 
-	it('edits the reference score and the weights', () => {
+	it('edits the weights of the evidence components', () => {
 		const seen = vi.fn()
 		render(<Harness onValue={seen} />)
-		fireEvent.change(screen.getByLabelText('Score de référence'), {
-			target: { value: '30' },
-		})
 		fireEvent.change(screen.getByLabelText('Poids : environnement'), {
 			target: { value: '3' },
 		})
 		expect(lastValue(seen).evidence).toEqual({
-			reference_score: 30,
 			weights: { environment: 3 },
 		})
 	})
@@ -1065,5 +1063,44 @@ describe('server problems', () => {
 		expect(scores[1]?.getAttribute('aria-invalid')).toBe('true')
 		expect(scores[0]?.getAttribute('aria-invalid')).toBe('false')
 		expect(sheet().getByText('Doit être un nombre de 0 à 1')).toBeTruthy()
+	})
+
+	it('switches the learned calibration of a qualification agent', () => {
+		const seen = vi.fn()
+		render(<Harness onValue={seen} />)
+		fireEvent.click(screen.getByRole('button', { name: 'Modifier Pertinence' }))
+		const toggle = sheet().getByLabelText('Calibration apprise')
+		expect(toggle.getAttribute('aria-checked')).toBe('true')
+		expect(
+			sheet().getByText(
+				"Corrige chaque jour les probabilités de cet agent d'après vos décisions, dès 50 leads étiquetés dont au moins 10 de chaque classe.",
+			),
+		).toBeTruthy()
+		fireEvent.click(toggle)
+		expect(toggle.getAttribute('aria-checked')).toBe('false')
+		expect(
+			(lastValue(seen).qualification_agents as JsonObject[])[0]
+				?.learned_calibration,
+		).toBe(false)
+		expect(sheet().getByText('Désactivée')).toBeTruthy()
+	})
+
+	it('shows the state and the Brier scores of the agent when known', () => {
+		render(
+			<Harness
+				calibration={{
+					'qualification:pertinence': {
+						status: 'insufficient',
+						n: 12,
+						required: 50,
+						brierBefore: 0.31,
+						brierAfter: null,
+					},
+				}}
+			/>,
+		)
+		fireEvent.click(screen.getByRole('button', { name: 'Modifier Pertinence' }))
+		expect(sheet().getByText('Pas assez de décisions (12/50)')).toBeTruthy()
+		expect(sheet().getByText(/Score de Brier avant 0,31, après —/)).toBeTruthy()
 	})
 })

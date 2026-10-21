@@ -1,10 +1,22 @@
 export const NEW_PROFILE_TEMPLATE = `{
-  "schema_version": 11,
+  "schema_version": 18,
   "identity": {
     "offer": "",
     "target_customer": ""
   },
+  "language": "fr",
   "agents": [],
+  "inspection": {
+    "enabled": true
+  },
+  "enrichment": {
+    "custom": {
+      "fingerprints": [],
+      "excluded_products": [],
+      "extra_subdomains": []
+    },
+    "highlight_keywords": []
+  },
   "qualification_agents": [],
   "scoring_agents": [],
   "aggregator": {
@@ -24,7 +36,6 @@ export const NEW_PROFILE_TEMPLATE = `{
   },
   "evidence": {
     "influence": 0.6,
-    "reference_score": 50,
     "weights": {
       "volume": 1,
       "diversity": 1,
@@ -43,16 +54,8 @@ export const NEW_PROFILE_TEMPLATE = `{
       "default": 180
     }
   },
-  "scoring": {
-    "factors": []
-  },
   "contact_ranking": {
     "preferred_local_parts": []
-  },
-  "llm": {
-    "qualification_threshold": 50,
-    "relevance_criteria": "",
-    "language": "fr"
   }
 }
 `

@@ -9,7 +9,7 @@ import {
 } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { Quality } from '#/pages/quality/lib/types'
+import type { Calibration, Quality } from '#/pages/quality/lib/types'
 import { QualityFeature } from './quality-feature'
 
 const router = vi.hoisted(() => ({
@@ -71,7 +71,35 @@ const QUALITY: Quality = {
 	],
 }
 
+const CALIBRATION: Calibration = {
+	required: 50,
+	required_per_class: 10,
+	profiles: [
+		{
+			profile_id: 'p1',
+			name: 'Fintech',
+			agents: [
+				{
+					kind: 'scoring',
+					agent_id: 'score-global',
+					name: 'Score global',
+					n: 12,
+					positives: 5,
+					brier_before: 0.25,
+					brier_after: null,
+					status: 'insufficient',
+					reliability: [],
+					fitted_at: null,
+				},
+			],
+		},
+	],
+}
+
 let qualityCalls: URL[]
+let calibrationCalls: string[]
+let runResponse: { queued: boolean }
+let calibrationStatus: number
 
 function json(body: unknown, status = 200): Response {
 	return new Response(JSON.stringify(body), {
@@ -90,6 +118,19 @@ function install(status = 200) {
 				return status === 200
 					? json({ data: QUALITY })
 					: json({ code: 'E_INTERNAL', message: 'Boom', status }, status)
+			}
+			if (url.pathname === '/api/v1/quality/calibration/run') {
+				calibrationCalls.push('run')
+				return json({ data: runResponse }, 202)
+			}
+			if (url.pathname === '/api/v1/quality/calibration') {
+				calibrationCalls.push('list')
+				return calibrationStatus === 200
+					? json({ data: CALIBRATION })
+					: json(
+							{ code: 'E_INTERNAL', message: 'Panne', status: 500 },
+							calibrationStatus,
+						)
 			}
 			return json({
 				data: [{ id: 'p1', name: 'Fintech', lead_count: 3, active: true }],
@@ -112,6 +153,9 @@ function renderFeature() {
 beforeEach(() => {
 	Object.assign(window, { apiUrl: 'http://api.test' })
 	qualityCalls = []
+	calibrationCalls = []
+	runResponse = { queued: true }
+	calibrationStatus = 200
 	router.search = {}
 	router.navigate.mockReset()
 	install()
@@ -215,5 +259,47 @@ describe('QualityFeature', () => {
 		await waitFor(() =>
 			expect(screen.getByRole('alert').textContent).toContain('presse-papiers'),
 		)
+	})
+
+	it('shows the calibration of each agent', async () => {
+		renderFeature()
+		const card = within(await screen.findByLabelText('Calibration'))
+		expect(card.getByText('Pas assez de décisions (12/50)')).toBeTruthy()
+		expect(card.getByText('Score global')).toBeTruthy()
+	})
+
+	it('queues a recalculation and reloads the calibration', async () => {
+		renderFeature()
+		const card = within(await screen.findByLabelText('Calibration'))
+		fireEvent.click(card.getByRole('button', { name: 'Recalculer maintenant' }))
+		await waitFor(() => expect(calibrationCalls).toContain('run'))
+		await waitFor(() =>
+			expect(screen.getByText(/Recalcul programmé : il démarre/)).toBeTruthy(),
+		)
+		await waitFor(() =>
+			expect(
+				calibrationCalls.filter((call) => call === 'list').length,
+			).toBeGreaterThan(1),
+		)
+	})
+
+	it('says when a recalculation is already waiting', async () => {
+		runResponse = { queued: false }
+		renderFeature()
+		fireEvent.click(
+			await screen.findByRole('button', { name: 'Recalculer maintenant' }),
+		)
+		await waitFor(() =>
+			expect(screen.getByText('Un recalcul est déjà en attente.')).toBeTruthy(),
+		)
+	})
+
+	it('reports a calibration that cannot be loaded without hiding the report', async () => {
+		calibrationStatus = 500
+		renderFeature()
+		await screen.findByLabelText('Décisions')
+		await waitFor(() => expect(screen.getByRole('alert')).toBeTruthy())
+		expect(screen.getByRole('alert').textContent).toContain('Panne')
+		expect(screen.queryByLabelText('Calibration')).toBeNull()
 	})
 })

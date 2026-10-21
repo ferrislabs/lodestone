@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT provider_key FROM source_provider_configurations WHERE status = 'ready' AND provider_key = ANY($1::text[])",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "provider_key",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "TextArray"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "e71e4aa2a0f2fe5e9b00d676601e399526dc17b73e33b30aee5e39fab1b7db77"
+}

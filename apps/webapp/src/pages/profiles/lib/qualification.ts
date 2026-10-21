@@ -49,7 +49,6 @@ export const DEFAULT_CALIBRATION_FLOOR = 0.05
 export const MAX_CALIBRATION_FLOOR_PERCENT = 20
 export const DEFAULT_MIN_EVIDENCE = 0.5
 export const DEFAULT_INFLUENCE = 0.6
-export const DEFAULT_REFERENCE_SCORE = 50
 export const DEFAULT_EVIDENCE_WEIGHT = 1
 export const MAX_EVIDENCE_WEIGHT = 10
 export const MIN_HALF_LIFE_DAYS = 1
@@ -345,7 +344,6 @@ export interface EvidenceSettings {
 	calibrationFloor: number | null
 	minEvidence: number | null
 	influence: number | null
-	referenceScore: number | null
 	weights: Record<EvidenceWeightKey, number | null>
 	halfLives: Record<HalfLifeKey, number | null>
 }
@@ -379,10 +377,6 @@ export function evidenceSettingsOf(value: JsonObject): EvidenceSettings {
 		),
 		minEvidence: percentOf(verdict, 'min_evidence', DEFAULT_MIN_EVIDENCE),
 		influence: percentOf(evidence, 'influence', DEFAULT_INFLUENCE),
-		referenceScore:
-			'reference_score' in evidence
-				? numberField(evidence, 'reference_score')
-				: DEFAULT_REFERENCE_SCORE,
 		weights: {
 			volume: weight('volume'),
 			diversity: weight('diversity'),
@@ -396,7 +390,6 @@ export function evidenceSettingsOf(value: JsonObject): EvidenceSettings {
 }
 
 export const FLOOR_ERROR = `Doit être un pourcentage entier de 0 à ${MAX_CALIBRATION_FLOOR_PERCENT}`
-export const REFERENCE_SCORE_ERROR = "Doit être un nombre d'au moins 1"
 export const WEIGHT_ERROR = `Doit être un entier de 0 à ${MAX_EVIDENCE_WEIGHT}`
 export const NO_WEIGHT_ERROR = 'Au moins un poids doit être supérieur à 0'
 export const HALF_LIFE_ERROR = `Doit être un entier de ${MIN_HALF_LIFE_DAYS} à ${MAX_HALF_LIFE_DAYS} jours`
@@ -421,7 +414,7 @@ function isWeight(value: number | null): value is number {
 
 export function evidenceProblems(settings: EvidenceSettings): Problem[] {
 	const problems: Problem[] = []
-	const { calibrationFloor, minEvidence, influence, referenceScore } = settings
+	const { calibrationFloor, minEvidence, influence } = settings
 	if (
 		!isPercent(calibrationFloor) ||
 		calibrationFloor > MAX_CALIBRATION_FLOOR_PERCENT
@@ -433,12 +426,6 @@ export function evidenceProblems(settings: EvidenceSettings): Problem[] {
 	}
 	if (!isPercent(influence)) {
 		problems.push({ path: 'evidence.influence', message: PERCENT_ERROR })
-	}
-	if (referenceScore === null || referenceScore < 1) {
-		problems.push({
-			path: 'evidence.reference_score',
-			message: REFERENCE_SCORE_ERROR,
-		})
 	}
 	for (const key of EVIDENCE_WEIGHT_KEYS) {
 		if (!isWeight(settings.weights[key])) {
@@ -767,7 +754,7 @@ export function setEscalationField(
 
 export function setEvidenceField(
 	value: JsonObject,
-	key: 'influence' | 'reference_score',
+	key: 'influence',
 	next: number | null,
 ): JsonObject {
 	const current = isJsonObject(value.evidence) ? value.evidence : {}
@@ -818,7 +805,6 @@ export function qualificationSummary(
 	return [
 		`${count} ${pluralize(count, "axe d'analyse", "axes d'analyse")}`,
 		`fournisseur : ${providerName(agentProvider(agent), providers)}`,
-		`poids ${agentWeight(agent)}`,
 	].join(' · ')
 }
 

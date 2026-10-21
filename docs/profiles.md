@@ -1,6 +1,6 @@
 # Detection profiles
 
-A detection profile describes one market: what is sold, which agents scan which sources, which qualification agents judge a lead, which scoring agents decide its score and verdict, how an aggregator sums it up, how signals are weighted and which contacts to prefer.
+A detection profile describes one market: what is sold, which sourcing agents find leads in which sources, which profile-specific settings the ecosystem inspection of every lead uses, which qualification agents judge a lead, which scoring agents decide its score and verdict, how an aggregator sums it up, how signals are weighted and which contacts to prefer.
 
 ## Storage
 
@@ -8,7 +8,7 @@ Profiles live in Postgres. Each edit creates a new revision; earlier revisions a
 
 ## Schema
 
-The JSON Schema is `docs/schemas/profile.v11.schema.json`. It is generated from `ProfileDefinition` and must not be edited by hand. Regenerate it with:
+The JSON Schema is `docs/schemas/profile.v19.schema.json`. It is generated from `ProfileDefinition` and must not be edited by hand. Regenerate it with:
 
 ```
 UPDATE_SCHEMA=1 cargo test -p lodestone-core --test profile_examples
@@ -18,32 +18,35 @@ Without `UPDATE_SCHEMA=1` the same test fails if the committed file is stale. Th
 
 ## Examples
 
-- `docs/examples/profiles/iam-ferriskey.json`: sells FerrisKey and Autharie to organizations running Keycloak or a SaaS IAM. Uses certificate transparency, HTTP probes, CNAME patterns, public tenders and two job agents of the same kind (`ats-fr`, `ats-en`), the second with its own relevance criteria.
-- `docs/examples/profiles/ecommerce-replatforming.json`: sells Magento migrations. Uses one HTTP probe with a version extractor, BOAMP and France Travail. It has no IAM-specific field.
+- `docs/examples/profiles/iam-ferriskey.json`: sells FerrisKey and Autharie to organizations running Keycloak or a SaaS IAM. Sourcing agents « Certificats » (certificate labels) and « DNS » (CNAME patterns), both limited to France (`countries: ["FR"]`), « Marchés publics » over BOAMP, DECP and TED and « Offres et missions » over France Travail and Hacker News. Enrichment: its own fingerprints (Keycloak, Authentik, Zitadel) probed on the lead domain and the identity subdomains, and the job keywords highlighted in the offers of every lead, whose relevance criteria are written in the prompt of the `pertinence` agent.
+- `docs/examples/profiles/ecommerce-replatforming.json`: sells Magento migrations. Search agents over BOAMP and France Travail, and its own Magento fingerprint with a version extractor, probed on `www`, `shop` and `boutique`. It has no IAM-specific field.
 
 ## Sections
 
-- `schema_version`: must be 11. See [Older versions](#older-versions).
+- `schema_version`: must be 19. See [Older versions](#older-versions).
 - `identity`: the offer and the target customer, in free text.
-- `agents`: the detection agents; at least one is required. An agent searches one source with its own settings (see ADR 0005). Several agents of the same kind are allowed.
-  - `id`: slug matching `^[a-z0-9][a-z0-9-]{0,62}$`, unique in the profile.
-  - `name`: display name, not empty.
-  - `enabled`: defaults to `true`. A disabled agent is kept but not run.
-  - `source`: an object whose `kind` selects the source; the other fields are that kind's settings (table below).
-  - `llm.relevance_criteria`: optional, not empty when present. Criteria for triaging this agent's candidates; the profile's criteria apply without it. Qualification of a lead always uses the profile's criteria.
+- `language`: `fr` or `en`, default `fr` (was `llm.language` before 14). The language of every free-text field the LLM writes: the aggregator's summary, verdict narrative, approach angle, draft subject and body, the qualification summaries and the scoring reasons. The system prompts state it (`Write every free-text field (...) in French. Evidence quotes stay in the language of the document they come from.`), so evidence quotes stay in the source language and the verbatim check is unchanged. Changing the language changes the system prompt, hence the LLM cache key: answers are regenerated.
+- `agents`: the sourcing agents, they find leads (ADR 0005, ADR 0011). At least one is required unless the inspection is on and the profile has its own fingerprints or job keywords to highlight (`NoAgent`). `type` selects `search`, `certificates` or `dns`. `id` (slug matching `^[a-z0-9][a-z0-9-]{0,62}$`, unique in the profile), `name` (not empty) and `enabled` (default `true`, a disabled agent is kept but not run) are common.
+  - `search` agent: looks for keywords across catalog providers (ADR 0010). `providers`: at least one catalog key that supports keyword search (`boamp`, `decp`, `ted`, `france_travail`, `hacker_news_hiring`, `welcome_to_the_jungle`), no duplicate; an unknown key (`UnknownProvider`) or a provider without keyword search (`ProviderCannotSearch`, `ats` included since schema 17) is rejected, a provider that is not ready is accepted but skipped at run time. `keywords` (at least one), `exclusions`, `accept_min_keywords` and `filters` are defined once for every provider (see "Search agents").
+  - `certificates` agent: `labels`, hostname labels looked for in certificate transparency logs (lowercase labels, at least one). A matching host creates or updates a lead (see "Certificates and DNS agents").
+  - `dns` agent: `patterns`, provider names with the CNAME target suffix that identifies them (at least one).
+- `inspection`: `enabled` (default `true`), the master switch of the ecosystem inspection for the leads of the profile (ADR 0012, see "Ecosystem inspection"). Off, the leads of the profile are not inspected and qualification does not wait for the inspection.
+- `enrichment`: the settings of the inspection specific to this profile; everything else is the same for every profile (ADR 0012). The section and each field are optional, and there is no trade-specific default.
+  - `custom`: « Avancé » in the webapp. `fingerprints` (path, matchers, optional version extractor, debt markers, unique ids), `excluded_products` and `extra_subdomains` (hostname labels, no duplicate, empty by default). The fingerprints are probed on the lead domain and the extra subdomains; a match is a `product_detected` or `debt_marker` signal and a finding of « Site et stack technique ».
+  - `highlight_keywords`: « Mots-clés à mettre en avant » in the job offers of a lead. An offer with them is highlighted in « Activité de recrutement » and becomes a `job_offer` signal (at least 2 distinct keywords for a strong signal). Empty means the union of the keywords of the enabled search agents. No blank keyword.
 - `qualification_agents`: at least one (ADR 0007). Each agent evaluates every lead of the profile, from every source, from one angle.
   - `id`: slug, unique among all agents of the profile, sourcing and qualification together.
   - `name`: display name, not empty. `enabled`: defaults to `true`.
   - `description`: what the agent evaluates, 1 to 300 characters. Shown on the agent card and on the lead page.
   - `provider_id`: id of a declared LLM provider (`GET /api/v1/llm/providers`), or `null` for the default provider. The reference is not checked by profile validation: the runtime resolves it and treats a missing or disabled provider as an error.
   - `system_prompt`: not empty, at most 8000 characters.
-  - `weight`: integer from 1 to 10, default 5, the agent's weight in the lead confidence.
   - `exclusion_threshold`: from 0.5 to 1, default 0.6, the probability at which an excluding option excludes the lead (see "Exclusions").
   - `samples`: integer from 1 to 5, default 3, the number of independent model calls per lead (see "Sampling and voting").
   - `sampling_temperature`: from 0 to 1.5, default 0.7, the temperature of those calls when `samples` is above 1; it overrides the provider temperature for them.
+  - `learned_calibration`: default `true`. Whether the isotonic map learned for this agent corrects its score (see "Learned calibration"). The fit always runs, so the quality page keeps its figures.
   - `questions`: at least one. A question has an `id` (lowercase letters, digits, `-`, `_`, at most 63 characters, unique in the agent), a `wording`, a `weight` (1 to 10, default 5) and 2 to 11 `options`. An option has a `value` (same identifier rule, unique in the question), a `label`, a `score` from 0 to 1 `is_unknown` (default false) and `excludes` (default false, never together with `is_unknown`). Exactly one option per question is the unknown option (`is_unknown: true`, default value `inconnu`, label `Inconnu`, score 0.5): the model picks it when nothing in the documents supports an answer. Its score is editable, it cannot be removed, and the editor pins it last as `Option « inconnu »`. A question without exactly one unknown option is rejected (`UnknownOptionCount`, path `...options`).
   - Validation paths include the indexes, for example `qualification_agents[1].questions[0].options[2].score`.
-  - Ready-made templates (editor, "Ajouter un agent de qualification"; French prompts and labels, higher score = better lead for the offer; the operator adjusts scores and weights):
+  - Ready-made templates (editor, "Ajouter un agent de qualification"; French prompts and labels, higher score = better lead for the offer; the operator adjusts scores and question weights):
     - `Pertinence`: axis `pertinence` (`forte`, `moyenne`, `faible`).
     - `Maturité technique`: axis `maturite` (`legacy_auto_heberge`, `saas`, `inconnu`).
     - `Environnement`: production or non-production evidence. Axes `environnement` (`production`, `mixte`, `hors_production`, `inconnu`) and `maturite_usage` (`usage_reel`, `experimentation`, `inconnu`). Reads the "Faits" block (environment per host, production share).
@@ -51,18 +54,19 @@ Without `UPDATE_SCHEMA=1` the same test fails if the committed file is stale. Th
     - `Marché`: the prompt starts with an editable sentence, `Zone visée : France et Europe francophone.`. Axes `zone` (`dans_la_zone`, `proche`, `hors_zone`, `inconnu`) and `langue` (`francais`, `autre`, `inconnu`). Reads the country by ccTLD from the "Faits" block.
     - `Opportunité`: migration, technical debt, cost or limits of the current SaaS, hiring. Axes `migration` (`en_cours`, `probable`, `improbable`, `inconnu`) and `declencheur` (`fort`, `moyen`, `aucun`).
     - `Recherche entreprise`: what the company does and its size, from its dossier.
-    - `Exclusions`: weight 1. Axes `editeur_integrateur`, `hebergeur_agence` (the signal concerns a customer of the company), `domaine_inactif` (`parque_ou_inactif`, `actif`, `inconnu`), `client_actuel` and `concurrent`; the other four have `oui` (excludes, score 0), `non` (score 1) and `inconnu` (score 0.5). The prompt holds three operator-editable lists in French, `Clients actuels :`, `Concurrents :` and `Éditeurs et intégrateurs du domaine :`, with short IAM-oriented defaults.
+    - `Exclusions`: axes `editeur_integrateur`, `hebergeur_agence` (the signal concerns a customer of the company), `domaine_inactif` (`parque_ou_inactif`, `actif`, `inconnu`), `client_actuel` and `concurrent`; the other four have `oui` (excludes, score 0), `non` (score 1) and `inconnu` (score 0.5). The prompt holds three operator-editable lists in French, `Clients actuels :`, `Concurrents :` and `Éditeurs et intégrateurs du domaine :`, with short IAM-oriented defaults.
     - The IAM example (`docs/examples/profiles/iam-ferriskey.json`) enables all of them.
 - `scoring_agents`: zero or more (ADR 0009). Each agent *decides* a score and a verdict for every lead from the reports of the qualification agents, through a contract imposed by the application. With none enabled the verdict stays pending (`en_attente`, reason `awaiting_scoring`).
   - `id`: slug, unique among all agents of the profile (sourcing, qualification and scoring). `name`, `enabled` (default `true`), `description` (1 to 300 characters), `provider_id` (`null` for the Synthèse default provider, the one of the aggregator), `system_prompt` (not empty, at most 8000 characters).
-  - `weight`: integer from 1 to 10, default 5, the agent's weight in the lead score and verdict.
+  - `weight`: integer from 1 to 10, default 5, the agent's weight in the lead score and verdict. It only matters with two or more scoring agents: the editor shows the field, and the weight on the agent card, only then, and keeps the stored value when it is hidden.
   - `criteria`: at least one. Same rules as qualification `questions` (identifier, `wording`, `weight`, 2 to 11 options with a score from 0 to 1, exactly one unknown option), except that no option can exclude a lead (`CriterionCannotExclude`, path `scoring_agents[i].criteria[j].options[k].excludes`).
   - `samples`: integer from 1 to 5, default 1. `sampling_temperature`: from 0 to 1.5, default 0.7, used when `samples` is above 1.
+  - `learned_calibration`: default `true`. Whether the isotonic map learned for this agent corrects its verdict probabilities (see "Learned calibration").
   - Default agent given to every profile of an older version on upgrade (and carried by both examples): `score-global`, "Score global", weight 5, 1 sample, provider `null`, a French description and prompt, and three criteria (`adequation_offre` forte/moyenne/faible, `solidite_preuves` solide/partielle/fragile, `priorite_commerciale` haute/normale/basse), each with an unknown option.
 - `aggregator`: `provider_id` (or `null` for the synthesis default) and a `system_prompt` (not empty, at most 8000 characters). Once every enabled qualification agent has a result for a lead, it writes the lead summary and a message draft (see "Qualification and summary").
 - `escalation`: `provider` (id of a declared LLM provider, `null` by default which disables escalation), `band_low` (0 to 100, default 40) and `band_high` (0 to 100, default 70) with `band_high > band_low` (see "Escalation"). The whole section and each field are optional.
 - `verdict`: `reliable_from` (0 to 100, default 70) and `discard_below` (0 to 100, default 30), with `reliable_from > discard_below`. Percentages of the lead confidence: reliable from the first (and only when the two conditions below hold), to check between the two, discarded below the second. `calibration_floor` (0 to 0.2, default 0.05, 0 disables) clamps every answer probability to `[floor, 1 - floor]` before scoring, then renormalises. `min_evidence` (0 to 1, default 0.5) is the evidence strength a lead needs to be reliable.
-- `evidence`: how the strength of the evidence weighs on the confidence (ADR 0007, "Evidence and calibration"). `influence` (0 to 1, default 0.6), `reference_score` (at least 1, default 50) and `weights` (`volume`, `diversity`, `environment`, `strength`, integers from 0 to 10, default 1, at least one above 0). `half_life_days` maps a signal kind to its half-life in days (see "Evidence indicators"). The whole section and each field are optional.
+- `evidence`: how the strength of the evidence weighs on the confidence (ADR 0007, "Evidence and calibration"). `influence` (0 to 1, default 0.6) and `weights` (`volume`, `diversity`, `environment`, `strength`, integers from 0 to 10, default 1, at least one above 0). `half_life_days` maps a signal kind to its half-life in days (see "Evidence indicators"). The whole section and each field are optional.
 
 ### Scoring agents
 
@@ -99,17 +103,43 @@ Validation is `validate_scoring` (`libs/core/src/domain/scoring_agent/mod.rs`) a
 
 **Combination.** Pure function `combine` / `decide` (`libs/core/src/domain/scoring_agent/combination.rs`), over the valid results of the enabled scoring agents:
 
-- lead score = weighted mean of the agent scores (weights 1 to 10), rounded half up to an integer;
-- verdict probabilities = weighted mean of the agents' verdict probabilities, each first passed through `calibrate_verdict(probabilities, agent)`, the identity until issue 171;
+- lead score = weighted mean of the agent scores (scoring agent weights 1 to 10), rounded half up to an integer;
+- verdict probabilities = weighted mean of the agents' verdict probabilities, each first passed through `calibrate_verdict(probabilities, agent, calibrations)`, the identity unless a learned calibration applies to the agent (see "Learned calibration");
 - verdict = argmax, ties resolved prudently `a_verifier` > `ecarte` > `fiable`; verdict confidence = that probability, stored in percent on the lead (`leads.confidence`);
 - qualification exclusions force `ecarte` with reason `excluded` and confidence 100, whatever the scoring agents say, even when none answered;
 - no valid scoring result and no exclusion: verdict `null`, score `null`, reason `awaiting_scoring`.
 
 **Storage and due logic.** Results live in `scoring_results` (lead, profile revision, agent, status, criteria answers, score, verdict, reasons, provenance, raw samples), upserted on `(lead_id, profile_revision, agent_id)`. The lead score is `leads.llm_score`, the verdict and its confidence `leads.verdict` and `leads.confidence`, the verdict probabilities, reason and source `lead_qualification_state.verdict_probabilities`, `verdict_reason` and `verdict_source` (`scoring`, or `indicators` for a lead qualified before the scoring agents existed and not scored since: it keeps its former computed verdict until scored). The indicators stay in `opinion`, `evidence`, `indicator_confidence` and `indicator_cap`. A lead is due for scoring when its qualification results changed (`lead_qualification_state.completed_at` differs from `scoring_for`) or its profile revision differs from `scoring_revision`. The aggregator only summarises a lead whose scoring is up to date, and receives the scoring results (score, verdict, reasons) as documents; it still must not restate figures.
 
-**Rescoring.** The rescoring loop (no model call) refreshes the indicators and the decay (`SCORING_VERSION` 4) and no longer decides: it recombines the stored scoring results and changes a verdict only through exclusions (a lead scored by the scoring agents is recombined, an `indicators` lead is untouched unless a qualification agent excludes it).
+**Rescoring.** The rescoring loop (no model call) refreshes the indicators and the decay (`SCORING_VERSION` 5) and no longer decides: it recombines the stored scoring results and changes a verdict only through exclusions (a lead scored by the scoring agents is recombined, an `indicators` lead is untouched unless a qualification agent excludes it).
 
 **Quality.** Decision label snapshots keep the scoring results (`scoring_agents`, `llm_score`, `indicator_confidence`, `verdict_source`); the versions table of `GET /api/v1/quality` has a `kind` (`qualification`, `scoring`, `aggregator`), so precision is counted per scoring agent and per version (model and prompt).
+
+### Learned calibration
+
+Issue 171. The probabilities of the agents are corrected from the human decisions (`decision_labels`). Everything is pure code in `libs/core/src/domain/calibration/`; storage is the `calibrations` table.
+
+**Labelled data.** For each profile and each agent, the observations are the leads whose latest lead label (`lead_validated` = 1, `lead_rejected` = 0; draft labels and suppressed leads are ignored) has a valid result of that agent at the current revision of the lead.
+
+**Isotonic regression.** Pool-adjacent-violators over the observations `(x, y)` with unit weights: samples sharing the same `x` are averaged first, then neighbouring blocks that violate the order are pooled into their weighted mean. The fitted map is the list of blocks `[{x: lower bound of the block, y: value}]`, stored as `calibrations.points`. Prediction is a step function: the value of the last block whose lower bound is at most `x` (the first block below the smallest bound), clamped to `[0.02, 0.98]`.
+
+**Scoring agents.** `x` = `P(fiable) + 0.5 x P(a_verifier)` of the agent verdict (called the good probability), `y` = validated. With `g` the calibrated good probability and `(r, c, d)` the raw probabilities of `fiable`, `a_verifier` and `ecarte` (summing to 1), the transform keeps `c` and moves the rest:
+
+- `r' = clamp(g - 0.5 c, 0, 1 - c)`
+- `c' = c`
+- `d' = 1 - c - r'`
+
+so `r' + d' = 1 - c`, the three still sum to 1, `r' + 0.5 c'` equals `g` whenever `0.5 c <= g <= 1 - 0.5 c` (otherwise `r'` is clamped at 0 or at `1 - c`), `g` equal to the raw good probability is the identity, and `r'` is non-decreasing and `d'` non-increasing in `g`. The calibrated probabilities replace the raw ones in the weighted mean of `combine`; the stored result keeps the raw ones.
+
+**Qualification agents (indicators).** `x` = the agent score computed without the calibration floor (`agent_score(agent, answers, 0)`, recomputed from the stored answers), `y` = validated. When a map applies, the agent opinion used by the indicators is `predict(x)` instead of the score computed with `verdict.calibration_floor`; otherwise the floor applies as before. The stored `qualification_results.agent_score` keeps the value used.
+
+**Thresholds.** A map is fitted and applied only with at least 50 observations and at least 10 of each class. Below, the row keeps `n`, `positives` and `brier_before`, `points` is `[]`, `enabled` is `false`, and the identity applies.
+
+**Storage.** `calibrations (profile_id, kind scoring|qualification, agent_id, points, n, positives, brier_before, brier_after, reliability, fitted_at, enabled)`, primary key `(profile_id, kind, agent_id)`. `brier_before` is the mean squared error of the raw `x` against the outcomes, `brier_after` the same for the calibrated values on the same observations (in-sample, hence optimistic). `reliability` holds the ten-bin reliability curve of the raw predictions (non-empty bins `{n, predicted, observed}`). `enabled` means the thresholds were met; the `learned_calibration` flag of the agent decides whether an enabled map is applied to it (`false`: raw probabilities for that agent, state "Désactivée"; the fit still runs and keeps `n` and the Brier scores).
+
+**Job `quality.calibrate`.** A daily recurring job in the Postgres queue (payload `{"recurring": true}`, dedup key `quality:calibrate`, first run at startup then rescheduled 24 hours after each run, 3 attempts). It refits every profile from its latest revision and writes the rows with an upsert, so it is idempotent and safe to run twice. When an applied map changed for an agent whose `learned_calibration` is `true`, it sets `lead_qualification_state.scored_at` to `NULL` for the leads of the profile: the rescoring loop then recombines the stored results with the new maps, without any model call. `POST /api/v1/quality/calibration/run` (users only) enqueues a one-shot run (payload `{"recurring": false}`, dedup key `quality:calibrate:manual`, answer 202 `{queued}`, `queued` false when one is already waiting). `GET /api/v1/quality/calibration` gives the state of every agent of every profile.
+
+**Display.** The Qualité page has a "Calibration" card per profile (n, validated, Brier before and after, state "Active", "Pas assez de décisions (n/50)" or "Désactivée", reliability curve with the diagonal as reference, button "Recalculer maintenant"). The lead page shows "Calibré (n = ...)" on a scoring agent card with its raw and calibrated verdict probabilities.
 
 ### Evidence indicators
 
@@ -126,12 +156,12 @@ The strength of the evidence is computed in code (ADR 0007, "Evidence and calibr
 - `volume = 1 - exp(-decayed / 3)`.
 - `diversity = min(1, (sources + 0.5 x (kinds - 1)) / 2)` with `sources` the distinct sources and `kinds` the distinct signal kinds (at least one kind counts as zero extra).
 - `environment`: share of production hosts among the hosts carrying signals, 0.5 when none.
-- `strength = clamp(signal_score x (decayed / n) / reference_score, 0, 1)`, the signal score of the lead weighted by the mean freshness of its independent signals (1 when there is no signal).
+- `strength` = the mean of the three highest `s_i x decay_i` among the independent signals, with `s_i` the strength (0 to 1) the source gave the signal (fewer signals: the mean of those there are; 0 when there is none). It needs no profile setting. The strength of an independent signal is the one of its freshest observation, and signals of the siblings count as for the other components.
 - `score = weighted mean of the four components` with `evidence.weights`.
 
 **Half-lives.** `evidence.half_life_days` is an object of integers from 1 to 3650, keyed by signal kind (lowercase snake case) plus `default`. Defaults: `job_offer` 90, `public_tender` 180, `awarded_contract` 365, `saas_provider` 365, `product_detected` 365, `debt_marker` 365, `contact` 365, `role_contact_found` 365, `default` 180. A kind absent from the object falls back to its default above, then to `default`, then to 180. The editor shows one field per kind in "Demi-vie des signaux (jours)".
 
-**API.** The lead page shows `facts.independent_signals`, `facts.sibling_domains` and, in `evidence`, `independent_signals`, `decayed_signals`, `source_count` and `kind_count`. The lead list accepts `group_by=company`: one row per company and profile, the lead with the best confidence (then score) standing for the others, which are returned in `grouped_leads`; the other filters apply before grouping, and `total` counts rows. Default is `none`. The webapp groups by default ("Regrouper par entreprise") and shows a "+N domaines" badge that expands the sibling domains.
+**API.** The lead page shows `facts.independent_signals`, `facts.sibling_domains` and, in `evidence`, `independent_signals`, `decayed_signals`, `source_count` and `kind_count`. The lead list accepts `group_by=company`: one row per company and profile, the lead with the best confidence (then signal strength) standing for the others, which are returned in `grouped_leads`; the other filters apply before grouping, and `total` counts rows. Default is `none`. The webapp groups by default ("Regrouper par entreprise") and shows a "+N domaines" badge that expands the sibling domains.
 
 **Rescoring.** `SCORING_VERSION` 3 (v10 counting rules) rescored every stored lead without calling a model; version 4 (v11) refreshes the indicators of every stored lead the same way. A lead is rescored whenever the number of signals it aggregates changes, including signals of a sibling. Decay is evaluated at each scoring; it does not run on its own.
 
@@ -187,40 +217,44 @@ A qualification agent answers, and only answers, with one object per question:
 
 `contract_schema(&QualificationAgent)` (`libs/core/src/domain/profile/contract.rs`) builds the JSON Schema of this contract from the agent's questions: every question required, `choice` limited to the option values, `confidence` and every probability a number from 0 to 1, `probabilities` holding exactly the option keys, no additional property. Contract v3 adds `evidence`, a required string of at most 300 characters: the sentence of the documents that justifies the choice, copied verbatim. It may be empty only when the choice is the unknown option. The editor shows it read-only as "Aperçu du JSON contractuel".
 
-- `scoring`: weighted factors, each made of a signal, an optional value and a weight. The weight is an integer from 1 to 10, validated by the server (`scoring.factors[i].weight`). A lead's score is the sum, over factors, of `weight × measure`. For a normal factor the measure is the highest strength (0 to 1) among the lead's signals of that kind, and of that value when one is set; several matching signals count once. The reserved factor `distinct_signals` measures the number of distinct signal kinds on the lead. The score and its per-factor breakdown are recomputed whenever the lead's signals change, and stored on the lead. Scores stay in points.
-
-  The maximum possible score is the sum, over factors, of `weight × cap`. The cap is 1 for a normal factor; for `distinct_signals` it is the number of distinct signal kinds among the profile's other factors (values are ignored: two `product_detected` factors count one kind). `ProfileDefinition::max_score()` computes it. Example: the IAM example has weights 10, 5, 3, 8, 7, 2 on six kinds plus `distinct_signals` at 2, so its maximum is 35 + 2 × 6 = 47.- `contact_ranking`: preferred email local parts, most preferred first.
-- `llm`: the qualification threshold, the relevance criteria and the answer language given to the model. `language` (`llm.language`, `fr` or `en`, default `fr` when absent) is the language of every free-text field the LLM writes: the aggregator's summary, verdict narrative, approach angle, draft subject and body. The aggregator's system prompt states it (`Write every free-text field (...) in French. Evidence quotes stay in the language of the document they come from.`), so evidence quotes stay in the source language and the verbatim check is unchanged. Changing the language changes the system prompt, hence the LLM cache key: answers are regenerated. Profiles without the field answer in French without a new revision. `qualification_threshold` is a percentage, an integer from 0 to 100 (`llm.qualification_threshold`), of the maximum possible score. It is kept for older profiles and no longer gates anything: since ADR 0007 every lead with a signal goes through the qualification agents, whatever its score.
+- There is no `scoring` section since schema 13 and no `evidence.reference_score`: the strength of the signals comes only from the sources (see "Signal strength"). A document that still carries them is rejected, an older one is upgraded and they are discarded.
+- `contact_ranking`: `preferred_local_parts`, the email local parts to keep first among the addresses found, most preferred first, and `guess_local_parts`, the local parts to guess when no address is found (each must also be listed in `preferred_local_parts`).
+- There is no `llm` section since schema 14: the relevance criteria live in the system prompts of the qualification agents, the answer language is `language`, and the qualification threshold is gone (it gated nothing since ADR 0007). A document that still carries `llm`, `calibration` or an agent `llm` block is rejected, an older one is upgraded.
 
 ## Qualification and summary
 
 Qualification runs in the `qualification` listener (ADR 0006, ADR 0007), not in a recurring job: the former `llm.qualify` job is gone, its row is deleted by a migration and a stale one is rejected as a permanent failure.
 
-1. **Agents.** Every lead with a signal is evaluated by each enabled qualification agent. The step is repeated when the lead receives a signal from a source it had no signal from, and for every lead when the profile gets a new revision. The lead's confidence (0 to 100) and verdict come from the valid results only, computed in code: calibrated question score, agent score, the weighted mean over agents (the agents' opinion), blended with the evidence strength, then compared with `verdict.reliable_from` and `verdict.discard_below`; a lead is reliable only with two independent angles and enough evidence (see ADR 0007, "Evidence and calibration"). Verdicts: `fiable`, `a_verifier`, `ecarte`; a lead without any valid result has no verdict and is shown "En attente".
+1. **Agents.** Every lead with a signal is evaluated by each enabled qualification agent. The step is repeated when the lead receives a signal from a source it had no signal from, and for every lead when the profile gets a new revision. The lead's confidence (0 to 100) and verdict come from the valid results only, computed in code: calibrated question score, agent score, the plain mean over agents (the agents' opinion), blended with the evidence strength, then compared with `verdict.reliable_from` and `verdict.discard_below`; a lead is reliable only with two independent angles and enough evidence (see ADR 0007, "Evidence and calibration"). Verdicts: `fiable`, `a_verifier`, `ecarte`; a lead without any valid result has no verdict and is shown "En attente".
 2. **Aggregator.** A lead is summarised when the agents' step has stored a result for every enabled agent (valid or invalid) and its summary is missing or older than the agents' results (the `summarised_at` mark of `lead_qualification_state` is reset each time the agents run again). A decided lead (validated, rejected, contacted) is not summarised again. The selection runs in the same listener loop, right after the agents' step, oldest first, within the same batch size and run budget.
 3. **Provider.** `aggregator.provider_id`, else the default provider "Synthèse (agrégateur par défaut)". Qualification agents without a provider use "Classification (agents de qualification par défaut)". The two defaults keep the former tier names in the database and the API (`triage` and `qualification`); the Fournisseurs LLM screen shows them under "Fournisseurs par défaut".
 4. **Prompt.** System: the aggregator's `system_prompt`, the market context (offer and target customer, neutralised), the answer language and the output rules. Documents (untrusted, numbered): one per signal first, then the lead overview, then one per enabled agent with its questions, the chosen option label, its confidence and its score (an invalid agent is listed as such and left out of the confidence). The instruction states the computed confidence and verdict as final facts.
 5. **Output.** `summary`, `verdict_narrative`, `approach_angle`, `evidence` (quotes with the index of a signal document) and `draft_message` (`subject`, `body`). The output has no confidence or verdict field and any extra field is ignored: the lead's confidence and verdict are never written by the aggregator.
 6. **Evidence.** Each quote must appear verbatim, after typographic normalisation, in the signal document it names. An unverified answer is retried once with a reminder. If it is still unverified, the summary is kept with `evidence_verified = false`, only the verified quotes are stored and the lead page and the validation queue show "Preuves non vérifiées". An answer that breaks the output contract twice stores nothing and the lead stays due.
 7. **Draft.** Every summarised lead gets a message draft in the validation queue, pending review, whatever its verdict. The lead moves from `new` to `qualified`. Nothing is ever sent. A new summary replaces the previous draft in the queue only while that draft is pending and unedited. A draft a human edited, or already approved or rejected, is carried over unchanged into the new assessment; an edited pending draft also gets the new model text as a read-only suggestion (`suggested_subject`, `suggested_body`) and `outdated_at`, and the review screen says "Le bilan a été mis à jour après votre modification".
-8. **Backoff.** A failed aggregation (provider unavailable, call failure, answer breaking the contract twice) is counted per lead in `lead_qualification_state` (`summary_attempts`, `summary_next_attempt_at`, `summary_error`). The next try waits 1 min, 5 min, 30 min, 2 h, then 6 h; from 5 consecutive failures the lead page shows "Bilan en échec : <raison>" and the aggregator keeps trying every 6 h. A success, or new agent results, resets the counter. `POST /api/v1/leads/{lead_id}/summary/retry` (users only) resets it at once; the lead page has a "Réessayer" button. The agents' step has no per-lead loop (a failed call stores an invalid result); when a step exhausts its run budget the listener pauses that step with the same schedule.
+8. **Backoff.** A failed aggregation (provider unavailable, call failure, answer breaking the contract twice) is counted per lead in `lead_qualification_state` (`summary_attempts`, `summary_next_attempt_at`, `summary_error`). The next try waits 1 min, 5 min, 30 min, 2 h, then 6 h; from 5 consecutive failures the lead page shows "Bilan en échec : <raison>" and the aggregator keeps trying every 6 h. A success, or new agent results, resets the counter. `POST /api/v1/leads/{lead_id}/summary/retry` (users only) resets it at once; the lead page has a "Réessayer" button. When a step exhausts its run budget the listener pauses that step with the same schedule.
+
+9. **Model call failures.** A qualification or scoring agent whose model call failed (transport, timeout, rate limit, any HTTP status; for sampled agents, every sample's call failed) stores no result. The lead stays due for that step and the failure is counted per lead and agent kind in `lead_agent_retries` (`attempts`, `next_attempt_at`, `error`, `provider_id`, `profile_revision`) with the same schedule as the aggregator (1 min, 5 min, 30 min, 2 h, then 6 h). From 5 attempts the lead page shows "En échec après 5 tentatives" and the step keeps trying every 6 h. A success, a new profile revision or a provider update (`PATCH /api/v1/llm/providers/{provider_id}`, which also resets the aggregator backoff of the leads that failed with that provider) clears or resets it. `POST /api/v1/leads/{lead_id}/agents/retry` (users only) makes the failed agents due at once. A dropped sample whose call failed is ignored when other samples answered. An answer that breaks the contract after the retry stays a final invalid result. Invalid results already stored with an error starting with "Échec de l'appel au modèle" are made due again by the migration `add_agent_call_retries`.
+10. **Reasoning effort.** When an OpenAI-compatible provider answers 400 or 422 with a message about `reasoning_effort` (or reasoning that is not supported, not enabled, unknown), the call is retried once without `reasoning_effort`. The provider is remembered in memory, keyed by endpoint, model and effort, so a provider change forgets it, and a warning is logged once. The provider test does not use that fallback and reports "Ce modèle n'accepte pas le réglage de raisonnement".
 
 The assessment is stored in `assessments` (`prompt_version` is `aggregator@` plus a hash of the system prompt, `verdict_narrative`, `evidence_verified`).
 
-The leads list (`GET /api/v1/profiles/{profile_id}/leads`) accepts `verdict` (comma-separated `fiable`, `a_verifier`, `ecarte`, `en_attente`), `min_confidence` and `sort` (`confidence_desc`, the default, `confidence_asc`, `score_desc`, ...); each lead carries `confidence`, `verdict`, `opinion` (agents' opinion in percent), `evidence` (strength in percent with its four components, signal count, signal score, `only_non_production`), `verdict_reason` (`single_angle`, `weak_evidence` or `non_production` when a confident lead was capped at `a_verifier`) and the latest `summary`. The Leads screen hides `ecarte` by default and sorts by confidence. The queue (`GET /api/v1/drafts`) is sorted by lead confidence and filtered by the same `verdict` parameter; the Brouillons screen also hides `ecarte` by default.
+The leads list (`GET /api/v1/profiles/{profile_id}/leads`) accepts `verdict` (comma-separated `fiable`, `a_verifier`, `ecarte`, `en_attente`), `min_confidence` and `sort` (`confidence_desc`, the default, `confidence_asc`, `score_desc`, `score_asc` (signal strength), ...); each lead carries `confidence`, `verdict`, `opinion` (agents' opinion in percent), `evidence` (strength in percent with its four components, signal count, signal strength in `signal_score`, `only_non_production`), `verdict_reason` (`single_angle`, `weak_evidence` or `non_production` when a confident lead was capped at `a_verifier`) and the latest `summary`. The Leads screen hides `ecarte` by default and sorts by confidence. The queue (`GET /api/v1/drafts`) is sorted by lead confidence and filtered by the same `verdict` parameter; the Brouillons screen also hides `ecarte` by default.
 
-## How scoring works
+## Signal strength
 
-Each factor looks for one signal kind, optionally one value. Its contribution is `weight × strength` of the strongest matching signal on the lead (strength from 0 to 1, set by the source). No matching signal gives 0. The `distinct_signals` factor contributes `weight × number of distinct signal kinds` on the lead, which rewards leads seen by several agents.
+Each signal carries a `strength` from 0 to 1 set by its source. The strength of the signals of a lead is computed in code, with no profile setting:
 
-- Lead score = sum of the contributions, in points.
-- Max score = sum of the weights, with `distinct_signals` counted as `weight × number of distinct signal kinds among the other factors`.
-- The score is a secondary indicator. Qualification no longer depends on it: every lead with a signal is evaluated by the qualification agents, and its confidence and verdict come from their answers (see "Qualification and summary").
+- For every independent signal of the lead and of its siblings of the same profile, `s_i x decay_i`, the strength set by the source times the age decay of its kind (see "Evidence indicators").
+- Strength = the mean of the three highest of these values (fewer when the lead has fewer signals, 0 when it has none), from 0 to 1. It is the `strength` component of the evidence.
+- `leads.score` = round(strength x 100, 1): the "Force des signaux", from 0 to 100. It is recomputed whenever a source or the contact finder records signals, and by the rescoring loop, because decay changes it with the days. The leads list `min_score` filter, the `score_desc` and `score_asc` sorts, the `score` field of the exports and of the webhook, and the lead page all use it. It orders the leads found by the sourcing; it does not decide the verdict, the scoring agents do (`llm_score`).
+- Since schema 13 a lead no longer carries a per-factor breakdown (`score_breakdown` is gone from the API, the exports and the webhook payload).
 
 Strengths set by the sources:
 
 | Origin | Signal | Strength |
 | --- | --- | --- |
+| Certificates agent | `certificate_seen` | 0.3 |
 | HTTP probe | `product_detected` | 0.9 |
 | HTTP probe | `debt_marker` | 0.6 |
 | DNS CNAME | `saas_provider` | 0.9 |
@@ -229,38 +263,119 @@ Strengths set by the sources:
 | Address extracted by the LLM | `role_contact_found` | 0.5 |
 | Address guessed from a role | `role_contact_found` | 0.2 |
 
-Example with the IAM weights: a lead with a Keycloak fingerprint (strength 0.9) and a job offer accepted by the rules (strength 0.7) scores `10 × 0.9 + 8 × 0.7 = 14.6` points.
+Example: a lead with a Keycloak fingerprint (strength 0.9) and a job offer accepted by the rules (strength 0.7), both observed today, has a strength of `(0.9 + 0.7) / 2 = 0.8`, a score of 80. A third signal of 0.3 brings it to `(0.9 + 0.7 + 0.3) / 3 = 0.63`.
 
-## Agent kinds
+## Search agents
 
-| `kind` | Settings |
+A search agent defines its criteria once and every provider attached to it translates them into its own API. `filters`:
+
+| Field | Values |
 | --- | --- |
-| `certificate_transparency` | `labels`: hostname labels to look for in certificate logs. |
-| `http_probe` | `fingerprints` (path, matchers, optional version extractor, debt markers) and `excluded_products`. |
-| `dns_cname` | `patterns`: provider names with the CNAME target suffix that identifies them. |
-| `boamp`, `decp`, `ted` | Public procurement sources: `keywords`, `exclusions`, `accept_min_keywords`. |
-| `france_travail`, `ats` | Job sources: `keywords`, `exclusions`, `accept_min_keywords`. |
+| `remote` | `any` (default), `full_remote`, `remote_or_hybrid`. |
+| `countries` | ISO 3166-1 alpha-2 codes in uppercase (`FR`), no duplicate. Empty means every country. |
+| `contracts` | `freelance`, `employee`, `public_contract`, `any`. Empty or containing `any` means every contract type. |
 
-`accept_min_keywords` (default 2, at least 1) is the number of distinct keywords from which a candidate is accepted without the LLM, provided no exclusion matches.
+A candidate without any keyword is rejected. `accept_min_keywords` (default 2, at least 1) is the number of distinct keywords from which a candidate gives a strong signal (route `keywords`, strength 0.7), provided no exclusion matches. Fewer keywords, or any exclusion, still keep the candidate with a weaker signal (route `keywords_ambiguous`, strength 0.5): exclusions never reject.
 
-Validation paths include the agent index, for example `agents[1].source.keywords[0]` or `agents[0].llm.relevance_criteria`.
+Each provider filters natively what its API supports (`capabilities.filters` of its catalog descriptor) and the rest is applied after collection, on every candidate, by the same function for all providers (`passes_filters`, `libs/core/src/domain/triage/filters.rs`). A candidate dropped by the filters is counted as `rejected_by_filters` and never reaches the keyword routing. The signals recorded by a search agent carry its id in `agent`.
+
+| Provider | Native | Applied after collection |
+| --- | --- | --- |
+| `france_travail` | `contracts` as `typeContrat` (`freelance`: `FRA,LIB`; `employee`: `CDD,CDI,MIS,SAI`). Keywords are queried once per distinct native filter. | `remote`, `countries`, and `contracts` again on the offer contract code and text. |
+| `ted` | `countries` as `buyer-country` (alpha-3 code derived from the alpha-2; a country without alpha-3 code is left to the post-filter). Without `countries`, the operator default `TED_BUYER_COUNTRIES` applies. | `remote` (not applicable to notices, they pass), `contracts` (a notice is a `public_contract`). |
+| `hacker_news_hiring` | none | all three filters, on the work mode, contract and country read from the post header (see "Hacker News parsing"). |
+| `welcome_to_the_jungle` | none (the attributes of the jobs index are not documented) | all three filters, on the contract, remote mode and office country of each offer (see "Welcome to the Jungle"). |
+| `boamp`, `decp` | none | all three filters. |
+
+Post-filter rules, best effort on the title and text of the candidate, accents ignored:
+
+- `remote` applies to job offers only; notices and awards pass. A negation (`pas de télétravail`, `no remote`) is on-site; `full remote`, `100% télétravail`, `télétravail complet`, `fully remote`, `entièrement à distance` are fully remote; `hybride`, `hybrid`, `télétravail partiel`, `N jours de télétravail`, or any mention of `télétravail`, `remote`, `à distance` is hybrid; `sur site`, `on-site`, `présentiel` is on-site. An offer with no mention fails `full_remote` and `remote_or_hybrid`.
+- `contracts`: a tender or an award is a `public_contract`. An offer is `freelance` (`freelance`, `indépendant`, `contractor`, `TJM`, `auto-entrepreneur`, provider contract code `LIB`) and/or `employee` (`CDI`, `CDD`, `permanent`, `salarié`, `fixed-term`, provider codes `CDI`, `CDD`, `MIS`, `SAI`). An offer with no recognised contract fails a contract filter.
+- `countries`: the country comes from the provider detail (TED `buyer-country`), the country-code top-level domain of the candidate, or a country name in French or English in the text. A candidate with no country evidence is kept; one whose evidence names only other countries is dropped.
+
+The editor lists, per selected provider, what it filters natively and what is applied after collection.
+
+### Welcome to the Jungle
+
+`welcome_to_the_jungle` searches the job offers of welcometothejungle.com through the search backend of its public search page (Algolia), under an authorisation the operator declares in the catalog (`authorised`, dated in `authorised_at`, and `authorisation_reference`). Scope: keyword search of offers and the company of each offer, nothing else. Every run reads `/api/env` for the application id and the public search-only key (never stored), and sends the `Referer` value the operator entered (`referer`, an https URL on welcometothejungle.com) with the Lodestone User-Agent; no other browser header is sent. The jobs index is `jobs_index` when set, otherwise it is discovered once per process in the public scripts of `/fr/jobs` (at most 8 scripts). Each distinct keyword is searched (`max_pages` pages of 30 offers, 1 to 3, default 3) and an offer found twice is kept once (by object id). The company website comes from the offer when present, otherwise from the organisation index (one lookup per company, cached, at most 60 per run); an offer without a website is counted as `skipped_no_domain`. The signal is a `job_offer` titled « offer — company » whose provenance is the offer page on welcometothejungle.com and whose date is the publication date. Requests to one host are spaced to `requests_per_minute` (default 10, 1 to 30). A `429` stops the run as rate limited; a `403` naming the referer, any other `403` or a challenge marks the provider `failing` with the reason and stops the run, without retry nor workaround.
+
+### Hacker News parsing
+
+`hacker_news_hiring` reads the monthly "Ask HN: Who is hiring?" thread once a day (`HACKER_NEWS_INTERVAL_HOURS`, default 24). The thread is the most recent story of the `whoishiring` account whose title starts with `Ask HN: Who is hiring?`; the first run of a process also reads the previous month's thread, later runs only the current one. Each distinct keyword of the enabled search agents attached to the provider is searched in the thread (`HACKER_NEWS_MAX_PAGES` pages of 100 comments at most per keyword and thread, default 5). Replies to job posts are ignored and a post found by several keywords is kept once (by item id).
+
+- The comment HTML becomes plain text: block tags are line breaks, tags are dropped, entities are decoded, and a link is replaced by its full `href` (the displayed text is truncated by Hacker News).
+- The first line is split on `|`. The first token is the company, the first following token that is neither a work-mode, contract nor URL token is the role, the other such tokens are the location. A line without `|` is a company only. The signal title is `role - company`.
+- Work mode from the tokens after the company: `hybrid`, or both remote and on-site, or `remote-friendly` is hybrid; `remote` is full remote; `onsite` / `on-site` or `no remote` is on-site. The text handed to the post-filters starts with a hint line (`Full remote.`, `Hybrid.`, `On-site only, no remote.`) so the shared remote rules agree with the header.
+- Contract hints from the same tokens: `contract`, `contractor`, `freelance`, `consultant` is freelance; `full-time` is employee; `part-time` is employee. They are written as hint lines (`Freelance contract.`, `Full-time employee.`) for the shared contract rules, and listed in the signal details (`contract_hints`).
+- Country hint from the tokens after the company: `US`, `USA`, `U.S.` is `USA`, `UK` is `GBR` (`details.country`); other countries are found by name in the text, and the domain top-level domain counts too. Ambiguous two-letter codes (`CA`, `DE`) are not read as countries.
+- The company domain is the first URL of the comment (links first, then URLs in the text, `www.` included) whose host is not `news.ycombinator.com`, a job board, an applicant tracking system, a code or social host, or a webmail. A post without such a URL is skipped and counted in `skipped_no_domain`: a company name alone cannot be a lead.
+- The signal is a `job_offer` whose provenance is `https://news.ycombinator.com/item?id=<item id>` and whose observation date is the comment date.
+
+## Certificates and DNS agents
+
+| `type` | Settings | Effect |
+| --- | --- | --- |
+| `certificates` | `labels`: hostname labels to look for in certificate logs. | A new certificate host with one of the labels in its subdomain part creates or updates the lead of its registrable domain with a `certificate_seen` signal (value: the host, `raw.labels`: the matched labels, provenance `https://crt.sh/?q=<host>`, strength 0.3). The host is recorded as a candidate host for the DNS lookup and the HTTP probe. |
+| `dns` | `patterns`: provider names with the CNAME target suffix that identifies them. | A candidate host whose CNAME chain ends with a suffix creates or updates the lead of its domain with a `saas_provider` signal. |
+
+Both kinds take an optional `countries` (since schema 19): ISO 3166-1 alpha-2 codes, uppercase, no duplicate (`InvalidCountryCode` otherwise, path `agents[0].countries[1]`). Empty, the default, means every country. With countries, before a lead is created:
+
+- a domain whose country-code top-level domain names a listed country (`.fr` for `FR`, from the ccTLD table of `libs/core/src/domain/facts/country.rs`) is kept;
+- a domain under the ccTLD of another country is dropped, counted in `skipped_out_of_country` of the source run report;
+- a domain under a generic top-level domain (`.com`, `.io`, or a ccTLD missing from the table) is kept, unless its company dossier already gives a head office country that is not listed. Once the dossier gives such a head office, the lead is suppressed for this profile with the reason « hors pays visé » when every sourcing signal of the lead comes from a certificates or DNS agent of the profile whose countries exclude that country (a signal of another agent keeps it). A new signal of the lead from a sourcing agent of the profile whose filter admits it, or that has no filter, lifts this exclusion. A suppressed lead (`leads.excluded_reason`) leaves the list, the detail, the qualification and the inspection, like a suppressed domain, for that profile only.
+
+A host whose name is, or ends with, a SaaS tenant domain never creates a lead, whatever the countries: `crm.dev`, `force.com`, `salesforce.com`, `my.salesforce.com`, `okta.com`, `oktapreview.com`, `okta-emea.com`, `auth0.com`, `b2clogin.com`, `ciamlogin.com`, `onmicrosoft.com`, `sharepoint.com`, `zendesk.com`, `freshdesk.com`, `atlassian.net`, `myshopify.com`, `cloudfront.net`, `azurefd.net`, `herokudns.com`, `amazonaws.com` (data in code, `SAAS_TENANT_DOMAINS`, next to the hosting platforms). Such hosts are counted in `skipped_saas_tenant`. A tenant reaches a company only through a CNAME from the company's own domain, which the DNS agent reads. At startup, the existing leads of active profiles on these domains are suppressed with the reason « domaine d'un fournisseur SaaS » (idempotent).
+
+Validation paths include the agent index, for example `agents[1].keywords[0]`, `agents[1].providers[0]`, `agents[0].labels[1]`, `enrichment.custom.fingerprints[0].path` or `contact_ranking.guess_local_parts[1]`.
+
+## Ecosystem inspection
+
+Every identified lead, that is every lead with a registrable domain, gets the same ecosystem inspection whatever the profile (ADR 0012). The inspection is made of modules; the qualification agents of each profile read what they found and decide what matters.
+
+| Module | Key | What it learns | Refresh |
+| --- | --- | --- | --- |
+| Identité officielle | `official_identity` | legal name, SIREN, main activity, headcount range, head office and creation date from the official company register | 30 days |
+| Vie légale | `legal_life` | BODACC events (issue 211) | 7 days |
+| Marchés publics | `public_contracts` | DECP contracts held by the company (issue 211) | 7 days |
+| Site et stack technique | `website_stack` | home page (confirmed), `server`, `x-powered-by`, generator, and the profile fingerprints on the domain and its extra subdomains | 7 days |
+| Écosystème DNS et e-mail | `dns_email` | mail and service providers from DNS records (issue 212) | 7 days |
+| Activité de recrutement | `hiring_activity` | confirmed career pages, recruiting board (Greenhouse, Lever, Ashby), open positions and offers, highlighted ones first (at most 20) | 3 days |
+| Activité récente | `recent_activity` | recent news of the company site (issue 212) | 3 days |
+
+- **Modules of this version.** `official_identity` wraps the company dossier: it reads the stored dossier when one was built, else builds it now. `website_stack` wraps the HTTP probe with the profile fingerprints of every profile that has a lead on the domain. `hiring_activity` wraps the career page and recruiting board reader. `legal_life` reads the BODACC announcements and `public_contracts` the DECP awards of the company by SIREN; without a SIREN they report « SIREN inconnu ». The other modules are listed with « À venir » and have no status yet.
+- **Findings.** A finding has a module, a key, a kind, a French label, a value, a source URL (a confirmed link or the API URL it was read from), the time it was observed and details. Findings are stored per registrable domain in `lead_ecosystem (domain, module, finding_key)` and shared by the leads of every profile on that domain. A new run of a module replaces its findings; a failed run keeps the previous ones.
+- **Status.** `lead_ecosystem_modules (domain, module)` keeps `status` (`pending`, `done`, `not_applicable`, `failed`), `last_run`, `next_run_at`, `error`, `content_hash` (hash of the findings of the last successful run) and `changed_at` (last run whose findings differed). A module is due when it never ran for the domain or when `next_run_at` passed: its refresh interval after a run, 6 hours after a failure, at least one minute after a rate limit (the module stops for that pass and the domain keeps its status).
+- **Priority.** Each pass of a module first takes up to `INSPECTION_PRIORITY_BATCH` (default 30) due domains that were never inspected by it or have a lead created less than an hour ago, newest lead first, then up to 10 due domains to refresh, oldest `next_run_at` first.
+- **Hosting platforms.** A domain under a hosting platform (`notion.site`, `github.io`, `gitlab.io`, `vercel.app`, `netlify.app`, `pages.dev`, `webflow.io`, `wixsite.com`, `framer.website`, `carrd.co`, `herokuapp.com`, `azurewebsites.net`, `web.app`, `firebaseapp.com`, `blogspot.com`, `wordpress.com`, `substack.com`, `myshopify.com`; data in code, `HOSTING_PLATFORMS`) is flagged « Site hébergé sur une plateforme »: modules that read the site are `not_applicable` and no page is guessed. The company research listener does not read it either: its dossier gets the terminal state `hosting_platform` without any request, and the lead page shows « Site hébergé sur une plateforme : pas de dossier entreprise lu ». At startup, existing dossiers of such domains are switched to that state (idempotent).
+- **Runtime.** One continuous listener, `ecosystem_inspection` (ADR 0006), runs the modules on the due domains of the active profiles whose inspection is on, in the priority order above, through the shared polite fetcher (per-host rate limits, robots.txt, confirmed links). Each pass of a module that inspected something appends a row to `ecosystem_module_runs` (`module`, `ran_at`, `leads_inspected`, `findings_count`, `latest_example`), kept 30 days.
+- **Signals.** The HTTP probe listener and the scheduled `ats` job still produce the profile-scoped signals: `product_detected` and `debt_marker` for profiles with their own fingerprints, `job_offer` for offers with the highlighted keywords. They never create a lead. `lead_enrichments (lead_id, step, ran_at)` stays as their internal bookkeeping (which lead hosts were seeded, which domains were read); it no longer drives the qualification wait nor the API.
+- **Qualification.** A lead is due for its qualification agents as soon as it has evidence, with whatever findings and dossier exist: there is no wait for the inspection nor for the dossier. A lead whose only evidence is `certificate_seen` (contact signals from `security_txt`, `public_page` and `role_guess` do not count) is never sent to the models; it becomes due when a signal of another kind arrives.
+- **Requalification.** When a run of a module stores findings whose content differs from the previous run (the hash ignores the observation time, the order and the values relative to the pass: the days of « Fraîcheur du site » and the trend of « Recrutement »), or when the company dossier content changes, every lead of the domain gets `lead_requalifications.requalify_after = now + REQUALIFY_DEBOUNCE_SECONDS` (default 120); a later change pushes it, so several modules finishing together give one requalification. The lead is due once `requalify_after` is reached, at most `REQUALIFY_MAX_PER_DAY` (default 3) times per lead and UTC day (`daily_count`, `counted_on`); beyond, it waits for the next day. `POST /api/v1/leads/{id}/reevaluate` (users only, 403 for a service account, 404 for an unknown or suppressed lead) makes it due at once and is not counted; its qualification, scoring and aggregator calls skip the LLM cache read and refresh the cached answers. At startup, leads whose dossier `content_at` is newer than their last evaluation are marked once (idempotent). A requalification reruns the qualification agents, then the scoring agents and the aggregator, as a signal from a new source does; an edited draft stays protected. An evaluation clears the marks set before it started; marks set while it ran stay. An identical rerun of a module requalifies nothing.
+- **Agents.** The qualification, scoring and aggregator documents include, after the company dossier, one « Ecosystem » document per module and source (at most 12 findings per module), whose source is that URL. Evidence may quote them.
+- **Status.** Every lead of the list and of the detail carries `evaluation`: `stage` (`not_evaluated` « Non évalué » before the first evaluation, `certificate_only` « Certificat seul — en attente d'une autre preuve », `requalification_planned` « Réévaluation prévue à HH:MM (nouvelles informations) », `inspection_running` « Évalué — inspection en cours (3/7 modules) », `inspection_complete` « Évalué — inspection complète », `evaluated` when the inspection of the profile is off), `evaluated_at`, `modules_done` and `modules_available` (modules waiting for a catalog provider excluded), `requalify_at` and `requalify_reason` (`new_information` or `manual`), and `changed_modules`, the modules whose findings changed after the last evaluation. The list and the lead page refresh every 15 seconds while the status can still move.
+- **API.** The lead detail carries `enrichment` (`modules` with `module`, `label`, `status`, `last_run`, `changed_at`, `error`; `hosting_platform`) and `ecosystem` (`hosting_platform`, `modules` with their status and `findings`). `GET /api/v1/ecosystem/modules` lists the seven modules with their question, what they learn, `available`, `reads_site`, `refresh_days` and their activity over the last seven days (`leads_inspected`, `findings_count`, `last_run`, `latest_example`). `POST /api/v1/leads/{id}/ecosystem/dry-run?module=<key>` runs one module now on the lead domain for a user (403 for a service account), stores nothing and answers the findings, the status and `duration_ms`; 409 for a module that is not available yet, 429 when a host is rate limited, 404 for an unknown or suppressed lead.
+
+## Provider URLs
+
+The URL settings of the catalog (`boamp.base_url`, `decp.dataset_api_url`, `ted.base_url`, `certificate_transparency.log_list_url`, `company_research.entreprises_url`, `hacker_news_hiring.base_url`) are read at each run. The environment variables only seed the catalog at startup (ADR 0010). DECP name lookups use `company_research.entreprises_url`.
 
 ## Dependencies between kinds
 
-- `http_probe` probes hosts found by certificate transparency. Without a `certificate_transparency` agent, it only probes hosts imported by an operator.
-- `ats` only visits companies already detected by `certificate_transparency`, `http_probe` or `dns_cname` signals.
+- The DNS lookup and the HTTP probe read candidate hosts: hosts found in certificates, imported by an operator, or derived from the leads (origin `lead`).
+- Company job offers visit every lead domain of the profiles with keywords to highlight.
+- The ecosystem inspection visits every lead domain of the active profiles whose inspection is on.
 
 ## Run a source now
 
 Sources come in two modes (ADR 0006).
 
-- **Continuous** sources listen around the clock inside the binary: `certificate_transparency`, `dns_cname`, `http_probe`, `security_txt`, `public_page` and `role_guess`. They have no recurring job and nothing to run on demand: an edited agent is picked up on the listener's next loop (a few seconds when idle), and a new certificate or lead flows through the pipeline within minutes. A listener is active while at least one enabled agent of its kind exists in an active profile (contact finders are always active); otherwise it is "Inactif (aucun agent)". With several replicas one holds each listener at a time (Postgres advisory lock); the others show "En veille (autre instance)" and take over when it stops.
-- **Scheduled** sources (`boamp`, `decp`, `ted`, `france_travail`, `ats`) run on a recurring job, so an edited agent otherwise waits for the next interval. "Lancer maintenant" on the Sources screen (Configuration > Sources), or "Lancer la source" on an agent card, moves the pending job to the present.
+- **Continuous** sources listen around the clock inside the binary: `certificate_transparency`, `dns_cname`, `http_probe`, `security_txt`, `public_page` and `role_guess`. They have no recurring job and nothing to run on demand: an edited agent is picked up on the listener's next loop (a few seconds when idle), and a new certificate or lead flows through the pipeline within minutes. A listener is active while at least one enabled agent of its kind exists in an active profile, or for `http_probe` a profile with its own fingerprints, or for `ecosystem_inspection` a profile whose inspection is on (contact finders are always active); otherwise it is "Inactif (aucun agent)". With several replicas one holds each listener at a time (Postgres advisory lock); the others show "En veille (autre instance)" and take over when it stops.
+- **Scheduled** sources (`boamp`, `decp`, `ted`, `france_travail`, `hacker_news_hiring`, `welcome_to_the_jungle`, and `ats` for the job offers with highlighted keywords) run on a recurring job, so an edited agent otherwise waits for the next interval. "Lancer maintenant" on the Sources screen (Configuration > Sources), or "Lancer la source" on an agent card, moves the pending job to the present.
 
-The Sources screen shows continuous sources in their own "Écoute continue" group with the listener state, last activity, backlog (tiles of lag for certificate transparency, hosts to probe, contact targets), totals and last error. Agent cards of continuous kinds show an "En écoute" status line instead of the run button.
+The Sources screen shows continuous sources in their own "Écoute continue" group with the listener state, last activity, backlog (tiles of lag for certificate transparency, hosts to probe, contact targets), totals and the error of the latest pass with its time (`last_error_at`); a successful pass clears `listeners.last_error`, so a former error is no longer shown. Agent cards of continuous kinds show an "En écoute" status line instead of the run button.
 
-- `GET /api/v1/sources` lists every known source. `mode` is `continuous` or `scheduled`. A continuous source carries a `listener` object (`state`, `holder`, `last_activity_at`, `last_error`, `items_total`, `signals_total`, `backlog`) and `status` mirrors the listener state; a scheduled source carries its job state, and one without a job, for example `france_travail` without credentials, has `status: "unavailable"`. Both list their latest runs; a continuous source records a run only for a loop that processed at least one item.
-- `POST /api/v1/sources/{source}/run` answers 202 with the updated job. It answers 409 when the source is already running or listens continuously, 404 for an unknown source or one without a job, and 403 for service accounts.
+- `GET /api/v1/sources` lists every known source. `mode` is `continuous` or `scheduled`. A continuous source carries a `listener` object (`state`, `holder`, `last_activity_at`, `last_error`, `items_total`, `signals_total`, `backlog`) and `status` mirrors the listener state; a scheduled source carries its job state, and one without a job has `status: "unavailable"`. A source that depends on a catalog provider carries `provider` (`key`, `name`, `status`); it only runs while that status is `ready`, and `POST /api/v1/sources/{source}/run` answers `409` otherwise. Both list their latest runs; a continuous source records a run only for a loop that processed at least one item.
+- `POST /api/v1/sources/{source}/run` answers 202 with the updated job. It answers 409 when the source is already running, listens continuously or depends on a catalog provider that is not ready (French message), 404 for an unknown source or one without a job, and 403 for service accounts.
 
 For a scheduled source the worker picks the job up on its next poll. The run covers every active profile with an enabled agent of that kind, using the saved revisions only.
 
@@ -272,7 +387,7 @@ A host or domain whose lookup, probe or crawl fails is marked checked like a suc
 
 ## Older versions
 
-Stored revisions are never rewritten. Versions 1, 2, 3, 4, 5, 6, 7, 8, 9 and 10 are accepted and upgraded when read; new revisions are written in version 11. Errors on an older document keep that document's paths.
+Stored revisions are never rewritten. Versions 1 to 17 are accepted and upgraded when read; new revisions are written in version 18. Errors on an older document keep that document's paths.
 
 ### Version 1 to 2
 
@@ -280,12 +395,10 @@ Version 1 listed sources as optional fields of a `sources` object. Parsing upgra
 
 ### Version 2 to 3
 
-Versions 1 and 2 had free number weights and a threshold in points. The upgrade, applied to both:
+Versions 1 and 2 had free number weights and a threshold in points. Both are discarded by the upgrade to the current version (the weights since 13, the threshold since 14), whatever their value.
 
-- Weights: when every weight is an integer from 1 to 10 they are kept. Otherwise each becomes `max(1, round(w × 10 / largest weight))`.
-- Threshold: `clamp(round(old threshold / old maximum × 100), 0, 100)`, with the old maximum computed from the old weights by the same formula. When the old maximum is not positive the threshold becomes 50.
-
-For the IAM v1 and v2 examples the weights 30, 15, 10, 25, 20, 5, 5 become 10, 5, 3, 8, 7, 2, 2, and a threshold of 50 points out of 135 becomes 37 %.
+- Weights: ignored, see "Version 12 to 13".
+- Threshold: converted to a percentage of the old maximum in that version, then dropped with the weights since schema 13 and 14. The old fields are read and ignored.
 
 ### Version 3 to 4
 
@@ -324,3 +437,53 @@ Every qualification agent gains `samples` (3) and `sampling_temperature` (0.7), 
 ### Version 10 to 11
 
 The profile gains `scoring_agents` with one agent, `score-global` (see `scoring_agents` above), provider `null` (the Synthèse default), weight 5, 1 sample. Stored leads keep the verdict they had, computed by the former confidence formula (`verdict_source` `indicators`), until the scoring agents have scored them: every stored lead becomes due for scoring on the next pass, and is summarised again afterwards because the aggregator now receives the scoring results. Rescoring (`SCORING_VERSION` 4) refreshes the indicators of every stored lead without calling a model. Profiles written in version 11 may declare no scoring agent; their leads then wait with a pending verdict.
+
+### Version 11 to 12
+
+The profile gains `calibration` with `learned` `true`. Nothing is learned until 50 leads are labelled with 10 of each class, so a stored profile behaves as before until then; the first run of the `quality.calibrate` job happens at startup.
+
+### Version 12 to 13
+
+The `scoring` section (weighted factors) and `evidence.reference_score` are removed: the scoring agents decide, and the strength of the signals comes only from the sources (see "Signal strength"). The upgrade discards both. `leads.score` changes meaning, from a weighted sum in points to the signal strength from 0 to 100, and every stored lead gets its new value when it is next rescored; the per-factor breakdown column is dropped. `llm.qualification_threshold` is kept as is until version 14.
+
+### Version 13 to 14
+
+`llm` and `calibration` disappear, and the agents no longer carry an `llm` block:
+
+- `llm.language` becomes the top-level `language`.
+- `llm.qualification_threshold` is dropped: it gated nothing since ADR 0007.
+- `llm.relevance_criteria` and the per-agent `agents[].llm.relevance_criteria` are moved into the system prompt of the first qualification agent, in this order: the profile criteria as `Critères de pertinence : <text>`, then each sourcing agent's criteria, in agent order, as `Critères de l'agent « <agent name> » : <text>`. A text is appended after a blank line, trimmed, unless it is empty or already contained in the prompt (comparison on lowercased text with the white space collapsed), so a profile upgraded from version 3 or less, or one that already holds its criteria in the prompt, is not duplicated, and two identical criteria are appended once. The appended text is cut so that the prompt stays within 8000 characters; when the remaining room does not even hold the label, the criteria is dropped. A profile with no qualification agent drops them.
+- `calibration.learned` is copied to the new `learned_calibration` of every qualification agent and every scoring agent (`true` when the section was absent). Calibration is now chosen per agent: an agent applies its learned map only when its own flag is `true`, and a changed map only marks leads for rescoring when it belongs to such an agent. `GET /api/v1/quality/calibration` lost the profile-level `learned`; the state of an agent is its `status` (`disabled` when its flag is `false`).
+
+### Version 14 to 15
+
+`qualification_agents[].weight` is dropped, whatever its value. It only fed the agents' opinion, which is now the plain mean of the calibrated scores of the valid qualification agents. Question weights and scoring agent weights are unchanged. Stored leads are rescored without a model call (`SCORING_VERSION` 5), so their indicators (opinion, indicator confidence) follow the new mean. The aggregator and scoring prompts no longer print a weight for qualification agents.
+
+### Version 15 to 16
+
+`agents[]` becomes a tagged union. Every agent of a keyword kind (`boamp`, `decp`, `ted`, `france_travail`, `ats`) becomes a `search` agent whose `providers` is `[kind]`, with the same `keywords`, `exclusions` and `accept_min_keywords` and open `filters`. Agents of the signal kinds (`certificate_transparency`, `dns_cname`, `http_probe`) become `signal` agents and `source.kind` is renamed `source.provider`. Ids, names, order and `enabled` are kept. Agents with identical keywords are not merged; the operator can do it by hand. The IAM example merges its three public procurement agents into one `marches-publics` agent over `boamp`, `decp` and `ted`.
+
+### Version 16 to 17
+
+Sourcing and enrichment are separated (ADR 0011). In this order:
+
+1. `http_probe` signal agents leave `agents` for `enrichment.http_probe`: fingerprints are merged in agent order and deduplicated by id (the first wins), excluded products are merged, `extra_subdomains` takes its default, and the step is enabled when one of those agents was.
+2. `ats` is removed from the `providers` of every search agent. `enrichment.company_jobs` gets the union of the keywords of those agents (case-insensitive, first spelling kept) and the `accept_min_keywords` of the first one, and is enabled when one of them was. Their exclusions and filters are dropped. A search agent left without provider is dropped.
+3. Search agents with identical keywords and exclusions (in any order), filters, `accept_min_keywords` and `enabled` are merged into one, at the place of the first, with the union of their providers. The merged agent is named « Offres et missions » when all its providers are in the jobs and missions category, « Marchés publics » when all are public procurement, else it keeps the name of the first agent. Its id is the slug of the name (lowercase, accents removed, other characters replaced by `-`), followed by `-2`, `-3` when another agent of the profile already uses it. A lone agent keeps its id and name.
+4. `certificate_transparency` and `dns_cname` signal agents become `certificates` and `dns` agents with the same id, name, `enabled`, `labels` or `patterns`.
+
+The IAM example of version 16 upgrades to « Certificate transparency », « DNS CNAME », « Marchés publics » (BOAMP, DECP, TED) and « France Travail », with its five fingerprints and the keywords of its two job agents in the enrichment.
+
+### Version 18 to 19
+
+`countries` is added, empty, to every `certificates` and `dns` agent. Nothing else changes; an empty list filters nothing.
+
+### Version 17 to 18
+
+The enrichment steps become the profile-specific settings of the ecosystem inspection (ADR 0012).
+
+1. `inspection` is added with `enabled: true`.
+2. An enabled `enrichment.http_probe` becomes `enrichment.custom` with its `fingerprints` and `excluded_products`. Its `extra_subdomains` are kept, except the exact former default (`auth`, `sso`, `login`, `id`, `idp`, `accounts`, in any order), which is dropped unless a fingerprint looks like an identity product (its id, product or path contains `realm`, `auth`, `sso`, `oidc`, `saml`, `oauth`, `openid`, `idp` or `identity`). A disabled probe leaves an empty `custom`: it had no effect and keeping it would start probing.
+3. The `keywords` of an enabled `enrichment.company_jobs` become `enrichment.highlight_keywords`; `accept_min_keywords` is dropped (the signal keeps the default of 2). A disabled step leaves no keyword.
+
+The IAM example of version 17 upgrades to the current example: its fingerprints are identity fingerprints, so it keeps its six subdomains.

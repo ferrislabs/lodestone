@@ -2,11 +2,13 @@ use std::{sync::Arc, time::Duration};
 
 use chrono::{DateTime, Utc};
 use lodestone_core::{
-    ActiveProfile, ContactFinder, ContactMethod, FetchError, FetchPurpose, FetchRequest,
-    FetchResponse, Fetcher, FoundAddress, NormalizedDomain, Provenance, SourceError, SourceName,
-    UnitInterval,
+    ActiveProfile, ContactFinder, ContactMethod, FetchError, FetchPurpose, FetchRequest, Fetcher,
+    FoundAddress, NormalizedDomain, Provenance, SourceError, SourceName, UnitInterval,
 };
+use tracing::{debug, info};
 use url::Url;
+
+use crate::link_check::{LinkChecker, LinkOrigin, LinkVerdict, fetch_waiting, rejection_of};
 
 pub mod extract;
 
@@ -17,8 +19,6 @@ pub struct ContactPageSettings {
     pub max_rate_limit_wait: Duration,
 }
 
-const FETCH_ATTEMPTS: usize = 3;
-
 pub struct PublicPageFinder<F: Fetcher> {
     fetcher: Arc<F>,
     settings: ContactPageSettings,
@@ -28,22 +28,6 @@ impl<F: Fetcher> PublicPageFinder<F> {
     pub fn new(fetcher: Arc<F>, settings: ContactPageSettings) -> Self {
         Self { fetcher, settings }
     }
-
-    async fn fetch_waiting(&self, request: &FetchRequest) -> Result<FetchResponse, FetchError> {
-        let mut attempt = 1;
-        loop {
-            match self.fetcher.fetch(request).await {
-                Err(FetchError::RateLimited { retry_after })
-                    if attempt < FETCH_ATTEMPTS
-                        && retry_after <= self.settings.max_rate_limit_wait =>
-                {
-                    attempt += 1;
-                    tokio::time::sleep(retry_after).await;
-                }
-                other => return other,
-            }
-        }
-    }
 }
 
 fn page_url(domain: &NormalizedDomain, path: &str) -> Option<Url> {
@@ -51,21 +35,11 @@ fn page_url(domain: &NormalizedDomain, path: &str) -> Option<Url> {
     Url::parse(&format!("https://{}{separator}{path}", domain.as_str())).ok()
 }
 
-fn is_parsable(response: &FetchResponse) -> bool {
-    match response.header("content-type") {
-        None => true,
-        Some(value) => {
-            let media = value
-                .split(';')
-                .next()
-                .unwrap_or("")
-                .trim()
-                .to_ascii_lowercase();
-            matches!(
-                media.as_str(),
-                "text/html" | "text/plain" | "application/xhtml+xml"
-            )
-        }
+fn origin_of(path: &str) -> LinkOrigin {
+    if path.is_empty() || path == "/" {
+        LinkOrigin::Home
+    } else {
+        LinkOrigin::Guessed
     }
 }
 
@@ -94,9 +68,14 @@ impl<F: Fetcher> ContactFinder for PublicPageFinder<F> {
         _now: DateTime<Utc>,
     ) -> Result<Vec<FoundAddress>, SourceError> {
         let mut found: Vec<FoundAddress> = Vec::new();
+        let mut checker = LinkChecker::new(
+            self.fetcher.as_ref(),
+            SourceName::PublicPage,
+            self.settings.max_rate_limit_wait,
+        );
         for path in self.settings.paths.iter().take(self.settings.max_pages) {
             let Some(url) = page_url(domain, path) else {
-                tracing::debug!(domain = domain.as_str(), path, "invalid contact page path");
+                debug!(domain = domain.as_str(), path, "invalid contact page path");
                 continue;
             };
             let request = FetchRequest {
@@ -104,18 +83,37 @@ impl<F: Fetcher> ContactFinder for PublicPageFinder<F> {
                 purpose: FetchPurpose::Crawl,
                 source: SourceName::PublicPage,
             };
-            let response = match self.fetch_waiting(&request).await {
+            let response = match fetch_waiting(
+                self.fetcher.as_ref(),
+                &request,
+                self.settings.max_rate_limit_wait,
+            )
+            .await
+            {
                 Ok(response) => response,
                 Err(FetchError::RateLimited { retry_after }) => {
                     return Err(SourceError::RateLimited { retry_after });
                 }
                 Err(error) => {
-                    tracing::debug!(url = %request.url, %error, "contact page skipped");
+                    if let Some(reason) = rejection_of(&error) {
+                        checker.reject(reason);
+                    }
+                    debug!(url = %request.url, %error, "contact page skipped");
                     continue;
                 }
             };
-            if response.status >= 400 || !is_parsable(&response) {
-                tracing::debug!(url = %request.url, status = response.status, "contact page ignored");
+            let verdict = match checker
+                .confirm(&request.url, origin_of(path), &response)
+                .await
+            {
+                Ok(verdict) => verdict,
+                Err(FetchError::RateLimited { retry_after }) => {
+                    return Err(SourceError::RateLimited { retry_after });
+                }
+                Err(error) => return Err(SourceError::Fetch(error)),
+            };
+            if let LinkVerdict::NotFound(reason) = verdict {
+                debug!(url = %request.url, status = response.status, reason = reason.as_str(), "contact page not confirmed");
                 continue;
             }
             let Ok(provenance) = Provenance::parse(response.final_url.as_str()) else {
@@ -135,6 +133,15 @@ impl<F: Fetcher> ContactFinder for PublicPageFinder<F> {
                     },
                 );
             }
+        }
+        let unconfirmed = checker.unconfirmed();
+        if unconfirmed.total() > 0 {
+            info!(
+                domain = domain.as_str(),
+                unconfirmed_links = unconfirmed.total(),
+                unconfirmed_by_reason = %unconfirmed,
+                "contact pages not confirmed were ignored"
+            );
         }
         Ok(found)
     }

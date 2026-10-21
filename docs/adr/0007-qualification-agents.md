@@ -45,7 +45,7 @@ Computed in code, never by a model:
 
 - question score = Σ over options of probability × option score;
 - agent score = Σ (question weight × question score) / Σ question weights;
-- lead confidence = Σ (agent weight × agent score) / Σ agent weights over valid results, in percent.
+- lead confidence = Σ (agent weight × agent score) / Σ agent weights over valid results, in percent (superseded by the amendment on agent weights below).
 
 The lead's verdict comes from two profile thresholds on the confidence: **fiable**, **à vérifier**, **écarté**.
 
@@ -96,7 +96,7 @@ All of it is computed in code. Notation: `floor` = `verdict.calibration_floor`, 
 
 **Calibration.** Before scoring, each answer's probabilities are clamped to `[floor, 1 - floor]` and renormalised to sum to 1 (`floor` default 0.05, 0 disables, at most 0.2). Question and agent scores use the calibrated probabilities. The stored answers keep the raw (already renormalised) probabilities, so a change of floor is applied by rescoring, not by asking the model again.
 
-**Agents' opinion A** (0 to 1): the existing weighted mean of the agent scores over the valid results.
+**Agents' opinion A** (0 to 1): the mean of the agent scores over the valid results (plain mean since the amendment on agent weights below).
 
 **Evidence strength E** (0 to 1), a pure function of the lead facts (#154) and the lead's signal score:
 
@@ -152,7 +152,7 @@ Company research is not an LLM step. It is a **company dossier** built without a
 
 **State machine.** `pending` (no build yet, or a refresh was requested on a domain without dossier), then `complete` (site read and official data found), `partial` (site read, no SIREN or no official data) or `unreachable` (the home page is blocked by robots.txt, fails or is empty). A failed build (unreachable site, failed official lookup) backs off along the aggregator schedule (1, 5, 30 minutes, 2, 6 hours), then waits the refresh interval after five attempts; a build without failure waits the refresh interval. A failed refresh keeps the content already collected. A rate-limited fetch defers the domain and never counts as a failure. Failures never block qualification.
 
-**Ordering.** The agents of a lead wait until its dossier is not `pending`, for at most `COMPANY_RESEARCH_WAIT_MINUTES` after `leads.created_at`; then they run without it. A dossier whose content changed (hash of the official data and the pages) gets a new `content_at`; the lead stores the `content_at` it used (`lead_qualification_state.dossier_at`), and a newer one makes its agent results due again, as a signal from a new source does, so the aggregator runs again too. A rebuild with the same content requalifies nothing. With a zero wait there is no gate.
+**Ordering.** The agents of a lead wait until its dossier is not `pending`, for at most `COMPANY_RESEARCH_WAIT_MINUTES` after `leads.created_at`; then they run without it. A dossier whose content changed (hash of the official data and the pages) gets a new `content_at`; the lead stores the `content_at` it used (`lead_qualification_state.dossier_at`), and a newer one makes its agent results due again, as a signal from a new source does, so the aggregator runs again too. A rebuild with the same content requalifies nothing. With a zero wait there is no gate. (Amended by ADR 0012, "Progressive evaluation": the wait and `COMPANY_RESEARCH_WAIT_MINUTES` are removed, and a new `content_at` marks a debounced, capped requalification instead of the `dossier_at` comparison.)
 
 **Prompts.** Official data lines then each page (text truncated to 3000 characters) are given as documents starting with "Company dossier", after the signal documents; the page URL, or the Recherche d'entreprises URL, is the document source. The aggregator may quote them as evidence, verified like any document; the stored evidence takes the document source as provenance. Both system prompts describe the dossier and tell the model to treat the points as unknown when it is missing.
 
@@ -160,3 +160,10 @@ Company research is not an LLM step. It is a **company dossier** built without a
 
 **Lead page.** `GET /api/v1/leads/{id}` returns `company`; `POST /api/v1/leads/{id}/company/refresh` (users only) makes the dossier of the lead domain due now. The "Fiche entreprise" block shows the official data, a link to the Annuaire des entreprises, the pages read, the state, the last update and the "Enrichir" button.
 
+## Amendment: signal strength (#180)
+
+`strength` no longer uses a signal score or `evidence.reference_score` (removed in profile schema 13): it is the mean of the three highest `strength x decay` among the independent signals of the lead and its siblings, the strength being the one the source gave each signal. See ADR 0009, "Amendment: no signal weights", and `docs/profiles.md`, "Signal strength".
+
+## Amendment: no qualification agent weights (#184)
+
+The weight of a qualification agent only fed the agents' opinion, an indicator given to the scoring agents for information, and no longer decides the verdict (ADR 0009). Profile schema 15 removes `qualification_agents[].weight`; the upgrade from 14 drops it. The agents' opinion is the plain mean of the calibrated scores of the valid qualification agents, and the prompts no longer print an agent weight. Question weights stay. Rescoring (`SCORING_VERSION` 5) refreshes the indicators without a model call.

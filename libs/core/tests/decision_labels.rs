@@ -366,7 +366,7 @@ async fn approving_a_draft_records_the_draft_and_the_lead_decision(pool: PgPool)
     let assessment = draft(&pool, id).await;
 
     LodestoneUseCase::new(pool.clone())
-        .approve_draft(assessment, actor)
+        .approve_draft(assessment, actor, None)
         .await
         .unwrap();
 
@@ -393,6 +393,7 @@ async fn rejecting_a_draft_records_the_draft_and_the_lead_decision(pool: PgPool)
             assessment,
             actor,
             Rejection::new(RejectionReason::Other, Some("off target")).unwrap(),
+            None,
         )
         .await
         .unwrap();
@@ -439,7 +440,7 @@ async fn validations_and_approvals_carry_no_rejection_reason(pool: PgPool) {
     let id = lead(&pool, profile, "a.com", "qualified").await;
     let assessment = draft(&pool, id).await;
     LodestoneUseCase::new(pool.clone())
-        .approve_draft(assessment, actor)
+        .approve_draft(assessment, actor, None)
         .await
         .unwrap();
     let reasons: Vec<Option<String>> =
@@ -465,7 +466,6 @@ async fn the_report_names_agents_after_the_profile_revisions_and_lists_reasons_a
         "description": "Fit",
         "enabled": true,
         "system_prompt": "PROMPT",
-        "weight": 5,
         "questions": [{
             "id": "q",
             "wording": "Pertinent ?",
@@ -535,7 +535,7 @@ async fn a_conflicting_draft_decision_records_nothing(pool: PgPool) {
     let id = lead(&pool, profile, "a.com", "validated").await;
     let assessment = draft(&pool, id).await;
     let error = LodestoneUseCase::new(pool.clone())
-        .approve_draft(assessment, actor)
+        .approve_draft(assessment, actor, None)
         .await
         .unwrap_err();
     assert!(matches!(error, CoreError::Conflict(_)));

@@ -169,7 +169,9 @@ export function LeadSummary({
 										size="sm"
 										onClick={() => onOpenDraft(assessment.id)}
 									>
-										Ouvrir dans la file de validation
+										{assessment.draft.status === 'pending'
+											? 'Ouvrir dans la file de validation'
+											: 'Ouvrir le brouillon'}
 									</Button>
 								</div>
 								<p className="text-sm font-medium">

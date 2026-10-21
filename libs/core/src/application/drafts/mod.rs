@@ -8,13 +8,14 @@ use crate::{
         LodestoneUseCase,
         output::schedule_webhook,
         quality::{Decided, record_decisions},
+        timeline::{decision_detail, status_changed},
     },
     domain::{
         lead::{
             AssessmentId, ContactEmail, Lead, LeadStatus,
             draft::{
-                DraftEdit, DraftEntry, DraftQueue, DraftRecord, DraftReview, DraftStatus,
-                InvalidDraftTransition,
+                DraftEdit, DraftEntry, DraftQueue, DraftRecord, DraftReview, DraftRevision,
+                DraftStatus, InvalidDraftTransition,
             },
             ports::{AssessmentRepository, ContactRepository, LeadRepository},
             query::VerdictFilter,
@@ -22,6 +23,7 @@ use crate::{
         profile::{ProfileId, ports::ProfileRepository},
         quality::{DecisionKind, Rejection},
         suppression::ports::SuppressionRepository,
+        timeline::ports::TimelineRepository,
     },
     infrastructure::job::postgres::PgJobOutbox,
 };
@@ -105,6 +107,31 @@ fn require_pending(record: &DraftRecord) -> Result<&DraftReview, CoreError> {
     }
 }
 
+fn guarded_revision(
+    review: &DraftReview,
+    expected: Option<DraftRevision>,
+) -> Result<DraftRevision, CoreError> {
+    let current = review.revision;
+    let expected = expected.unwrap_or(current);
+    if expected == current {
+        Ok(expected)
+    } else {
+        Err(conflict("draft changed, reload it"))
+    }
+}
+
+async fn is_latest(
+    assessments: &mut impl AssessmentRepository,
+    record: &DraftRecord,
+) -> Result<bool, CoreError> {
+    let latest = assessments
+        .list_for_lead(record.lead.id)
+        .await?
+        .first()
+        .map(|assessment| assessment.id);
+    Ok(latest == Some(record.assessment.id))
+}
+
 async fn best_contact(
     contacts: &mut impl ContactRepository,
     suppression: &mut impl SuppressionRepository,
@@ -167,15 +194,23 @@ impl LodestoneUseCase {
         &self,
         id: AssessmentId,
         edit: DraftEdit,
+        expected_revision: Option<DraftRevision>,
     ) -> Result<DraftEntry, CoreError> {
         let mut assessments = assessment_repository;
         let mut contacts = contact_repository;
         let mut suppression = suppression_repository;
 
         let record = visible_draft(&mut assessments, &mut suppression, id).await?;
-        require_pending(&record)?;
-        if !assessments.edit_draft(id, &edit, Utc::now()).await? {
-            return Err(conflict("draft is no longer pending"));
+        let review = require_pending(&record)?;
+        if !is_latest(&mut assessments, &record).await? {
+            return Err(conflict("draft was superseded by a newer assessment"));
+        }
+        let expected = guarded_revision(review, expected_revision)?;
+        if !assessments
+            .edit_draft(id, &edit, expected, Utc::now())
+            .await?
+        {
+            return Err(conflict("draft changed or no longer pending"));
         }
         let record = visible_draft(&mut assessments, &mut suppression, id).await?;
         let contact = best_contact(&mut contacts, &mut suppression, &record.lead).await?;
@@ -186,8 +221,10 @@ impl LodestoneUseCase {
         &self,
         id: AssessmentId,
         actor: UserId,
+        expected_revision: Option<DraftRevision>,
     ) -> Result<DraftEntry, CoreError> {
-        self.decide_draft(id, actor, Decision::Approve).await
+        self.decide_draft(id, actor, Decision::Approve, expected_revision)
+            .await
     }
 
     pub async fn reject_draft(
@@ -195,8 +232,9 @@ impl LodestoneUseCase {
         id: AssessmentId,
         actor: UserId,
         rejection: Rejection,
+        expected_revision: Option<DraftRevision>,
     ) -> Result<DraftEntry, CoreError> {
-        self.decide_draft(id, actor, Decision::Reject(rejection))
+        self.decide_draft(id, actor, Decision::Reject(rejection), expected_revision)
             .await
     }
 
@@ -208,13 +246,15 @@ impl LodestoneUseCase {
         qualification,
         scoring_agent,
         profile,
-        decision
+        decision,
+        timeline
     )]
     async fn decide_draft(
         &self,
         id: AssessmentId,
         actor: UserId,
         decision: Decision,
+        expected_revision: Option<DraftRevision>,
     ) -> Result<DraftEntry, CoreError> {
         let mut assessments = assessment_repository;
         let mut leads = lead_repository;
@@ -224,17 +264,14 @@ impl LodestoneUseCase {
         let mut scoring_agents = scoring_agent_repository;
         let mut profiles = profile_repository;
         let mut decisions = decision_repository;
+        let mut timeline = timeline_repository;
 
         let record = visible_draft(&mut assessments, &mut suppression, id).await?;
         let review = require_pending(&record)?;
-        let latest = assessments
-            .list_for_lead(record.lead.id)
-            .await?
-            .first()
-            .map(|assessment| assessment.id);
-        if latest != Some(id) {
+        if !is_latest(&mut assessments, &record).await? {
             return Err(CoreError::NotFound);
         }
+        let expected = guarded_revision(review, expected_revision)?;
         let from = record.lead.status;
         if from != LeadStatus::Qualified {
             return Err(conflict(format!(
@@ -246,8 +283,8 @@ impl LodestoneUseCase {
         let decided = decision.apply(review, actor, now).map_err(conflict)?;
         let to = from.move_to(decision.target()).map_err(conflict)?;
 
-        if !assessments.decide_draft(id, &decided).await? {
-            return Err(conflict("draft is no longer pending"));
+        if !assessments.decide_draft(id, &decided, expected).await? {
+            return Err(conflict("draft changed or no longer pending"));
         }
         let updated = leads
             .update_status(record.lead.id, from, to, now)
@@ -255,6 +292,17 @@ impl LodestoneUseCase {
             .ok_or_else(|| conflict("lead status changed concurrently, reload and retry"))?;
         let lead_kind = DecisionKind::for_lead(to);
         let kinds: Vec<DecisionKind> = std::iter::once(decision.kind()).chain(lead_kind).collect();
+        timeline
+            .record(
+                record.lead.id,
+                &status_changed(
+                    from,
+                    to,
+                    now,
+                    Some(decision_detail(&kinds, actor, decision.rejection())),
+                ),
+            )
+            .await?;
         record_decisions(
             &mut decisions,
             &mut qualification,

@@ -62,8 +62,8 @@ async fn lead(pool: &PgPool, domain: &str) -> (Uuid, Uuid) {
     .unwrap();
     let id = Uuid::now_v7();
     sqlx::query(
-        "INSERT INTO leads (id, profile_id, domain, status, score, score_breakdown, first_seen_at, last_seen_at, updated_at)
-         VALUES ($1, $2, $3, 'validated', 7, '[]'::jsonb, now(), now(), now())",
+        "INSERT INTO leads (id, profile_id, domain, status, score, first_seen_at, last_seen_at, updated_at)
+         VALUES ($1, $2, $3, 'validated', 7, now(), now(), now())",
     )
     .bind(id)
     .bind(profile)

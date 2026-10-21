@@ -1,16 +1,20 @@
 mod support;
 
-use std::{num::NonZeroU16, time::Duration};
+use std::{collections::BTreeMap, num::NonZeroU16, time::Duration};
 
-use chrono::{Duration as Delta, Utc};
+use chrono::{DateTime, Duration as Delta, Utc};
+use common::Secret;
 use http::{Method, StatusCode};
 use lodestone_core::{
-    JobKind, JobQueue, NewJob, Run, RunId, RunOutcome, RunRepository, SourceName,
+    CancelReason, JobKind, JobQueue, NewJob, ProviderStatus, Run, RunId, RunOutcome, RunRepository,
+    SourceName,
     infrastructure::{
         job::postgres::PgJobQueue, postgres::with_tx, run::postgres::PgRunRepository,
     },
+    provider_descriptor,
+    source_providers::{SaveProviderConfiguration, SecretChange},
 };
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 use sqlx::PgPool;
 use support::{Harness, send};
 use utoipa::OpenApi;
@@ -48,6 +52,34 @@ impl Api {
             .unwrap();
     }
 
+    async fn ready(&self, key: &str) {
+        let usecase = &self.harness.state.usecase;
+        let (settings, secrets) = if key == "france_travail" {
+            (
+                Map::from_iter([("client_id".to_owned(), json!("client-1"))]),
+                BTreeMap::from([(
+                    "client_secret".to_owned(),
+                    SecretChange::Replace(Secret::new("secret-0123456789")),
+                )]),
+            )
+        } else {
+            (Map::new(), BTreeMap::new())
+        };
+        usecase
+            .save_provider_configuration(
+                provider_descriptor(key).unwrap(),
+                SaveProviderConfiguration { settings, secrets },
+                true,
+                self.harness.state.cipher.as_ref(),
+            )
+            .await
+            .unwrap();
+        usecase
+            .record_provider_status(key, ProviderStatus::Ready, None, Utc::now())
+            .await
+            .unwrap();
+    }
+
     async fn call(&self, method: Method, uri: &str) -> (StatusCode, Value) {
         let (status, json, _) =
             send(self.harness.public(), method, uri, Some(&self.bearer), None).await;
@@ -72,13 +104,13 @@ fn entry<'a>(sources: &'a [Value], name: &str) -> &'a Value {
 async fn run_now_moves_run_at_and_keeps_the_job_pending(pool: PgPool) {
     let api = Api::new(pool).await;
     api.schedule("source.run", "source:boamp", 6).await;
+    api.ready("boamp").await;
 
     let (status, body) = api.call(Method::POST, "/api/v1/sources/boamp/run").await;
 
     assert_eq!(status, StatusCode::ACCEPTED, "{body}");
     assert_eq!(body["data"]["status"], "pending");
-    let next = chrono::DateTime::parse_from_rfc3339(body["data"]["next_run_at"].as_str().unwrap())
-        .unwrap();
+    let next = DateTime::parse_from_rfc3339(body["data"]["next_run_at"].as_str().unwrap()).unwrap();
     assert!(next <= Utc::now());
     let listed = api.list().await;
     assert_eq!(entry(&listed, "boamp")["status"], "pending");
@@ -88,6 +120,7 @@ async fn run_now_moves_run_at_and_keeps_the_job_pending(pool: PgPool) {
 async fn run_now_refuses_a_running_job(pool: PgPool) {
     let api = Api::new(pool).await;
     api.schedule("source.run", "source:boamp", -1).await;
+    api.ready("boamp").await;
     api.queue
         .claim(Utc::now(), Duration::from_secs(60))
         .await
@@ -106,6 +139,67 @@ async fn run_now_refuses_a_running_job(pool: PgPool) {
 }
 
 #[sqlx::test(migrations = "../../migrations")]
+async fn run_now_is_refused_in_french_while_the_provider_is_not_ready(pool: PgPool) {
+    let api = Api::new(pool).await;
+    api.schedule("source.run", "source:boamp", 6).await;
+
+    let (status, body) = api.call(Method::POST, "/api/v1/sources/boamp/run").await;
+
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(
+        body["message"],
+        "Conflict: Le fournisseur « BOAMP » n'est pas prêt : configurez-le et testez-le dans le catalogue avant de lancer la source."
+    );
+    let listed = api.list().await;
+    assert_eq!(entry(&listed, "boamp")["status"], "pending");
+    let next =
+        DateTime::parse_from_rfc3339(entry(&listed, "boamp")["next_run_at"].as_str().unwrap())
+            .unwrap();
+    assert!(next > Utc::now());
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn run_now_is_refused_while_the_provider_is_failing(pool: PgPool) {
+    let api = Api::new(pool).await;
+    api.schedule("source.run", "source:boamp", 6).await;
+    api.ready("boamp").await;
+    api.harness
+        .state
+        .usecase
+        .record_provider_status("boamp", ProviderStatus::Failing, None, Utc::now())
+        .await
+        .unwrap();
+
+    let (status, _) = api.call(Method::POST, "/api/v1/sources/boamp/run").await;
+
+    assert_eq!(status, StatusCode::CONFLICT);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_list_carries_the_provider_of_every_source(pool: PgPool) {
+    let api = Api::new(pool).await;
+    api.ready("decp").await;
+
+    let listed = api.list().await;
+
+    assert_eq!(
+        entry(&listed, "boamp")["provider"],
+        json!({"key": "boamp", "name": "BOAMP", "status": "not_configured"})
+    );
+    assert_eq!(entry(&listed, "decp")["provider"]["status"], "ready");
+    assert_eq!(
+        entry(&listed, "security_txt")["provider"]["key"],
+        "contacts"
+    );
+    assert_eq!(entry(&listed, "role_guess")["provider"]["key"], "contacts");
+    assert_eq!(
+        entry(&listed, "company_research")["provider"]["key"],
+        "company_research"
+    );
+    assert!(entry(&listed, "qualification")["provider"].is_null());
+}
+
+#[sqlx::test(migrations = "../../migrations")]
 async fn unknown_source_is_404_and_malformed_is_400(pool: PgPool) {
     let api = Api::new(pool).await;
 
@@ -119,6 +213,7 @@ async fn unknown_source_is_404_and_malformed_is_400(pool: PgPool) {
 #[sqlx::test(migrations = "../../migrations")]
 async fn source_without_a_job_is_404_with_a_reason(pool: PgPool) {
     let api = Api::new(pool).await;
+    api.ready("france_travail").await;
 
     let (status, body) = api
         .call(Method::POST, "/api/v1/sources/france_travail/run")
@@ -176,10 +271,8 @@ async fn service_accounts_cannot_run_a_source(pool: PgPool) {
     assert_eq!(status, StatusCode::FORBIDDEN);
     let listed = api.list().await;
     assert!(
-        chrono::DateTime::parse_from_rfc3339(
-            entry(&listed, "boamp")["next_run_at"].as_str().unwrap()
-        )
-        .unwrap()
+        DateTime::parse_from_rfc3339(entry(&listed, "boamp")["next_run_at"].as_str().unwrap())
+            .unwrap()
             > Utc::now()
     );
 }
@@ -216,10 +309,13 @@ async fn list_shows_every_source_with_states_and_last_runs(pool: PgPool) {
 
     let listed = api.list().await;
 
-    assert_eq!(listed.len(), SourceName::ALL.len() + 2);
+    assert_eq!(listed.len(), SourceName::ALL.len() + 3);
     let company = entry(&listed, "company_research");
     assert_eq!(company["mode"], "continuous");
     assert_eq!(company["kind"], "listener.company_research");
+    let inspection = entry(&listed, "ecosystem_inspection");
+    assert_eq!(inspection["mode"], "continuous");
+    assert_eq!(inspection["kind"], "listener.ecosystem_inspection");
     let boamp = entry(&listed, "boamp");
     assert_eq!(boamp["status"], "pending");
     assert_eq!(boamp["kind"], "source.run");
@@ -230,7 +326,7 @@ async fn list_shows_every_source_with_states_and_last_runs(pool: PgPool) {
     assert_eq!(boamp["last_runs"][0]["error"], "timeout");
     let france_travail = entry(&listed, "france_travail");
     assert_eq!(france_travail["status"], "unavailable");
-    assert_eq!(france_travail["unavailable_reason"], "missing_credentials");
+    assert_eq!(france_travail["unavailable_reason"], "not_scheduled");
     assert_eq!(
         entry(&listed, "decp")["unavailable_reason"],
         "not_scheduled"
@@ -372,4 +468,43 @@ async fn support_profile(pool: &PgPool) -> lodestone_core::ProfileId {
     .await
     .unwrap();
     lodestone_core::ProfileId(id)
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_cancelled_run_reports_why_it_stopped(pool: PgPool) {
+    let api = Api::new(pool.clone()).await;
+    api.schedule("source.run", "source:boamp", 6).await;
+    let profile = support_profile(&pool).await;
+    with_tx(&pool, async |shared| {
+        let mut repo = PgRunRepository::new(&shared);
+        let run = Run::start(
+            RunId(common::generate_uuid_v7()),
+            profile,
+            SourceName::Boamp,
+            None,
+            Utc::now() - Delta::minutes(5),
+        );
+        repo.insert(&run).await?;
+        repo.finish(
+            run.id,
+            &RunOutcome::Cancelled {
+                volume: 2,
+                signals: 1,
+                reason: CancelReason::AgentRemoved,
+            },
+            Utc::now(),
+        )
+        .await?;
+        Ok(())
+    })
+    .await
+    .unwrap();
+
+    let listed = api.list().await;
+
+    let run = &entry(&listed, "boamp")["last_runs"][0];
+    assert_eq!(run["status"], "cancelled");
+    assert_eq!(run["cancel_reason"], "agent_removed");
+    assert_eq!(run["volume"], 2);
+    assert!(run["error"].is_null());
 }

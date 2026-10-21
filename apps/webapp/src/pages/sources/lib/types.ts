@@ -14,6 +14,7 @@ export type SourceState =
 	| 'running'
 	| 'failed'
 	| 'succeeded'
+	| 'cancelled'
 	| 'unavailable'
 
 export type TriggerResult =

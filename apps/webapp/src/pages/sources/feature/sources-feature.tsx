@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
+import { useNavigate } from '@tanstack/react-router'
 
 import { errorMessage, lodestoneApi } from '#/api/lodestone'
 import { useSourceTrigger } from '#/pages/sources/feature/use-source-trigger'
@@ -13,6 +14,7 @@ import { SourcesPage } from '#/pages/sources/ui/sources-page'
 const NO_SOURCES: Source[] = []
 
 export function SourcesFeature() {
+	const navigate = useNavigate()
 	const { trigger, results, triggeredAt, pending } = useSourceTrigger()
 	const query = useQuery({
 		...lodestoneApi().get('/api/v1/sources').queryOptions,
@@ -44,6 +46,9 @@ export function SourcesFeature() {
 			pending={pending}
 			errors={errors}
 			onRun={trigger}
+			onOpenProvider={(key) =>
+				void navigate({ to: '/sources/providers/$key', params: { key } })
+			}
 		/>
 	)
 }

@@ -1,19 +1,39 @@
-use std::{num::NonZeroU32, time::Duration};
+use std::{
+    num::{NonZeroU32, NonZeroUsize},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
+    time::Duration,
+};
 
 use chrono::{DateTime, SecondsFormat, Utc};
 use common::{CoreError, generate_uuid_v7};
+use futures_util::{StreamExt, stream};
 use lodestone_macros::transactional;
+use serde_json::json;
 use tracing::{info, warn};
 
 use crate::{
     application::{
         LodestoneUseCase,
-        llm::gateway::{
-            CallSettings, LlmCallError, Prompt, RunBudget, SchemaCall, Structured, call_with_schema,
+        llm::{
+            gateway::{
+                CallSettings, LlmCallError, Prompt, RunBudget, SchemaCall, Structured,
+                call_with_schema_until,
+            },
+            limits::{Throttled, locked},
+        },
+        timeline::{
+            AgentTrace, BUDGET_EXHAUSTED, agent_entries, agent_interrupted, agent_span,
+            agent_started, call_failed, combined, in_flight::Subject as Running, round_key,
         },
     },
     domain::{
-        company::PAGE_PROMPT_CHARS,
+        agent_work::{
+            AgentWork, CancelReason, WorkKind, WorkTarget, first_stop, ports::AgentWorkRepository,
+        },
+        calibration::{Calibrations, opinion_score},
         facts::{LeadFacts, signal_sentence},
         job::ports::Clock,
         lead::{Lead, LeadId, Signal},
@@ -25,16 +45,21 @@ use crate::{
             provider::{ProviderId, SecretCipher, Tier, TierError, TokenPricing},
         },
         profile::{
-            ActiveProfile,
+            ActiveProfile, RevisionNumber,
             contract::contract_schema,
             definition::{ProfileDefinition, QualificationAgent},
         },
         qualification::{
-            AgentOpinion, Completion, EvidenceStrength, Judgement, QualificationResult, ResultId,
-            ResultStatus, SCORING_VERSION, ValidOutput, Violations, agent_score, exclusions, judge,
+            AgentCallFailure, AgentFailure, AgentKind, AgentOpinion, Completion, DueGates,
+            EvidenceStrength, Judgement, QualificationResult, ResultId, ResultStatus,
+            SCORING_VERSION, ValidOutput, Verdict, VerdictCap, Violations, agent_retry_delay,
+            exclusions, judge,
             ports::QualificationRepository,
             prompt::{AgentPrompt, build, lead_document, with_ungrounded, with_violations},
             sample_record, validate_answers, vote,
+        },
+        timeline::{
+            EventActor, EventStatus, TimelineEntry, TimelineStep, kind, ports::TimelineRepository,
         },
     },
 };
@@ -58,6 +83,7 @@ pub struct EvaluationSettings {
     pub budget_cents: NonZeroU32,
     pub batch_size: u32,
     pub base_delay: Duration,
+    pub concurrency: NonZeroUsize,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -66,12 +92,14 @@ pub struct EvaluationReport {
     pub valid: u64,
     pub invalid: u64,
     pub rescored: u64,
+    pub deferred: u64,
+    pub stopped: u64,
     pub backlog: u64,
     pub budget_exhausted: bool,
 }
 
 pub(crate) struct Loaded<P> {
-    pub(crate) provider: P,
+    pub(crate) provider: Throttled<P>,
     pub(crate) id: ProviderId,
     pub(crate) name: String,
     pub(crate) model: String,
@@ -144,7 +172,10 @@ where
     Ok(
         resolved.and_then(|resolved| match builder.build(&resolved.definition) {
             Ok(provider) => Some(Loaded {
-                provider,
+                provider: Throttled::new(
+                    provider,
+                    usecase.provider_gate(resolved.id, resolved.max_concurrency),
+                ),
                 id: resolved.id,
                 name: resolved.name.clone(),
                 model: resolved.definition.model.clone(),
@@ -172,19 +203,38 @@ pub fn render_signal(signal: &Signal) -> String {
     )
 }
 
+type Entry<P> = (Option<ProviderId>, Option<Arc<Loaded<P>>>);
+
 pub(crate) struct Providers<P> {
-    pub(crate) entries: Vec<(Option<ProviderId>, Option<Loaded<P>>)>,
+    entries: Mutex<Vec<Entry<P>>>,
 }
 
 impl<P> Providers<P> {
     pub(crate) fn new() -> Self {
         Self {
-            entries: Vec::new(),
+            entries: Mutex::new(Vec::new()),
         }
     }
 
-    fn position(&self, wanted: Option<ProviderId>) -> Option<usize> {
-        self.entries.iter().position(|(key, _)| *key == wanted)
+    fn cached(&self, wanted: Option<ProviderId>) -> Option<Option<Arc<Loaded<P>>>> {
+        locked(&self.entries)
+            .iter()
+            .find(|(key, _)| *key == wanted)
+            .map(|(_, loaded)| loaded.clone())
+    }
+
+    fn keep(
+        &self,
+        wanted: Option<ProviderId>,
+        loaded: Option<Loaded<P>>,
+    ) -> Option<Arc<Loaded<P>>> {
+        let mut entries = locked(&self.entries);
+        if let Some((_, known)) = entries.iter().find(|(key, _)| *key == wanted) {
+            return known.clone();
+        }
+        let loaded = loaded.map(Arc::new);
+        entries.push((wanted, loaded.clone()));
+        loaded
     }
 }
 
@@ -195,19 +245,17 @@ pub(crate) async fn load_cached<B, S>(
     wanted: Option<ProviderId>,
     tier: Tier,
     label: &str,
-    providers: &mut Providers<B::Provider>,
-) -> Result<Option<usize>, CoreError>
+    providers: &Providers<B::Provider>,
+) -> Result<Option<Arc<Loaded<B::Provider>>>, CoreError>
 where
     B: ProviderBuilder,
     S: SecretCipher,
 {
-    if let Some(index) = providers.position(wanted) {
-        return Ok(providers.entries[index].1.is_some().then_some(index));
+    if let Some(known) = providers.cached(wanted) {
+        return Ok(known);
     }
     let loaded = load_provider(usecase, builder, cipher, wanted, tier, label).await?;
-    let available = loaded.is_some();
-    providers.entries.push((wanted, loaded));
-    Ok(available.then(|| providers.entries.len() - 1))
+    Ok(providers.keep(wanted, loaded))
 }
 
 struct Evaluator<'a, B, S, C> {
@@ -217,25 +265,85 @@ struct Evaluator<'a, B, S, C> {
     settings: EvaluationSettings,
 }
 
+pub(crate) const CALL_FAILURE_PREFIX: &str = "Échec de l'appel au modèle";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CallFailure {
+    pub(crate) agent_id: String,
+    pub(crate) provider_id: ProviderId,
+    pub(crate) error: String,
+}
+
+impl CallFailure {
+    pub(crate) fn into_record(
+        self,
+        lead_id: LeadId,
+        kind: AgentKind,
+        profile_revision: RevisionNumber,
+    ) -> AgentCallFailure {
+        AgentCallFailure {
+            lead_id,
+            kind,
+            profile_revision,
+            agent_id: self.agent_id,
+            provider_id: Some(self.provider_id),
+            error: self.error,
+        }
+    }
+}
+
 enum AgentOutcome {
     Result(Box<QualificationResult>, Option<AgentOpinion>),
+    CallFailed(CallFailure),
     BudgetExhausted,
+    Stopped(CancelReason),
+}
+
+enum PassOutcome {
+    Done(Pass),
+    CallFailed(CallFailure),
+    BudgetExhausted,
+    Stopped(AgentWork, CancelReason),
 }
 
 enum LeadOutcome {
     Done { valid: u64, invalid: u64 },
+    Deferred,
     BudgetExhausted,
+    Stopped,
+}
+
+pub(crate) enum LeadStep<T> {
+    Skipped,
+    Halted(CancelReason),
+    Ran(T),
+}
+
+pub(crate) fn lead_step<T>(halted: &AtomicBool, works: &[AgentWork]) -> Option<LeadStep<T>> {
+    if halted.load(Ordering::Acquire) {
+        return Some(LeadStep::Skipped);
+    }
+    first_stop(works).map(LeadStep::Halted)
 }
 
 enum SampleOutcome {
     Valid { output: ValidOutput, model: String },
     Invalid { error: String },
+    CallFailed { error: String },
     BudgetExhausted,
+    Stopped(CancelReason),
+}
+
+enum Escalated {
+    Replaced(bool),
+    BudgetExhausted,
+    Stopped(AgentWork, CancelReason),
 }
 
 struct Pass {
     results: Vec<QualificationResult>,
     opinions: Vec<Option<AgentOpinion>>,
+    entries: Vec<TimelineEntry>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -270,8 +378,11 @@ impl RunPlan {
 struct Subject<'a> {
     active: &'a ActiveProfile,
     definition: &'a ProfileDefinition,
+    calibrations: &'a Calibrations,
     lead: &'a Lead,
     documents: &'a [UntrustedDocument<'a>],
+    fresh: bool,
+    round: String,
     at: DateTime<Utc>,
 }
 
@@ -280,6 +391,24 @@ struct AgentRun<'a, P> {
     subject: &'a Subject<'a>,
     agent: &'a QualificationAgent,
     prompt: &'a AgentPrompt,
+    work: &'a AgentWork,
+}
+
+pub(crate) fn qualification_works(
+    usecase: &LodestoneUseCase,
+    active: &ActiveProfile,
+) -> Vec<AgentWork> {
+    active
+        .revision
+        .definition
+        .definition()
+        .qualification_agents
+        .iter()
+        .filter(|agent| agent.enabled)
+        .map(|agent| {
+            usecase.agent_work(active, WorkTarget::new(WorkKind::Qualification, &agent.id))
+        })
+        .collect()
 }
 
 pub(crate) fn count(value: usize) -> u64 {
@@ -322,10 +451,11 @@ fn succeeded(
     output: &ValidOutput,
     stored: (bool, serde_json::Value),
 ) -> (QualificationResult, AgentOpinion) {
-    let score = agent_score(
+    let score = opinion_score(
         agent,
         &output.answers,
         subject.definition.verdict.calibration_floor,
+        subject.calibrations,
     );
     let result = QualificationResult {
         id: ResultId(generate_uuid_v7()),
@@ -344,7 +474,6 @@ fn succeeded(
         created_at: subject.at,
     };
     let opinion = AgentOpinion {
-        weight: agent.weight,
         score,
         axes: output.answers.0.len(),
     };
@@ -353,14 +482,13 @@ fn succeeded(
 
 fn judgement_of(
     definition: &ProfileDefinition,
-    lead: &Lead,
     facts: &LeadFacts,
     opinions: &[AgentOpinion],
     at: DateTime<Utc>,
 ) -> Judgement {
     judge(
         opinions,
-        EvidenceStrength::compute(facts, lead.score.get(), &definition.evidence, at),
+        EvidenceStrength::compute(facts, &definition.evidence, at),
         definition.verdict,
         &definition.evidence,
     )
@@ -377,8 +505,8 @@ where
         usecase: &LodestoneUseCase,
         wanted: Option<ProviderId>,
         label: &str,
-        providers: &mut Providers<B::Provider>,
-    ) -> Result<Option<usize>, CoreError> {
+        providers: &Providers<B::Provider>,
+    ) -> Result<Option<Arc<Loaded<B::Provider>>>, CoreError> {
         load_cached(
             usecase,
             self.builder,
@@ -396,13 +524,14 @@ where
         run: &AgentRun<'_, B::Provider>,
         instruction: &str,
         call: (RunPlan, u32),
-        budget: &mut RunBudget,
+        budget: &RunBudget,
     ) -> Result<Structured<serde_json::Value>, LlmCallError> {
         let AgentRun {
             loaded,
             subject,
             agent,
             prompt,
+            work,
         } = *run;
         let (plan, sample) = call;
         let schema = contract_schema(agent);
@@ -418,6 +547,7 @@ where
             domain: subject.lead.domain.clone(),
             agent: Some(agent.id.clone()),
             sample,
+            fresh: subject.fresh,
         };
         let call = SchemaCall {
             scope: &scope,
@@ -430,7 +560,7 @@ where
             },
             schema: &schema,
         };
-        call_with_schema(
+        call_with_schema_until(
             &loaded.provider,
             self.cache,
             call,
@@ -441,6 +571,7 @@ where
                 base_delay: self.settings.base_delay,
             },
             budget,
+            work,
         )
         .await
     }
@@ -449,7 +580,7 @@ where
         &self,
         run: &AgentRun<'_, B::Provider>,
         call: (RunPlan, u32),
-        budget: &mut RunBudget,
+        budget: &RunBudget,
     ) -> SampleOutcome {
         let AgentRun {
             subject,
@@ -464,12 +595,24 @@ where
             let structured = match self.ask(run, &instruction, call, budget).await {
                 Ok(structured) => structured,
                 Err(LlmCallError::BudgetExhausted) => return SampleOutcome::BudgetExhausted,
+                Err(LlmCallError::Cancelled(reason)) => return SampleOutcome::Stopped(reason),
                 Err(error) => {
                     if let Some((output, model)) = fallback {
                         return SampleOutcome::Valid { output, model };
                     }
-                    return SampleOutcome::Invalid {
-                        error: format!("Échec de l'appel au modèle : {error}"),
+                    let call_failure = error.is_call_failure();
+                    warn!(
+                        agent = agent.id.as_str(),
+                        %error,
+                        provider_message = error.provider_message(),
+                        call_failure,
+                        "qualification call failed"
+                    );
+                    let error = format!("{CALL_FAILURE_PREFIX} : {error}");
+                    return if call_failure {
+                        SampleOutcome::CallFailed { error }
+                    } else {
+                        SampleOutcome::Invalid { error }
                     };
                 }
             };
@@ -512,14 +655,14 @@ where
         usecase: &LodestoneUseCase,
         subject: &Subject<'_>,
         agent: &QualificationAgent,
-        plan: RunPlan,
-        providers: &mut Providers<B::Provider>,
-        budget: &mut RunBudget,
+        (plan, work): (RunPlan, &AgentWork),
+        providers: &Providers<B::Provider>,
+        budget: &RunBudget,
     ) -> Result<AgentOutcome, CoreError> {
         let schema = contract_schema(agent);
         let prompt = build(subject.definition, agent, &schema);
         let version = agent_prompt_version(&prompt);
-        let Some(index) = self
+        let Some(loaded) = self
             .load(usecase, plan.provider, agent.id.as_str(), providers)
             .await?
         else {
@@ -532,24 +675,40 @@ where
             );
             return Ok(AgentOutcome::Result(Box::new(result), None));
         };
-        let Some(loaded) = providers.entries[index].1.as_ref() else {
-            return Err(CoreError::Internal(
-                "provider cache is inconsistent".to_owned(),
-            ));
-        };
-        let run = AgentRun {
+        let loaded = loaded.as_ref();
+        let run = &AgentRun {
             loaded,
             subject,
             agent,
             prompt: &prompt,
+            work,
         };
         let mut valid: Vec<ValidOutput> = Vec::new();
         let mut records: Vec<serde_json::Value> = Vec::new();
         let mut model: Option<String> = None;
         let mut first_error: Option<String> = None;
-        for sample in 0..plan.samples {
-            match self.run_sample(&run, (plan, sample), budget).await {
+        let mut call_errors: Vec<String> = Vec::new();
+        let mut samples = stream::iter(0..plan.samples)
+            .map(move |sample| async move {
+                let outcome = match work.stop_reason() {
+                    Some(reason) => SampleOutcome::Stopped(reason),
+                    None => self.run_sample(run, (plan, sample), budget).await,
+                };
+                (sample, outcome)
+            })
+            .buffered(self.settings.concurrency.get());
+        while let Some((sample, outcome)) = samples.next().await {
+            match outcome {
                 SampleOutcome::BudgetExhausted => return Ok(AgentOutcome::BudgetExhausted),
+                SampleOutcome::Stopped(reason) => return Ok(AgentOutcome::Stopped(reason)),
+                SampleOutcome::CallFailed { error } => {
+                    warn!(
+                        agent = agent.id.as_str(),
+                        sample, "qualification sample dropped, its call failed"
+                    );
+                    records.push(sample_record(sample, Err(&error)));
+                    call_errors.push(error);
+                }
                 SampleOutcome::Valid {
                     output,
                     model: answered,
@@ -567,6 +726,16 @@ where
                     first_error.get_or_insert(error);
                 }
             }
+        }
+        if valid.is_empty()
+            && first_error.is_none()
+            && let Some(error) = call_errors.into_iter().next()
+        {
+            return Ok(AgentOutcome::CallFailed(CallFailure {
+                agent_id: agent.id.as_str().to_owned(),
+                provider_id: loaded.id,
+                error,
+            }));
         }
         let raw_samples = if plan.samples > 1 {
             serde_json::Value::Array(records)
@@ -616,30 +785,118 @@ where
         Ok(AgentOutcome::Result(Box::new(result), Some(opinion)))
     }
 
-    async fn run_agents(
+    async fn run_agents<K: Clock>(
         &self,
         usecase: &LodestoneUseCase,
         subject: &Subject<'_>,
         escalation: Option<ProviderId>,
-        providers: &mut Providers<B::Provider>,
-        budget: &mut RunBudget,
-    ) -> Result<Option<Pass>, CoreError> {
+        providers: &Providers<B::Provider>,
+        (budget, clock): (&RunBudget, &K),
+    ) -> Result<PassOutcome, CoreError> {
         let mut pass = Pass {
             results: Vec::new(),
             opinions: Vec::new(),
+            entries: Vec::new(),
         };
-        for agent in subject
+        let agents: &Vec<&QualificationAgent> = &subject
             .definition
             .qualification_agents
             .iter()
             .filter(|agent| agent.enabled)
-        {
-            let plan = escalation.map_or_else(|| RunPlan::primary(agent), RunPlan::escalation);
-            match self
-                .evaluate_agent(usecase, subject, agent, plan, providers, budget)
-                .await?
-            {
-                AgentOutcome::BudgetExhausted => return Ok(None),
+            .collect();
+        let mut outcomes = stream::iter(0..agents.len())
+            .map(move |index| async move {
+                let agent = agents[index];
+                let plan = escalation.map_or_else(|| RunPlan::primary(agent), RunPlan::escalation);
+                let work = usecase.agent_work(
+                    subject.active,
+                    WorkTarget::new(WorkKind::Qualification, &agent.id),
+                );
+                let step = if plan.escalated {
+                    TimelineStep::Escalation
+                } else {
+                    TimelineStep::Qualification
+                };
+                let started = clock.now();
+                let span = agent_span(step, agent.id.as_str(), &subject.round, started);
+                let outcome = match work.stop_reason() {
+                    Some(reason) => AgentOutcome::Stopped(reason),
+                    None => {
+                        let _running = usecase.enter_step(
+                            Running::Lead(subject.lead.id),
+                            step,
+                            EventActor::agent(agent.id.as_str(), &agent.name),
+                            started,
+                        );
+                        usecase
+                            .record_timeline(
+                                subject.lead.id,
+                                &agent_started(
+                                    step,
+                                    (agent.id.as_str(), &agent.name),
+                                    &span,
+                                    started,
+                                ),
+                            )
+                            .await?;
+                        self.evaluate_agent(
+                            usecase,
+                            subject,
+                            agent,
+                            (plan, &work),
+                            providers,
+                            budget,
+                        )
+                        .await?
+                    }
+                };
+                Ok::<_, CoreError>((agent, plan, work, outcome, (span, started, clock.now())))
+            })
+            .buffered(self.settings.concurrency.get());
+        while let Some(next) = outcomes.next().await {
+            let (agent, plan, work, outcome, (span, started, finished)) = next?;
+            let step = if plan.escalated {
+                TimelineStep::Escalation
+            } else {
+                TimelineStep::Qualification
+            };
+            let interrupted = |ending: (EventStatus, Option<&str>)| {
+                agent_interrupted(
+                    step,
+                    (agent.id.as_str(), &agent.name),
+                    (&span, started),
+                    finished,
+                    ending,
+                )
+            };
+            match outcome {
+                AgentOutcome::BudgetExhausted => {
+                    usecase
+                        .record_timeline(
+                            subject.lead.id,
+                            &interrupted((EventStatus::Skipped, Some(BUDGET_EXHAUSTED))),
+                        )
+                        .await?;
+                    return Ok(PassOutcome::BudgetExhausted);
+                }
+                AgentOutcome::Stopped(reason) => {
+                    usecase
+                        .record_timeline(
+                            subject.lead.id,
+                            &interrupted((EventStatus::Skipped, Some(reason.as_str()))),
+                        )
+                        .await?;
+                    return Ok(PassOutcome::Stopped(work, reason));
+                }
+                AgentOutcome::CallFailed(failure) => {
+                    usecase
+                        .record_timeline(
+                            subject.lead.id,
+                            &interrupted((EventStatus::Failed, Some(&failure.error))),
+                        )
+                        .await?;
+                    return Ok(PassOutcome::CallFailed(failure));
+                }
                 AgentOutcome::Result(result, opinion) => {
                     info!(
                         monotonic_counter.qualification_results = 1u64,
@@ -648,37 +905,66 @@ where
                         escalated = plan.escalated,
                         "qualification result recorded"
                     );
+                    pass.entries.extend(agent_entries(AgentTrace {
+                        step,
+                        agent: (agent.id.as_str(), &agent.name),
+                        provenance: &result.provenance,
+                        valid: result.status == ResultStatus::Valid,
+                        error: result.error.as_deref(),
+                        raw_samples: &result.raw_samples,
+                        detail: json!({
+                            "agent_score": result.agent_score,
+                            "samples": result.provenance.samples,
+                            "escalated": plan.escalated,
+                            "summary": result.summary,
+                        }),
+                        span: &span,
+                        started_at: started,
+                        finished_at: finished,
+                    }));
                     pass.results.push(*result);
                     pass.opinions.push(opinion);
                 }
             }
         }
-        Ok(Some(pass))
+        Ok(PassOutcome::Done(pass))
     }
 
-    async fn escalate(
+    async fn escalate<K: Clock>(
         &self,
         usecase: &LodestoneUseCase,
         subject: &Subject<'_>,
         provider: ProviderId,
         pass: &mut Pass,
-        providers: &mut Providers<B::Provider>,
-        budget: &mut RunBudget,
-    ) -> Result<Option<bool>, CoreError> {
+        providers: &Providers<B::Provider>,
+        (budget, clock): (&RunBudget, &K),
+    ) -> Result<Escalated, CoreError> {
         if self
             .load(usecase, Some(provider), ESCALATION_LABEL, providers)
             .await?
             .is_none()
         {
             warn!(lead_id = %subject.lead.id, "escalation skipped, its provider is unavailable");
-            return Ok(Some(false));
+            return Ok(Escalated::Replaced(false));
         }
-        let Some(escalated) = self
-            .run_agents(usecase, subject, Some(provider), providers, budget)
+        let escalated = match self
+            .run_agents(usecase, subject, Some(provider), providers, (budget, clock))
             .await?
-        else {
-            return Ok(None);
+        {
+            PassOutcome::Done(escalated) => escalated,
+            PassOutcome::BudgetExhausted => return Ok(Escalated::BudgetExhausted),
+            PassOutcome::Stopped(work, reason) => return Ok(Escalated::Stopped(work, reason)),
+            PassOutcome::CallFailed(failure) => {
+                warn!(
+                    lead_id = %subject.lead.id,
+                    agent = failure.agent_id,
+                    error = failure.error,
+                    "escalation skipped, its model call failed"
+                );
+                return Ok(Escalated::Replaced(false));
+            }
         };
+        pass.entries.extend(escalated.entries);
         let mut replaced = false;
         for (index, (result, opinion)) in escalated
             .results
@@ -692,7 +978,7 @@ where
                 replaced = true;
             }
         }
-        Ok(Some(replaced))
+        Ok(Escalated::Replaced(replaced))
     }
 
     async fn evaluate_lead<K: Clock>(
@@ -700,18 +986,18 @@ where
         usecase: &LodestoneUseCase,
         active: &ActiveProfile,
         lead: &Lead,
-        providers: &mut Providers<B::Provider>,
-        budget: &mut RunBudget,
+        providers: &Providers<B::Provider>,
+        budget: &RunBudget,
         clock: &K,
     ) -> Result<LeadOutcome, CoreError> {
+        let read_at = clock.now();
+        let fresh = usecase.lead_fresh_calls(lead.id).await?;
         let definition = active.revision.definition.definition();
+        let calibrations = usecase.profile_calibrations(active).await?;
         let (signals, facts, dossier) = usecase.signals_with_facts(lead).await?;
         let overview = lead_document(lead.domain.as_str(), &facts);
         let contents: Vec<String> = signals.iter().map(render_signal).collect();
-        let dossier_documents = dossier
-            .as_ref()
-            .map(|dossier| dossier.documents(PAGE_PROMPT_CHARS))
-            .unwrap_or_default();
+        let dossier_documents = usecase.grounding_documents(lead, dossier.as_ref()).await?;
         let mut documents = Vec::with_capacity(signals.len() + dossier_documents.len() + 1);
         documents.push(UntrustedDocument {
             source: "lead",
@@ -727,32 +1013,76 @@ where
             source: &document.source,
             content: &document.content,
         }));
+        let round = round_key(lead.qualified_at);
+        let trigger = if lead.qualified_at.is_none() {
+            "first"
+        } else if fresh {
+            "manual"
+        } else {
+            "requalification"
+        };
+        usecase
+            .record_timeline(
+                lead.id,
+                &TimelineEntry::round_started(read_at, trigger, lead.qualified_at),
+            )
+            .await?;
         let subject = Subject {
             active,
             definition,
+            calibrations: &calibrations,
             lead,
             documents: &documents,
+            fresh,
+            round,
             at: clock.now(),
         };
         let at = subject.at;
-        let Some(mut pass) = self
-            .run_agents(usecase, &subject, None, providers, budget)
-            .await?
-        else {
-            return Ok(LeadOutcome::BudgetExhausted);
-        };
         let revision = active.revision.number;
+        let mut pass = match self
+            .run_agents(usecase, &subject, None, providers, (budget, clock))
+            .await?
+        {
+            PassOutcome::Done(pass) => pass,
+            PassOutcome::BudgetExhausted => return Ok(LeadOutcome::BudgetExhausted),
+            PassOutcome::Stopped(work, reason) => {
+                usecase.note_stop(lead.id, &work, reason, at).await?;
+                return Ok(LeadOutcome::Stopped);
+            }
+            PassOutcome::CallFailed(failure) => {
+                let record = failure.into_record(lead.id, AgentKind::Qualification, revision);
+                let attempts = usecase.note_agent_failure(&record, clock.now()).await?;
+                warn!(
+                    lead_id = %lead.id,
+                    agent = record.agent_id,
+                    attempts,
+                    error = record.error,
+                    "qualification deferred, a model call failed"
+                );
+                return Ok(LeadOutcome::Deferred);
+            }
+        };
         let mut escalated_revision = None;
         let scored = |pass: &Pass| -> Vec<AgentOpinion> {
             pass.opinions.iter().flatten().copied().collect()
         };
-        let mut judgement = judgement_of(definition, lead, &facts, &scored(&pass), at);
+        let mut judgement = judgement_of(definition, &facts, &scored(&pass), at);
         if escalated_revision.is_none()
             && let (Some(provider), Some(confidence)) =
                 (definition.escalation.provider, judgement.confidence)
             && definition.escalation.triggers(confidence)
         {
             info!(lead_id = %lead.id, confidence, "grey-zone lead, escalating");
+            pass.entries.push(
+                TimelineEntry::new(
+                    TimelineStep::Escalation,
+                    kind::ESCALATED,
+                    EventStatus::Succeeded,
+                    clock.now(),
+                    format!("escalated:{}", subject.round),
+                )
+                .detail(json!({ "confidence": confidence })),
+            );
             match self
                 .escalate(
                     usecase,
@@ -760,20 +1090,24 @@ where
                     ProviderId(provider),
                     &mut pass,
                     providers,
-                    budget,
+                    (budget, clock),
                 )
                 .await?
             {
-                None => return Ok(LeadOutcome::BudgetExhausted),
-                Some(true) => {
+                Escalated::BudgetExhausted => return Ok(LeadOutcome::BudgetExhausted),
+                Escalated::Stopped(work, reason) => {
+                    usecase.note_stop(lead.id, &work, reason, at).await?;
+                    return Ok(LeadOutcome::Stopped);
+                }
+                Escalated::Replaced(true) => {
                     escalated_revision = Some(revision);
-                    judgement = judgement_of(definition, lead, &facts, &scored(&pass), at);
+                    judgement = judgement_of(definition, &facts, &scored(&pass), at);
                     info!(
                         monotonic_counter.qualification_escalations = 1u64,
                         "lead escalated"
                     );
                 }
-                Some(false) => {}
+                Escalated::Replaced(false) => {}
             }
         }
         let valid = count(pass.opinions.iter().flatten().count());
@@ -784,6 +1118,18 @@ where
             .collect();
         sources.sort();
         sources.dedup();
+        pass.entries.push(combined(
+            "indicators",
+            &subject.round,
+            clock.now(),
+            json!({
+                "source": "indicators",
+                "confidence": judgement.confidence,
+                "opinion": judgement.opinion,
+                "verdict": judgement.verdict.map(Verdict::as_str),
+                "cap": judgement.cap.map(VerdictCap::as_str),
+            }),
+        ));
         let completion = Completion {
             lead_id: lead.id,
             profile_revision: revision,
@@ -793,9 +1139,19 @@ where
             scoring_version: SCORING_VERSION,
             dossier_at: dossier.as_ref().and_then(|dossier| dossier.content_at),
             escalated_revision,
+            read_at,
             at,
         };
-        usecase.store_evaluation(&pass.results, &completion).await?;
+        let works = qualification_works(usecase, active);
+        if let Some(work) = works.iter().find(|work| !work.is_live())
+            && let Some(reason) = work.stop_reason()
+        {
+            usecase.note_stop(lead.id, work, reason, at).await?;
+            return Ok(LeadOutcome::Stopped);
+        }
+        usecase
+            .store_evaluation(&pass.results, &completion, &pass.entries)
+            .await?;
         Ok(LeadOutcome::Done { valid, invalid })
     }
 }
@@ -834,7 +1190,7 @@ impl LodestoneUseCase {
             settings,
         };
         let profiles: Vec<ActiveProfile> = self
-            .list_active_profiles()
+            .refreshed_active_profiles()
             .await?
             .into_iter()
             .filter(|active| {
@@ -848,59 +1204,86 @@ impl LodestoneUseCase {
             })
             .collect();
         let mut report = EvaluationReport::default();
-        let mut budget = RunBudget::new(settings.budget_cents);
-        let mut providers = Providers::new();
+        let budget = &RunBudget::new(settings.budget_cents);
+        let providers = &Providers::new();
+        let evaluator = &evaluator;
         let mut remaining = settings.batch_size;
-        let gate = self.dossier_gate(clock.now());
         let rescoring = self
             .rescore_stale_leads(RESCORE_BATCH_SIZE, clock.now())
             .await?;
         report.rescored = rescoring.leads;
-        'profiles: for active in &profiles {
-            if remaining == 0 {
+        for active in &profiles {
+            if remaining == 0 || report.budget_exhausted {
                 break;
             }
-            let leads = self.due_leads(active, remaining, gate).await?;
-            for lead in &leads {
-                let outcome = evaluator
-                    .evaluate_lead(self, active, lead, &mut providers, &mut budget, clock)
-                    .await?;
-                match outcome {
-                    LeadOutcome::Done { valid, invalid } => {
+            let leads = self
+                .due_leads(active, remaining, self.due_gates(), clock.now())
+                .await?;
+            let works = &qualification_works(self, active);
+            let halted = &AtomicBool::new(false);
+            let leads = &leads;
+            let mut steps = stream::iter(0..leads.len())
+                .map(move |index| async move {
+                    if let Some(step) = lead_step(halted, works) {
+                        return Ok(step);
+                    }
+                    let lead = &leads[index];
+                    evaluator
+                        .evaluate_lead(self, active, lead, providers, budget, clock)
+                        .await
+                        .map(LeadStep::Ran)
+                })
+                .buffered(settings.concurrency.get());
+            while let Some(step) = steps.next().await {
+                match step? {
+                    LeadStep::Skipped => {}
+                    LeadStep::Halted(reason) => {
+                        if !halted.swap(true, Ordering::AcqRel) {
+                            info!(profile = %active.profile.id, reason = reason.as_str(), "qualification pass stopped for the profile");
+                        }
+                    }
+                    LeadStep::Ran(LeadOutcome::Stopped) => {
+                        report.stopped += 1;
+                        halted.store(true, Ordering::Release);
+                    }
+                    LeadStep::Ran(LeadOutcome::Done { valid, invalid }) => {
                         report.leads += 1;
                         report.valid += valid;
                         report.invalid += invalid;
                         remaining = remaining.saturating_sub(1);
                     }
-                    LeadOutcome::BudgetExhausted => {
+                    LeadStep::Ran(LeadOutcome::Deferred) => {
+                        report.deferred += 1;
+                        remaining = remaining.saturating_sub(1);
+                    }
+                    LeadStep::Ran(LeadOutcome::BudgetExhausted) => {
+                        if !report.budget_exhausted {
+                            warn!("qualification stopped, the run budget is exhausted");
+                        }
                         report.budget_exhausted = true;
-                        warn!("qualification stopped, the run budget is exhausted");
-                        break 'profiles;
+                        halted.store(true, Ordering::Release);
                     }
                 }
             }
         }
-        report.backlog = self.due_backlog(&profiles, gate).await? + rescoring.backlog;
+        report.backlog = self.due_backlog(&profiles, clock.now()).await? + rescoring.backlog;
         Ok(report)
     }
 
-    fn dossier_gate(&self, now: DateTime<Utc>) -> Option<DateTime<Utc>> {
-        if self.company_wait.is_zero() {
-            return None;
+    pub(crate) fn due_gates(&self) -> DueGates {
+        DueGates {
+            requalify_max_per_day: self.requalify.max_per_day,
         }
-        chrono::Duration::from_std(self.company_wait)
-            .ok()
-            .and_then(|wait| now.checked_sub_signed(wait))
     }
 
     async fn due_backlog(
         &self,
         profiles: &[ActiveProfile],
-        gate: Option<DateTime<Utc>>,
+        now: DateTime<Utc>,
     ) -> Result<u64, CoreError> {
         let mut backlog = 0;
         for active in profiles {
-            backlog += self.count_due_leads(active, gate).await?;
+            backlog += self.count_due_leads(active, self.due_gates(), now).await?;
         }
         Ok(backlog)
     }
@@ -910,10 +1293,11 @@ impl LodestoneUseCase {
         &self,
         active: &ActiveProfile,
         limit: u32,
-        gate: Option<DateTime<Utc>>,
+        gates: DueGates,
+        now: DateTime<Utc>,
     ) -> Result<Vec<Lead>, CoreError> {
         let mut repo = qualification_repository;
-        repo.due_leads(active.profile.id, active.revision.number, limit, gate)
+        repo.due_leads(active.profile.id, active.revision.number, limit, gates, now)
             .await
     }
 
@@ -921,23 +1305,94 @@ impl LodestoneUseCase {
     async fn count_due_leads(
         &self,
         active: &ActiveProfile,
-        gate: Option<DateTime<Utc>>,
+        gates: DueGates,
+        now: DateTime<Utc>,
     ) -> Result<u64, CoreError> {
         let mut repo = qualification_repository;
-        repo.count_due(active.profile.id, active.revision.number, gate)
+        repo.count_due(active.profile.id, active.revision.number, gates, now)
             .await
     }
 
     #[transactional(qualification)]
+    pub(crate) async fn lead_fresh_calls(&self, lead_id: LeadId) -> Result<bool, CoreError> {
+        let mut repo = qualification_repository;
+        repo.fresh_calls(lead_id).await
+    }
+
+    #[transactional(qualification)]
+    pub async fn backfill_dossier_requalifications(
+        &self,
+        now: DateTime<Utc>,
+    ) -> Result<u64, CoreError> {
+        let mut repo = qualification_repository;
+        repo.backfill_dossier_requalifications(self.requalify.requalify_after(now), now)
+            .await
+    }
+
+    #[transactional(qualification, timeline)]
+    pub(crate) async fn note_agent_failure(
+        &self,
+        failure: &AgentCallFailure,
+        at: DateTime<Utc>,
+    ) -> Result<u32, CoreError> {
+        let mut repo = qualification_repository;
+        let mut timeline = timeline_repository;
+        let attempts = repo.record_agent_failure(failure, at).await?;
+        let step = match failure.kind {
+            AgentKind::Qualification => TimelineStep::Qualification,
+            AgentKind::Scoring => TimelineStep::Scoring,
+        };
+        timeline
+            .record(
+                failure.lead_id,
+                &call_failed(
+                    step,
+                    &failure.agent_id,
+                    attempts,
+                    at + agent_retry_delay(attempts),
+                    &failure.error,
+                    at,
+                ),
+            )
+            .await?;
+        Ok(attempts)
+    }
+
+    #[transactional(qualification)]
+    pub async fn lead_agent_failures(
+        &self,
+        lead_id: LeadId,
+    ) -> Result<Vec<AgentFailure>, CoreError> {
+        let mut repo = qualification_repository;
+        repo.agent_failures(lead_id).await
+    }
+
+    #[transactional(qualification, agent_work, timeline)]
     async fn store_evaluation(
         &self,
         results: &[QualificationResult],
         completion: &Completion,
+        entries: &[TimelineEntry],
     ) -> Result<(), CoreError> {
         let mut repo = qualification_repository;
+        let mut stops = agent_work_repository;
+        let mut timeline = timeline_repository;
         for result in results {
             repo.store_result(result).await?;
         }
+        for entry in entries {
+            timeline.record(completion.lead_id, entry).await?;
+        }
+        stops
+            .clear_stops(
+                completion.lead_id,
+                &[
+                    WorkKind::Qualification,
+                    WorkKind::Scoring,
+                    WorkKind::Aggregator,
+                ],
+            )
+            .await?;
         repo.complete(completion).await
     }
 

@@ -61,16 +61,38 @@ fn duplicate_links_and_the_home_page_are_dropped() {
 fn the_fallback_paths_are_tried_only_when_no_link_of_the_kind_exists() {
     let none = candidates(&[], &home(), 10);
     assert_eq!(
-        none.iter().map(|(url, _)| url.path()).collect::<Vec<_>>(),
+        none.iter()
+            .map(|candidate| candidate.url.path())
+            .collect::<Vec<_>>(),
         ["/mentions-legales", "/legal", "/a-propos", "/about"]
+    );
+    assert!(
+        none.iter()
+            .all(|candidate| candidate.origin == LinkOrigin::Guessed)
     );
     let html = r#"<a href="/mentions">M</a>"#;
     let links = page_links(html, &home(), &domain());
     let found = candidates(&links, &home(), 10);
     assert_eq!(
-        found.iter().map(|(url, _)| url.path()).collect::<Vec<_>>(),
-        ["/mentions", "/a-propos", "/about"]
+        found
+            .iter()
+            .map(|candidate| (candidate.url.path(), candidate.origin))
+            .collect::<Vec<_>>(),
+        [
+            ("/mentions", LinkOrigin::Linked),
+            ("/a-propos", LinkOrigin::Guessed),
+            ("/about", LinkOrigin::Guessed)
+        ]
     );
+}
+
+#[test]
+fn stored_pages_get_back_the_origin_they_were_found_with() {
+    let origin = |raw: &str| stored_origin(&Url::parse(raw).unwrap());
+    assert_eq!(origin("https://acme.fr/"), LinkOrigin::Home);
+    assert_eq!(origin("https://acme.fr/legal"), LinkOrigin::Guessed);
+    assert_eq!(origin("https://acme.fr/a-propos"), LinkOrigin::Guessed);
+    assert_eq!(origin("https://acme.fr/societe/infos"), LinkOrigin::Linked);
 }
 
 #[test]

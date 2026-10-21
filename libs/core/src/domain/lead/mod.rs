@@ -154,7 +154,6 @@ pub struct Lead {
     pub domain: NormalizedDomain,
     pub status: LeadStatus,
     pub score: Score,
-    pub score_breakdown: Vec<crate::domain::scoring::ScoreContribution>,
     pub confidence: Option<f64>,
     pub verdict: Option<crate::domain::qualification::Verdict>,
     pub llm_score: Option<u8>,

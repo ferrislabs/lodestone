@@ -6,27 +6,39 @@ use uuid::Uuid;
 
 use crate::domain::values::SourceName;
 
-pub const PROFILE_SCHEMA_VERSION: u32 = 11;
+pub const PROFILE_SCHEMA_VERSION: u32 = 19;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[schemars(
     title = "Detection profile",
-    description = "Describes one market: what is sold, which agents scan which sources, which qualification agents judge a lead, which scoring agents decide its score and verdict, how an aggregator sums it up, how signals are weighted and which contacts to prefer."
+    description = "Describes one market: what is sold, which agents scan which sources, which qualification agents judge a lead, which scoring agents decide its score and verdict, how an aggregator sums it up and which contacts to prefer."
 )]
 pub struct ProfileDefinition {
-    #[schemars(description = "Profile format version. Must be 11.")]
+    #[schemars(description = "Profile format version. Must be 19.")]
     pub schema_version: u32,
     pub identity: Identity,
-    #[schemars(description = "Detection agents. At least one is required.")]
+    #[serde(default)]
+    #[schemars(
+        title = "Answer language",
+        description = "Language of every free-text field the LLM writes: triage reason, qualification summary, approach angle and draft. Evidence quotes stay in the source language."
+    )]
+    pub language: Language,
+    #[schemars(
+        description = "Sourcing agents: they find leads. At least one is required unless the profile probes its own fingerprints or highlights job keywords."
+    )]
     pub agents: Vec<Agent>,
+    #[serde(default)]
+    pub inspection: Inspection,
+    #[serde(default)]
+    pub enrichment: Enrichment,
     #[schemars(
         description = "Qualification agents. Each one evaluates every lead of the profile from one angle. At least one is required."
     )]
     pub qualification_agents: Vec<QualificationAgent>,
     #[serde(default)]
     #[schemars(
-        description = "Scoring agents. Each one decides a score and a verdict for every lead from the reports of the qualification agents, through a contract imposed by the application. The lead score and verdict are the weighted means of their answers. With none enabled, the verdict stays pending."
+        description = "Scoring agents. Each one decides a score and a verdict for every lead from the reports of the qualification agents, through a contract imposed by the application. The lead score and verdict are the means of their answers weighted by the weight of each agent. With none enabled, the verdict stays pending."
     )]
     pub scoring_agents: Vec<ScoringAgent>,
     pub aggregator: Aggregator,
@@ -36,9 +48,7 @@ pub struct ProfileDefinition {
     pub verdict: VerdictThresholds,
     #[serde(default)]
     pub evidence: EvidenceSettings,
-    pub scoring: Scoring,
     pub contact_ranking: ContactRanking,
-    pub llm: LlmSettings,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -119,12 +129,6 @@ pub struct QualificationAgent {
         description = "System prompt given to the model."
     )]
     pub system_prompt: String,
-    #[serde(default = "default_weight")]
-    #[schemars(
-        range(min = 1, max = 10),
-        description = "Integer weight from 1 to 10 of this agent in the lead confidence."
-    )]
-    pub weight: u8,
     #[serde(default = "default_exclusion_threshold")]
     #[schemars(
         range(min = 0.5, max = 1.0),
@@ -148,6 +152,11 @@ pub struct QualificationAgent {
         description = "Questions the agent answers. At least one is required."
     )]
     pub questions: Vec<Question>,
+    #[serde(default = "default_enabled")]
+    #[schemars(
+        description = "When true, once at least 50 leads are labelled with 10 of each class, the score of this agent is corrected by an isotonic map learned daily from the human decisions. The fit always runs so the quality page keeps its figures. Default true."
+    )]
+    pub learned_calibration: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -180,7 +189,7 @@ pub struct ScoringAgent {
     #[serde(default = "default_weight")]
     #[schemars(
         range(min = 1, max = 10),
-        description = "Integer weight from 1 to 10 of this agent in the lead score and verdict."
+        description = "Integer weight from 1 to 10 of this agent in the lead score and verdict. It only matters when the profile has two or more scoring agents."
     )]
     pub weight: u8,
     #[schemars(
@@ -205,6 +214,11 @@ pub struct ScoringAgent {
         description = "Temperature of the calls when samples is above 1, overriding the provider temperature. Default 0.7."
     )]
     pub sampling_temperature: f64,
+    #[serde(default = "default_enabled")]
+    #[schemars(
+        description = "When true, once at least 50 leads are labelled with 10 of each class, the verdict probabilities of this agent are corrected by an isotonic map learned daily from the human decisions. The fit always runs so the quality page keeps its figures. Default true."
+    )]
+    pub learned_calibration: bool,
 }
 
 pub const DEFAULT_SCORING_SAMPLES: u8 = 1;
@@ -489,7 +503,7 @@ pub struct EvidenceWeights {
     #[serde(default = "default_evidence_weight")]
     #[schemars(
         range(min = 0, max = 10),
-        description = "Signal score of the lead, weighted by the freshness of its signals, against the reference score."
+        description = "Mean of the three strongest independent signals, each strength given by its source and decayed by its age."
     )]
     pub strength: u8,
 }
@@ -526,7 +540,7 @@ const BUILT_IN_HALF_LIVES: [(&str, u32); 9] = [
     (DEFAULT_HALF_LIFE_KEY, FALLBACK_HALF_LIFE_DAYS),
 ];
 
-fn default_half_life_days() -> BTreeMap<String, u32> {
+pub(super) fn default_half_life_days() -> BTreeMap<String, u32> {
     BUILT_IN_HALF_LIVES
         .iter()
         .map(|(kind, days)| ((*kind).to_owned(), *days))
@@ -546,12 +560,6 @@ pub struct EvidenceSettings {
         description = "Confidence = agents opinion x ((1 - influence) + influence x evidence strength). 0 ignores the evidence, 1 multiplies the opinion by it."
     )]
     pub influence: f64,
-    #[serde(default = "default_reference_score")]
-    #[schemars(
-        range(min = 1.0),
-        description = "Signal score at which the signal strength component reaches 1."
-    )]
-    pub reference_score: f64,
     #[serde(default)]
     pub weights: EvidenceWeights,
     #[serde(default = "default_half_life_days")]
@@ -578,19 +586,14 @@ impl EvidenceSettings {
     }
 }
 
-fn default_influence() -> f64 {
+pub(super) fn default_influence() -> f64 {
     0.6
-}
-
-fn default_reference_score() -> f64 {
-    50.0
 }
 
 impl Default for EvidenceSettings {
     fn default() -> Self {
         Self {
             influence: default_influence(),
-            reference_score: default_reference_score(),
             weights: EvidenceWeights::default(),
             half_life_days: default_half_life_days(),
         }
@@ -598,33 +601,229 @@ impl Default for EvidenceSettings {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[serde(tag = "type", rename_all = "snake_case")]
 #[schemars(
     title = "Agent",
-    description = "Searches one source with its own settings."
+    description = "A sourcing agent, selected by type. A search agent looks for keywords across catalog providers, a certificates agent reads hostnames in certificate transparency logs, a DNS agent recognises providers by the CNAME target of hosts."
 )]
-pub struct Agent {
-    #[schemars(description = "Unique slug in the profile, for example ats-en.")]
+pub enum Agent {
+    #[schemars(title = "Search agent")]
+    Search(SearchAgent),
+    #[schemars(title = "Certificates agent")]
+    Certificates(CertificatesAgent),
+    #[schemars(title = "DNS agent")]
+    Dns(DnsAgent),
+}
+
+impl Agent {
+    pub fn id(&self) -> &AgentId {
+        match self {
+            Self::Search(agent) => &agent.id,
+            Self::Certificates(agent) => &agent.id,
+            Self::Dns(agent) => &agent.id,
+        }
+    }
+
+    pub fn name(&self) -> &str {
+        match self {
+            Self::Search(agent) => &agent.name,
+            Self::Certificates(agent) => &agent.name,
+            Self::Dns(agent) => &agent.name,
+        }
+    }
+
+    pub fn enabled(&self) -> bool {
+        match self {
+            Self::Search(agent) => agent.enabled,
+            Self::Certificates(agent) => agent.enabled,
+            Self::Dns(agent) => agent.enabled,
+        }
+    }
+
+    pub fn as_search(&self) -> Option<&SearchAgent> {
+        match self {
+            Self::Search(agent) => Some(agent),
+            _ => None,
+        }
+    }
+
+    pub fn certificates(&self) -> Option<&CertificatesAgent> {
+        match self {
+            Self::Certificates(agent) => Some(agent),
+            _ => None,
+        }
+    }
+
+    pub fn dns(&self) -> Option<&DnsAgent> {
+        match self {
+            Self::Dns(agent) => Some(agent),
+            _ => None,
+        }
+    }
+
+    pub fn host_countries(&self) -> Option<&[CountryCode]> {
+        match self {
+            Self::Search(_) => None,
+            Self::Certificates(agent) => Some(&agent.countries),
+            Self::Dns(agent) => Some(&agent.countries),
+        }
+    }
+
+    pub fn serves(&self, source: SourceName) -> bool {
+        match self {
+            Self::Search(agent) => agent.searches(source.as_str()),
+            Self::Certificates(_) => source == SourceName::CertificateTransparency,
+            Self::Dns(_) => source == SourceName::DnsCname,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(
+    title = "Certificates agent",
+    description = "Reads new certificates in the certificate transparency logs. A hostname with one of the labels creates or updates a lead for its registrable domain."
+)]
+pub struct CertificatesAgent {
+    #[schemars(description = "Unique slug in the profile, for example certificats.")]
     pub id: AgentId,
     #[schemars(description = "Display name.")]
     pub name: String,
     #[serde(default = "default_enabled")]
     #[schemars(description = "A disabled agent is kept but not run.")]
     pub enabled: bool,
-    #[schemars(description = "The source searched and its settings.")]
-    pub source: AgentSource,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(description = "LLM settings specific to this agent.")]
-    pub llm: Option<AgentLlm>,
+    #[schemars(description = "Hostname labels to look for, for example auth or sso.")]
+    pub labels: Vec<String>,
+    #[serde(default)]
+    #[schemars(
+        description = "Target countries, as ISO 3166-1 alpha-2 codes, uppercase, for example FR. A host under the country-code top-level domain of another country creates no lead; a host under a generic top-level domain creates one, suppressed for this profile once the head office of the company is known to be elsewhere. Empty means every country."
+    )]
+    pub countries: Vec<CountryCode>,
 }
 
-impl Agent {
-    pub fn relevance_criteria(&self) -> Option<&str> {
-        self.llm
-            .as_ref()
-            .and_then(|llm| llm.relevance_criteria.as_deref())
-            .map(str::trim)
-            .filter(|criteria| !criteria.is_empty())
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(
+    title = "DNS agent",
+    description = "Resolves the CNAME chain of candidate hosts. A target matching a pattern creates or updates a lead for the registrable domain of the host."
+)]
+pub struct DnsAgent {
+    #[schemars(description = "Unique slug in the profile, for example dns.")]
+    pub id: AgentId,
+    #[schemars(description = "Display name.")]
+    pub name: String,
+    #[serde(default = "default_enabled")]
+    #[schemars(description = "A disabled agent is kept but not run.")]
+    pub enabled: bool,
+    #[schemars(description = "Provider and target suffix pairs.")]
+    pub patterns: Vec<CnamePattern>,
+    #[serde(default)]
+    #[schemars(
+        description = "Target countries, as ISO 3166-1 alpha-2 codes, uppercase, for example FR. A host under the country-code top-level domain of another country creates no lead; a host under a generic top-level domain creates one, suppressed for this profile once the head office of the company is known to be elsewhere. Empty means every country."
+    )]
+    pub countries: Vec<CountryCode>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(
+    title = "Ecosystem inspection",
+    description = "Every lead with a registrable domain gets the same ecosystem inspection, whatever the profile: official identity, legal life, public contracts, site and technical stack, DNS and e-mail, hiring and recent activity. The qualification agents read what it finds and decide what matters."
+)]
+pub struct Inspection {
+    #[serde(default = "default_enabled")]
+    #[schemars(
+        description = "When false, the leads of the profile are not inspected and qualification does not wait for the inspection. Default true."
+    )]
+    pub enabled: bool,
+}
+
+impl Default for Inspection {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(
+    title = "Enrichment",
+    description = "Settings of the inspection specific to this profile. Everything else is the same for every profile."
+)]
+pub struct Enrichment {
+    #[serde(default)]
+    pub custom: CustomInspection,
+    #[serde(default)]
+    #[schemars(
+        description = "Keywords to highlight in the job offers of a lead. An offer with them becomes a job_offer signal. Empty means the keywords of the enabled search agents."
+    )]
+    pub highlight_keywords: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(
+    title = "Profile-specific fingerprints",
+    description = "Fingerprints probed on the site of every lead of this profile, with the products to ignore and the extra subdomains to probe. A match becomes a product_detected or debt_marker signal."
+)]
+pub struct CustomInspection {
+    #[serde(default)]
+    #[schemars(description = "Fingerprints to probe on each host of a lead.")]
+    pub fingerprints: Vec<Fingerprint>,
+    #[serde(default)]
+    #[schemars(description = "Products to ignore, for example your own.")]
+    pub excluded_products: Vec<String>,
+    #[serde(default)]
+    #[schemars(
+        description = "Subdomains of the lead domain probed as well, as hostname labels. Empty by default."
+    )]
+    pub extra_subdomains: Vec<String>,
+}
+
+pub const COMPANY_JOBS_AGENT_ID: &str = "company-jobs";
+pub const COMPANY_JOBS_NAME: &str = "Offres d'emploi de l'entreprise";
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum SourceTarget<'a> {
+    Agent(&'a Agent),
+    HttpProbe(&'a CustomInspection),
+    CompanyJobs(&'a Enrichment),
+}
+
+impl<'a> SourceTarget<'a> {
+    pub fn agent_id(&self) -> Option<&'a AgentId> {
+        match self {
+            Self::Agent(agent) => Some(agent.id()),
+            Self::HttpProbe(_) | Self::CompanyJobs(_) => None,
+        }
+    }
+
+    pub fn certificates(&self) -> Option<&'a CertificatesAgent> {
+        match self {
+            Self::Agent(agent) => agent.certificates(),
+            _ => None,
+        }
+    }
+
+    pub fn dns(&self) -> Option<&'a DnsAgent> {
+        match self {
+            Self::Agent(agent) => agent.dns(),
+            _ => None,
+        }
+    }
+
+    pub fn host_countries(&self) -> Option<&'a [CountryCode]> {
+        match self {
+            Self::Agent(agent) => agent.host_countries(),
+            _ => None,
+        }
+    }
+
+    pub fn http_probe(&self) -> Option<&'a CustomInspection> {
+        match self {
+            Self::HttpProbe(probe) => Some(probe),
+            _ => None,
+        }
     }
 }
 
@@ -633,89 +832,147 @@ fn default_enabled() -> bool {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-#[schemars(
-    title = "Agent source",
-    description = "The source an agent searches, selected by kind."
-)]
-pub enum AgentSource {
-    #[schemars(title = "Certificate transparency")]
-    CertificateTransparency(CertificateTransparency),
-    #[schemars(title = "DNS CNAME")]
-    DnsCname(DnsCname),
-    #[schemars(title = "HTTP probe")]
-    HttpProbe(HttpProbe),
-    #[schemars(title = "BOAMP")]
-    Boamp(KeywordSource),
-    #[schemars(title = "DECP")]
-    Decp(KeywordSource),
-    #[schemars(title = "TED")]
-    Ted(KeywordSource),
-    #[schemars(title = "France Travail")]
-    FranceTravail(KeywordSource),
-    #[schemars(title = "ATS")]
-    Ats(KeywordSource),
-}
-
-impl AgentSource {
-    pub fn keyword_rules(&self) -> Option<&KeywordSource> {
-        match self {
-            Self::Boamp(rules)
-            | Self::Decp(rules)
-            | Self::Ted(rules)
-            | Self::FranceTravail(rules)
-            | Self::Ats(rules) => Some(rules),
-            _ => None,
-        }
-    }
-
-    pub fn certificate_transparency(&self) -> Option<&CertificateTransparency> {
-        match self {
-            Self::CertificateTransparency(rules) => Some(rules),
-            _ => None,
-        }
-    }
-
-    pub fn dns_cname(&self) -> Option<&DnsCname> {
-        match self {
-            Self::DnsCname(rules) => Some(rules),
-            _ => None,
-        }
-    }
-
-    pub fn http_probe(&self) -> Option<&HttpProbe> {
-        match self {
-            Self::HttpProbe(rules) => Some(rules),
-            _ => None,
-        }
-    }
-
-    pub fn source_name(&self) -> SourceName {
-        match self {
-            Self::CertificateTransparency(_) => SourceName::CertificateTransparency,
-            Self::DnsCname(_) => SourceName::DnsCname,
-            Self::HttpProbe(_) => SourceName::HttpProbe,
-            Self::Boamp(_) => SourceName::Boamp,
-            Self::Decp(_) => SourceName::Decp,
-            Self::Ted(_) => SourceName::Ted,
-            Self::FranceTravail(_) => SourceName::FranceTravail,
-            Self::Ats(_) => SourceName::Ats,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[schemars(
-    title = "Agent LLM settings",
-    description = "LLM settings of one agent."
+    title = "Search agent",
+    description = "Looks for keywords across one or several catalog providers. Keywords, exclusions and filters are defined once and every provider translates them into its own API, or applies them after collection when it cannot filter natively."
 )]
-pub struct AgentLlm {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+pub struct SearchAgent {
+    #[schemars(description = "Unique slug in the profile, for example marches-publics.")]
+    pub id: AgentId,
+    #[schemars(description = "Display name.")]
+    pub name: String,
+    #[serde(default = "default_enabled")]
+    #[schemars(description = "A disabled agent is kept but not run.")]
+    pub enabled: bool,
     #[schemars(
-        description = "Criteria given to the LLM to triage this agent's candidates. The profile criteria apply when absent."
+        length(min = 1),
+        description = "Catalog provider keys searched by this agent, for example boamp, decp, ted, france_travail or hacker_news_hiring. Each one must exist in the catalog and support keyword search. A provider that is not ready is skipped at run time."
     )]
-    pub relevance_criteria: Option<String>,
+    pub providers: Vec<String>,
+    #[schemars(description = "Keywords to search for.")]
+    pub keywords: Vec<String>,
+    #[serde(default)]
+    #[schemars(
+        description = "Keywords that weaken the signal of a candidate when present. They never reject it: only a candidate without any keyword is rejected."
+    )]
+    pub exclusions: Vec<String>,
+    #[serde(default)]
+    pub filters: SearchFilters,
+    #[serde(default = "default_accept_min_keywords")]
+    #[schemars(
+        description = "Distinct keywords a candidate needs for a strong signal. Fewer, or any exclusion, still keeps the candidate with a weaker signal."
+    )]
+    pub accept_min_keywords: u8,
+}
+
+pub(super) fn default_accept_min_keywords() -> u8 {
+    2
+}
+
+impl SearchAgent {
+    pub fn new(
+        id: AgentId,
+        name: impl Into<String>,
+        providers: &[&str],
+        keywords: &[&str],
+        exclusions: &[&str],
+    ) -> Self {
+        Self {
+            id,
+            name: name.into(),
+            enabled: true,
+            providers: providers.iter().map(|key| (*key).to_owned()).collect(),
+            keywords: keywords.iter().map(|word| (*word).to_owned()).collect(),
+            exclusions: exclusions.iter().map(|word| (*word).to_owned()).collect(),
+            filters: SearchFilters::default(),
+            accept_min_keywords: default_accept_min_keywords(),
+        }
+    }
+
+    pub fn searches(&self, provider: &str) -> bool {
+        self.providers.iter().any(|key| key == provider)
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(
+    title = "Search filters",
+    description = "Criteria shared by every provider of a search agent. A provider filters natively what its API supports and the rest is applied on the candidate text after collection."
+)]
+pub struct SearchFilters {
+    #[serde(default)]
+    #[schemars(description = "Remote work requirement. Default any.")]
+    pub remote: RemoteFilter,
+    #[serde(default)]
+    #[schemars(
+        description = "ISO 3166-1 alpha-2 country codes, uppercase, for example FR. Empty means every country."
+    )]
+    pub countries: Vec<CountryCode>,
+    #[serde(default)]
+    #[schemars(description = "Accepted contract types. Empty, or any, means every contract type.")]
+    pub contracts: Vec<ContractFilter>,
+}
+
+impl SearchFilters {
+    pub fn is_open(&self) -> bool {
+        self.remote == RemoteFilter::Any
+            && self.countries.is_empty()
+            && self
+                .contracts
+                .iter()
+                .all(|kind| *kind == ContractFilter::Any)
+    }
+
+    pub fn wants_any_contract(&self) -> bool {
+        self.contracts.is_empty() || self.contracts.contains(&ContractFilter::Any)
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+#[schemars(
+    title = "Remote filter",
+    description = "any keeps every candidate, full_remote keeps fully remote ones, remote_or_hybrid keeps remote and hybrid ones."
+)]
+pub enum RemoteFilter {
+    #[default]
+    Any,
+    FullRemote,
+    RemoteOrHybrid,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+#[schemars(title = "Contract filter")]
+pub enum ContractFilter {
+    Freelance,
+    Employee,
+    PublicContract,
+    Any,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(transparent)]
+#[schemars(
+    title = "Country code",
+    description = "ISO 3166-1 alpha-2 country code, uppercase."
+)]
+pub struct CountryCode(#[schemars(length(min = 2, max = 2), regex(pattern = "^[A-Z]{2}$"))] String);
+
+impl CountryCode {
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn is_valid(&self) -> bool {
+        self.0.len() == 2 && self.0.bytes().all(|byte| byte.is_ascii_uppercase())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -727,6 +984,11 @@ pub struct AgentLlm {
 pub struct CertificateTransparency {
     #[schemars(description = "Hostname labels to look for, for example auth or sso.")]
     pub labels: Vec<String>,
+    #[serde(default)]
+    #[schemars(
+        description = "Target countries, as ISO 3166-1 alpha-2 codes, uppercase, for example FR. A host under the country-code top-level domain of another country creates no lead; a host under a generic top-level domain creates one, suppressed for this profile once the head office of the company is known to be elsewhere. Empty means every country."
+    )]
+    pub countries: Vec<CountryCode>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -848,6 +1110,11 @@ pub enum DebtRule {
 pub struct DnsCname {
     #[schemars(description = "Provider and target suffix pairs.")]
     pub patterns: Vec<CnamePattern>,
+    #[serde(default)]
+    #[schemars(
+        description = "Target countries, as ISO 3166-1 alpha-2 codes, uppercase, for example FR. A host under the country-code top-level domain of another country creates no lead; a host under a generic top-level domain creates one, suppressed for this profile once the head office of the company is known to be elsewhere. Empty means every country."
+    )]
+    pub countries: Vec<CountryCode>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -866,58 +1133,6 @@ pub struct CnamePattern {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[schemars(
-    title = "Keyword source",
-    description = "Source searched with keywords and exclusions."
-)]
-pub struct KeywordSource {
-    #[schemars(description = "Keywords to search for.")]
-    pub keywords: Vec<String>,
-    #[serde(default)]
-    #[schemars(description = "Keywords that send a candidate to LLM triage when present.")]
-    pub exclusions: Vec<String>,
-    #[serde(default = "default_accept_min_keywords")]
-    #[schemars(
-        description = "Distinct keywords needed to accept a candidate without the LLM. Fewer, or any exclusion, sends it to LLM triage."
-    )]
-    pub accept_min_keywords: u8,
-}
-
-fn default_accept_min_keywords() -> u8 {
-    2
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-#[schemars(
-    title = "Scoring",
-    description = "Weighted factors. A lead score is the sum of weight times measure over the factors."
-)]
-pub struct Scoring {
-    #[schemars(description = "Weighted factors.")]
-    pub factors: Vec<ScoringFactor>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-#[schemars(title = "Scoring factor", description = "One weighted signal kind.")]
-pub struct ScoringFactor {
-    #[schemars(
-        description = "Signal kind. The reserved distinct_signals measures how many distinct signal kinds a lead has."
-    )]
-    pub signal: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(description = "Signal value to match. Any value when absent.")]
-    pub value: Option<String>,
-    #[schemars(
-        range(min = 1, max = 10),
-        description = "Integer weight from 1 to 10 applied to the measure of the signal."
-    )]
-    pub weight: u8,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-#[schemars(
     title = "Contact ranking",
     description = "Preferred email local parts, most preferred first."
 )]
@@ -927,28 +1142,6 @@ pub struct ContactRanking {
     #[serde(default)]
     #[schemars(description = "Local parts to guess when no address is found.")]
     pub guess_local_parts: Vec<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-#[schemars(
-    title = "LLM settings",
-    description = "Qualification threshold, relevance criteria and answer language given to the model."
-)]
-pub struct LlmSettings {
-    #[schemars(
-        range(min = 0, max = 100),
-        description = "Percentage of the maximum possible score from which a lead is qualified."
-    )]
-    pub qualification_threshold: u8,
-    #[schemars(description = "Criteria given to the LLM to judge a lead relevance.")]
-    pub relevance_criteria: String,
-    #[serde(default)]
-    #[schemars(
-        title = "Answer language",
-        description = "Language of every free-text field the LLM writes: triage reason, qualification summary, approach angle and draft. Evidence quotes stay in the source language."
-    )]
-    pub language: Language,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -969,14 +1162,6 @@ impl Language {
 }
 
 impl ProfileDefinition {
-    pub fn max_score(&self) -> f64 {
-        crate::domain::scoring::max_score(&self.scoring)
-    }
-
-    pub fn qualification_points(&self) -> f64 {
-        f64::from(self.llm.qualification_threshold) * self.max_score() / 100.0
-    }
-
     pub fn enabled_scoring_agents(&self) -> impl Iterator<Item = &ScoringAgent> {
         self.scoring_agents.iter().filter(|agent| agent.enabled)
     }
@@ -984,14 +1169,76 @@ impl ProfileDefinition {
     pub fn enabled_agents(&self, source: SourceName) -> impl Iterator<Item = &Agent> {
         self.agents
             .iter()
-            .filter(move |agent| agent.enabled && agent.source.source_name() == source)
+            .filter(move |agent| agent.enabled() && agent.serves(source))
     }
 
-    pub fn enabled_keyword_rules(
-        &self,
-        source: SourceName,
-    ) -> impl Iterator<Item = &KeywordSource> {
-        self.enabled_agents(source)
-            .filter_map(|agent| agent.source.keyword_rules())
+    pub fn enabled_search_agents(&self, source: SourceName) -> impl Iterator<Item = &SearchAgent> {
+        self.agents
+            .iter()
+            .filter_map(Agent::as_search)
+            .filter(move |agent| agent.enabled && agent.searches(source.as_str()))
+    }
+
+    pub fn targets(&self, source: SourceName) -> Vec<SourceTarget<'_>> {
+        let mut targets: Vec<SourceTarget<'_>> = self
+            .enabled_agents(source)
+            .map(SourceTarget::Agent)
+            .collect();
+        if source == SourceName::HttpProbe && self.probes_hosts() {
+            targets.push(SourceTarget::HttpProbe(&self.enrichment.custom));
+        }
+        if source == SourceName::Ats && self.reads_company_jobs() {
+            targets.push(SourceTarget::CompanyJobs(&self.enrichment));
+        }
+        targets
+    }
+
+    pub fn has_targets(&self, source: SourceName) -> bool {
+        !self.targets(source).is_empty()
+    }
+
+    pub fn probes_hosts(&self) -> bool {
+        self.inspection.enabled && !self.enrichment.custom.fingerprints.is_empty()
+    }
+
+    pub fn reads_company_jobs(&self) -> bool {
+        self.inspection.enabled && !self.company_jobs_keywords().is_empty()
+    }
+
+    pub fn company_jobs_keywords(&self) -> Vec<String> {
+        let own = &self.enrichment.highlight_keywords;
+        if !own.is_empty() {
+            return own.clone();
+        }
+        let mut seen: Vec<String> = Vec::new();
+        let mut keywords = Vec::new();
+        for agent in self
+            .agents
+            .iter()
+            .filter_map(Agent::as_search)
+            .filter(|agent| agent.enabled)
+        {
+            for keyword in &agent.keywords {
+                let lowered = keyword.trim().to_lowercase();
+                if !lowered.is_empty() && !seen.contains(&lowered) {
+                    seen.push(lowered);
+                    keywords.push(keyword.trim().to_owned());
+                }
+            }
+        }
+        keywords
+    }
+
+    pub fn company_jobs_rules(&self) -> Option<SearchAgent> {
+        self.reads_company_jobs().then(|| SearchAgent {
+            id: AgentId::new(COMPANY_JOBS_AGENT_ID),
+            name: COMPANY_JOBS_NAME.to_owned(),
+            enabled: true,
+            providers: vec![SourceName::Ats.as_str().to_owned()],
+            keywords: self.company_jobs_keywords(),
+            exclusions: Vec::new(),
+            filters: SearchFilters::default(),
+            accept_min_keywords: default_accept_min_keywords(),
+        })
     }
 }

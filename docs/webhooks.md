@@ -29,7 +29,6 @@ Lodestone-Signature: t=1800000000,v1=<hex hmac-sha256(secret, "<t>.<raw body>")>
     "domain": "acme.com",
     "status": "validated",
     "score": 42.0,
-    "score_breakdown": [],
     "first_seen_at": "2027-01-10T08:00:00Z",
     "last_seen_at": "2027-01-15T07:00:00Z",
     "contact": {"address": "security@acme.com", "method": "public_page", "confidence": 0.8, "provenance": "https://acme.com/contact"},
@@ -67,3 +66,5 @@ A Rust reference is `api::webhook::verify`.
 ## Exports
 
 `GET /api/v1/profiles/{profile_id}/leads/export?format=json|csv` returns the profile leads as an attachment named `<profile>-leads.<ext>`, with the same filters as the lead list (`status`, `min_score`, `domain`, `signal`, `sort`). Suppressed domains and addresses are excluded. An export holds at most 10000 leads, beyond that the request is refused with 422 and the filters must be narrowed. Service accounts may call it. CSV cells starting with `=`, `+`, `-`, `@`, tab or CR are prefixed with `'`.
+
+In the payload and in the exports, `score` is the signal strength of the lead from 0 to 100: the mean of the three strongest independent signals, each strength given by its source and decayed by its age (`min_score` and the `score_desc` and `score_asc` sorts use it too). It was a weighted sum in points before profile schema 13. The decision of the scoring agents is not exported in this field.

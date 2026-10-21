@@ -1,30 +1,28 @@
-use std::{
-    collections::HashSet,
-    sync::{Arc, Mutex},
-    time::{Duration as StdDuration, Instant},
-};
+use std::{collections::BTreeSet, collections::HashSet, sync::Arc, time::Duration as StdDuration};
 
 use chrono::{DateTime, Utc};
 use common::Secret;
 use fetch::{ApiFetcher, ApiRequest};
 use lodestone_core::{
     ActiveProfile, Candidate, FetchError, FetchResponse, Provenance, SignalKind, SourceError,
-    SourceName, triage::CandidateSource,
+    SourceName,
+    definition::{ContractFilter, SearchAgent},
+    triage::CandidateSource,
 };
 use serde_json::{Value, json};
 use tokio::time::sleep;
 use tracing::{debug, info};
 use url::Url;
 
-use crate::buyer_domain::{domain_of_email, domain_of_url};
+use crate::{
+    buyer_domain::{domain_of_email, domain_of_url},
+    search::query_groups,
+};
 
 pub const PAGE_SIZE: usize = 150;
 pub const LAST_INDEX_CAP: usize = 3149;
 pub const TEXT_MAX_CHARS: usize = 4000;
-pub const SCOPE: &str = "api_offresdemploiv2 o2dsoffre";
-pub const TOKEN_EXPIRY_MARGIN: StdDuration = StdDuration::from_secs(60);
 const ALLOWED_PUBLISHED_SINCE: [u32; 5] = [1, 3, 7, 14, 31];
-const DEFAULT_EXPIRES_IN: u64 = 1499;
 const MAX_RATE_LIMIT_WAIT: StdDuration = StdDuration::from_secs(75);
 const MAX_THROTTLE_RETRIES: u8 = 2;
 const DEFAULT_RETRY_AFTER: StdDuration = StdDuration::from_secs(60);
@@ -32,12 +30,20 @@ const OFFER_URL: &str = "https://candidat.francetravail.fr/offres/recherche/deta
 
 #[derive(Debug, Clone)]
 pub struct FranceTravailSettings {
-    pub token_url: Url,
-    pub api_base_url: Url,
-    pub client_id: Secret,
-    pub client_secret: Secret,
     pub published_since_days: u32,
     pub max_pages: u32,
+}
+
+#[derive(Debug, Clone)]
+pub struct FranceTravailAccess {
+    pub token: Secret,
+    pub api_base_url: Url,
+}
+
+pub trait AccessProvider: Send + Sync {
+    fn access(&self) -> impl Future<Output = Result<FranceTravailAccess, SourceError>> + Send;
+
+    fn invalidate(&self);
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -58,11 +64,6 @@ pub enum Skip {
     NoDomain,
 }
 
-struct CachedToken {
-    value: Secret,
-    expires_at: Instant,
-}
-
 enum Page {
     Offers {
         offers: Vec<Value>,
@@ -71,10 +72,10 @@ enum Page {
     Empty,
 }
 
-pub struct FranceTravailSource<F: ApiFetcher> {
+pub struct FranceTravailSource<F: ApiFetcher, A: AccessProvider> {
     fetcher: Arc<F>,
+    access: A,
     settings: FranceTravailSettings,
-    token: Mutex<Option<CachedToken>>,
 }
 
 pub fn closest_published_since(days: u32) -> u32 {
@@ -85,24 +86,45 @@ pub fn closest_published_since(days: u32) -> u32 {
         .unwrap_or(7)
 }
 
-pub fn query_keywords(profiles: &[ActiveProfile]) -> Vec<String> {
-    let mut seen: HashSet<String> = HashSet::new();
-    let mut queries = Vec::new();
-    for rules in profiles.iter().flat_map(|active| {
-        active
-            .revision
-            .definition
-            .definition()
-            .enabled_keyword_rules(SourceName::FranceTravail)
-    }) {
-        for keyword in &rules.keywords {
-            let keyword = keyword.trim();
-            if !keyword.is_empty() && seen.insert(keyword.to_lowercase()) {
-                queries.push(keyword.to_owned());
-            }
+const FREELANCE_CODES: [&str; 2] = ["LIB", "FRA"];
+const EMPLOYEE_CODES: [&str; 4] = ["CDI", "CDD", "MIS", "SAI"];
+
+pub fn native_contract(agent: &SearchAgent) -> Option<String> {
+    if agent.filters.wants_any_contract() {
+        return None;
+    }
+    let mut codes: BTreeSet<&str> = BTreeSet::new();
+    for contract in &agent.filters.contracts {
+        match contract {
+            ContractFilter::Freelance => codes.extend(FREELANCE_CODES),
+            ContractFilter::Employee => codes.extend(EMPLOYEE_CODES),
+            ContractFilter::PublicContract | ContractFilter::Any => {}
         }
     }
-    queries
+    if codes.is_empty() {
+        None
+    } else {
+        Some(codes.into_iter().collect::<Vec<_>>().join(","))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Query {
+    pub keyword: String,
+    pub contract: Option<String>,
+}
+
+pub fn query_plan(profiles: &[ActiveProfile]) -> Vec<Query> {
+    query_groups(profiles, SourceName::FranceTravail, native_contract)
+        .into_iter()
+        .flat_map(|group| {
+            let contract = group.native;
+            group.keywords.into_iter().map(move |keyword| Query {
+                keyword,
+                contract: contract.clone(),
+            })
+        })
+        .collect()
 }
 
 pub fn content_range_total(header: &str) -> Option<u64> {
@@ -186,12 +208,12 @@ fn retry_after(response: &FetchResponse) -> StdDuration {
         .map_or(DEFAULT_RETRY_AFTER, StdDuration::from_secs)
 }
 
-impl<F: ApiFetcher> FranceTravailSource<F> {
-    pub fn new(fetcher: Arc<F>, settings: FranceTravailSettings) -> Self {
+impl<F: ApiFetcher, A: AccessProvider> FranceTravailSource<F, A> {
+    pub fn new(fetcher: Arc<F>, access: A, settings: FranceTravailSettings) -> Self {
         Self {
             fetcher,
+            access,
             settings,
-            token: Mutex::new(None),
         }
     }
 
@@ -211,70 +233,8 @@ impl<F: ApiFetcher> FranceTravailSource<F> {
         }
     }
 
-    fn cached_token(&self) -> Option<Secret> {
-        let guard = self.token.lock().ok()?;
-        let cached = guard.as_ref()?;
-        let deadline = Instant::now().checked_add(TOKEN_EXPIRY_MARGIN)?;
-        (cached.expires_at > deadline).then(|| cached.value.clone())
-    }
-
-    fn forget_token(&self) {
-        if let Ok(mut guard) = self.token.lock() {
-            *guard = None;
-        }
-    }
-
-    async fn token(&self) -> Result<Secret, SourceError> {
-        if let Some(token) = self.cached_token() {
-            return Ok(token);
-        }
-        let request = ApiRequest {
-            url: self.settings.token_url.clone(),
-            source: SourceName::FranceTravail,
-            bearer: None,
-            form: Some(vec![
-                ("grant_type".to_owned(), Secret::new("client_credentials")),
-                ("client_id".to_owned(), self.settings.client_id.clone()),
-                (
-                    "client_secret".to_owned(),
-                    self.settings.client_secret.clone(),
-                ),
-                ("scope".to_owned(), Secret::new(SCOPE)),
-            ]),
-        };
-        let response = self.call(&request).await?;
-        if response.status != 200 {
-            return Err(upstream(format!(
-                "france travail token endpoint answered {}",
-                response.status
-            )));
-        }
-        let body: Value = serde_json::from_slice(&response.body)
-            .map_err(|_| upstream("france travail token response is not json"))?;
-        let value = body
-            .get("access_token")
-            .and_then(Value::as_str)
-            .filter(|token| !token.is_empty())
-            .ok_or_else(|| upstream("france travail token response has no access_token"))?;
-        let lifetime = body
-            .get("expires_in")
-            .and_then(Value::as_u64)
-            .unwrap_or(DEFAULT_EXPIRES_IN);
-        let token = Secret::new(value);
-        let expires_at = Instant::now()
-            .checked_add(StdDuration::from_secs(lifetime))
-            .unwrap_or_else(Instant::now);
-        if let Ok(mut guard) = self.token.lock() {
-            *guard = Some(CachedToken {
-                value: token.clone(),
-                expires_at,
-            });
-        }
-        Ok(token)
-    }
-
-    fn search_url(&self, keyword: &str, first: usize) -> Result<Url, SourceError> {
-        let mut url = self.settings.api_base_url.clone();
+    fn search_url(&self, base: &Url, query: &Query, first: usize) -> Result<Url, SourceError> {
+        let mut url = base.clone();
         url.path_segments_mut()
             .map_err(|_| upstream("france travail api base url cannot carry a path"))?
             .pop_if_empty()
@@ -282,24 +242,28 @@ impl<F: ApiFetcher> FranceTravailSource<F> {
             .push("search");
         let last = first + PAGE_SIZE - 1;
         url.query_pairs_mut()
-            .append_pair("motsCles", keyword)
+            .append_pair("motsCles", &query.keyword)
             .append_pair("range", &format!("{first}-{last}"))
             .append_pair(
                 "publieeDepuis",
                 &closest_published_since(self.settings.published_since_days).to_string(),
             );
+        if let Some(contract) = &query.contract {
+            url.query_pairs_mut().append_pair("typeContrat", contract);
+        }
         Ok(url)
     }
 
-    async fn fetch_page(&self, keyword: &str, first: usize) -> Result<Page, SourceError> {
-        let url = self.search_url(keyword, first)?;
+    async fn fetch_page(&self, query: &Query, first: usize) -> Result<Page, SourceError> {
         let mut refreshed = false;
         let mut throttled: u8 = 0;
         loop {
+            let access = self.access.access().await?;
             let request = ApiRequest {
-                url: url.clone(),
+                url: self.search_url(&access.api_base_url, query, first)?,
                 source: SourceName::FranceTravail,
-                bearer: Some(self.token().await?),
+                bearer: Some(access.token),
+                headers: Vec::new(),
                 form: None,
             };
             let response = self.call(&request).await?;
@@ -323,7 +287,7 @@ impl<F: ApiFetcher> FranceTravailSource<F> {
                 204 => return Ok(Page::Empty),
                 401 if !refreshed => {
                     refreshed = true;
-                    self.forget_token();
+                    self.access.invalidate();
                 }
                 429 => {
                     let wait = retry_after(&response);
@@ -347,7 +311,7 @@ impl<F: ApiFetcher> FranceTravailSource<F> {
         let mut stats = FranceTravailStats::default();
         let mut seen: HashSet<String> = HashSet::new();
         let mut candidates = Vec::new();
-        for keyword in query_keywords(profiles) {
+        for query in query_plan(profiles) {
             stats.queries += 1;
             for page in 0..self.settings.max_pages {
                 let first = usize::try_from(page)
@@ -357,7 +321,7 @@ impl<F: ApiFetcher> FranceTravailSource<F> {
                     break;
                 }
                 stats.requests += 1;
-                let (offers, total) = match self.fetch_page(&keyword, first).await? {
+                let (offers, total) = match self.fetch_page(&query, first).await? {
                     Page::Empty => break,
                     Page::Offers { offers, total } => (offers, total),
                 };
@@ -408,7 +372,7 @@ impl<F: ApiFetcher> FranceTravailSource<F> {
     }
 }
 
-impl<F: ApiFetcher> CandidateSource for FranceTravailSource<F> {
+impl<F: ApiFetcher, A: AccessProvider> CandidateSource for FranceTravailSource<F, A> {
     fn name(&self) -> SourceName {
         SourceName::FranceTravail
     }

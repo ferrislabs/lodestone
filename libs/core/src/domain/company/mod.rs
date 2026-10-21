@@ -1,8 +1,11 @@
-use chrono::{DateTime, NaiveDate, Utc};
+use aws_lc_rs::digest::{SHA256, digest};
+use chrono::{DateTime, Duration, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 
 use crate::domain::{
     NormalizedDomain,
+    fetch::link::{LinkRejection, UnconfirmedLinks},
     qualification::{SUMMARY_FAILED_AFTER, summary_retry_delay},
     source::SourceError,
 };
@@ -27,6 +30,7 @@ pub enum DossierState {
     Complete,
     Partial,
     Unreachable,
+    HostingPlatform,
 }
 
 impl DossierState {
@@ -36,6 +40,7 @@ impl DossierState {
             Self::Complete => "complete",
             Self::Partial => "partial",
             Self::Unreachable => "unreachable",
+            Self::HostingPlatform => "hosting_platform",
         }
     }
 
@@ -45,6 +50,7 @@ impl DossierState {
             Self::Complete,
             Self::Partial,
             Self::Unreachable,
+            Self::HostingPlatform,
         ]
         .into_iter()
         .find(|state| state.as_str() == raw)
@@ -131,6 +137,8 @@ pub struct CompanyDossier {
     pub attempts: u32,
     pub next_attempt_at: DateTime<Utc>,
     pub error: Option<String>,
+    pub ignored_links: u32,
+    pub pages_checked_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -146,6 +154,14 @@ fn truncated(text: &str, limit: usize) -> String {
 impl CompanyDossier {
     pub fn has_content(&self) -> bool {
         self.official.is_some() || !self.pages.is_empty()
+    }
+
+    pub fn head_office_country_code(&self) -> Option<&str> {
+        self.official
+            .as_ref()
+            .and_then(|official| official.head_office_country_code.as_deref())
+            .map(str::trim)
+            .filter(|code| !code.is_empty())
     }
 
     pub fn documents(&self, page_chars: usize) -> Vec<DossierDocument> {
@@ -172,6 +188,48 @@ pub struct DossierBuild {
     pub pages: Vec<CompanyPage>,
     pub reachable: bool,
     pub failure: Option<String>,
+    pub unconfirmed: UnconfirmedLinks,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PageReview {
+    pub rejected: Vec<(String, LinkRejection)>,
+}
+
+impl PageReview {
+    pub fn unconfirmed(&self) -> UnconfirmedLinks {
+        let mut links = UnconfirmedLinks::default();
+        for (_, reason) in &self.rejected {
+            links.record(*reason);
+        }
+        links
+    }
+
+    fn rejects(&self, url: &str) -> bool {
+        self.rejected.iter().any(|(rejected, _)| rejected == url)
+    }
+}
+
+fn content_hash_of(official: Option<&OfficialData>, pages: &[CompanyPage]) -> Option<String> {
+    if official.is_none() && pages.is_empty() {
+        return None;
+    }
+    let material = json!({
+        "official": official,
+        "pages": pages,
+    });
+    let hashed = digest(&SHA256, material.to_string().as_bytes());
+    Some(
+        hashed
+            .as_ref()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect(),
+    )
+}
+
+fn ignored_count(links: &UnconfirmedLinks) -> u32 {
+    u32::try_from(links.total()).unwrap_or(u32::MAX)
 }
 
 impl DossierBuild {
@@ -186,22 +244,7 @@ impl DossierBuild {
     }
 
     pub fn content_hash(&self) -> Option<String> {
-        if self.official.is_none() && self.pages.is_empty() {
-            return None;
-        }
-        let material = serde_json::json!({
-            "official": self.official,
-            "pages": self.pages,
-        });
-        let digest =
-            aws_lc_rs::digest::digest(&aws_lc_rs::digest::SHA256, material.to_string().as_bytes());
-        Some(
-            digest
-                .as_ref()
-                .iter()
-                .map(|byte| format!("{byte:02x}"))
-                .collect(),
-        )
+        content_hash_of(self.official.as_ref(), &self.pages)
     }
 }
 
@@ -219,6 +262,46 @@ impl CompanyDossier {
             attempts: 0,
             next_attempt_at,
             error: None,
+            ignored_links: 0,
+            pages_checked_at: None,
+        }
+    }
+
+    pub fn on_hosting_platform(
+        domain: NormalizedDomain,
+        now: DateTime<Utc>,
+        refresh: Duration,
+    ) -> Self {
+        Self {
+            state: DossierState::HostingPlatform,
+            built_at: Some(now),
+            pages_checked_at: Some(now),
+            ..Self::pending(domain, now + refresh)
+        }
+    }
+
+    pub fn reviewed(&self, review: &PageReview, now: DateTime<Utc>) -> Self {
+        let pages: Vec<CompanyPage> = self
+            .pages
+            .iter()
+            .filter(|page| !review.rejects(&page.url))
+            .cloned()
+            .collect();
+        let content_hash = content_hash_of(self.official.as_ref(), &pages);
+        let content_at = if content_hash == self.content_hash {
+            self.content_at
+        } else {
+            Some(now)
+        };
+        Self {
+            pages,
+            content_hash,
+            content_at,
+            ignored_links: self
+                .ignored_links
+                .saturating_add(ignored_count(&review.unconfirmed())),
+            pages_checked_at: Some(now),
+            ..self.clone()
         }
     }
 
@@ -233,7 +316,7 @@ pub fn settle(
     build: DossierBuild,
     previous: Option<&CompanyDossier>,
     now: DateTime<Utc>,
-    refresh: chrono::Duration,
+    refresh: Duration,
 ) -> CompanyDossier {
     let failure = match (&build.failure, build.reachable) {
         (Some(message), _) => Some(bounded_error(message)),
@@ -294,6 +377,8 @@ pub fn settle(
         attempts,
         next_attempt_at,
         error: failure,
+        ignored_links: ignored_count(&build.unconfirmed),
+        pages_checked_at: Some(now),
     }
 }
 
@@ -306,6 +391,13 @@ pub trait CompanyBuilder: Send + Sync {
         &self,
         domain: &NormalizedDomain,
     ) -> impl Future<Output = Result<DossierBuild, SourceError>> + Send;
+}
+
+pub trait PageVerifier: Send + Sync {
+    fn review(
+        &self,
+        pages: &[CompanyPage],
+    ) -> impl Future<Output = Result<PageReview, SourceError>> + Send;
 }
 
 #[cfg(test)]
@@ -341,6 +433,8 @@ mod tests {
             attempts: 0,
             next_attempt_at: DateTime::from_timestamp(0, 0).unwrap(),
             error: None,
+            ignored_links: 0,
+            pages_checked_at: None,
         }
     }
 
@@ -351,6 +445,7 @@ mod tests {
             DossierState::Complete,
             DossierState::Partial,
             DossierState::Unreachable,
+            DossierState::HostingPlatform,
         ] {
             assert_eq!(DossierState::parse(state.as_str()), Some(state));
         }
@@ -416,6 +511,7 @@ mod tests {
                 .collect(),
             reachable,
             failure: None,
+            unconfirmed: UnconfirmedLinks::default(),
         }
     }
 
@@ -437,7 +533,7 @@ mod tests {
         DateTime::from_timestamp(seconds, 0).unwrap()
     }
 
-    const REFRESH: chrono::Duration = chrono::Duration::days(90);
+    const REFRESH: Duration = Duration::days(90);
 
     #[test]
     fn a_complete_build_is_refreshed_after_the_interval_and_dates_its_content() {
@@ -554,5 +650,65 @@ mod tests {
         assert!(first.is_some());
         assert_eq!(first, build(true, None, 1).content_hash());
         assert_ne!(first, build(true, None, 2).content_hash());
+    }
+
+    #[test]
+    fn a_build_records_its_ignored_links_and_marks_its_pages_checked() {
+        let mut built = build(true, None, 1);
+        built.unconfirmed.record(LinkRejection::Soft404Marker);
+        built.unconfirmed.record(LinkRejection::Status);
+        let settled = settle(domain(), built, None, at(1_000), REFRESH);
+        assert_eq!(settled.ignored_links, 2);
+        assert_eq!(settled.pages_checked_at, Some(at(1_000)));
+    }
+
+    #[test]
+    fn a_review_drops_rejected_pages_and_dates_the_content_only_when_it_changed() {
+        let first = settle(domain(), build(true, None, 2), None, at(1_000), REFRESH);
+        let unchanged = first.reviewed(&PageReview::default(), at(5_000));
+        assert_eq!(unchanged.pages.len(), 2);
+        assert_eq!(unchanged.content_at, Some(at(1_000)));
+        assert_eq!(unchanged.content_hash, first.content_hash);
+        assert_eq!(unchanged.pages_checked_at, Some(at(5_000)));
+        let review = PageReview {
+            rejected: vec![(
+                "https://edf.fr/1".to_owned(),
+                LinkRejection::Soft404Baseline,
+            )],
+        };
+        let pruned = first.reviewed(&review, at(6_000));
+        assert_eq!(pruned.pages.len(), 1);
+        assert_eq!(pruned.pages[0].url, "https://edf.fr/0");
+        assert_eq!(pruned.content_at, Some(at(6_000)));
+        assert_ne!(pruned.content_hash, first.content_hash);
+        assert_eq!(pruned.ignored_links, 1);
+        assert_eq!(review.unconfirmed().soft_404_baseline, 1);
+    }
+
+    #[test]
+    fn a_review_that_removes_every_page_still_dates_the_change() {
+        let first = settle(domain(), build(true, None, 1), None, at(1_000), REFRESH);
+        let review = PageReview {
+            rejected: vec![("https://edf.fr/0".to_owned(), LinkRejection::EmptyContent)],
+        };
+        let emptied = first.reviewed(&review, at(2_000));
+        assert!(emptied.pages.is_empty());
+        assert_eq!(emptied.content_hash, None);
+        assert_eq!(emptied.content_at, Some(at(2_000)));
+    }
+
+    #[test]
+    fn a_platform_dossier_is_terminal_and_reads_nothing() {
+        let now = DateTime::from_timestamp(1_000, 0).unwrap();
+        let dossier = CompanyDossier::on_hosting_platform(
+            NormalizedDomain::from_host("acme.github.io").unwrap(),
+            now,
+            REFRESH,
+        );
+        assert_eq!(dossier.state, DossierState::HostingPlatform);
+        assert_eq!(dossier.built_at, Some(now));
+        assert_eq!(dossier.next_attempt_at, now + REFRESH);
+        assert!(!dossier.has_content());
+        assert!(dossier.documents(PAGE_PROMPT_CHARS).is_empty());
     }
 }

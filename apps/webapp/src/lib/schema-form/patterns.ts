@@ -15,7 +15,7 @@ function walk(
 	found: Map<string, RenderedField>,
 	depth: number,
 ) {
-	if (depth > 12) return
+	if (depth > 14) return
 	const node = classify(root, schema)
 	switch (node.kind) {
 		case 'object':
@@ -64,7 +64,7 @@ export function renderedFields(root: Schema, hints: UiHints): RenderedField[] {
 export function renderedVariantValues(root: Schema): string[] {
 	const values = new Set<string>()
 	const visit = (schema: Schema, depth: number) => {
-		if (depth > 12) return
+		if (depth > 14) return
 		const node = classify(root, schema)
 		if (node.kind === 'union') {
 			for (const variant of node.variants) {

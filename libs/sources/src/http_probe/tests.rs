@@ -7,16 +7,8 @@ use uuid::Uuid;
 
 use super::*;
 
-fn agent_of(profile: &ActiveProfile, kind: SourceName) -> Agent {
-    profile
-        .revision
-        .definition
-        .definition()
-        .agents
-        .iter()
-        .find(|agent| agent.source.source_name() == kind)
-        .cloned()
-        .unwrap()
+fn target_of(profile: &ActiveProfile, kind: SourceName) -> SourceTarget<'_> {
+    profile.revision.definition.definition().targets(kind)[0]
 }
 
 fn at(seconds: i64) -> DateTime<Utc> {
@@ -191,11 +183,13 @@ impl Fetcher for FakeFetcher {
 }
 
 type Marked = (Vec<String>, SourceName, DateTime<Utc>);
+type Seeded = (ProfileId, Vec<String>, DateTime<Utc>, u32);
 
 #[derive(Default)]
 struct FakeHosts {
     due: Vec<CandidateHost>,
     marked: Mutex<Vec<Marked>>,
+    seeded: Mutex<Vec<Seeded>>,
     list_args: Mutex<Vec<(SourceName, DateTime<Utc>, u32)>>,
     fail_list: bool,
     fail_mark: bool,
@@ -237,6 +231,20 @@ impl CandidateHosts for FakeHosts {
             at,
         ));
         Ok(())
+    }
+
+    async fn seed_lead_hosts(
+        &self,
+        profile: ProfileId,
+        subdomains: &[String],
+        at: DateTime<Utc>,
+        limit: u32,
+    ) -> Result<u64, CoreError> {
+        self.seeded
+            .lock()
+            .unwrap()
+            .push((profile, subdomains.to_vec(), at, limit));
+        Ok(0)
     }
 }
 
@@ -301,12 +309,14 @@ fn source(
 }
 
 fn observe(source: &TestSource, item: &ProbedHost, profile: &ActiveProfile) -> Vec<Observation> {
-    let agents = &profile.revision.definition.definition().agents;
-    let agent = agents
-        .iter()
-        .find(|agent| agent.source.source_name() == SourceName::HttpProbe)
-        .unwrap_or(&agents[0]);
-    source.evaluate(item, profile, agent)
+    let definition = profile.revision.definition.definition();
+    let target = definition
+        .targets(SourceName::HttpProbe)
+        .into_iter()
+        .next()
+        .or_else(|| definition.agents.first().map(SourceTarget::Agent))
+        .unwrap();
+    source.evaluate(item, profile, &target)
 }
 
 fn evaluator() -> TestSource {
@@ -383,6 +393,23 @@ async fn paths_are_the_sorted_union_fetched_once_per_host() {
     assert_eq!(marked[0].2, at(100));
     let args = hosts.list_args.lock().unwrap();
     assert_eq!(args[0], (SourceName::HttpProbe, at(100 - 3600), 50));
+    let seeded = hosts.seeded.lock().unwrap();
+    let subdomains: Vec<String> = ["auth", "sso", "login", "id", "idp", "accounts"]
+        .iter()
+        .map(|label| (*label).to_owned())
+        .collect();
+    assert_eq!(
+        *seeded,
+        vec![
+            (
+                ProfileId(Uuid::from_u128(1)),
+                subdomains.clone(),
+                at(100),
+                50
+            ),
+            (ProfileId(Uuid::from_u128(3)), subdomains, at(100), 50),
+        ]
+    );
 }
 
 #[tokio::test]
@@ -613,7 +640,7 @@ fn matchers_require_all_conditions() {
     );
     assert_eq!(
         evaluator
-            .evaluate(&hit, &profile, &agent_of(&profile, SourceName::HttpProbe))
+            .evaluate(&hit, &profile, &target_of(&profile, SourceName::HttpProbe))
             .len(),
         1
     );
@@ -625,7 +652,7 @@ fn matchers_require_all_conditions() {
         let miss = probed_item("sso.acme.com", "/realms/master", answer);
         assert!(
             evaluator
-                .evaluate(&miss, &profile, &agent_of(&profile, SourceName::HttpProbe))
+                .evaluate(&miss, &profile, &target_of(&profile, SourceName::HttpProbe))
                 .is_empty()
         );
     }
@@ -639,7 +666,7 @@ fn matchers_require_all_conditions() {
             .evaluate(
                 &other_path,
                 &profile,
-                &agent_of(&profile, SourceName::HttpProbe)
+                &target_of(&profile, SourceName::HttpProbe)
             )
             .is_empty()
     );
@@ -700,7 +727,7 @@ fn header_matching_ignores_name_case() {
     );
     assert_eq!(
         evaluator
-            .evaluate(&hit, &profile, &agent_of(&profile, SourceName::HttpProbe))
+            .evaluate(&hit, &profile, &target_of(&profile, SourceName::HttpProbe))
             .len(),
         1
     );
@@ -711,7 +738,7 @@ fn header_matching_ignores_name_case() {
     );
     assert!(
         evaluator
-            .evaluate(&miss, &profile, &agent_of(&profile, SourceName::HttpProbe))
+            .evaluate(&miss, &profile, &target_of(&profile, SourceName::HttpProbe))
             .is_empty()
     );
 }
@@ -982,48 +1009,27 @@ fn both_paths_item() -> ProbedHost {
     }
 }
 
-fn agent_named(profile: &ActiveProfile, id: &str) -> Agent {
-    profile
-        .revision
-        .definition
-        .definition()
-        .agents
-        .iter()
-        .find(|agent| agent.id.as_str() == id)
-        .cloned()
-        .unwrap()
-}
-
 #[test]
-fn each_agent_applies_its_own_fingerprints() {
+fn merged_probe_agents_apply_every_fingerprint_once() {
     let profile = two_agent_profile(&[]);
     let evaluator = evaluator();
     let item = both_paths_item();
-    let first = evaluator.evaluate(&item, &profile, &agent_named(&profile, "probe-a"));
-    let second = evaluator.evaluate(&item, &profile, &agent_named(&profile, "probe-b"));
-    let products = |found: &[Observation]| -> Vec<String> {
-        found.iter().filter_map(|o| o.value.clone()).collect()
-    };
-    assert_eq!(products(&first), ["keycloak"]);
-    assert_eq!(products(&second), ["keycloak", "zitadel"]);
-    assert_eq!(evaluator.compilations(), 2);
+    let found = evaluator.evaluate(&item, &profile, &target_of(&profile, SourceName::HttpProbe));
+    let products: Vec<String> = found.iter().filter_map(|o| o.value.clone()).collect();
+    assert_eq!(products, ["keycloak", "zitadel"]);
+    assert!(found.iter().all(|observation| observation.agent.is_none()));
+    assert_eq!(evaluator.compilations(), 1);
 }
 
 #[test]
-fn excluded_products_apply_per_agent() {
+fn excluded_products_of_a_merged_agent_apply_to_the_enrichment() {
     let profile = two_agent_profile(&["keycloak"]);
     let evaluator = evaluator();
     let item = both_paths_item();
     assert!(
         evaluator
-            .evaluate(&item, &profile, &agent_named(&profile, "probe-a"))
+            .evaluate(&item, &profile, &target_of(&profile, SourceName::HttpProbe))
             .is_empty()
-    );
-    assert_eq!(
-        evaluator
-            .evaluate(&item, &profile, &agent_named(&profile, "probe-b"))
-            .len(),
-        2
     );
 }
 

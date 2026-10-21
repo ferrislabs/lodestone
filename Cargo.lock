@@ -120,6 +120,7 @@ dependencies = [
  "serde",
  "serde_json",
  "server",
+ "source-providers",
  "sources",
  "sqlx",
  "thiserror 2.0.18",
@@ -1598,7 +1599,10 @@ dependencies = [
  "chrono",
  "codspeed-divan-compat",
  "common",
+ "dns",
+ "fetch",
  "http 1.4.0",
+ "httpmock",
  "itoa",
  "llm",
  "lodestone-core",
@@ -1607,6 +1611,8 @@ dependencies = [
  "serde",
  "serde_json",
  "server",
+ "source-providers",
+ "sources",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -2401,6 +2407,7 @@ dependencies = [
  "aws-lc-rs",
  "chrono",
  "common",
+ "futures-util",
  "idna",
  "lodestone-macros",
  "mockall",
@@ -3905,12 +3912,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "source-providers"
+version = "0.1.0"
+dependencies = [
+ "aws-lc-rs",
+ "base64 0.22.1",
+ "chrono",
+ "common",
+ "fetch",
+ "httpmock",
+ "lodestone-core",
+ "rate-limit",
+ "serde_json",
+ "sources",
+ "sqlx",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "url",
+ "uuid",
+]
+
+[[package]]
 name = "sources"
 version = "0.1.0"
 dependencies = [
  "chrono",
  "common",
  "ct",
+ "dns",
  "fetch",
  "flate2",
  "httpmock",
@@ -3919,6 +3949,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sqlx",
+ "thiserror 2.0.18",
  "tokio",
  "tracing",
  "tracing-subscriber",
