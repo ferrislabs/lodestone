@@ -8,7 +8,7 @@ Profiles live in Postgres. Each edit creates a new revision; earlier revisions a
 
 ## Schema
 
-The JSON Schema is `docs/schemas/profile.v14.schema.json`. It is generated from `ProfileDefinition` and must not be edited by hand. Regenerate it with:
+The JSON Schema is `docs/schemas/profile.v15.schema.json`. It is generated from `ProfileDefinition` and must not be edited by hand. Regenerate it with:
 
 ```
 UPDATE_SCHEMA=1 cargo test -p lodestone-core --test profile_examples
@@ -23,7 +23,7 @@ Without `UPDATE_SCHEMA=1` the same test fails if the committed file is stale. Th
 
 ## Sections
 
-- `schema_version`: must be 14. See [Older versions](#older-versions).
+- `schema_version`: must be 15. See [Older versions](#older-versions).
 - `identity`: the offer and the target customer, in free text.
 - `language`: `fr` or `en`, default `fr` (was `llm.language` before 14). The language of every free-text field the LLM writes: the aggregator's summary, verdict narrative, approach angle, draft subject and body, the qualification summaries and the scoring reasons. The system prompts state it (`Write every free-text field (...) in French. Evidence quotes stay in the language of the document they come from.`), so evidence quotes stay in the source language and the verbatim check is unchanged. Changing the language changes the system prompt, hence the LLM cache key: answers are regenerated.
 - `agents`: the detection agents; at least one is required. An agent searches one source with its own settings (see ADR 0005). Several agents of the same kind are allowed.
@@ -37,14 +37,13 @@ Without `UPDATE_SCHEMA=1` the same test fails if the committed file is stale. Th
   - `description`: what the agent evaluates, 1 to 300 characters. Shown on the agent card and on the lead page.
   - `provider_id`: id of a declared LLM provider (`GET /api/v1/llm/providers`), or `null` for the default provider. The reference is not checked by profile validation: the runtime resolves it and treats a missing or disabled provider as an error.
   - `system_prompt`: not empty, at most 8000 characters.
-  - `weight`: integer from 1 to 10, default 5, the agent's weight in the lead confidence.
   - `exclusion_threshold`: from 0.5 to 1, default 0.6, the probability at which an excluding option excludes the lead (see "Exclusions").
   - `samples`: integer from 1 to 5, default 3, the number of independent model calls per lead (see "Sampling and voting").
   - `sampling_temperature`: from 0 to 1.5, default 0.7, the temperature of those calls when `samples` is above 1; it overrides the provider temperature for them.
   - `learned_calibration`: default `true`. Whether the isotonic map learned for this agent corrects its score (see "Learned calibration"). The fit always runs, so the quality page keeps its figures.
   - `questions`: at least one. A question has an `id` (lowercase letters, digits, `-`, `_`, at most 63 characters, unique in the agent), a `wording`, a `weight` (1 to 10, default 5) and 2 to 11 `options`. An option has a `value` (same identifier rule, unique in the question), a `label`, a `score` from 0 to 1 `is_unknown` (default false) and `excludes` (default false, never together with `is_unknown`). Exactly one option per question is the unknown option (`is_unknown: true`, default value `inconnu`, label `Inconnu`, score 0.5): the model picks it when nothing in the documents supports an answer. Its score is editable, it cannot be removed, and the editor pins it last as `Option « inconnu »`. A question without exactly one unknown option is rejected (`UnknownOptionCount`, path `...options`).
   - Validation paths include the indexes, for example `qualification_agents[1].questions[0].options[2].score`.
-  - Ready-made templates (editor, "Ajouter un agent de qualification"; French prompts and labels, higher score = better lead for the offer; the operator adjusts scores and weights):
+  - Ready-made templates (editor, "Ajouter un agent de qualification"; French prompts and labels, higher score = better lead for the offer; the operator adjusts scores and question weights):
     - `Pertinence`: axis `pertinence` (`forte`, `moyenne`, `faible`).
     - `Maturité technique`: axis `maturite` (`legacy_auto_heberge`, `saas`, `inconnu`).
     - `Environnement`: production or non-production evidence. Axes `environnement` (`production`, `mixte`, `hors_production`, `inconnu`) and `maturite_usage` (`usage_reel`, `experimentation`, `inconnu`). Reads the "Faits" block (environment per host, production share).
@@ -52,11 +51,11 @@ Without `UPDATE_SCHEMA=1` the same test fails if the committed file is stale. Th
     - `Marché`: the prompt starts with an editable sentence, `Zone visée : France et Europe francophone.`. Axes `zone` (`dans_la_zone`, `proche`, `hors_zone`, `inconnu`) and `langue` (`francais`, `autre`, `inconnu`). Reads the country by ccTLD from the "Faits" block.
     - `Opportunité`: migration, technical debt, cost or limits of the current SaaS, hiring. Axes `migration` (`en_cours`, `probable`, `improbable`, `inconnu`) and `declencheur` (`fort`, `moyen`, `aucun`).
     - `Recherche entreprise`: what the company does and its size, from its dossier.
-    - `Exclusions`: weight 1. Axes `editeur_integrateur`, `hebergeur_agence` (the signal concerns a customer of the company), `domaine_inactif` (`parque_ou_inactif`, `actif`, `inconnu`), `client_actuel` and `concurrent`; the other four have `oui` (excludes, score 0), `non` (score 1) and `inconnu` (score 0.5). The prompt holds three operator-editable lists in French, `Clients actuels :`, `Concurrents :` and `Éditeurs et intégrateurs du domaine :`, with short IAM-oriented defaults.
+    - `Exclusions`: axes `editeur_integrateur`, `hebergeur_agence` (the signal concerns a customer of the company), `domaine_inactif` (`parque_ou_inactif`, `actif`, `inconnu`), `client_actuel` and `concurrent`; the other four have `oui` (excludes, score 0), `non` (score 1) and `inconnu` (score 0.5). The prompt holds three operator-editable lists in French, `Clients actuels :`, `Concurrents :` and `Éditeurs et intégrateurs du domaine :`, with short IAM-oriented defaults.
     - The IAM example (`docs/examples/profiles/iam-ferriskey.json`) enables all of them.
 - `scoring_agents`: zero or more (ADR 0009). Each agent *decides* a score and a verdict for every lead from the reports of the qualification agents, through a contract imposed by the application. With none enabled the verdict stays pending (`en_attente`, reason `awaiting_scoring`).
   - `id`: slug, unique among all agents of the profile (sourcing, qualification and scoring). `name`, `enabled` (default `true`), `description` (1 to 300 characters), `provider_id` (`null` for the Synthèse default provider, the one of the aggregator), `system_prompt` (not empty, at most 8000 characters).
-  - `weight`: integer from 1 to 10, default 5, the agent's weight in the lead score and verdict.
+  - `weight`: integer from 1 to 10, default 5, the agent's weight in the lead score and verdict. It only matters with two or more scoring agents: the editor shows the field, and the weight on the agent card, only then, and keeps the stored value when it is hidden.
   - `criteria`: at least one. Same rules as qualification `questions` (identifier, `wording`, `weight`, 2 to 11 options with a score from 0 to 1, exactly one unknown option), except that no option can exclude a lead (`CriterionCannotExclude`, path `scoring_agents[i].criteria[j].options[k].excludes`).
   - `samples`: integer from 1 to 5, default 1. `sampling_temperature`: from 0 to 1.5, default 0.7, used when `samples` is above 1.
   - `learned_calibration`: default `true`. Whether the isotonic map learned for this agent corrects its verdict probabilities (see "Learned calibration").
@@ -101,7 +100,7 @@ Validation is `validate_scoring` (`libs/core/src/domain/scoring_agent/mod.rs`) a
 
 **Combination.** Pure function `combine` / `decide` (`libs/core/src/domain/scoring_agent/combination.rs`), over the valid results of the enabled scoring agents:
 
-- lead score = weighted mean of the agent scores (weights 1 to 10), rounded half up to an integer;
+- lead score = weighted mean of the agent scores (scoring agent weights 1 to 10), rounded half up to an integer;
 - verdict probabilities = weighted mean of the agents' verdict probabilities, each first passed through `calibrate_verdict(probabilities, agent, calibrations)`, the identity unless a learned calibration applies to the agent (see "Learned calibration");
 - verdict = argmax, ties resolved prudently `a_verifier` > `ecarte` > `fiable`; verdict confidence = that probability, stored in percent on the lead (`leads.confidence`);
 - qualification exclusions force `ecarte` with reason `excluded` and confidence 100, whatever the scoring agents say, even when none answered;
@@ -109,7 +108,7 @@ Validation is `validate_scoring` (`libs/core/src/domain/scoring_agent/mod.rs`) a
 
 **Storage and due logic.** Results live in `scoring_results` (lead, profile revision, agent, status, criteria answers, score, verdict, reasons, provenance, raw samples), upserted on `(lead_id, profile_revision, agent_id)`. The lead score is `leads.llm_score`, the verdict and its confidence `leads.verdict` and `leads.confidence`, the verdict probabilities, reason and source `lead_qualification_state.verdict_probabilities`, `verdict_reason` and `verdict_source` (`scoring`, or `indicators` for a lead qualified before the scoring agents existed and not scored since: it keeps its former computed verdict until scored). The indicators stay in `opinion`, `evidence`, `indicator_confidence` and `indicator_cap`. A lead is due for scoring when its qualification results changed (`lead_qualification_state.completed_at` differs from `scoring_for`) or its profile revision differs from `scoring_revision`. The aggregator only summarises a lead whose scoring is up to date, and receives the scoring results (score, verdict, reasons) as documents; it still must not restate figures.
 
-**Rescoring.** The rescoring loop (no model call) refreshes the indicators and the decay (`SCORING_VERSION` 4) and no longer decides: it recombines the stored scoring results and changes a verdict only through exclusions (a lead scored by the scoring agents is recombined, an `indicators` lead is untouched unless a qualification agent excludes it).
+**Rescoring.** The rescoring loop (no model call) refreshes the indicators and the decay (`SCORING_VERSION` 5) and no longer decides: it recombines the stored scoring results and changes a verdict only through exclusions (a lead scored by the scoring agents is recombined, an `indicators` lead is untouched unless a qualification agent excludes it).
 
 **Quality.** Decision label snapshots keep the scoring results (`scoring_agents`, `llm_score`, `indicator_confidence`, `verdict_source`); the versions table of `GET /api/v1/quality` has a `kind` (`qualification`, `scoring`, `aggregator`), so precision is counted per scoring agent and per version (model and prompt).
 
@@ -223,7 +222,7 @@ A qualification agent answers, and only answers, with one object per question:
 
 Qualification runs in the `qualification` listener (ADR 0006, ADR 0007), not in a recurring job: the former `llm.qualify` job is gone, its row is deleted by a migration and a stale one is rejected as a permanent failure.
 
-1. **Agents.** Every lead with a signal is evaluated by each enabled qualification agent. The step is repeated when the lead receives a signal from a source it had no signal from, and for every lead when the profile gets a new revision. The lead's confidence (0 to 100) and verdict come from the valid results only, computed in code: calibrated question score, agent score, the weighted mean over agents (the agents' opinion), blended with the evidence strength, then compared with `verdict.reliable_from` and `verdict.discard_below`; a lead is reliable only with two independent angles and enough evidence (see ADR 0007, "Evidence and calibration"). Verdicts: `fiable`, `a_verifier`, `ecarte`; a lead without any valid result has no verdict and is shown "En attente".
+1. **Agents.** Every lead with a signal is evaluated by each enabled qualification agent. The step is repeated when the lead receives a signal from a source it had no signal from, and for every lead when the profile gets a new revision. The lead's confidence (0 to 100) and verdict come from the valid results only, computed in code: calibrated question score, agent score, the plain mean over agents (the agents' opinion), blended with the evidence strength, then compared with `verdict.reliable_from` and `verdict.discard_below`; a lead is reliable only with two independent angles and enough evidence (see ADR 0007, "Evidence and calibration"). Verdicts: `fiable`, `a_verifier`, `ecarte`; a lead without any valid result has no verdict and is shown "En attente".
 2. **Aggregator.** A lead is summarised when the agents' step has stored a result for every enabled agent (valid or invalid) and its summary is missing or older than the agents' results (the `summarised_at` mark of `lead_qualification_state` is reset each time the agents run again). A decided lead (validated, rejected, contacted) is not summarised again. The selection runs in the same listener loop, right after the agents' step, oldest first, within the same batch size and run budget.
 3. **Provider.** `aggregator.provider_id`, else the default provider "Synthèse (agrégateur par défaut)". Qualification agents without a provider use "Classification (agents de qualification par défaut)". The two defaults keep the former tier names in the database and the API (`triage` and `qualification`); the Fournisseurs LLM screen shows them under "Fournisseurs par défaut".
 4. **Prompt.** System: the aggregator's `system_prompt`, the market context (offer and target customer, neutralised), the answer language and the output rules. Documents (untrusted, numbered): one per signal first, then the lead overview, then one per enabled agent with its questions, the chosen option label, its confidence and its score (an invalid agent is listed as such and left out of the confidence). The instruction states the computed confidence and verdict as final facts.
@@ -367,3 +366,7 @@ The `scoring` section (weighted factors) and `evidence.reference_score` are remo
 - `llm.qualification_threshold` is dropped: it gated nothing since ADR 0007.
 - `llm.relevance_criteria` and the per-agent `agents[].llm.relevance_criteria` are moved into the system prompt of the first qualification agent, in this order: the profile criteria as `Critères de pertinence : <text>`, then each sourcing agent's criteria, in agent order, as `Critères de l'agent « <agent name> » : <text>`. A text is appended after a blank line, trimmed, unless it is empty or already contained in the prompt (comparison on lowercased text with the white space collapsed), so a profile upgraded from version 3 or less, or one that already holds its criteria in the prompt, is not duplicated, and two identical criteria are appended once. The appended text is cut so that the prompt stays within 8000 characters; when the remaining room does not even hold the label, the criteria is dropped. A profile with no qualification agent drops them.
 - `calibration.learned` is copied to the new `learned_calibration` of every qualification agent and every scoring agent (`true` when the section was absent). Calibration is now chosen per agent: an agent applies its learned map only when its own flag is `true`, and a changed map only marks leads for rescoring when it belongs to such an agent. `GET /api/v1/quality/calibration` lost the profile-level `learned`; the state of an agent is its `status` (`disabled` when its flag is `false`).
+
+### Version 14 to 15
+
+`qualification_agents[].weight` is dropped, whatever its value. It only fed the agents' opinion, which is now the plain mean of the calibrated scores of the valid qualification agents. Question weights and scoring agent weights are unchanged. Stored leads are rescored without a model call (`SCORING_VERSION` 5), so their indicators (opinion, indicator confidence) follow the new mean. The aggregator and scoring prompts no longer print a weight for qualification agents.

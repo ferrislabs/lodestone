@@ -122,7 +122,6 @@ mod tests {
             enabled: true,
             provider_id: None,
             system_prompt: "p".to_owned(),
-            weight: 1,
             exclusion_threshold: threshold,
             samples: 1,
             sampling_temperature: 0.7,
@@ -314,12 +313,10 @@ mod tests {
         };
         let opinions = [
             AgentOpinion {
-                weight: 5,
                 score: 0.95,
                 axes: 2,
             },
             AgentOpinion {
-                weight: 5,
                 score: 0.95,
                 axes: 2,
             },

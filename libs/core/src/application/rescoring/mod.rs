@@ -48,7 +48,6 @@ pub(crate) fn stored_opinions(
             calibrations,
         );
         opinions.push(AgentOpinion {
-            weight: agent.weight,
             score,
             axes: answers.0.len(),
         });

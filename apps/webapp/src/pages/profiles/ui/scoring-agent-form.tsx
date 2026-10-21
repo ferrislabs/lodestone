@@ -43,6 +43,7 @@ interface ScoringAgentFormProps {
 	index: number
 	problems: readonly Problem[]
 	providers: readonly ProviderOption[]
+	showWeight: boolean
 	calibration: AgentCalibrationState | undefined
 	previewing: boolean
 	actions: ScoringActions
@@ -80,6 +81,7 @@ export function ScoringAgentForm({
 	index,
 	problems,
 	providers,
+	showWeight,
 	calibration,
 	previewing,
 	actions,
@@ -184,19 +186,22 @@ export function ScoringAgentForm({
 					/>
 					<FieldErrors id={`${key}-provider`} problems={providerProblems} />
 				</div>
-				<div className="flex flex-col gap-1.5">
-					<Label id={`${key}-weight-label`}>Poids de l'agent</Label>
-					<p className="text-xs text-muted-foreground">
-						Poids de cet agent dans le score et le verdict du lead, de 1 à 10.
-					</p>
-					<WeightPicker
-						labelledBy={`${key}-weight-label`}
-						value={agentWeight(agent)}
-						invalid={weightProblems.length > 0}
-						onChange={(weight) => actions.setWeight(index, weight)}
-					/>
-					<FieldErrors id={`${key}-weight`} problems={weightProblems} />
-				</div>
+				{showWeight ? (
+					<div className="flex flex-col gap-1.5">
+						<Label id={`${key}-weight-label`}>Poids de l'agent</Label>
+						<p className="text-xs text-muted-foreground">
+							Part de cet agent dans la moyenne pondérée du score et du verdict
+							du lead, de 1 à 10. Plus le poids est élevé, plus son avis compte.
+						</p>
+						<WeightPicker
+							labelledBy={`${key}-weight-label`}
+							value={agentWeight(agent)}
+							invalid={weightProblems.length > 0}
+							onChange={(weight) => actions.setWeight(index, weight)}
+						/>
+						<FieldErrors id={`${key}-weight`} problems={weightProblems} />
+					</div>
+				) : null}
 				<LearnedCalibrationField
 					id={`${key}-learned-calibration`}
 					learned={agentLearnsCalibration(agent)}

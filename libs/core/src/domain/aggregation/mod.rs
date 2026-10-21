@@ -168,8 +168,8 @@ fn percent(value: f64) -> String {
 
 pub fn render_agent(agent: &QualificationAgent, result: Option<&QualificationResult>) -> String {
     let mut text = format!(
-        "qualification agent: {} (weight {})\nevaluates: {}\n",
-        agent.name, agent.weight, agent.description
+        "qualification agent: {}\nevaluates: {}\n",
+        agent.name, agent.description
     );
     let Some(result) = result.filter(|result| result.status == ResultStatus::Valid) else {
         let reason = result

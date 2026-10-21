@@ -253,7 +253,6 @@ fn qualification_agent(id: &str) -> Value {
         "enabled": true,
         "provider_id": null,
         "system_prompt": format!("PROMPT-OF-{id}"),
-        "weight": 5,
         "samples": 1,
         "questions": [question("q", ["forte", "moyenne", "faible"])]
     })
@@ -944,7 +943,6 @@ fn excluding_agent() -> Value {
         "enabled": true,
         "provider_id": null,
         "system_prompt": "PROMPT-OF-exclusions",
-        "weight": 1,
         "samples": 1,
         "exclusion_threshold": 0.6,
         "questions": [{

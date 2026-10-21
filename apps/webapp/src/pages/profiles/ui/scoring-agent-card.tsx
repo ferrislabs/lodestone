@@ -14,6 +14,7 @@ interface ScoringAgentCardProps {
 	index: number
 	problems: readonly Problem[]
 	providers: readonly ProviderOption[]
+	showWeight: boolean
 	editing: boolean
 	confirmingRemove: boolean
 	onEdit: () => void
@@ -28,6 +29,7 @@ export function ScoringAgentCard({
 	index,
 	problems,
 	providers,
+	showWeight,
 	editing,
 	confirmingRemove,
 	onEdit,
@@ -70,7 +72,7 @@ export function ScoringAgentCard({
 				</p>
 			) : null}
 			<p className="text-xs text-muted-foreground" data-part="summary">
-				{scoringSummary(agent, providers)}
+				{scoringSummary(agent, providers, showWeight)}
 			</p>
 			<div className="mt-auto flex items-center gap-1 pt-1">
 				{confirmingRemove ? (

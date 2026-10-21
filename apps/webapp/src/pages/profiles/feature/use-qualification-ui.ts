@@ -72,8 +72,6 @@ export function useQualificationUi(
 					providerId === '' ? null : providerId,
 				),
 			),
-		setWeight: (index, weight) =>
-			onChange(setAgentField(value, index, 'weight', weight)),
 		setLearnedCalibration: (index, learned) =>
 			onChange(setAgentField(value, index, 'learned_calibration', learned)),
 		setExclusionThreshold: (index, percent) =>

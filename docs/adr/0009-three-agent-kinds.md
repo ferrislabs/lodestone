@@ -73,3 +73,7 @@ With the scoring agents deciding the score and the verdict, the weighted `scorin
 - **Where it is written.** At each recording of signals (sources, contact finder), with the clock of the run, and by the rescoring loop for every lead it rescores, since decay changes it with the days.
 - **Staleness.** A lead is stale when its scoring version is older, its stored evidence is older than a day or missing, or the number of signals it aggregates changed. The comparison of the stored signal score with `leads.score` is gone: the score is a function of the signals and of the date, refreshed with them.
 - **Public meaning.** `min_score`, the score sorts, the `score` field of exports and webhooks and the lead page show the signal strength from 0 to 100, labelled "Force des signaux" in the webapp. `score_breakdown` is removed.
+
+## Amendment: weights only between scoring agents (#184)
+
+Scoring agents keep their `weight`: the lead score and the verdict are the weighted means of their answers. The weight is meaningless with a single scoring agent, so the editor shows it (card and sheet) only when the profile declares two or more scoring agents, and keeps the stored value when it is hidden. Qualification agents lose their weight (profile schema 15, ADR 0007 amendment).

@@ -19,6 +19,7 @@ import {
 import { PROFILE_HINTS } from '#/pages/profiles/lib/form-hints'
 import { PROFILE_SCHEMA } from '#/pages/profiles/lib/profile-schema'
 import type { ProviderOption } from '#/pages/profiles/lib/qualification'
+import { weightsApply } from '#/pages/profiles/lib/scoring-agents'
 import type { EditorTab } from '#/pages/profiles/lib/tabs'
 import type { Problem } from '#/pages/profiles/lib/types'
 import { AgentsEditor } from '#/pages/profiles/ui/agents-editor'
@@ -118,6 +119,7 @@ export function DefinitionTabContent({
 				>
 					<ScoringHelp
 						collapsed={helpCollapsed}
+						showWeight={weightsApply(scoringAgents.agents.length)}
 						onToggle={() => setHelpCollapsed((current) => !current)}
 					/>
 					<div className="flex flex-col gap-8 lg:order-1 lg:col-span-3">

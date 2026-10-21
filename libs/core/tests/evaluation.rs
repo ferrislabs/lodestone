@@ -195,7 +195,7 @@ fn settings(budget_cents: u32, batch_size: u32) -> EvaluationSettings {
     }
 }
 
-fn agent(id: &str, weight: u8, provider: Option<ProviderId>, question: &str) -> Value {
+fn agent(id: &str, provider: Option<ProviderId>, question: &str) -> Value {
     json!({
         "id": id,
         "name": id,
@@ -203,7 +203,6 @@ fn agent(id: &str, weight: u8, provider: Option<ProviderId>, question: &str) -> 
         "enabled": true,
         "provider_id": provider.map(|provider| provider.0.to_string()),
         "system_prompt": format!("PROMPT-OF-{id}"),
-        "weight": weight,
         "samples": 1,
         "questions": [{
             "id": question,
@@ -217,6 +216,11 @@ fn agent(id: &str, weight: u8, provider: Option<ProviderId>, question: &str) -> 
             ]
         }]
     })
+}
+
+fn revised(mut agent: Value) -> Value {
+    agent["system_prompt"] = json!("PROMPT-REVISED");
+    agent
 }
 
 fn sampled(mut agent: Value, samples: u8) -> Value {
@@ -550,7 +554,7 @@ async fn each_result_stores_the_provider_model_prompt_and_generation_settings(po
         .await
         .unwrap();
     let profile = harness
-        .profile(vec![agent("pertinence", 5, None, "pertinence")])
+        .profile(vec![agent("pertinence", None, "pertinence")])
         .await;
     harness.observe("acme.com", SourceName::HttpProbe, 10).await;
 
@@ -587,7 +591,7 @@ async fn valid_answers_are_stored_scored_and_judged(pool: PgPool) {
     let harness = Harness::new(pool, 10);
     harness.default_provider("model-default").await;
     let profile = harness
-        .profile(vec![agent("pertinence", 5, None, "pertinence")])
+        .profile(vec![agent("pertinence", None, "pertinence")])
         .await;
     harness.observe("acme.com", SourceName::HttpProbe, 10).await;
 
@@ -633,7 +637,7 @@ async fn the_prompt_carries_the_agent_the_profile_context_the_contract_and_the_l
     let harness = Harness::new(pool, 10);
     harness.default_provider("model-default").await;
     let profile = harness
-        .profile(vec![agent("pertinence", 5, None, "pertinence")])
+        .profile(vec![agent("pertinence", None, "pertinence")])
         .await;
     harness.observe("acme.com", SourceName::HttpProbe, 10).await;
 
@@ -675,7 +679,7 @@ async fn a_lead_seen_only_on_a_development_host_is_documented_as_such(pool: PgPo
     let harness = Harness::new(pool.clone(), 10);
     harness.default_provider("model-default").await;
     harness
-        .profile(vec![agent("pertinence", 5, None, "pertinence")])
+        .profile(vec![agent("pertinence", None, "pertinence")])
         .await;
     lodestone_core::CandidateHosts::upsert(
         &lodestone_core::infrastructure::candidate_host::PgCandidateHosts::new(pool),
@@ -704,15 +708,15 @@ async fn a_lead_seen_only_on_a_development_host_is_documented_as_such(pool: PgPo
 }
 
 #[sqlx::test(migrations = "../../migrations")]
-async fn agent_weights_drive_the_lead_confidence_and_the_verdict(pool: PgPool) {
+async fn the_indicator_opinion_is_the_plain_mean_of_the_agent_scores(pool: PgPool) {
     let harness = Harness::new(pool, 10);
     let good = harness.provider("model-good", 0).await;
     let bad = harness.provider("model-bad", 0).await;
     harness.script("model-bad", vec![Reply::Worst]);
     let profile = harness
         .profile(vec![
-            agent("light", 1, Some(good), "q"),
-            agent("heavy", 3, Some(bad), "q"),
+            agent("light", Some(good), "q"),
+            agent("heavy", Some(bad), "q"),
         ])
         .await;
     harness.observe("acme.com", SourceName::HttpProbe, 10).await;
@@ -723,8 +727,8 @@ async fn agent_weights_drive_the_lead_confidence_and_the_verdict(pool: PgPool) {
     assert_eq!(result_of(&results, "light").agent_score, Some(1.0));
     assert_eq!(result_of(&results, "heavy").agent_score, Some(0.0));
     let indicated = harness.indicated(profile, "acme.com").await;
-    assert_eq!(indicated.0, Some(25.0));
-    assert_eq!(indicated.1, Some(Verdict::Discarded));
+    assert_eq!(indicated.0, Some(50.0));
+    assert_eq!(indicated.1, Some(Verdict::ToCheck));
 }
 
 fn broken() -> Value {
@@ -738,7 +742,7 @@ async fn a_contract_violation_is_retried_once_with_the_violation_list(pool: PgPo
     let provider = harness.provider("model-a", 0).await;
     harness.script("model-a", vec![Reply::Raw(broken()), Reply::Best]);
     let profile = harness
-        .profile(vec![agent("solo", 5, Some(provider), "q")])
+        .profile(vec![agent("solo", Some(provider), "q")])
         .await;
     harness.observe("acme.com", SourceName::HttpProbe, 10).await;
 
@@ -756,7 +760,7 @@ async fn a_contract_violation_is_retried_once_with_the_violation_list(pool: PgPo
 }
 
 fn solo_answers() -> Value {
-    let profile = ValidatedProfile::parse(definition(vec![agent("solo", 5, None, "q")])).unwrap();
+    let profile = ValidatedProfile::parse(definition(vec![agent("solo", None, "q")])).unwrap();
     let schema = lodestone_core::contract_schema(&profile.definition().qualification_agents[0]);
     answers_from(&schema, Pick::First, "lead: acme.com")
 }
@@ -772,7 +776,7 @@ async fn an_answer_without_summary_is_retried_then_stored_without_one(pool: PgPo
         vec![Reply::Raw(headless.clone()), Reply::Raw(headless)],
     );
     let profile = harness
-        .profile(vec![agent("solo", 5, Some(provider), "q")])
+        .profile(vec![agent("solo", Some(provider), "q")])
         .await;
     harness.observe("acme.com", SourceName::HttpProbe, 10).await;
 
@@ -793,7 +797,7 @@ async fn an_over_long_summary_is_a_violation_and_a_retry_fixes_it(pool: PgPool) 
     verbose["summary"] = json!("x".repeat(601));
     harness.script("model-a", vec![Reply::Raw(verbose), Reply::Best]);
     let profile = harness
-        .profile(vec![agent("solo", 5, Some(provider), "q")])
+        .profile(vec![agent("solo", Some(provider), "q")])
         .await;
     harness.observe("acme.com", SourceName::HttpProbe, 10).await;
 
@@ -820,7 +824,7 @@ async fn two_contract_violations_store_an_invalid_result(pool: PgPool) {
     let provider = harness.provider("model-a", 0).await;
     harness.script("model-a", vec![Reply::Raw(broken()), Reply::Raw(broken())]);
     let profile = harness
-        .profile(vec![agent("solo", 5, Some(provider), "q")])
+        .profile(vec![agent("solo", Some(provider), "q")])
         .await;
     harness.observe("acme.com", SourceName::HttpProbe, 10).await;
 
@@ -857,7 +861,7 @@ async fn a_provider_failure_stores_an_invalid_result(pool: PgPool) {
     let provider = harness.provider("model-a", 0).await;
     harness.script("model-a", vec![Reply::Fail(LlmError::Refused)]);
     let profile = harness
-        .profile(vec![agent("solo", 5, Some(provider), "q")])
+        .profile(vec![agent("solo", Some(provider), "q")])
         .await;
     harness.observe("acme.com", SourceName::HttpProbe, 10).await;
 
@@ -887,9 +891,9 @@ async fn a_missing_provider_invalidates_one_agent_without_blocking_the_others(po
     let ghost = ProviderId(uuid::Uuid::from_u128(42));
     let profile = harness
         .profile(vec![
-            agent("ghost", 5, Some(ghost), "q"),
-            agent("off", 5, Some(disabled), "q"),
-            agent("fine", 5, Some(provider), "q"),
+            agent("ghost", Some(ghost), "q"),
+            agent("off", Some(disabled), "q"),
+            agent("fine", Some(provider), "q"),
         ])
         .await;
     harness.observe("acme.com", SourceName::HttpProbe, 10).await;
@@ -913,7 +917,7 @@ async fn a_missing_provider_invalidates_one_agent_without_blocking_the_others(po
 #[sqlx::test(migrations = "../../migrations")]
 async fn without_a_default_provider_agents_are_invalid_not_blocking(pool: PgPool) {
     let harness = Harness::new(pool, 10);
-    let profile = harness.profile(vec![agent("solo", 5, None, "q")]).await;
+    let profile = harness.profile(vec![agent("solo", None, "q")]).await;
     harness.observe("acme.com", SourceName::HttpProbe, 10).await;
 
     let report = harness.step(settings(100, 10)).await;
@@ -931,7 +935,7 @@ async fn without_a_default_provider_agents_are_invalid_not_blocking(pool: PgPool
 async fn a_lead_is_due_on_creation_only_once_it_has_a_signal(pool: PgPool) {
     let harness = Harness::new(pool.clone(), 10);
     harness.default_provider("model-default").await;
-    let profile = harness.profile(vec![agent("solo", 5, None, "q")]).await;
+    let profile = harness.profile(vec![agent("solo", None, "q")]).await;
     support::seen_lead(&pool, profile, "bare.com").await;
 
     let before = harness.step(settings(100, 10)).await;
@@ -948,7 +952,7 @@ async fn a_lead_is_due_on_creation_only_once_it_has_a_signal(pool: PgPool) {
 async fn a_signal_from_a_new_source_makes_the_lead_due_again(pool: PgPool) {
     let harness = Harness::new(pool, 10);
     harness.default_provider("model-default").await;
-    let profile = harness.profile(vec![agent("solo", 5, None, "q")]).await;
+    let profile = harness.profile(vec![agent("solo", None, "q")]).await;
     harness.observe("acme.com", SourceName::HttpProbe, 10).await;
     assert_eq!(harness.step(settings(100, 10)).await.leads, 1);
 
@@ -969,13 +973,13 @@ async fn a_signal_from_a_new_source_makes_the_lead_due_again(pool: PgPool) {
 async fn a_new_profile_revision_makes_every_lead_due_again(pool: PgPool) {
     let harness = Harness::new(pool, 10);
     harness.default_provider("model-default").await;
-    let profile = harness.profile(vec![agent("solo", 5, None, "q")]).await;
+    let profile = harness.profile(vec![agent("solo", None, "q")]).await;
     harness.observe("acme.com", SourceName::HttpProbe, 10).await;
     assert_eq!(harness.step(settings(100, 10)).await.leads, 1);
     assert_eq!(harness.step(settings(100, 10)).await.leads, 0);
 
     harness
-        .revise(profile, vec![agent("solo", 7, None, "q")])
+        .revise(profile, vec![revised(agent("solo", None, "q"))])
         .await;
 
     let report = harness.step(settings(100, 10)).await;
@@ -989,7 +993,7 @@ async fn a_new_profile_revision_makes_every_lead_due_again(pool: PgPool) {
 async fn suppressed_domains_are_never_qualified(pool: PgPool) {
     let harness = Harness::new(pool, 10);
     harness.default_provider("model-default").await;
-    harness.profile(vec![agent("solo", 5, None, "q")]).await;
+    harness.profile(vec![agent("solo", None, "q")]).await;
     harness.observe("acme.com", SourceName::HttpProbe, 10).await;
     harness
         .usecase
@@ -1008,7 +1012,7 @@ async fn suppressed_domains_are_never_qualified(pool: PgPool) {
 async fn a_step_takes_a_bounded_batch_oldest_first_and_reports_the_backlog(pool: PgPool) {
     let harness = Harness::new(pool, 10);
     harness.default_provider("model-default").await;
-    let profile = harness.profile(vec![agent("solo", 5, None, "q")]).await;
+    let profile = harness.profile(vec![agent("solo", None, "q")]).await;
     for index in 0..12 {
         harness
             .observe(
@@ -1036,8 +1040,8 @@ async fn an_exhausted_budget_leaves_the_lead_due(pool: PgPool) {
     let pricey = harness.provider("model-pricey", 100).await;
     let profile = harness
         .profile(vec![
-            agent("first", 5, Some(pricey), "q"),
-            agent("second", 5, Some(pricey), "q"),
+            agent("first", Some(pricey), "q"),
+            agent("second", Some(pricey), "q"),
         ])
         .await;
     harness.observe("acme.com", SourceName::HttpProbe, 10).await;
@@ -1063,8 +1067,8 @@ async fn answers_are_cached_per_agent_and_prompt(pool: PgPool) {
     let provider = harness.provider("model-a", 0).await;
     let profile = harness
         .profile(vec![
-            agent("one", 5, Some(provider), "q"),
-            agent("two", 5, Some(provider), "q"),
+            agent("one", Some(provider), "q"),
+            agent("two", Some(provider), "q"),
         ])
         .await;
     harness.observe("acme.com", SourceName::HttpProbe, 10).await;
@@ -1092,7 +1096,7 @@ async fn a_cached_contract_violation_is_never_served(pool: PgPool) {
         vec![Reply::Raw(broken()), Reply::Raw(broken()), Reply::Best],
     );
     harness
-        .profile(vec![agent("solo", 5, Some(provider), "q")])
+        .profile(vec![agent("solo", Some(provider), "q")])
         .await;
     harness.observe("acme.com", SourceName::HttpProbe, 10).await;
     harness.step(settings(100, 10)).await;
@@ -1112,10 +1116,10 @@ async fn a_cached_contract_violation_is_never_served(pool: PgPool) {
 async fn a_disabled_agent_is_not_run(pool: PgPool) {
     let harness = Harness::new(pool, 10);
     let provider = harness.provider("model-a", 0).await;
-    let mut off = agent("off", 5, Some(provider), "q");
+    let mut off = agent("off", Some(provider), "q");
     off["enabled"] = json!(false);
     let profile = harness
-        .profile(vec![off, agent("on", 5, Some(provider), "q")])
+        .profile(vec![off, agent("on", Some(provider), "q")])
         .await;
     harness.observe("acme.com", SourceName::HttpProbe, 10).await;
 
@@ -1127,7 +1131,7 @@ async fn a_disabled_agent_is_not_run(pool: PgPool) {
 }
 
 fn two_axes_agent(id: &str, provider: ProviderId) -> Value {
-    let mut value = agent(id, 5, Some(provider), "q");
+    let mut value = agent(id, Some(provider), "q");
     let second = value["questions"][0].clone();
     let mut second = second;
     second["id"] = json!("q2");
@@ -1141,7 +1145,7 @@ async fn a_single_dev_host_answered_with_certainty_is_calibrated_and_not_reliabl
     let provider = harness.provider("model-a", 0).await;
     let profile = harness
         .profile_tuned(
-            vec![agent("pertinence", 5, Some(provider), "q")],
+            vec![agent("pertinence", Some(provider), "q")],
             json!({}),
             json!({}),
         )
@@ -1176,8 +1180,8 @@ async fn a_confident_lead_on_a_dev_host_names_the_cap(pool: PgPool) {
     let profile = harness
         .profile_tuned(
             vec![
-                agent("one", 5, Some(first), "q"),
-                agent("two", 5, Some(second), "q"),
+                agent("one", Some(first), "q"),
+                agent("two", Some(second), "q"),
             ],
             json!({"reliable_from": 40, "discard_below": 10}),
             json!({}),
@@ -1248,7 +1252,7 @@ async fn leads_scored_before_the_evidence_rules_are_rescored_without_a_model_cal
     let provider = harness.provider("model-a", 0).await;
     let profile = harness
         .profile_tuned(
-            vec![agent("solo", 5, Some(provider), "q")],
+            vec![agent("solo", Some(provider), "q")],
             json!({}),
             json!({}),
         )
@@ -1298,7 +1302,7 @@ async fn a_scoring_from_an_older_version_is_rescored_without_a_model_call(pool: 
     let provider = harness.provider("model-a", 0).await;
     let profile = harness
         .profile_tuned(
-            vec![agent("solo", 5, Some(provider), "q")],
+            vec![agent("solo", Some(provider), "q")],
             json!({}),
             json!({}),
         )
@@ -1312,7 +1316,7 @@ async fn a_scoring_from_an_older_version_is_rescored_without_a_model_call(pool: 
         .unwrap();
     assert_eq!(stored, SCORING_VERSION);
     sqlx::query("UPDATE lead_qualification_state SET scoring_version = $1")
-        .bind(SCORING_VERSION - 1)
+        .bind(4)
         .execute(&pool)
         .await
         .unwrap();
@@ -1337,7 +1341,7 @@ async fn a_scoring_older_than_a_day_is_refreshed_and_the_old_signals_weigh_less(
     let provider = harness.provider("model-a", 0).await;
     let profile = harness
         .profile_tuned(
-            vec![agent("solo", 5, Some(provider), "q")],
+            vec![agent("solo", Some(provider), "q")],
             json!({}),
             json!({}),
         )
@@ -1379,7 +1383,7 @@ async fn a_new_signal_on_a_sibling_domain_rescores_the_other_leads_without_a_mod
     let provider = harness.provider("model-a", 0).await;
     let profile = harness
         .profile_tuned(
-            vec![agent("solo", 5, Some(provider), "q")],
+            vec![agent("solo", Some(provider), "q")],
             json!({}),
             json!({}),
         )
@@ -1417,7 +1421,7 @@ async fn a_new_signal_from_a_known_source_refreshes_the_evidence_without_a_model
     let provider = harness.provider("model-a", 0).await;
     let profile = harness
         .profile_tuned(
-            vec![agent("solo", 5, Some(provider), "q")],
+            vec![agent("solo", Some(provider), "q")],
             json!({}),
             json!({}),
         )
@@ -1464,7 +1468,7 @@ async fn an_ungrounded_answer_is_retried_with_its_axes_and_stored_grounded(pool:
         vec![Reply::Raw(ungrounded_answers()), Reply::Best],
     );
     let profile = harness
-        .profile(vec![agent("solo", 5, Some(provider), "q")])
+        .profile(vec![agent("solo", Some(provider), "q")])
         .await;
     harness.observe("acme.com", SourceName::HttpProbe, 10).await;
 
@@ -1497,7 +1501,7 @@ async fn an_answer_still_ungrounded_after_the_retry_is_downgraded_not_invalid(po
         ],
     );
     let profile = harness
-        .profile(vec![agent("solo", 5, Some(provider), "q")])
+        .profile(vec![agent("solo", Some(provider), "q")])
         .await;
     harness.observe("acme.com", SourceName::HttpProbe, 10).await;
 
@@ -1526,7 +1530,7 @@ async fn a_retry_that_breaks_the_contract_keeps_the_first_downgraded_answer(pool
         vec![Reply::Raw(ungrounded_answers()), Reply::Raw(broken())],
     );
     let profile = harness
-        .profile(vec![agent("solo", 5, Some(provider), "q")])
+        .profile(vec![agent("solo", Some(provider), "q")])
         .await;
     harness.observe("acme.com", SourceName::HttpProbe, 10).await;
 
@@ -1546,7 +1550,7 @@ async fn the_unknown_option_with_an_empty_quote_is_accepted_without_a_retry(pool
     let provider = harness.provider("model-a", 0).await;
     harness.script("model-a", vec![Reply::Raw(unknown_answers())]);
     let profile = harness
-        .profile(vec![agent("solo", 5, Some(provider), "q")])
+        .profile(vec![agent("solo", Some(provider), "q")])
         .await;
     harness.observe("acme.com", SourceName::HttpProbe, 10).await;
 
@@ -1573,7 +1577,7 @@ async fn rescoring_reads_the_downgraded_answers(pool: PgPool) {
         ],
     );
     let profile = harness
-        .profile(vec![agent("solo", 5, Some(provider), "q")])
+        .profile(vec![agent("solo", Some(provider), "q")])
         .await;
     harness.observe("acme.com", SourceName::HttpProbe, 10).await;
     harness.step(settings(100, 10)).await;
@@ -1598,7 +1602,7 @@ async fn rescoring_reads_the_downgraded_answers(pool: PgPool) {
 
 #[test]
 fn the_aggregator_document_carries_the_quote_and_the_ungrounded_marker() {
-    let profile = ValidatedProfile::parse(definition(vec![agent("solo", 5, None, "q")])).unwrap();
+    let profile = ValidatedProfile::parse(definition(vec![agent("solo", None, "q")])).unwrap();
     let agent = &profile.definition().qualification_agents[0];
     let mut result = QualificationResult {
         id: ResultId(uuid::Uuid::nil()),
@@ -1637,7 +1641,6 @@ fn excluding_agent(id: &str, provider: ProviderId, threshold: f64) -> Value {
         "enabled": true,
         "provider_id": provider.0.to_string(),
         "system_prompt": format!("PROMPT-OF-{id}"),
-        "weight": 1,
         "exclusion_threshold": threshold,
         "samples": 1,
         "questions": [{
@@ -1659,8 +1662,10 @@ async fn a_grounded_exclusion_discards_a_confident_lead_and_keeps_the_confidence
     let provider = harness.provider("model-a", 0).await;
     let profile = harness
         .profile(vec![
-            agent("solo", 5, Some(provider), "q"),
-            agent("second", 5, Some(provider), "q"),
+            agent("solo", Some(provider), "q"),
+            agent("second", Some(provider), "q"),
+            agent("third", Some(provider), "q"),
+            agent("fourth", Some(provider), "q"),
             excluding_agent("exclusions", provider, 0.6),
         ])
         .await;
@@ -1692,8 +1697,8 @@ async fn an_answer_that_does_not_pick_the_excluding_option_leaves_the_verdict(po
     harness.script("model-a", vec![Reply::Best, Reply::Best, Reply::Worst]);
     let profile = harness
         .profile(vec![
-            agent("solo", 5, Some(provider), "q"),
-            agent("second", 5, Some(provider), "q"),
+            agent("solo", Some(provider), "q"),
+            agent("second", Some(provider), "q"),
             excluding_agent("exclusions", provider, 0.6),
         ])
         .await;
@@ -1753,7 +1758,7 @@ async fn rescoring_applies_exclusions_to_stored_leads_without_a_model_call(pool:
     let provider = harness.provider("model-a", 0).await;
     let profile = harness
         .profile(vec![
-            agent("solo", 5, Some(provider), "q"),
+            agent("solo", Some(provider), "q"),
             excluding_agent("exclusions", provider, 0.6),
         ])
         .await;
@@ -1825,7 +1830,7 @@ async fn three_samples_are_three_calls_at_the_sampling_temperature_and_the_major
     let provider = harness.provider("model-a", 0).await;
     harness.script("model-a", vec![Reply::Best, Reply::Worst, Reply::Best]);
     let profile = harness
-        .profile(vec![sampled(agent("solo", 5, Some(provider), "q"), 3)])
+        .profile(vec![sampled(agent("solo", Some(provider), "q"), 3)])
         .await;
     harness.observe("acme.com", SourceName::HttpProbe, 10).await;
 
@@ -1868,7 +1873,7 @@ async fn identical_replies_still_cost_one_call_per_sample_and_replays_are_cached
     let harness = Harness::new(pool.clone(), 10);
     let provider = harness.provider("model-a", 0).await;
     let profile = harness
-        .profile(vec![sampled(agent("solo", 5, Some(provider), "q"), 3)])
+        .profile(vec![sampled(agent("solo", Some(provider), "q"), 3)])
         .await;
     harness.observe("acme.com", SourceName::HttpProbe, 10).await;
     harness.step(settings(100, 10)).await;
@@ -1891,7 +1896,7 @@ async fn the_budget_is_charged_per_sample_call(pool: PgPool) {
     let harness = Harness::new(pool, 1_000_000);
     let pricey = harness.provider("model-pricey", 1).await;
     let profile = harness
-        .profile(vec![sampled(agent("solo", 5, Some(pricey), "q"), 3)])
+        .profile(vec![sampled(agent("solo", Some(pricey), "q"), 3)])
         .await;
     harness.observe("acme.com", SourceName::HttpProbe, 10).await;
 
@@ -1923,7 +1928,7 @@ async fn an_invalid_sample_is_dropped_and_the_others_vote(pool: PgPool) {
         vec![Reply::Best, Reply::Fail(LlmError::Refused), Reply::Best],
     );
     let profile = harness
-        .profile(vec![sampled(agent("solo", 5, Some(provider), "q"), 3)])
+        .profile(vec![sampled(agent("solo", Some(provider), "q"), 3)])
         .await;
     harness.observe("acme.com", SourceName::HttpProbe, 10).await;
 
@@ -1955,7 +1960,7 @@ async fn the_result_is_invalid_only_when_every_sample_is_invalid(pool: PgPool) {
         ],
     );
     let profile = harness
-        .profile(vec![sampled(agent("solo", 5, Some(provider), "q"), 3)])
+        .profile(vec![sampled(agent("solo", Some(provider), "q"), 3)])
         .await;
     harness.observe("acme.com", SourceName::HttpProbe, 10).await;
 
@@ -1975,7 +1980,7 @@ async fn a_single_sample_keeps_the_provider_temperature_and_stores_no_agreement(
     let harness = Harness::new(pool, 10);
     let provider = harness.provider("model-a", 0).await;
     let profile = harness
-        .profile(vec![agent("solo", 5, Some(provider), "q")])
+        .profile(vec![agent("solo", Some(provider), "q")])
         .await;
     harness.observe("acme.com", SourceName::HttpProbe, 10).await;
 
@@ -2042,8 +2047,8 @@ async fn a_grey_zone_lead_is_re_evaluated_by_the_escalation_provider(pool: PgPoo
     let profile = harness
         .escalating_profile(
             vec![
-                agent("first", 5, Some(local), "q"),
-                agent("second", 5, Some(local), "q"),
+                agent("first", Some(local), "q"),
+                agent("second", Some(local), "q"),
             ],
             Some(strong),
         )
@@ -2081,7 +2086,7 @@ async fn a_confident_lead_is_not_escalated(pool: PgPool) {
     let local = harness.provider("model-a", 0).await;
     let strong = harness.provider("model-b", 0).await;
     let profile = harness
-        .escalating_profile(vec![agent("first", 5, Some(local), "q")], Some(strong))
+        .escalating_profile(vec![agent("first", Some(local), "q")], Some(strong))
         .await;
     harness.observe("acme.com", SourceName::HttpProbe, 10).await;
 
@@ -2098,7 +2103,7 @@ async fn the_band_is_inclusive_below_and_exclusive_above(pool: PgPool) {
     let local = harness.provider("model-a", 0).await;
     let strong = harness.provider("model-b", 0).await;
     harness.script("model-a", vec![Reply::Middle, Reply::Middle]);
-    let mut value = definition(vec![agent("first", 5, Some(local), "q")]);
+    let mut value = definition(vec![agent("first", Some(local), "q")]);
     value["escalation"]["provider"] = json!(strong.0.to_string());
     value["escalation"]["band_low"] = json!(10);
     value["escalation"]["band_high"] = json!(50);
@@ -2132,7 +2137,7 @@ async fn without_an_escalation_provider_a_grey_zone_lead_stays_as_it_is(pool: Pg
     let local = harness.provider("model-a", 0).await;
     harness.script("model-a", vec![Reply::Middle]);
     let profile = harness
-        .escalating_profile(vec![agent("first", 5, Some(local), "q")], None)
+        .escalating_profile(vec![agent("first", Some(local), "q")], None)
         .await;
     harness.observe("acme.com", SourceName::HttpProbe, 10).await;
 
@@ -2151,7 +2156,7 @@ async fn a_replayed_evaluation_reuses_the_cached_escalation_without_new_calls(po
     let strong = harness.provider("model-b", 0).await;
     harness.script("model-a", vec![Reply::Middle, Reply::Middle, Reply::Middle]);
     let profile = harness
-        .escalating_profile(vec![agent("first", 5, Some(local), "q")], Some(strong))
+        .escalating_profile(vec![agent("first", Some(local), "q")], Some(strong))
         .await;
     harness.observe("acme.com", SourceName::HttpProbe, 10).await;
     harness.step(settings(100, 10)).await;
@@ -2178,7 +2183,7 @@ async fn a_lead_that_becomes_due_again_and_stays_grey_is_escalated_again(pool: P
     harness.script("model-a", vec![Reply::Middle, Reply::Middle]);
     harness.script("model-b", vec![Reply::Middle, Reply::Middle]);
     let profile = harness
-        .escalating_profile(vec![agent("first", 5, Some(local), "q")], Some(strong))
+        .escalating_profile(vec![agent("first", Some(local), "q")], Some(strong))
         .await;
     harness.observe("acme.com", SourceName::HttpProbe, 10).await;
     harness.step(settings(100, 10)).await;
@@ -2200,13 +2205,13 @@ async fn a_new_revision_may_escalate_the_lead_again(pool: PgPool) {
     let strong = harness.provider("model-b", 0).await;
     harness.script("model-a", vec![Reply::Middle, Reply::Middle]);
     let profile = harness
-        .escalating_profile(vec![agent("first", 5, Some(local), "q")], Some(strong))
+        .escalating_profile(vec![agent("first", Some(local), "q")], Some(strong))
         .await;
     harness.observe("acme.com", SourceName::HttpProbe, 10).await;
     harness.step(settings(100, 10)).await;
     assert_eq!(harness.calls_to("model-b"), 1);
 
-    let mut value = definition(vec![agent("first", 5, Some(local), "q")]);
+    let mut value = definition(vec![agent("first", Some(local), "q")]);
     value["escalation"]["provider"] = json!(strong.0.to_string());
     value["identity"]["offer"] = json!("Managed IAM, second revision");
     harness
@@ -2231,7 +2236,7 @@ async fn a_failed_escalation_keeps_the_original_results(pool: PgPool) {
     harness.script("model-a", vec![Reply::Middle]);
     harness.script("model-b", vec![Reply::Fail(LlmError::Refused)]);
     let profile = harness
-        .escalating_profile(vec![agent("first", 5, Some(local), "q")], Some(strong))
+        .escalating_profile(vec![agent("first", Some(local), "q")], Some(strong))
         .await;
     harness.observe("acme.com", SourceName::HttpProbe, 10).await;
 
@@ -2252,7 +2257,7 @@ async fn escalation_spends_the_run_budget_and_a_replay_reuses_the_cached_calls(p
     let strong = harness.provider("model-b", 100).await;
     harness.script("model-a", vec![Reply::Middle, Reply::Middle]);
     let profile = harness
-        .escalating_profile(vec![agent("first", 5, Some(local), "q")], Some(strong))
+        .escalating_profile(vec![agent("first", Some(local), "q")], Some(strong))
         .await;
     harness.observe("acme.com", SourceName::HttpProbe, 10).await;
 

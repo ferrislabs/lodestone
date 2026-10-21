@@ -140,7 +140,7 @@ fn parse_value(value: serde_json::Value) -> ValidatedProfile {
 fn version_one_iam_fixture_is_upgraded_to_the_current_example() {
     let upgraded = parse(IAM_V1);
     let current = parse(IAM);
-    assert_eq!(upgraded.definition().schema_version, 14);
+    assert_eq!(upgraded.definition().schema_version, 15);
     assert_eq!(
         agent_ids(&upgraded),
         [
@@ -205,8 +205,8 @@ fn version_one_iam_fixture_is_upgraded_to_the_current_example() {
 fn version_two_iam_fixture_is_upgraded_to_version_six() {
     let upgraded = parse(IAM_V2);
     let definition = upgraded.definition();
-    assert_eq!(definition.schema_version, 14);
-    assert_eq!(upgraded.to_json()["schema_version"], 14);
+    assert_eq!(definition.schema_version, 15);
+    assert_eq!(upgraded.to_json()["schema_version"], 15);
     assert!(upgraded.to_json().get("scoring").is_none());
     assert!(upgraded.to_json().get("llm").is_none());
 }
@@ -335,7 +335,7 @@ fn the_current_example_upgrades_from_its_version_three_form() {
         value.as_object_mut().expect("object").remove(key);
     }
     let upgraded = parse(&value.to_string());
-    assert_eq!(upgraded.definition().schema_version, 14);
+    assert_eq!(upgraded.definition().schema_version, 15);
     assert_eq!(upgraded.definition().agents, parse(IAM).definition().agents);
     assert_eq!(upgraded.definition().qualification_agents.len(), 1);
 }
@@ -411,7 +411,7 @@ fn the_current_example_upgrades_from_its_version_nine_form() {
     let upgraded = parse(&value.to_string());
     assert_eq!(upgraded, parse(IAM));
     let evidence = &upgraded.definition().evidence;
-    assert_eq!(upgraded.definition().schema_version, 14);
+    assert_eq!(upgraded.definition().schema_version, 15);
     assert_eq!(evidence.half_life_days_for("job_offer"), 90);
     assert_eq!(evidence.half_life_days_for("public_tender"), 180);
     assert_eq!(evidence.half_life_days_for("saas_provider"), 365);
@@ -425,7 +425,7 @@ fn the_current_example_upgrades_from_its_version_eleven_form() {
     value.as_object_mut().expect("object").remove("calibration");
     let upgraded = parse(&value.to_string());
     assert_eq!(upgraded, parse(IAM));
-    assert_eq!(upgraded.definition().schema_version, 14);
+    assert_eq!(upgraded.definition().schema_version, 15);
     assert!(upgraded.to_json().get("calibration").is_none());
     assert!(
         upgraded
@@ -437,6 +437,40 @@ fn the_current_example_upgrades_from_its_version_eleven_form() {
 }
 
 #[test]
+fn version_fourteen_drops_the_qualification_agent_weights() {
+    let mut value: serde_json::Value = serde_json::from_str(IAM).expect("json");
+    value["schema_version"] = 14.into();
+    let agents = value["qualification_agents"]
+        .as_array_mut()
+        .expect("agents");
+    for (index, agent) in agents.iter_mut().enumerate() {
+        agent["weight"] = (index as u64 % 10 + 1).into();
+    }
+    let scoring_weight = value["scoring_agents"][0]["weight"].clone();
+    let upgraded = parse(&value.to_string());
+    assert_eq!(upgraded, parse(IAM));
+    assert_eq!(upgraded.definition().schema_version, 15);
+    let json = upgraded.to_json();
+    for agent in json["qualification_agents"].as_array().expect("agents") {
+        assert!(agent.get("weight").is_none());
+        assert!(agent["questions"][0].get("weight").is_some());
+    }
+    assert_eq!(json["scoring_agents"][0]["weight"], scoring_weight);
+}
+
+#[test]
+fn version_thirteen_weights_are_dropped_too() {
+    let mut value = version_thirteen();
+    value["qualification_agents"][0]["weight"] = 9.into();
+    let upgraded = parse(&value.to_string());
+    assert!(
+        upgraded.to_json()["qualification_agents"][0]
+            .get("weight")
+            .is_none()
+    );
+}
+
+#[test]
 fn the_current_example_upgrades_from_its_version_twelve_form() {
     let mut value = version_thirteen();
     value["schema_version"] = 12.into();
@@ -444,7 +478,7 @@ fn the_current_example_upgrades_from_its_version_twelve_form() {
     value["evidence"]["reference_score"] = 50.into();
     let upgraded = parse(&value.to_string());
     assert_eq!(upgraded, parse(IAM));
-    assert_eq!(upgraded.definition().schema_version, 14);
+    assert_eq!(upgraded.definition().schema_version, 15);
     let json = upgraded.to_json();
     assert!(json.get("scoring").is_none());
     assert!(json["evidence"].get("reference_score").is_none());
@@ -487,7 +521,7 @@ fn the_current_example_upgrades_from_its_version_thirteen_form() {
     value["calibration"] = serde_json::json!({"learned": false});
     let upgraded = parse(&value.to_string());
     let definition = upgraded.definition();
-    assert_eq!(definition.schema_version, 14);
+    assert_eq!(definition.schema_version, 15);
     assert!(
         definition.qualification_agents[0].system_prompt.ends_with(
             "Critères de l'agent « Job offers (English) » : Offers for identity engineers"
@@ -524,7 +558,7 @@ fn the_current_example_upgrades_from_its_version_ten_form() {
     let upgraded = parse(&value.to_string());
     assert_eq!(upgraded, parse(IAM));
     let definition = upgraded.definition();
-    assert_eq!(definition.schema_version, 14);
+    assert_eq!(definition.schema_version, 15);
     assert_eq!(definition.scoring_agents.len(), 1);
     let agent = &definition.scoring_agents[0];
     assert_eq!(agent.id.as_str(), "score-global");
@@ -566,7 +600,7 @@ fn the_current_example_upgrades_from_its_version_eight_form() {
     let upgraded = parse(&value.to_string());
     assert_eq!(upgraded, parse(IAM));
     let definition = upgraded.definition();
-    assert_eq!(definition.schema_version, 14);
+    assert_eq!(definition.schema_version, 15);
     assert_eq!(definition.escalation, Escalation::default());
     assert_eq!(definition.escalation.provider, None);
     assert_eq!(
@@ -612,7 +646,6 @@ fn the_iam_example_has_an_enabled_exclusions_agent() {
         .find(|agent| agent.id.as_str() == "exclusions")
         .expect("exclusions agent");
     assert!(agent.enabled);
-    assert_eq!(agent.weight, 1);
     assert_eq!(agent.exclusion_threshold, 0.6);
     assert_eq!(
         agent
@@ -685,7 +718,7 @@ fn the_current_example_upgrades_from_its_version_four_form() {
     }
     let upgraded = parse(&value.to_string());
     let current = current_without_exclusions_agent();
-    assert_eq!(upgraded.definition().schema_version, 14);
+    assert_eq!(upgraded.definition().schema_version, 15);
     for (old, new) in upgraded
         .definition()
         .qualification_agents
@@ -709,7 +742,7 @@ fn the_current_example_upgrades_from_its_version_five_form() {
     value["verdict"] = serde_json::json!({"reliable_from": 70, "discard_below": 30});
     let upgraded = parse(&value.to_string());
     let current = current_without_exclusions_agent();
-    assert_eq!(upgraded.definition().schema_version, 14);
+    assert_eq!(upgraded.definition().schema_version, 15);
     assert_eq!(upgraded, current);
 }
 
@@ -731,7 +764,7 @@ fn committed_schema_matches_definition() {
         serde_json::to_string_pretty(&schema_for!(ProfileDefinition)).expect("schema serializes");
     generated.push('\n');
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../docs/schemas/profile.v14.schema.json");
+        .join("../../docs/schemas/profile.v15.schema.json");
     if std::env::var("UPDATE_SCHEMA").as_deref() == Ok("1") {
         fs::write(&path, &generated).expect("schema file is writable");
         return;
@@ -740,6 +773,6 @@ fn committed_schema_matches_definition() {
         fs::read_to_string(&path).expect("schema file exists, regenerate with UPDATE_SCHEMA=1");
     assert!(
         committed == generated,
-        "docs/schemas/profile.v14.schema.json is stale, regenerate with UPDATE_SCHEMA=1"
+        "docs/schemas/profile.v15.schema.json is stale, regenerate with UPDATE_SCHEMA=1"
     );
 }

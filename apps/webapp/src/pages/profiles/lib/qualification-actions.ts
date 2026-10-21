@@ -47,7 +47,6 @@ export interface QualificationActions extends AxisActions {
 	setDescription: (index: number, description: string) => void
 	setId: (index: number, id: string) => void
 	setProvider: (index: number, providerId: string) => void
-	setWeight: (index: number, weight: number) => void
 	setLearnedCalibration: (index: number, learned: boolean) => void
 	setExclusionThreshold: (index: number, percent: number | null) => void
 	setSamples: (index: number, samples: number | null) => void

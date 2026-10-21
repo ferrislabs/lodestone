@@ -347,7 +347,6 @@ fn succeeded(
         created_at: subject.at,
     };
     let opinion = AgentOpinion {
-        weight: agent.weight,
         score,
         axes: output.answers.0.len(),
     };

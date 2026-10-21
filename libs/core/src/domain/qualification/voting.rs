@@ -215,7 +215,6 @@ mod tests {
             enabled: true,
             provider_id: None,
             system_prompt: "prompt".to_owned(),
-            weight: 5,
             exclusion_threshold: 0.6,
             samples: 3,
             sampling_temperature: 0.7,
