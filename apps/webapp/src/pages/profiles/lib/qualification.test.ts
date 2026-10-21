@@ -56,6 +56,7 @@ describe('templates', () => {
 			"Type et taille d'organisation",
 			'Marché',
 			'Opportunité',
+			'Recherche entreprise',
 			'Vide',
 		])
 	})

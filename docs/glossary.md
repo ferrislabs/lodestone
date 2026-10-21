@@ -28,3 +28,5 @@
 | draft status | One of pending, approved, rejected. Only pending drafts can be edited or decided. Approving marks the draft ready and validates its lead; it never sends anything. | sent, published |
 | LLM provider | A named endpoint with kind, base URL, model and encrypted API key, stored in Postgres. | model, backend |
 | output | An adapter that pushes leads out: JSON, CSV, webhook, later a CRM. | export target, sink |
+| company dossier | What the system knows about the company behind a lead domain, built without a model by the `company_research` listener: pages of the company's own site (home, about, legal notice) and official register data fetched with the SIREN found in the legal notice. One per registrable domain, shared by its leads. State: pending, complete, partial or unreachable. | company card, enrichment |
+| SIREN | The 9-digit French company identifier, checked with the Luhn algorithm. Read from a labelled SIREN or SIRET on the company site, never guessed from a name. | |

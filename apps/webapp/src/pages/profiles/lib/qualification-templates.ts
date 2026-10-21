@@ -216,6 +216,50 @@ export const QUALIFICATION_TEMPLATES: readonly QualificationTemplate[] = [
 			},
 		],
 	},
+	{
+		id: 'recherche-entreprise',
+		label: 'Recherche entreprise',
+		description:
+			"Que fait l'entreprise et quelle taille a-t-elle ? Selon sa fiche officielle et son site.",
+		name: 'Recherche entreprise',
+		evaluates:
+			"Ce que fait l'entreprise et sa taille, d'après sa fiche entreprise : données officielles du registre et pages de son site.",
+		prompt:
+			"Tu évalues l'entreprise à partir de sa fiche entreprise. Les documents « Company dossier » contiennent les données officielles du registre français (raison sociale, activité NAF, tranche d'effectif, siège, date de création) et le texte de pages du site de l'entreprise (accueil, à propos, mentions légales). Les données officielles sont fiables ; le texte du site est ce que l'entreprise dit d'elle-même. Appuie-toi uniquement sur cette fiche et sur le bloc « Faits ». Si la fiche est absente, ou si elle indique que le SIREN est introuvable, réponds « inconnu » : ne devine ni l'activité ni l'effectif d'après le nom de domaine. Évalue si l'activité de l'entreprise est pertinente pour l'offre, si sa taille correspond à la cible et si elle a de vrais enjeux d'identité et d'accès (clients, collaborateurs ou partenaires à authentifier, données sensibles, conformité). Ajuste la cible de taille dans ce prompt selon ton marché.",
+		axes: [
+			{
+				id: 'activite_pertinente',
+				wording:
+					"L'activité de l'entreprise est-elle pertinente pour l'offre ?",
+				options: [
+					['oui', 'Oui', 1],
+					['partiellement', 'Partiellement', 0.5],
+					['non', 'Non', 0],
+					['inconnu', 'Inconnue', 0.3],
+				],
+			},
+			{
+				id: 'taille_cible',
+				wording: "La taille de l'entreprise correspond-elle à la cible ?",
+				weight: 4,
+				options: [
+					['dans_la_cible', 'Dans la cible', 1],
+					['hors_cible', 'Hors cible', 0],
+					['inconnu', 'Inconnue', 0.3],
+				],
+			},
+			{
+				id: 'enjeux_identite',
+				wording: "L'entreprise a-t-elle des enjeux d'identité et d'accès ?",
+				options: [
+					['forts', 'Forts', 1],
+					['moyens', 'Moyens', 0.5],
+					['faibles', 'Faibles', 0],
+					['inconnu', 'Inconnus', 0.3],
+				],
+			},
+		],
+	},
 	BLANK_TEMPLATE,
 ]
 

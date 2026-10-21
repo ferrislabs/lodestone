@@ -49,6 +49,20 @@ const DUE: &str = r#"
               SELECT 1 FROM signals
               WHERE signals.lead_id = leads.id AND NOT (signals.source = ANY (state.sources))
           )
+          OR EXISTS (
+              SELECT 1 FROM company_dossiers dossier
+              WHERE dossier.domain = leads.domain
+                AND dossier.content_at IS NOT NULL
+                AND (state.dossier_at IS NULL OR state.dossier_at < dossier.content_at)
+          )
+      )
+      AND (
+          $3::timestamptz IS NULL
+          OR leads.created_at <= $3
+          OR EXISTS (
+              SELECT 1 FROM company_dossiers dossier
+              WHERE dossier.domain = leads.domain AND dossier.state <> 'pending'
+          )
       )
 "#;
 
@@ -85,15 +99,17 @@ impl<'tx> QualificationRepository for PgQualificationRepository<'tx> {
         profile_id: ProfileId,
         revision: RevisionNumber,
         limit: u32,
+        dossier_gate: Option<DateTime<Utc>>,
     ) -> Result<Vec<Lead>, CoreError> {
         let revision = revision_number(revision)?;
         let query = format!(
-            "SELECT leads.id, leads.profile_id, leads.domain, leads.status, leads.score, leads.score_breakdown, leads.confidence, leads.verdict, leads.qualified_at, leads.first_seen_at, leads.last_seen_at, leads.updated_at {DUE}{NOT_SUPPRESSED} ORDER BY leads.first_seen_at ASC, leads.id ASC LIMIT $3"
+            "SELECT leads.id, leads.profile_id, leads.domain, leads.status, leads.score, leads.score_breakdown, leads.confidence, leads.verdict, leads.qualified_at, leads.first_seen_at, leads.last_seen_at, leads.updated_at {DUE}{NOT_SUPPRESSED} ORDER BY leads.first_seen_at ASC, leads.id ASC LIMIT $4"
         );
         let mut tx = self.tx.lock().await;
         let rows = sqlx::query_as::<_, LeadRow>(&query)
             .bind(profile_id.0)
             .bind(revision)
+            .bind(dossier_gate)
             .bind(i64::from(limit))
             .fetch_all(&mut ***tx)
             .await
@@ -106,6 +122,7 @@ impl<'tx> QualificationRepository for PgQualificationRepository<'tx> {
         &mut self,
         profile_id: ProfileId,
         revision: RevisionNumber,
+        dossier_gate: Option<DateTime<Utc>>,
     ) -> Result<u64, CoreError> {
         let revision = revision_number(revision)?;
         let query = format!("SELECT COUNT(*) {DUE}{NOT_SUPPRESSED}");
@@ -113,6 +130,7 @@ impl<'tx> QualificationRepository for PgQualificationRepository<'tx> {
         let count: i64 = sqlx::query_scalar(&query)
             .bind(profile_id.0)
             .bind(revision)
+            .bind(dossier_gate)
             .fetch_one(&mut ***tx)
             .await
             .map_err(map_sqlx_error)?;
@@ -295,9 +313,9 @@ impl<'tx> QualificationRepository for PgQualificationRepository<'tx> {
             r#"
             INSERT INTO lead_qualification_state (
                 lead_id, profile_revision, sources, completed_at,
-                scoring_version, opinion, evidence, verdict_reason
+                scoring_version, opinion, evidence, verdict_reason, dossier_at
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
             ON CONFLICT (lead_id) DO UPDATE SET
                 profile_revision = EXCLUDED.profile_revision,
                 sources          = EXCLUDED.sources,
@@ -306,6 +324,7 @@ impl<'tx> QualificationRepository for PgQualificationRepository<'tx> {
                 opinion          = EXCLUDED.opinion,
                 evidence         = EXCLUDED.evidence,
                 verdict_reason   = EXCLUDED.verdict_reason,
+                dossier_at       = EXCLUDED.dossier_at,
                 summarised_at    = NULL,
                 summary_attempts = 0,
                 summary_next_attempt_at = NULL,
@@ -320,6 +339,7 @@ impl<'tx> QualificationRepository for PgQualificationRepository<'tx> {
         .bind(completion.judgement.opinion)
         .bind(evidence_json(&completion.judgement.evidence)?)
         .bind(completion.judgement.cap.map(|cap| cap.as_str()))
+        .bind(completion.dossier_at)
         .execute(&mut ***tx)
         .await
         .map_err(map_sqlx_error)?;

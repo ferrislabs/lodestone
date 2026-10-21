@@ -13,9 +13,11 @@ use crate::{
     },
     domain::{
         aggregation::{
-            AggregatorOutput, EVIDENCE_RETRY, Facts, agent_source, build, check, instruction,
-            missing_results, render_agent, retry_message, warnings, with_problem,
+            AggregatorOutput, EVIDENCE_RETRY, Facts, agent_source, build, check,
+            instruction_with_dossier, missing_results, render_agent, retry_message, warnings,
+            with_problem,
         },
+        company::PAGE_PROMPT_CHARS,
         job::ports::Clock,
         lead::{
             Assessment, AssessmentId, Evidence, Lead, LeadStatus, QualityWarning, Signal,
@@ -33,6 +35,7 @@ use crate::{
             QualificationResult, ports::QualificationRepository, prompt::lead_document,
         },
         suppression::ports::SuppressionRepository,
+        values::Provenance,
     },
 };
 
@@ -81,16 +84,20 @@ fn agent_blocks(
 fn evidence_of(
     check: &crate::domain::prompt::EvidenceCheck<'_>,
     signals: &[Signal],
+    quotable: &[UntrustedDocument<'_>],
 ) -> Vec<Evidence> {
     check
         .verified
         .iter()
         .filter_map(|quote| {
             let index = usize::try_from(quote.document_index).ok()?;
-            let signal = signals.get(index)?;
+            let provenance = match signals.get(index) {
+                Some(signal) => signal.provenance.clone(),
+                None => Provenance::parse(quotable.get(index)?.source).ok()?,
+            };
             Some(Evidence {
                 quote: quote.quote.clone(),
-                provenance: signal.provenance.clone(),
+                provenance,
             })
         })
         .collect()
@@ -122,10 +129,14 @@ where
             warn!(lead_id = %lead.id, missing = missing.len(), "aggregation skipped, agent results are missing");
             return Ok(Outcome::Skipped);
         }
-        let (signals, facts) = usecase.signals_with_facts(lead).await?;
+        let (signals, facts, dossier) = usecase.signals_with_facts(lead).await?;
         if signals.is_empty() {
             return Ok(Outcome::Skipped);
         }
+        let dossier_documents = dossier
+            .as_ref()
+            .map(|dossier| dossier.documents(PAGE_PROMPT_CHARS))
+            .unwrap_or_default();
         let signal_contents: Vec<String> = signals.iter().map(render_signal).collect();
         let overview = lead_document(lead.domain.as_str(), &facts);
         let blocks = agent_blocks(definition, &results);
@@ -137,6 +148,10 @@ where
                 content,
             })
             .collect();
+        documents.extend(dossier_documents.iter().map(|document| UntrustedDocument {
+            source: &document.source,
+            content: &document.content,
+        }));
         documents.push(UntrustedDocument {
             source: "lead",
             content: &overview,
@@ -146,16 +161,17 @@ where
                 .iter()
                 .map(|(source, content)| UntrustedDocument { source, content }),
         );
-        let evidence_documents = &documents[..signals.len()];
+        let evidence_documents = &documents[..signals.len() + dossier_documents.len()];
         let schema =
             AggregatorOutput::schema().map_err(|error| CoreError::Internal(error.to_string()))?;
         let prompt = build(definition, &definition.aggregator, &schema);
-        let base = instruction(
+        let base = instruction_with_dossier(
             Facts {
                 confidence: lead.confidence,
                 verdict: lead.verdict,
             },
             signals.len(),
+            dossier_documents.len(),
         );
         let scope = CacheScope {
             profile_id: active.profile.id,
@@ -247,7 +263,7 @@ where
         if verified && checked.rejected > 0 {
             quality_warnings.push(QualityWarning::DroppedQuotes);
         }
-        let evidence = evidence_of(&checked, &signals);
+        let evidence = evidence_of(&checked, &signals, evidence_documents);
         let now = clock.now();
         let assessment = Assessment {
             id: AssessmentId(generate_uuid_v7()),

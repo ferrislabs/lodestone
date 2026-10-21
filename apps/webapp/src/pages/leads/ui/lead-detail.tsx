@@ -4,6 +4,7 @@ import { Button } from '#/components/ui/button'
 import { Skeleton } from '#/components/ui/skeleton'
 import type { LeadDetailData, LeadStatus } from '#/pages/leads/lib/types'
 import { AssessmentsList } from './assessments-list'
+import { CompanyCard } from './company-card'
 import { ContactsList } from './contacts-list'
 import { LeadFacts } from './lead-facts'
 import { LeadHeader } from './lead-header'
@@ -23,6 +24,9 @@ interface LeadDetailProps {
 	onRetrySummary: () => void
 	retryingSummary: boolean
 	retrySummaryError: string | null
+	onRefreshCompany: () => void
+	refreshingCompany: boolean
+	refreshCompanyError: string | null
 	changing: boolean
 	changeError: string | null
 }
@@ -38,6 +42,9 @@ export function LeadDetail({
 	onRetrySummary,
 	retryingSummary,
 	retrySummaryError,
+	onRefreshCompany,
+	refreshingCompany,
+	refreshCompanyError,
 	changing,
 	changeError,
 }: LeadDetailProps) {
@@ -69,6 +76,12 @@ export function LeadDetail({
 						onChangeStatus={onChangeStatus}
 						changing={changing}
 						changeError={changeError}
+					/>
+					<CompanyCard
+						company={detail.company ?? null}
+						refreshing={refreshingCompany}
+						refreshError={refreshCompanyError}
+						onRefresh={onRefreshCompany}
 					/>
 					{detail.facts ? <LeadFacts facts={detail.facts} /> : null}
 					<QualificationResults results={detail.qualification_results} />

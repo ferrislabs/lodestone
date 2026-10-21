@@ -4,7 +4,7 @@ use api::{
     fetchers::ct_fetch_settings,
     internal_router::internal_router,
     jobs::{Intervals, JobRouter, WiredSources, schedule_wired_sources},
-    listeners::{ContactStep, CtStep, HostStep, QualificationStep},
+    listeners::{CompanyStep, ContactStep, CtStep, HostStep, QualificationStep},
     logger::init_tracing_and_logging,
     router::router,
     webhook::WebhookSink,
@@ -20,6 +20,7 @@ use fetch::{FetchSettings, PoliteFetcher};
 use handlers::state;
 use lodestone_core::{
     RetryPolicy,
+    company::CompanyRunSettings,
     contacts::ContactRunSettings,
     infrastructure::{
         candidate_host::postgres::PgCandidateHosts,
@@ -36,6 +37,7 @@ use server::{get_addr, run_server, shutdown_signal};
 use sources::{
     ats::{AtsSettings, AtsSource},
     boamp::{BoampSettings, BoampSource},
+    company::{CompanyResearch, CompanySettings},
     contact_pages::{ContactPageSettings, PublicPageFinder},
     ct::{CtSettings, CtSource},
     decp::{DecpSettings, DecpSource},
@@ -50,6 +52,7 @@ use tokio::sync::watch;
 use tracing::{error, info};
 
 const DNS_BATCH_SIZE: u32 = 500;
+const COMPANY_BATCH_SIZE: u32 = 5;
 const PROBE_BATCH_SIZE: u32 = 200;
 const BOAMP_MAX_BODY_BYTES: usize = 16 * 1024 * 1024;
 const BOAMP_REQUESTS_PER_MINUTE: u32 = 30;
@@ -192,6 +195,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
             max_pages: args.contacts.page_paths.len(),
             paths: args.contacts.page_paths.clone(),
             max_rate_limit_wait: args.contacts.max_rate_limit_wait(),
+        },
+    );
+    let company_research = CompanyResearch::new(
+        Arc::clone(&fetcher),
+        CompanySettings {
+            entreprises_url: args.decp.entreprises_url.clone(),
+            max_pages: args.company.max_pages.get(),
+            max_rate_limit_wait: args.contacts.max_rate_limit_wait(),
+            origin: None,
         },
     );
     let security_txt =
@@ -346,6 +358,19 @@ async fn main() -> Result<(), Box<dyn Error>> {
         instance.clone(),
         listener_settings,
     );
+    let company_listener = Listener::new(
+        CompanyStep {
+            usecase: usecase.clone(),
+            builder: company_research,
+            settings: CompanyRunSettings {
+                batch_size: COMPANY_BATCH_SIZE,
+                refresh_interval: args.company.refresh_interval(),
+            },
+        },
+        pool.clone(),
+        instance.clone(),
+        listener_settings,
+    );
     let qualification_listener = Listener::new(
         QualificationStep {
             usecase,
@@ -383,6 +408,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         security_txt_listener.run(shutdown_rx.clone()),
         public_page_listener.run(shutdown_rx.clone()),
         role_guess_listener.run(shutdown_rx.clone()),
+        company_listener.run(shutdown_rx.clone()),
         qualification_listener.run(shutdown_rx),
     );
 

@@ -16,8 +16,8 @@ use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
 use crate::{
-    auth::AuthenticatedUser, errors::ApiError, profiles::ProfileRefDto, response::Response,
-    state::AppState,
+    auth::AuthenticatedUser, company::CompanyDto, errors::ApiError, profiles::ProfileRefDto,
+    response::Response, state::AppState,
 };
 
 const MAX_DOMAIN_FILTER_LENGTH: usize = 253;
@@ -588,8 +588,22 @@ pub struct LeadFactsDto {
     pub first_seen_at: String,
     #[schema(format = DateTime)]
     pub last_seen_at: String,
-    /// Deduced from the domain extension only; null for a generic extension.
+    /// Head office country when official data exists, else deduced from the domain extension; null for a generic extension without official data.
     pub probable_country: Option<CountryDto>,
+    /// Basis of the probable country: `head_office` (official register) or `tld` (domain extension).
+    pub country_basis: Option<String>,
+    /// Official register data of the company, null until a dossier with official data exists.
+    pub official: Option<OfficialFactsDto>,
+}
+
+#[derive(Debug, Serialize, PartialEq, ToSchema)]
+pub struct OfficialFactsDto {
+    pub siren: String,
+    pub legal_name: String,
+    pub naf_code: Option<String>,
+    pub naf_label: Option<String>,
+    pub headcount_range: Option<String>,
+    pub head_office_country: Option<String>,
 }
 
 fn count(value: usize) -> u32 {
@@ -626,6 +640,19 @@ impl From<&LeadFacts> for LeadFactsDto {
                 code: country.code.to_owned(),
                 name: country.name.to_owned(),
             }),
+            country_basis: facts.country_basis.map(|basis| basis.as_str().to_owned()),
+            official: facts
+                .company
+                .as_ref()
+                .and_then(|company| company.official.as_ref())
+                .map(|official| OfficialFactsDto {
+                    siren: official.siren.clone(),
+                    legal_name: official.legal_name.clone(),
+                    naf_code: official.naf_code.clone(),
+                    naf_label: official.naf_label.clone(),
+                    headcount_range: official.headcount_range.clone(),
+                    head_office_country: official.head_office_country.clone(),
+                }),
         }
     }
 }
@@ -642,6 +669,8 @@ pub struct LeadDetailDto {
     pub qualification_results: Vec<QualificationResultDto>,
     /// Present while the summary of the lead failed at least once since the agents last answered.
     pub summary_state: Option<SummaryStateDto>,
+    /// Company dossier of the lead domain; null until the company research listener has seen the domain.
+    pub company: Option<CompanyDto>,
 }
 
 fn ordered_results(
@@ -667,6 +696,7 @@ impl LeadDetailDto {
     pub fn new(detail: &LeadDetail, providers: &[LlmProviderRecord]) -> Self {
         Self {
             summary_state: detail.summary_state.as_ref().and_then(SummaryStateDto::new),
+            company: detail.company.as_ref().map(CompanyDto::from),
             qualification_results: ordered_results(detail, providers),
             lead: LeadDto::new(
                 &detail.lead,
@@ -858,7 +888,7 @@ pub struct ChangeLeadStatusRequest {
     pub status: LeadStatusDto,
 }
 
-fn lead_id(raw: &str) -> Result<LeadId, ApiError> {
+pub(crate) fn lead_id(raw: &str) -> Result<LeadId, ApiError> {
     raw.parse()
         .map_err(|_| invalid("lead_id", "must be a UUID"))
 }

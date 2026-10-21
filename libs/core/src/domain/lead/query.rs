@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use crate::domain::{
+    company::CompanyDossier,
     facts::LeadFacts,
     lead::{Assessment, ContactEmail, Lead, LeadId, LeadStatus, Signal},
     profile::{Profile, ProfileId, ProfileName, RevisionNumber, definition::QualificationAgent},
@@ -126,6 +127,7 @@ pub struct LeadDetail {
     pub qualification_agents: Vec<QualificationAgent>,
     pub summary_state: Option<SummaryState>,
     pub scoring: Option<LeadScoring>,
+    pub company: Option<CompanyDossier>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -16,12 +16,14 @@ pub trait QualificationRepository: Send {
         profile_id: ProfileId,
         revision: RevisionNumber,
         limit: u32,
+        dossier_gate: Option<DateTime<Utc>>,
     ) -> impl Future<Output = Result<Vec<Lead>, CoreError>> + Send;
 
     fn count_due(
         &mut self,
         profile_id: ProfileId,
         revision: RevisionNumber,
+        dossier_gate: Option<DateTime<Utc>>,
     ) -> impl Future<Output = Result<u64, CoreError>> + Send;
 
     fn due_summaries(

@@ -13,6 +13,7 @@ use crate::{
         },
     },
     domain::{
+        company::PAGE_PROMPT_CHARS,
         facts::signal_sentence,
         job::ports::Clock,
         lead::{Lead, LeadId, Signal},
@@ -395,10 +396,14 @@ where
         clock: &K,
     ) -> Result<LeadOutcome, CoreError> {
         let definition = active.revision.definition.definition();
-        let (signals, facts) = usecase.signals_with_facts(lead).await?;
+        let (signals, facts, dossier) = usecase.signals_with_facts(lead).await?;
         let overview = lead_document(lead.domain.as_str(), &facts);
         let contents: Vec<String> = signals.iter().map(render_signal).collect();
-        let mut documents = Vec::with_capacity(signals.len() + 1);
+        let dossier_documents = dossier
+            .as_ref()
+            .map(|dossier| dossier.documents(PAGE_PROMPT_CHARS))
+            .unwrap_or_default();
+        let mut documents = Vec::with_capacity(signals.len() + dossier_documents.len() + 1);
         documents.push(UntrustedDocument {
             source: "lead",
             content: &overview,
@@ -408,6 +413,10 @@ where
                 source: signal.provenance.as_str(),
                 content,
             }
+        }));
+        documents.extend(dossier_documents.iter().map(|document| UntrustedDocument {
+            source: &document.source,
+            content: &document.content,
         }));
         let subject = Subject {
             active,
@@ -462,6 +471,7 @@ where
                 &definition.evidence,
             ),
             scoring_version: SCORING_VERSION,
+            dossier_at: dossier.as_ref().and_then(|dossier| dossier.content_at),
             at,
         };
         usecase.store_evaluation(&results, &completion).await?;
@@ -520,13 +530,14 @@ impl LodestoneUseCase {
         let mut budget = RunBudget::new(settings.budget_cents);
         let mut providers = Providers::new();
         let mut remaining = settings.batch_size;
+        let gate = self.dossier_gate(clock.now());
         let rescoring = self.rescore_stale_leads(RESCORE_BATCH_SIZE).await?;
         report.rescored = rescoring.leads;
         'profiles: for active in &profiles {
             if remaining == 0 {
                 break;
             }
-            let leads = self.due_leads(active, remaining).await?;
+            let leads = self.due_leads(active, remaining, gate).await?;
             for lead in &leads {
                 let outcome = evaluator
                     .evaluate_lead(self, active, lead, &mut providers, &mut budget, clock)
@@ -546,29 +557,51 @@ impl LodestoneUseCase {
                 }
             }
         }
-        report.backlog = self.due_backlog(&profiles).await? + rescoring.backlog;
+        report.backlog = self.due_backlog(&profiles, gate).await? + rescoring.backlog;
         Ok(report)
     }
 
-    async fn due_backlog(&self, profiles: &[ActiveProfile]) -> Result<u64, CoreError> {
+    fn dossier_gate(&self, now: DateTime<Utc>) -> Option<DateTime<Utc>> {
+        if self.company_wait.is_zero() {
+            return None;
+        }
+        chrono::Duration::from_std(self.company_wait)
+            .ok()
+            .and_then(|wait| now.checked_sub_signed(wait))
+    }
+
+    async fn due_backlog(
+        &self,
+        profiles: &[ActiveProfile],
+        gate: Option<DateTime<Utc>>,
+    ) -> Result<u64, CoreError> {
         let mut backlog = 0;
         for active in profiles {
-            backlog += self.count_due_leads(active).await?;
+            backlog += self.count_due_leads(active, gate).await?;
         }
         Ok(backlog)
     }
 
     #[transactional(qualification)]
-    async fn due_leads(&self, active: &ActiveProfile, limit: u32) -> Result<Vec<Lead>, CoreError> {
+    async fn due_leads(
+        &self,
+        active: &ActiveProfile,
+        limit: u32,
+        gate: Option<DateTime<Utc>>,
+    ) -> Result<Vec<Lead>, CoreError> {
         let mut repo = qualification_repository;
-        repo.due_leads(active.profile.id, active.revision.number, limit)
+        repo.due_leads(active.profile.id, active.revision.number, limit, gate)
             .await
     }
 
     #[transactional(qualification)]
-    async fn count_due_leads(&self, active: &ActiveProfile) -> Result<u64, CoreError> {
+    async fn count_due_leads(
+        &self,
+        active: &ActiveProfile,
+        gate: Option<DateTime<Utc>>,
+    ) -> Result<u64, CoreError> {
         let mut repo = qualification_repository;
-        repo.count_due(active.profile.id, active.revision.number)
+        repo.count_due(active.profile.id, active.revision.number, gate)
             .await
     }
 

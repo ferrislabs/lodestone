@@ -4,6 +4,7 @@ use chrono::{DateTime, SecondsFormat, Utc};
 
 use crate::domain::{
     NormalizedDomain,
+    company::{CompanyDossier, DossierState},
     host::{CandidateHost, Hostname},
     lead::{Lead, Signal},
     values::SourceName,
@@ -24,6 +25,38 @@ pub struct HostFact {
     pub signals: usize,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CountryBasis {
+    HeadOffice,
+    Tld,
+}
+
+impl CountryBasis {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::HeadOffice => "head_office",
+            Self::Tld => "tld",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OfficialFacts {
+    pub siren: String,
+    pub legal_name: String,
+    pub naf_code: Option<String>,
+    pub naf_label: Option<String>,
+    pub headcount_range: Option<String>,
+    pub head_office_country: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompanyFacts {
+    pub state: DossierState,
+    pub siren_found: bool,
+    pub official: Option<OfficialFacts>,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct LeadFacts {
     pub hosts: Vec<HostFact>,
@@ -33,6 +66,8 @@ pub struct LeadFacts {
     pub first_seen_at: DateTime<Utc>,
     pub last_seen_at: DateTime<Utc>,
     pub probable_country: Option<Country>,
+    pub country_basis: Option<CountryBasis>,
+    pub company: Option<CompanyFacts>,
 }
 
 fn belongs_to(host: &Hostname, domain: &NormalizedDomain) -> bool {
@@ -44,6 +79,41 @@ fn signal_host(signal: &Signal, domain: &NormalizedDomain) -> Option<Hostname> {
         .iter()
         .filter_map(|raw| Hostname::parse(raw).ok())
         .find(|host| belongs_to(host, domain))
+}
+
+impl CompanyFacts {
+    fn render(&self) -> String {
+        match (&self.official, self.state) {
+            (Some(official), _) => {
+                let mut parts = vec![format!("legal name {}", official.legal_name)];
+                match (&official.naf_code, &official.naf_label) {
+                    (Some(code), Some(label)) => parts.push(format!("activity NAF {code} ({label})")),
+                    (Some(code), None) => parts.push(format!("activity NAF {code}")),
+                    _ => {}
+                }
+                if let Some(range) = &official.headcount_range {
+                    parts.push(format!("headcount range {range}"));
+                }
+                if let Some(country) = &official.head_office_country {
+                    parts.push(format!("head office country {country}"));
+                }
+                format!(
+                    "- official data (French company register, SIREN {}): {}",
+                    official.siren,
+                    parts.join("; ")
+                )
+            }
+            (None, DossierState::Unreachable) => {
+                "- company dossier: unreachable, the company site could not be read".to_owned()
+            }
+            (None, _) if self.siren_found => {
+                "- company dossier: partial, the official lookup of the SIREN found on the site failed".to_owned()
+            }
+            (None, _) => {
+                "- company dossier: partial, SIREN not found on the company site (SIREN introuvable), no official data".to_owned()
+            }
+        }
+    }
 }
 
 impl LeadFacts {
@@ -68,6 +138,7 @@ impl LeadFacts {
         let mut sources: Vec<SourceName> = signals.iter().map(|signal| signal.source).collect();
         sources.sort_by_key(|source| source.as_str());
         sources.dedup();
+        let probable_country = country::country_of(&lead.domain);
         Self {
             hosts: counts
                 .into_iter()
@@ -82,8 +153,39 @@ impl LeadFacts {
             sources,
             first_seen_at: lead.first_seen_at,
             last_seen_at: lead.last_seen_at,
-            probable_country: country::country_of(&lead.domain),
+            country_basis: probable_country.map(|_| CountryBasis::Tld),
+            probable_country,
+            company: None,
         }
+    }
+
+    pub fn with_dossier(mut self, dossier: Option<&CompanyDossier>) -> Self {
+        let Some(dossier) = dossier.filter(|dossier| dossier.state != DossierState::Pending) else {
+            return self;
+        };
+        let official = dossier.official.as_ref().map(|official| OfficialFacts {
+            siren: official.siren.to_string(),
+            legal_name: official.legal_name.clone(),
+            naf_code: official.naf_code.clone(),
+            naf_label: official.naf_label.clone(),
+            headcount_range: official.headcount_range.clone(),
+            head_office_country: official.head_office_country.clone(),
+        });
+        let head_office = dossier
+            .official
+            .as_ref()
+            .and_then(|official| official.head_office_country_code.as_deref())
+            .and_then(Country::from_code);
+        if let Some(country) = head_office {
+            self.probable_country = Some(country);
+            self.country_basis = Some(CountryBasis::HeadOffice);
+        }
+        self.company = Some(CompanyFacts {
+            state: dossier.state,
+            siren_found: dossier.siren.is_some(),
+            official,
+        });
+        self
     }
 
     pub fn distinct_hosts(&self) -> usize {
@@ -164,12 +266,21 @@ impl LeadFacts {
             "- last seen: {}",
             self.last_seen_at.to_rfc3339_opts(SecondsFormat::Secs, true)
         ));
-        match self.probable_country {
-            Some(country) => lines.push(format!(
+        match (self.probable_country, self.country_basis) {
+            (Some(country), Some(CountryBasis::HeadOffice)) => lines.push(format!(
+                "- probable country, from the head office in the official company register: {} ({})",
+                country.name, country.code
+            )),
+            (Some(country), _) => lines.push(format!(
                 "- probable country, from the domain extension only: {} ({})",
                 country.name, country.code
             )),
-            None => lines.push("- probable country: unknown (generic domain extension)".to_owned()),
+            (None, _) => {
+                lines.push("- probable country: unknown (generic domain extension)".to_owned());
+            }
+        }
+        if let Some(company) = &self.company {
+            lines.push(company.render());
         }
         lines.join("\n")
     }
@@ -391,6 +502,120 @@ mod tests {
         assert!(
             text.contains("- probable country, from the domain extension only: Switzerland (CH)")
         );
+    }
+
+    fn dossier(
+        state: DossierState,
+        official: Option<crate::domain::company::OfficialData>,
+        siren_found: bool,
+    ) -> CompanyDossier {
+        let mut dossier = CompanyDossier::pending(
+            NormalizedDomain::from_host("acme.com").unwrap(),
+            at(1_800_000_000),
+        );
+        dossier.state = state;
+        dossier.siren =
+            siren_found.then(|| crate::domain::company::Siren::parse("552081317").unwrap());
+        dossier.official = official;
+        dossier
+    }
+
+    fn official(code: Option<&str>) -> crate::domain::company::OfficialData {
+        crate::domain::company::OfficialData {
+            siren: crate::domain::company::Siren::parse("552081317").unwrap(),
+            legal_name: "ACME SAS".to_owned(),
+            naf_code: Some("62.01Z".to_owned()),
+            naf_label: Some("Information et communication".to_owned()),
+            headcount_code: Some("12".to_owned()),
+            headcount_range: Some("20 à 49 salariés".to_owned()),
+            head_office_city: Some("PARIS".to_owned()),
+            head_office_postcode: Some("75008".to_owned()),
+            head_office_country: Some("France".to_owned()),
+            head_office_country_code: code.map(str::to_owned),
+            created_on: None,
+        }
+    }
+
+    #[test]
+    fn the_head_office_country_wins_over_the_extension_and_names_its_basis() {
+        let plain = LeadFacts::compute(&lead("acme.com"), &[], &[]);
+        assert_eq!(plain.probable_country, None);
+        assert_eq!(plain.country_basis, None);
+        let facts = plain.with_dossier(Some(&dossier(
+            DossierState::Complete,
+            Some(official(Some("FR"))),
+            true,
+        )));
+        assert_eq!(facts.probable_country.unwrap().code, "FR");
+        assert_eq!(facts.country_basis, Some(CountryBasis::HeadOffice));
+        let official = facts.company.as_ref().unwrap().official.as_ref().unwrap();
+        assert_eq!(official.legal_name, "ACME SAS");
+        assert_eq!(official.naf_code.as_deref(), Some("62.01Z"));
+        assert_eq!(
+            official.headcount_range.as_deref(),
+            Some("20 à 49 salariés")
+        );
+        assert_eq!(official.head_office_country.as_deref(), Some("France"));
+        let text = facts.render();
+        assert!(text.contains(
+            "- probable country, from the head office in the official company register: France (FR)"
+        ));
+        assert!(!text.contains("from the domain extension only"));
+        assert!(text.contains(
+            "- official data (French company register, SIREN 552081317): legal name ACME SAS; activity NAF 62.01Z (Information et communication); headcount range 20 à 49 salariés; head office country France"
+        ));
+    }
+
+    #[test]
+    fn the_extension_stays_the_basis_when_the_head_office_country_is_unknown() {
+        let facts = LeadFacts::compute(&lead("acme.de"), &[], &[]).with_dossier(Some(&dossier(
+            DossierState::Complete,
+            Some(official(None)),
+            true,
+        )));
+        assert_eq!(facts.probable_country.unwrap().code, "DE");
+        assert_eq!(facts.country_basis, Some(CountryBasis::Tld));
+    }
+
+    #[test]
+    fn a_dossier_without_official_data_says_why() {
+        let base = LeadFacts::compute(&lead("acme.fr"), &[], &[]);
+        let not_found =
+            base.clone()
+                .with_dossier(Some(&dossier(DossierState::Partial, None, false)));
+        assert!(
+            not_found
+                .render()
+                .contains("SIREN not found on the company site (SIREN introuvable)")
+        );
+        assert_eq!(not_found.country_basis, Some(CountryBasis::Tld));
+        let failed = base
+            .clone()
+            .with_dossier(Some(&dossier(DossierState::Partial, None, true)));
+        assert!(
+            failed
+                .render()
+                .contains("the official lookup of the SIREN found on the site failed")
+        );
+        let unreachable =
+            base.clone()
+                .with_dossier(Some(&dossier(DossierState::Unreachable, None, false)));
+        assert!(
+            unreachable
+                .render()
+                .contains("unreachable, the company site could not be read")
+        );
+    }
+
+    #[test]
+    fn a_pending_or_missing_dossier_adds_nothing() {
+        let base = LeadFacts::compute(&lead("acme.fr"), &[], &[]);
+        let pending = base
+            .clone()
+            .with_dossier(Some(&dossier(DossierState::Pending, None, false)));
+        assert_eq!(pending, base);
+        assert_eq!(base.clone().with_dossier(None), base);
+        assert!(!base.render().contains("company dossier"));
     }
 
     #[test]

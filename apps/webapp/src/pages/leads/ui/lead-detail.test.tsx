@@ -162,6 +162,9 @@ function renderDetail(
 			onRetrySummary={() => {}}
 			retryingSummary={false}
 			retrySummaryError={null}
+			onRefreshCompany={() => {}}
+			refreshingCompany={false}
+			refreshCompanyError={null}
 			changing={false}
 			changeError={null}
 			{...overrides}
@@ -632,6 +635,142 @@ describe('LeadDetail', () => {
 	it('shows the server message when a transition is refused', () => {
 		renderDetail({ changeError: 'transition not allowed' })
 		expect(screen.getByRole('alert').textContent).toBe('transition not allowed')
+	})
+
+	const completeCompany: NonNullable<LeadDetailData['company']> = {
+		state: 'complete',
+		siren: '552081317',
+		official: {
+			siren: '552081317',
+			legal_name: 'ELECTRICITE DE FRANCE',
+			naf_code: '35.11Z',
+			naf_label: "Production et distribution d'électricité",
+			headcount_range: '10 000 salariés et plus',
+			head_office_city: 'PARIS',
+			head_office_postcode: '75008',
+			head_office_country: 'France',
+			created_on: '1955-01-01',
+			annuaire_url:
+				'https://annuaire-entreprises.data.gouv.fr/entreprise/552081317',
+		},
+		pages: [
+			{ url: 'https://acme.test/' },
+			{ url: 'https://acme.test/mentions-legales' },
+		],
+		built_at: '2026-10-06T10:00:00Z',
+		next_attempt_at: '2027-01-04T10:00:00Z',
+		error: null,
+	}
+
+	it('shows the company block with its official data, pages and state', () => {
+		const { container } = renderDetail({
+			detail: { ...detail, company: completeCompany },
+		})
+		const card = container.querySelector('[data-section="company"]')
+		expect(card?.textContent).toContain('Fiche entreprise')
+		expect(
+			card
+				?.querySelector('[data-company-state]')
+				?.getAttribute('data-company-state'),
+		).toBe('complete')
+		const text = card?.textContent ?? ''
+		expect(text).toContain('Raison socialeELECTRICITE DE FRANCE')
+		expect(text).toContain('SIREN552 081 317')
+		expect(text).toContain(
+			"Activité (NAF)35.11Z · Production et distribution d'électricité",
+		)
+		expect(text).toContain('Effectif10 000 salariés et plus')
+		expect(text).toContain('Siège75008 PARIS, France')
+		expect(text).toContain('Création1 janvier 1955')
+		const siren = card?.querySelector('dl a')
+		expect(siren?.getAttribute('href')).toBe(
+			'https://annuaire-entreprises.data.gouv.fr/entreprise/552081317',
+		)
+		const pages = card?.querySelectorAll('[data-company-pages] a') ?? []
+		expect([...pages].map((link) => link.getAttribute('href'))).toEqual([
+			'https://acme.test/',
+			'https://acme.test/mentions-legales',
+		])
+		expect(text).toContain('Dernière mise à jour')
+	})
+
+	it('shows an explicit notice when the SIREN was not found', () => {
+		const { container } = renderDetail({
+			detail: {
+				...detail,
+				company: {
+					...completeCompany,
+					state: 'partial',
+					siren: null,
+					official: null,
+				},
+			},
+		})
+		const card = container.querySelector('[data-section="company"]')
+		expect(card?.querySelector('[data-company-official]')).toBeNull()
+		expect(card?.querySelector('[data-company-notice]')?.textContent).toContain(
+			'SIREN introuvable',
+		)
+		expect(card?.textContent).toContain('Partielle')
+	})
+
+	it('shows a pending block without data when the lead has no dossier yet', () => {
+		const { container } = renderDetail({ detail: { ...detail, company: null } })
+		const card = container.querySelector('[data-section="company"]')
+		expect(
+			card
+				?.querySelector('[data-company-state]')
+				?.getAttribute('data-company-state'),
+		).toBe('pending')
+		expect(card?.textContent).toContain('Jamais mise à jour')
+		expect(screen.getByRole('button', { name: 'Enrichir' })).toBeTruthy()
+	})
+
+	it('asks for a refresh with the Enrichir button and disables it while pending', () => {
+		const onRefreshCompany = vi.fn()
+		const first = renderDetail({
+			detail: { ...detail, company: completeCompany },
+			onRefreshCompany,
+		})
+		fireEvent.click(screen.getByRole('button', { name: 'Enrichir' }))
+		expect(onRefreshCompany).toHaveBeenCalledTimes(1)
+		first.unmount()
+
+		renderDetail({
+			detail: { ...detail, company: completeCompany },
+			refreshingCompany: true,
+		})
+		const busy = screen.getByRole('button', { name: 'Enrichissement…' })
+		expect((busy as HTMLButtonElement).disabled).toBe(true)
+		cleanup()
+
+		renderDetail({
+			detail: { ...detail, company: { ...completeCompany, state: 'pending' } },
+		})
+		expect(
+			(
+				screen.getByRole('button', {
+					name: 'Enrichissement…',
+				}) as HTMLButtonElement
+			).disabled,
+		).toBe(true)
+	})
+
+	it('shows the refresh error', () => {
+		renderDetail({ refreshCompanyError: 'refus du serveur' })
+		expect(screen.getByText('refus du serveur')).toBeTruthy()
+	})
+
+	it('names the basis of the probable country', () => {
+		const { container } = renderDetail({
+			detail: {
+				...detail,
+				facts: { ...detail.facts, country_basis: 'head_office' },
+			},
+		})
+		expect(
+			container.querySelector('[data-section="facts"]')?.textContent,
+		).toContain('Pays probableFrance (siège)')
 	})
 
 	it('shows the error state', () => {

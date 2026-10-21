@@ -8,6 +8,7 @@ use sqlx::postgres::PgPoolOptions;
 
 use crate::{domain::output::WebhookPolicy, infrastructure::postgres::error::map_sqlx_error};
 
+pub mod company;
 pub mod contacts;
 pub mod drafts;
 pub mod evaluation;
@@ -36,6 +37,7 @@ pub struct LodestoneUseCase {
     pub(crate) pool: PgPool,
     pub(crate) webhooks: Option<WebhookPolicy>,
     pub(crate) listener_stale_after: Duration,
+    pub(crate) company_wait: Duration,
 }
 
 impl LodestoneUseCase {
@@ -44,7 +46,13 @@ impl LodestoneUseCase {
             pool,
             webhooks: None,
             listener_stale_after: crate::domain::listener::STALE_FLOOR,
+            company_wait: Duration::ZERO,
         }
+    }
+
+    pub fn with_company_wait(mut self, wait: Duration) -> Self {
+        self.company_wait = wait;
+        self
     }
 
     pub fn with_listener_stale_after(mut self, stale_after: Duration) -> Self {

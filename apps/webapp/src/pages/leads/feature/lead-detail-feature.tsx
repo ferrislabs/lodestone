@@ -5,16 +5,22 @@ import { errorMessage, lodestoneApi } from '#/api/lodestone'
 import { nextStatuses } from '#/pages/leads/lib/transitions'
 import { LeadDetail } from '#/pages/leads/ui/lead-detail'
 
+const COMPANY_POLL_MS = 4_000
+
 export function LeadDetailFeature() {
 	const { leadId } = useParams({ from: '/_app/leads/$leadId' })
 	const navigate = useNavigate()
 	const queryClient = useQueryClient()
 
-	const detailQuery = useQuery(
-		lodestoneApi().get('/api/v1/leads/{lead_id}', {
+	const detailQuery = useQuery({
+		...lodestoneApi().get('/api/v1/leads/{lead_id}', {
 			path: { lead_id: leadId },
 		}).queryOptions,
-	)
+		refetchInterval: (query) =>
+			query.state.data?.data.company?.state === 'pending'
+				? COMPANY_POLL_MS
+				: false,
+	})
 
 	const changeStatus = useMutation({
 		...lodestoneApi().mutation('patch', '/api/v1/leads/{lead_id}/status')
@@ -37,6 +43,17 @@ export function LeadDetailFeature() {
 	const retrySummary = useMutation({
 		...lodestoneApi().mutation('post', '/api/v1/leads/{lead_id}/summary/retry')
 			.mutationOptions,
+		onSuccess: () =>
+			queryClient.invalidateQueries({
+				queryKey: [{ _id: '/api/v1/leads/{lead_id}' }],
+			}),
+	})
+
+	const refreshCompany = useMutation({
+		...lodestoneApi().mutation(
+			'post',
+			'/api/v1/leads/{lead_id}/company/refresh',
+		).mutationOptions,
 		onSuccess: () =>
 			queryClient.invalidateQueries({
 				queryKey: [{ _id: '/api/v1/leads/{lead_id}' }],
@@ -81,6 +98,13 @@ export function LeadDetailFeature() {
 			retryingSummary={retrySummary.isPending}
 			retrySummaryError={
 				retrySummary.isError ? errorMessage(retrySummary.error) : null
+			}
+			onRefreshCompany={() =>
+				refreshCompany.mutate({ path: { lead_id: leadId } })
+			}
+			refreshingCompany={refreshCompany.isPending}
+			refreshCompanyError={
+				refreshCompany.isError ? errorMessage(refreshCompany.error) : null
 			}
 			changing={changeStatus.isPending}
 			changeError={

@@ -16,3 +16,5 @@ export type Verdict = Schemas.VerdictDto
 export type SummaryState = Schemas.SummaryStateDto
 export type QualificationResult = Schemas.QualificationResultDto
 export type QualificationAnswer = Schemas.QualificationAnswerDto
+export type Company = NonNullable<LeadDetailData['company']>
+export type CompanyOfficial = NonNullable<Company['official']>

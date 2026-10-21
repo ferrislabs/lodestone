@@ -229,7 +229,7 @@ fn qualification_agent(profile: &ValidatedProfile, id: &str) -> Vec<(String, f64
 }
 
 #[test]
-fn iam_example_has_six_qualification_agents() {
+fn iam_example_has_seven_qualification_agents() {
     let profile = parse(IAM);
     let definition = profile.definition();
     let names: Vec<_> = definition
@@ -249,6 +249,7 @@ fn iam_example_has_six_qualification_agents() {
             ),
             ("marche", "Marché"),
             ("opportunite", "Opportunité"),
+            ("recherche-entreprise", "Recherche entreprise"),
         ]
     );
     assert!(

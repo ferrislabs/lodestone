@@ -12,6 +12,8 @@ const CONTEXT_TAG: &str = "market_context";
 
 pub(crate) const FACTS_NOTE: &str = "The lead document holds facts computed by the system from stored data: the hosts carrying signals with their environment, the subdomains seen, the signals and their sources, the dates and the probable country from the domain extension. They are reliable. Use them to weigh the signals: a signal found only on development, staging, test or demo hosts says little about the company's production stack, and a single signal from a single source is thin evidence.";
 
+pub(crate) const DOSSIER_NOTE: &str = "When present, the documents that start with \"Company dossier\" hold the company dossier the system built without any model: official data from the French company register (legal name, activity, headcount range, head office, creation date) and the text of pages of the company's own site (home, about, legal notice). Official data is reliable; the page text is what the company says about itself. Use them to judge what the company does, its size and what it has at stake. When the dossier is missing, or says the SIREN was not found, treat these points as unknown and never guess them.";
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentPrompt {
     pub system: String,
@@ -70,7 +72,7 @@ pub fn build(
     schema: &Value,
 ) -> AgentPrompt {
     let system = format!(
-        "{}\n\n{}\n\n{}\n\n{FACTS_NOTE}\n\n{}",
+        "{}\n\n{}\n\n{}\n\n{FACTS_NOTE}\n\n{DOSSIER_NOTE}\n\n{}",
         agent.system_prompt.trim(),
         identity_context(definition),
         language_line(definition),
@@ -210,6 +212,14 @@ mod tests {
     }
 
     #[test]
+    fn the_system_part_documents_the_company_dossier() {
+        let (_, prompt) = built("fr");
+        assert!(prompt.system.contains(DOSSIER_NOTE));
+        assert!(prompt.system.contains("Company dossier"));
+        assert!(prompt.system.contains("SIREN was not found"));
+    }
+
+    #[test]
     fn the_lead_document_names_the_domain_and_holds_the_facts() {
         let at = DateTime::from_timestamp(1_800_000_000, 0).unwrap();
         let facts = LeadFacts {
@@ -224,6 +234,8 @@ mod tests {
             first_seen_at: at,
             last_seen_at: at,
             probable_country: None,
+            country_basis: None,
+            company: None,
         };
         let document = lead_document("acme.com", &facts);
         assert!(document.starts_with("lead: acme.com\nFacts computed by the system"));
@@ -247,6 +259,8 @@ mod tests {
             first_seen_at: at,
             last_seen_at: at,
             probable_country: None,
+            country_basis: None,
+            company: None,
         };
         let before = lead_document("acme.com", &facts);
         facts.signal_count = 2;
