@@ -99,12 +99,18 @@ describe('leads search params', () => {
 		expect(search.verdict).toEqual(['fiable'])
 	})
 
-	it('hides discarded leads by default and sorts by confidence', () => {
-		expect(DEFAULT_SORT).toBe('confidence_desc')
+	it('hides discarded leads by default and sorts by relevance', () => {
+		expect(DEFAULT_SORT).toBe('relevance_desc')
 		expect(queryFromSearch({})).toEqual({
 			verdict: 'fiable,a_verifier,en_attente',
-			sort: 'confidence_desc',
+			sort: 'relevance_desc',
 		})
+	})
+
+	it('still accepts the confidence sort', () => {
+		expect(queryFromSearch({ sort: 'confidence_desc' }).sort).toBe(
+			'confidence_desc',
+		)
 	})
 
 	it('sends the chosen verdicts in a stable order with the min confidence', () => {

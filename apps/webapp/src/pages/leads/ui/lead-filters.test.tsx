@@ -45,6 +45,22 @@ describe('LeadFiltersForm grouping toggle', () => {
 })
 
 describe('LeadFiltersForm sort', () => {
+	it('offers the relevance first and selects it by default', () => {
+		renderForm(filtersFromSearch({}))
+		const select = screen.getByLabelText('Tri') as HTMLSelectElement
+		expect(select.options[0]?.value).toBe('relevance_desc')
+		expect(select.options[0]?.textContent).toBe(
+			'Pertinence (probabilité « fiable »)',
+		)
+		expect(select.value).toBe('relevance_desc')
+	})
+
+	it('keeps the confidence sort available', () => {
+		renderForm(filtersFromSearch({ sort: 'confidence_desc' }))
+		const select = screen.getByLabelText('Tri') as HTMLSelectElement
+		expect(select.value).toBe('confidence_desc')
+	})
+
 	it('sorts by the score of the scoring agents and keeps the signal score apart', () => {
 		renderForm(filtersFromSearch({}))
 		const select = screen.getByLabelText('Tri') as HTMLSelectElement

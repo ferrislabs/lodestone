@@ -853,17 +853,18 @@ async fn judged_fixture(pool: &PgPool) -> (Seed, String) {
     let seed = Seed { pool: pool.clone() };
     let profile = seed.profile("keycloak-ops").await;
     for (domain, score, judgement) in [
-        ("sure.com", 5.0, Some((92.5, "fiable"))),
-        ("maybe.com", 50.0, Some((55.0, "a_verifier"))),
-        ("out.com", 90.0, Some((8.0, "ecarte"))),
+        ("sure.com", 5.0, Some((92.5, "fiable", 92.5))),
+        ("maybe.com", 50.0, Some((55.0, "a_verifier", 30.0))),
+        ("out.com", 90.0, Some((8.0, "ecarte", 4.0))),
         ("waiting.com", 70.0, None),
     ] {
         let id = seed.lead(&profile, domain, "new", score, 1).await;
-        if let Some((confidence, verdict)) = judgement {
-            sqlx::query("UPDATE leads SET confidence = $2, verdict = $3 WHERE id = $1::uuid")
+        if let Some((confidence, verdict, reliable)) = judgement {
+            sqlx::query("UPDATE leads SET confidence = $2, verdict = $3, reliable_probability = $4 WHERE id = $1::uuid")
                 .bind(&id)
                 .bind(confidence)
                 .bind(verdict)
+                .bind(reliable)
                 .execute(pool)
                 .await
                 .unwrap();
@@ -873,7 +874,7 @@ async fn judged_fixture(pool: &PgPool) -> (Seed, String) {
 }
 
 #[sqlx::test(migrations = "../../migrations")]
-async fn leads_are_sorted_by_confidence_by_default_pending_ones_last(pool: PgPool) {
+async fn leads_are_sorted_by_relevance_by_default_pending_ones_last(pool: PgPool) {
     let (_seed, profile) = judged_fixture(&pool).await;
     let api = Api::new(pool).await;
     let base = format!("/api/v1/profiles/{profile}/leads");
@@ -881,6 +882,16 @@ async fn leads_are_sorted_by_confidence_by_default_pending_ones_last(pool: PgPoo
     let (_, default) = api.get(&base).await;
     assert_eq!(
         domains(&default),
+        ["sure.com", "maybe.com", "out.com", "waiting.com"]
+    );
+
+    let (status, explicit) = api.get(&format!("{base}?sort=relevance_desc")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(explicit, default);
+
+    let (_, descending) = api.get(&format!("{base}?sort=confidence_desc")).await;
+    assert_eq!(
+        domains(&descending),
         ["sure.com", "maybe.com", "out.com", "waiting.com"]
     );
 
@@ -894,6 +905,73 @@ async fn leads_are_sorted_by_confidence_by_default_pending_ones_last(pool: PgPoo
     assert_eq!(
         domains(&by_score),
         ["out.com", "waiting.com", "maybe.com", "sure.com"]
+    );
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_default_order_ranks_the_probability_of_being_reliable_not_the_confidence(
+    pool: PgPool,
+) {
+    let seed = Seed { pool: pool.clone() };
+    let profile = seed.profile("keycloak-ops").await;
+    for (domain, score, confidence, verdict, reliable) in [
+        ("doubtful.com", 90.0, 90.0, "a_verifier", 5.0),
+        ("probable.com", 10.0, 80.0, "fiable", 80.0),
+        ("excluded.com", 99.0, 100.0, "ecarte", 0.0),
+    ] {
+        let id = seed.lead(&profile, domain, "new", score, 1).await;
+        sqlx::query("UPDATE leads SET confidence = $2, verdict = $3, reliable_probability = $4 WHERE id = $1::uuid")
+            .bind(&id)
+            .bind(confidence)
+            .bind(verdict)
+            .bind(reliable)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+    seed.lead(&profile, "waiting.com", "new", 70.0, 1).await;
+    let api = Api::new(pool).await;
+    let base = format!("/api/v1/profiles/{profile}/leads");
+
+    let (_, default) = api.get(&base).await;
+    let (_, relevance) = api.get(&format!("{base}?sort=relevance_desc")).await;
+    let (_, confidence) = api.get(&format!("{base}?sort=confidence_desc")).await;
+
+    assert_eq!(
+        domains(&default),
+        [
+            "probable.com",
+            "doubtful.com",
+            "excluded.com",
+            "waiting.com"
+        ]
+    );
+    assert_eq!(relevance, default);
+    assert_eq!(
+        domains(&confidence),
+        [
+            "excluded.com",
+            "doubtful.com",
+            "probable.com",
+            "waiting.com"
+        ]
+    );
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn an_unknown_sort_lists_the_accepted_ones_starting_with_the_relevance(pool: PgPool) {
+    let (_seed, profile) = listing_fixture(&pool).await;
+    let api = Api::new(pool).await;
+
+    let (status, body) = api
+        .get(&format!("/api/v1/profiles/{profile}/leads?sort=random"))
+        .await;
+
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let message = body["message"].as_str().expect("message");
+    assert!(
+        message.contains("must be one of relevance_desc, confidence_desc"),
+        "{message}"
     );
 }
 
@@ -1909,11 +1987,12 @@ async fn link_company(pool: &PgPool, domain: &str, siren: &str, legal_name: &str
     .expect("dossier");
 }
 
-async fn judge(pool: &PgPool, lead: &str, confidence: f64, verdict: &str) {
-    sqlx::query("UPDATE leads SET confidence = $2, verdict = $3 WHERE id = $1::uuid")
+async fn judge(pool: &PgPool, lead: &str, confidence: f64, verdict: &str, reliable: f64) {
+    sqlx::query("UPDATE leads SET confidence = $2, verdict = $3, reliable_probability = $4 WHERE id = $1::uuid")
         .bind(lead)
         .bind(confidence)
         .bind(verdict)
+        .bind(reliable)
         .execute(pool)
         .await
         .expect("judgement");
@@ -1938,9 +2017,9 @@ async fn group_fixture(pool: &PgPool) -> Group {
     seed.lead(&profile, "solo.io", "new", 30.0, 1).await;
     link_company(pool, "acme.com", "552081317", "ACME SAS").await;
     link_company(pool, "acme.fr", "552081317", "ACME SAS").await;
-    judge(pool, &first, 40.0, "a_verifier").await;
-    judge(pool, &second, 85.0, "fiable").await;
-    judge(pool, &elsewhere, 20.0, "ecarte").await;
+    judge(pool, &first, 40.0, "a_verifier", 20.0).await;
+    judge(pool, &second, 85.0, "fiable", 85.0).await;
+    judge(pool, &elsewhere, 20.0, "ecarte", 10.0).await;
     Group {
         seed,
         profile,
@@ -2042,7 +2121,7 @@ async fn the_list_groups_siblings_of_a_company_when_asked(pool: PgPool) {
 
     let (status, body) = api
         .get(&format!(
-            "/api/v1/profiles/{}/leads?group_by=company&sort=confidence_desc",
+            "/api/v1/profiles/{}/leads?group_by=company",
             group.profile
         ))
         .await;

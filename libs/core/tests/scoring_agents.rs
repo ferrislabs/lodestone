@@ -29,7 +29,7 @@ use lodestone_core::{
     timeline_kind,
 };
 use serde_json::{Value, json};
-use sqlx::{PgPool, query};
+use sqlx::{PgPool, query, query_scalar};
 use support::{at, domain};
 use tokio::time::sleep;
 use uuid::Uuid;
@@ -599,9 +599,16 @@ fn near(left: f64, right: f64) -> bool {
     (left - right).abs() < 1e-6
 }
 
+async fn reliable_probability(pool: &PgPool) -> Option<f64> {
+    query_scalar("SELECT reliable_probability FROM leads")
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
 #[sqlx::test(migrations = "../../migrations")]
 async fn a_lead_flows_through_qualification_scoring_and_aggregation_in_that_order(pool: PgPool) {
-    let harness = Harness::new(pool).await;
+    let harness = Harness::new(pool.clone()).await;
     let profile = harness
         .profile(
             vec![qualification_agent("fit")],
@@ -620,6 +627,7 @@ async fn a_lead_flows_through_qualification_scoring_and_aggregation_in_that_orde
     assert_eq!(lead.verdict, Some(Verdict::Reliable));
     assert_eq!(lead.llm_score, Some(85));
     assert_eq!(lead.confidence, Some(80.0));
+    assert_eq!(reliable_probability(&pool).await, Some(80.0));
     let detail = harness.detail(profile, "acme.com").await;
     assert_eq!(detail.assessments.len(), 1);
     let scoring = detail.scoring.unwrap();
@@ -756,7 +764,7 @@ async fn scoring_results_are_upserted_once_per_lead_revision_and_agent(pool: PgP
 
 #[sqlx::test(migrations = "../../migrations")]
 async fn the_lead_score_and_verdict_are_the_weighted_means_of_the_agents(pool: PgPool) {
-    let harness = Harness::new(pool).await;
+    let harness = Harness::new(pool.clone()).await;
     let heavy = harness.provider("model-heavy").await;
     let light = harness.provider("model-light").await;
     harness.script(
@@ -790,6 +798,7 @@ async fn the_lead_score_and_verdict_are_the_weighted_means_of_the_agents(pool: P
     assert_eq!(lead.llm_score, Some(65));
     assert_eq!(lead.verdict, Some(Verdict::Reliable));
     assert_eq!(lead.confidence, Some(55.0));
+    assert_eq!(reliable_probability(&pool).await, Some(55.0));
     let scoring = harness.detail(profile, "acme.com").await.scoring.unwrap();
     let probabilities = scoring.probabilities.unwrap();
     assert!(near(probabilities.reliable, 0.55));
@@ -1044,7 +1053,7 @@ fn excluding_agent() -> Value {
 
 #[sqlx::test(migrations = "../../migrations")]
 async fn a_qualification_exclusion_forces_discarded_whatever_the_scoring_agents_say(pool: PgPool) {
-    let harness = Harness::new(pool).await;
+    let harness = Harness::new(pool.clone()).await;
     let profile = harness
         .profile(
             vec![excluding_agent()],
@@ -1059,6 +1068,7 @@ async fn a_qualification_exclusion_forces_discarded_whatever_the_scoring_agents_
     assert_eq!(lead.verdict, Some(Verdict::Discarded));
     assert_eq!(lead.confidence, Some(100.0));
     assert_eq!(lead.llm_score, Some(85));
+    assert_eq!(reliable_probability(&pool).await, Some(0.0));
     let scoring = harness.detail(profile, "acme.com").await.scoring.unwrap();
     assert_eq!(scoring.reason, Some(VerdictReason::Excluded));
     assert_eq!(scoring.exclusions.len(), 1);
@@ -1093,6 +1103,7 @@ async fn rescoring_keeps_the_verdict_and_refreshes_the_indicators_without_a_mode
     assert_eq!(after.verdict, before.verdict);
     assert_eq!(after.confidence, before.confidence);
     assert_eq!(after.llm_score, before.llm_score);
+    assert_eq!(reliable_probability(&pool).await, Some(80.0));
     let scoring = harness.detail(profile, "acme.com").await.scoring.unwrap();
     assert!(scoring.indicator_confidence.is_some());
     assert!(scoring.opinion.is_some());
@@ -1114,7 +1125,7 @@ async fn rescoring_applies_exclusions_to_a_stored_verdict(pool: PgPool) {
         .execute(&pool)
         .await
         .unwrap();
-    sqlx::query("UPDATE leads SET verdict = 'fiable', confidence = 80")
+    sqlx::query("UPDATE leads SET verdict = 'fiable', confidence = 80, reliable_probability = 80")
         .execute(&pool)
         .await
         .unwrap();
@@ -1128,6 +1139,7 @@ async fn rescoring_applies_exclusions_to_a_stored_verdict(pool: PgPool) {
     assert_eq!(lead.verdict, Some(Verdict::Discarded));
     assert_eq!(lead.confidence, Some(100.0));
     assert_eq!(lead.llm_score, Some(85));
+    assert_eq!(reliable_probability(&pool).await, Some(0.0));
 }
 
 #[sqlx::test(migrations = "../../migrations")]
@@ -1145,7 +1157,7 @@ async fn a_lead_qualified_before_the_scoring_agents_keeps_its_verdict_until_scor
         .execute(&pool)
         .await
         .unwrap();
-    sqlx::query("UPDATE leads SET verdict = 'a_verifier', confidence = 42, llm_score = NULL")
+    sqlx::query("UPDATE leads SET verdict = 'a_verifier', confidence = 42, llm_score = NULL, reliable_probability = NULL")
         .execute(&pool)
         .await
         .unwrap();
@@ -1164,12 +1176,14 @@ async fn a_lead_qualified_before_the_scoring_agents_keeps_its_verdict_until_scor
     let rescored = harness.lead(profile, "acme.com").await;
     assert_eq!(rescored.verdict, Some(Verdict::ToCheck));
     assert_eq!(rescored.confidence, Some(42.0));
+    assert_eq!(reliable_probability(&pool).await, None);
 
     harness.score().await;
 
     let after = harness.detail(profile, "acme.com").await;
     assert_eq!(after.lead.verdict, Some(Verdict::Reliable));
     assert_eq!(after.lead.llm_score, Some(85));
+    assert_eq!(reliable_probability(&pool).await, Some(80.0));
     assert_eq!(
         after.scoring.map(|scoring| scoring.verdict_source),
         Some(VerdictSource::Scoring)

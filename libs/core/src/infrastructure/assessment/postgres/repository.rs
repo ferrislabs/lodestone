@@ -221,7 +221,7 @@ impl<'tx> AssessmentRepository for PgAssessmentRepository<'tx> {
 
         let mut select = QueryBuilder::<Postgres>::new(format!("SELECT {ASSESSMENT_COLUMNS}"));
         push_queue_filters(&mut select, profile_id, verdicts);
-        select.push(" ORDER BY leads.confidence DESC NULLS LAST, leads.score DESC, assessments.created_at ASC, assessments.id ASC");
+        select.push(" ORDER BY leads.reliable_probability DESC NULLS LAST, leads.score DESC, assessments.created_at ASC, assessments.id ASC");
         select.push(" LIMIT ").push_bind(i64::from(limit));
         select
             .push(" OFFSET ")

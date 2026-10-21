@@ -6,6 +6,7 @@ use crate::domain::{
 };
 
 const EXCLUDED_CONFIDENCE: f64 = 100.0;
+const EXCLUDED_RELIABLE_PROBABILITY: f64 = 0.0;
 
 pub fn round_score(value: f64) -> u8 {
     let rounded = value.round().clamp(0.0, f64::from(MAX_SCORE));
@@ -35,6 +36,14 @@ pub struct Decision {
 impl Decision {
     pub fn reason_text(&self) -> Option<&'static str> {
         self.reason.map(VerdictReason::as_str)
+    }
+
+    pub fn reliable_probability(&self) -> Option<f64> {
+        if self.reason == Some(VerdictReason::Excluded) {
+            return Some(EXCLUDED_RELIABLE_PROBABILITY);
+        }
+        self.probabilities
+            .map(|probabilities| percent(probabilities.reliable))
     }
 }
 
@@ -127,4 +136,85 @@ pub fn decide(
         })
         .collect();
     combine(&inputs, calibrations, exclusions)
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::Value;
+
+    use super::*;
+    use crate::domain::profile::{ValidatedProfile, fixtures::MINIMAL_PROFILE};
+
+    fn agent() -> ScoringAgent {
+        let value: Value = serde_json::from_str(MINIMAL_PROFILE).unwrap();
+        ValidatedProfile::parse(value)
+            .unwrap()
+            .definition()
+            .scoring_agents[0]
+            .clone()
+    }
+
+    fn exclusion() -> Exclusion {
+        Exclusion {
+            agent_id: agent().id,
+            agent_name: "Pertinence".to_owned(),
+            question_id: "q".to_owned(),
+            option: "concurrent".to_owned(),
+            label: "Concurrent".to_owned(),
+            probability: 0.9,
+            evidence: "Nous sommes concurrents".to_owned(),
+            evidence_source: None,
+        }
+    }
+
+    fn decision(probabilities: (f64, f64, f64), exclusions: Vec<Exclusion>) -> Decision {
+        let agent = agent();
+        let input = AgentDecision {
+            agent: &agent,
+            score: 70,
+            probabilities: VerdictProbabilities::new(
+                probabilities.0,
+                probabilities.1,
+                probabilities.2,
+            ),
+        };
+        combine(&[input], &Calibrations::none(), exclusions)
+    }
+
+    #[test]
+    fn the_reliable_probability_is_the_reliable_share_in_percent() {
+        assert_eq!(
+            decision((0.8, 0.15, 0.05), Vec::new()).reliable_probability(),
+            Some(80.0)
+        );
+        assert_eq!(
+            decision((0.05, 0.9, 0.05), Vec::new()).reliable_probability(),
+            Some(5.0)
+        );
+        assert_eq!(
+            decision((0.1234, 0.5, 0.3766), Vec::new()).reliable_probability(),
+            Some(12.3)
+        );
+    }
+
+    #[test]
+    fn an_excluded_decision_has_a_reliable_probability_of_zero() {
+        let excluded = decision((0.95, 0.04, 0.01), vec![exclusion()]);
+        assert_eq!(excluded.reason, Some(VerdictReason::Excluded));
+        assert_eq!(excluded.reliable_probability(), Some(0.0));
+    }
+
+    #[test]
+    fn an_excluded_decision_without_any_scoring_result_has_a_reliable_probability_of_zero() {
+        let excluded = combine(&[], &Calibrations::none(), vec![exclusion()]);
+        assert_eq!(excluded.probabilities, None);
+        assert_eq!(excluded.reliable_probability(), Some(0.0));
+    }
+
+    #[test]
+    fn a_decision_without_probabilities_has_no_reliable_probability() {
+        let pending = combine(&[], &Calibrations::none(), Vec::new());
+        assert_eq!(pending.reason, Some(VerdictReason::AwaitingScoring));
+        assert_eq!(pending.reliable_probability(), None);
+    }
 }
