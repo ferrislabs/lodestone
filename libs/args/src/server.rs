@@ -8,7 +8,7 @@ pub struct ServerArgs {
         env,
         num_args = 0..,
         value_delimiter = ',',
-        long_help = "The port to run the application on",
+        long_help = "Comma-separated origins allowed to call the API from a browser, for example http://localhost:3000. Empty allows none, so the web UI cannot reach the API.",
     )]
     pub allowed_origins: Vec<String>,
     #[arg(
