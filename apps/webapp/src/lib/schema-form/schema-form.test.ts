@@ -51,14 +51,16 @@ describe('classify', () => {
 
 	it('classifies every $def of the committed schema', () => {
 		const names = Object.keys(root.$defs ?? {})
-		expect(names.length).toBe(15)
+		expect(names.length).toBe(16)
 		for (const name of names) {
 			const node = classify(root, { $ref: `#/$defs/${name}` })
 			const expected = unions.includes(name)
 				? 'union'
 				: name === 'AgentId'
 					? 'string'
-					: 'object'
+					: name === 'Language'
+						? 'enum'
+						: 'object'
 			expect(node.kind, name).toBe(expected)
 		}
 	})
@@ -139,7 +141,11 @@ describe('defaultValue', () => {
 			agents: [],
 			scoring: { factors: [] },
 			contact_ranking: { preferred_local_parts: [], guess_local_parts: [] },
-			llm: { qualification_threshold: 50, relevance_criteria: '' },
+			llm: {
+				qualification_threshold: 50,
+				relevance_criteria: '',
+				language: 'fr',
+			},
 		})
 		for (const key of root.required ?? []) expect(value).toHaveProperty(key)
 	})

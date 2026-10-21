@@ -13,7 +13,8 @@ export const NEW_PROFILE_TEMPLATE = `{
   },
   "llm": {
     "qualification_threshold": 50,
-    "relevance_criteria": ""
+    "relevance_criteria": "",
+    "language": "fr"
   }
 }
 `

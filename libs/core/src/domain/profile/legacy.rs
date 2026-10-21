@@ -2,8 +2,8 @@ use serde::Deserialize;
 
 use super::definition::{
     Agent, AgentId, AgentSource, CertificateTransparency, ContactRanking, DnsCname, HttpProbe,
-    Identity, KeywordSource, LlmSettings, PROFILE_SCHEMA_VERSION, ProfileDefinition, Scoring,
-    ScoringFactor,
+    Identity, KeywordSource, Language, LlmSettings, PROFILE_SCHEMA_VERSION, ProfileDefinition,
+    Scoring, ScoringFactor,
 };
 use crate::domain::scoring::max_possible;
 
@@ -105,6 +105,7 @@ fn upgrade_scoring_and_llm(scoring: ScoringV2, llm: LlmV2) -> (Scoring, LlmSetti
         LlmSettings {
             qualification_threshold: threshold,
             relevance_criteria: llm.relevance_criteria,
+            language: Language::default(),
         },
     )
 }

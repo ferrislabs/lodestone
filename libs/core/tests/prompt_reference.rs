@@ -1,7 +1,7 @@
 use std::{fs, num::NonZeroU32, path::PathBuf, time::Duration};
 
 use lodestone_core::{
-    LlmError, LlmProvider, LlmRequest, LlmResponse, PromptTemplate, QUALIFICATION_V1,
+    CacheScope, LlmError, LlmProvider, LlmRequest, LlmResponse, PromptTemplate, QUALIFICATION_V1,
     QualificationOutput, TRIAGE_V1, TokenPricing, TokenUsage, TriageVerdict, UntrustedDocument,
     ValidatedProfile,
     definition::ProfileDefinition,
@@ -9,6 +9,7 @@ use lodestone_core::{
     render_user_content,
 };
 use serde_json::Value;
+use std::sync::Mutex;
 
 struct Replay {
     output: Value,
@@ -181,4 +182,87 @@ async fn recorded_outputs_have_the_expected_shape_and_verdict() {
             }
         }
     }
+}
+
+struct Capture {
+    systems: Mutex<Vec<String>>,
+    output: Value,
+}
+
+impl LlmProvider for Capture {
+    async fn complete(&self, request: &LlmRequest<'_>) -> Result<LlmResponse, LlmError> {
+        self.systems.lock().unwrap().push(request.system.to_owned());
+        Ok(LlmResponse {
+            output: self.output.clone(),
+            model: "recorded".to_owned(),
+            usage: TokenUsage::default(),
+        })
+    }
+}
+
+fn profile_in(language: &str) -> ProfileDefinition {
+    let raw =
+        fs::read_to_string(root().join("../../docs/examples/profiles/iam-ferriskey.json")).unwrap();
+    let mut value: Value = serde_json::from_str(&raw).unwrap();
+    value["llm"]["language"] = serde_json::json!(language);
+    ValidatedProfile::parse(value).unwrap().definition().clone()
+}
+
+#[tokio::test]
+async fn the_requested_language_reaches_the_provider() {
+    let case = cases()
+        .into_iter()
+        .find(|case| case["template"] == "qualification")
+        .unwrap();
+    for (language, name) in [("fr", "French"), ("en", "English")] {
+        let provider = Capture {
+            systems: Mutex::new(Vec::new()),
+            output: case["recorded_output"].clone(),
+        };
+        let docs = documents(&case);
+        let untrusted: Vec<UntrustedDocument<'_>> = docs
+            .iter()
+            .map(|(source, content)| UntrustedDocument { source, content })
+            .collect();
+        let system = QUALIFICATION_V1.system(&profile_in(language));
+        let prompt = Prompt {
+            system: &system,
+            instruction: QUALIFICATION_V1.instruction(),
+            documents: &untrusted,
+            max_tokens: 2048,
+        };
+        let mut budget = RunBudget::new(NonZeroU32::new(1).unwrap());
+        call_structured::<QualificationOutput, _>(&provider, prompt, settings(), &mut budget)
+            .await
+            .unwrap();
+        let systems = provider.systems.lock().unwrap();
+        assert_eq!(systems.len(), 1);
+        assert!(systems[0].contains(&format!(
+            "approach_angle, draft_message.subject, draft_message.body) in {name}."
+        )));
+    }
+}
+
+#[test]
+fn cache_keys_differ_between_languages() {
+    let scope = CacheScope {
+        profile_id: lodestone_core::ProfileId(uuid::Uuid::nil()),
+        revision: lodestone_core::RevisionNumber::FIRST,
+        prompt: "qualification@1".to_owned(),
+        domain: lodestone_core::NormalizedDomain::from_host("acme.com").unwrap(),
+        agent: None,
+    };
+    let schema = serde_json::json!({});
+    let key = |language| {
+        let system = QUALIFICATION_V1.system(&profile_in(language));
+        let prompt = Prompt {
+            system: &system,
+            instruction: QUALIFICATION_V1.instruction(),
+            documents: &[],
+            max_tokens: 1,
+        };
+        lodestone_core::llm::gateway::cache_key(&scope, &prompt, &schema)
+    };
+    assert_ne!(key("fr"), key("en"));
+    assert_eq!(key("fr"), key("fr"));
 }

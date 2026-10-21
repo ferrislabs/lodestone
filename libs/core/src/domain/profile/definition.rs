@@ -404,7 +404,7 @@ pub struct ContactRanking {
 #[serde(deny_unknown_fields)]
 #[schemars(
     title = "LLM settings",
-    description = "Qualification threshold and relevance criteria given to the model."
+    description = "Qualification threshold, relevance criteria and answer language given to the model."
 )]
 pub struct LlmSettings {
     #[schemars(
@@ -414,6 +414,29 @@ pub struct LlmSettings {
     pub qualification_threshold: u8,
     #[schemars(description = "Criteria given to the LLM to judge a lead relevance.")]
     pub relevance_criteria: String,
+    #[serde(default)]
+    #[schemars(
+        title = "Answer language",
+        description = "Language of every free-text field the LLM writes: triage reason, qualification summary, approach angle and draft. Evidence quotes stay in the source language."
+    )]
+    pub language: Language,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum Language {
+    #[default]
+    Fr,
+    En,
+}
+
+impl Language {
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Fr => "French",
+            Self::En => "English",
+        }
+    }
 }
 
 impl ProfileDefinition {

@@ -42,6 +42,9 @@ export const PROFILE_HINTS: UiHints = {
 			},
 		},
 	},
+	optionLabels: {
+		'llm.language': { fr: 'Français', en: 'English' },
+	},
 	choices: {
 		'agents.source.accept_min_keywords': { min: 1, max: 5 },
 	},

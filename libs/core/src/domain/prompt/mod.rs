@@ -6,7 +6,10 @@ pub mod normalise;
 
 pub use evidence::{EvidenceProblem, verified_evidence};
 
-use crate::domain::{llm::UntrustedDocument, profile::definition::ProfileDefinition};
+use crate::domain::{
+    llm::UntrustedDocument,
+    profile::definition::{Language, ProfileDefinition},
+};
 
 const CONTEXT_TAG: &str = "market_context";
 const CONTEXT_PLACEHOLDER: &str = "{{market_context}}";
@@ -45,7 +48,7 @@ pub fn market_context(definition: &ProfileDefinition) -> String {
 
 pub fn market_context_with(definition: &ProfileDefinition, criteria: Option<&str>) -> String {
     format!(
-        "Offer: {}\nTarget customer: {}\nRelevance criteria: {}",
+        "Offer: {}\nTarget customer: {}\nRelevance criteria: {}\n{}",
         neutralize(definition.identity.offer.trim()),
         neutralize(definition.identity.target_customer.trim()),
         neutralize(
@@ -53,6 +56,14 @@ pub fn market_context_with(definition: &ProfileDefinition, criteria: Option<&str
                 .unwrap_or(&definition.llm.relevance_criteria)
                 .trim()
         ),
+        language_rule(definition.llm.language),
+    )
+}
+
+fn language_rule(language: Language) -> String {
+    format!(
+        "Write every free-text field (reason, summary, approach_angle, draft_message.subject, draft_message.body) in {}. Evidence quotes must be copied verbatim from the documents, in their original language.",
+        language.name()
     )
 }
 
@@ -141,6 +152,51 @@ mod tests {
             serde_json::from_str(crate::domain::profile::fixtures::MINIMAL_PROFILE).unwrap();
         value["llm"]["relevance_criteria"] = serde_json::json!(criteria);
         ValidatedProfile::parse(value).unwrap().definition().clone()
+    }
+
+    const FRENCH_LINE: &str = "Write every free-text field (reason, summary, approach_angle, draft_message.subject, draft_message.body) in French. Evidence quotes must be copied verbatim from the documents, in their original language.";
+    const ENGLISH_LINE: &str = "Write every free-text field (reason, summary, approach_angle, draft_message.subject, draft_message.body) in English. Evidence quotes must be copied verbatim from the documents, in their original language.";
+
+    fn with_language(language: Option<&str>) -> ProfileDefinition {
+        let mut value: serde_json::Value =
+            serde_json::from_str(crate::domain::profile::fixtures::MINIMAL_PROFILE).unwrap();
+        value["llm"].as_object_mut().unwrap().remove("language");
+        if let Some(language) = language {
+            value["llm"]["language"] = serde_json::json!(language);
+        }
+        ValidatedProfile::parse(value).unwrap().definition().clone()
+    }
+
+    #[test]
+    fn language_line_follows_the_profile_setting() {
+        for template in [TRIAGE_V1, QUALIFICATION_V1] {
+            let french = template.system(&with_language(Some("fr")));
+            let english = template.system(&with_language(Some("en")));
+            assert!(french.contains(FRENCH_LINE));
+            assert!(!french.contains(ENGLISH_LINE));
+            assert!(english.contains(ENGLISH_LINE));
+            assert!(!english.contains(FRENCH_LINE));
+            let context_end = french.find("</market_context>").unwrap();
+            assert!(french.find(FRENCH_LINE).unwrap() < context_end);
+        }
+    }
+
+    #[test]
+    fn language_defaults_to_french_when_absent() {
+        let absent = with_language(None);
+        assert_eq!(absent.llm.language, Language::Fr);
+        assert_eq!(
+            TRIAGE_V1.system(&absent),
+            TRIAGE_V1.system(&with_language(Some("fr")))
+        );
+    }
+
+    #[test]
+    fn unknown_language_is_rejected() {
+        let mut value: serde_json::Value =
+            serde_json::from_str(crate::domain::profile::fixtures::MINIMAL_PROFILE).unwrap();
+        value["llm"]["language"] = serde_json::json!("de");
+        assert!(ValidatedProfile::parse(value).is_err());
     }
 
     #[test]
