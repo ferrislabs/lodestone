@@ -87,14 +87,17 @@ Common flags / env vars (see `libs/args/src/`):
 | `JOBS_SOURCE_INTERVAL_MINUTES` | `--jobs-source-interval-minutes` | `60` |
 | `LISTENER_IDLE_SECONDS` | `--listener-idle-seconds` | `15` |
 | `LISTENER_LOCK_RETRY_SECONDS` | `--listener-lock-retry-seconds` | `15` |
+| `PROBE_CONCURRENCY` | `--probe-concurrency` | `8` |
+| `DNS_CONCURRENCY` | `--dns-concurrency` | `16` |
 | `OUTBOUND_CONTACT` | `--outbound-contact` | required, email or https URL |
 | `OUTBOUND_REQUESTS_PER_HOST_PER_MINUTE` | `--outbound-requests-per-host-per-minute` | `6` |
 | `OUTBOUND_REVISIT_INTERVAL_HOURS` | `--outbound-revisit-interval-hours` | `720` |
 | `OUTBOUND_REQUEST_TIMEOUT_SECONDS` | `--outbound-request-timeout-seconds` | `15` |
 | `CT_LOG_LIST_URL` | `--ct-log-list-url` | Chrome v3 log list |
-| `CT_MAX_LOGS` | `--ct-max-logs` | `4` |
-| `CT_TILES_PER_RUN` | `--ct-tiles-per-run` | `16` |
+| `CT_MAX_LOGS` | `--ct-max-logs` | `8` |
+| `CT_TILES_PER_RUN` | `--ct-tiles-per-run` | `64` |
 | `CT_MAX_LAG_TILES` | `--ct-max-lag-tiles` | `256` |
+| `CT_REQUESTS_PER_HOST_PER_MINUTE` | `--ct-requests-per-host-per-minute` | `120` |
 | `CONTACT_PAGE_PATHS` | `--contact-page-paths` | `/,/contact,/mentions-legales,/legal,/about` |
 | `CONTACT_BATCH_SIZE` | `--contact-batch-size` | `10` |
 | `CONTACT_MAX_RATE_LIMIT_WAIT_SECONDS` | `--contact-max-rate-limit-wait-seconds` | `75` |

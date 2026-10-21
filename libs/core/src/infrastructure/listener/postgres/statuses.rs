@@ -68,6 +68,34 @@ impl PgListenerStatuses {
         Ok(())
     }
 
+    #[tracing::instrument(skip(self), fields(db.system = "postgresql", db.operation = "upsert", db.table = "listeners"), err)]
+    pub async fn record_started(
+        &self,
+        name: &str,
+        holder: &str,
+        at: DateTime<Utc>,
+    ) -> Result<(), CoreError> {
+        sqlx::query!(
+            r#"
+            INSERT INTO listeners (name, holder, state, updated_at)
+            VALUES ($1, $2, 'listening', $3)
+            ON CONFLICT (name) DO UPDATE SET
+                holder = EXCLUDED.holder,
+                state = 'listening',
+                updated_at = EXCLUDED.updated_at
+            WHERE listeners.holder IS DISTINCT FROM EXCLUDED.holder
+                OR listeners.state IN ('standby', 'stopped')
+            "#,
+            name,
+            holder,
+            at,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+        Ok(())
+    }
+
     #[tracing::instrument(skip(self), fields(db.system = "postgresql", db.operation = "insert", db.table = "listeners"), err)]
     pub async fn record_standby(&self, name: &str, at: DateTime<Utc>) -> Result<(), CoreError> {
         sqlx::query!(

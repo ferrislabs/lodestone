@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO listeners (name, holder, state, updated_at)\n            VALUES ($1, $2, 'listening', $3)\n            ON CONFLICT (name) DO UPDATE SET\n                holder = EXCLUDED.holder,\n                state = 'listening',\n                updated_at = EXCLUDED.updated_at\n            WHERE listeners.holder IS DISTINCT FROM EXCLUDED.holder\n                OR listeners.state IN ('standby', 'stopped')\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "2e626b97157105022f92b7995b99c628f2cfba03c9ceeb8da64af4fd45d4321e"
+}

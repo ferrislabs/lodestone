@@ -1,3 +1,4 @@
+pub mod fetchers;
 pub mod internal_router;
 pub mod jobs;
 pub mod listeners;

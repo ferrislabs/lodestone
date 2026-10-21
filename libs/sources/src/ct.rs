@@ -33,6 +33,24 @@ pub struct CtRunStats {
     pub skipped_tiles: u64,
 }
 
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+struct LogPass {
+    tiles: u64,
+    entries: u64,
+    matched: BTreeSet<Hostname>,
+    lag_tiles: u64,
+}
+
+fn log_summary(name: &str, pass: &LogPass) -> String {
+    format!(
+        "{name}: tiles={} certificates={} matched={} lag={}",
+        pass.tiles,
+        pass.entries,
+        pass.matched.len(),
+        pass.lag_tiles
+    )
+}
+
 struct CachedLogs {
     fetched_at: DateTime<Utc>,
     logs: Arc<[CtLog]>,
@@ -141,7 +159,7 @@ where
         log: &CtLog,
         labels: &HashSet<String>,
         now: DateTime<Utc>,
-        found: &mut BTreeSet<Hostname>,
+        pass: &mut LogPass,
         stats: &mut CtRunStats,
     ) -> Result<(), CtError> {
         let full_tiles = fetch_tree_size(self.fetcher.as_ref(), log).await? / TILE_WIDTH;
@@ -164,20 +182,23 @@ where
             next_tile += skipped;
         }
         let end = full_tiles.min(next_tile + self.settings.tiles_per_log);
-        self.lag_tiles
-            .fetch_add(full_tiles.saturating_sub(next_tile), Ordering::Relaxed);
+        pass.lag_tiles = full_tiles.saturating_sub(next_tile);
+        self.lag_tiles.fetch_add(pass.lag_tiles, Ordering::Relaxed);
         for tile in next_tile..end {
             let entries = fetch_data_tile(self.fetcher.as_ref(), log, tile).await?;
             for entry in &entries {
                 stats.entries += 1;
+                pass.entries += 1;
                 for name in &entry.dns_names {
                     stats.names += 1;
                     if let Some(host) = matching_host(name, labels) {
-                        found.insert(host);
+                        pass.matched.insert(host);
                     }
                 }
             }
             self.advance(log, tile + 1, now).await?;
+            pass.tiles += 1;
+            pass.lag_tiles = pass.lag_tiles.saturating_sub(1);
             self.tiles_read.fetch_add(1, Ordering::Relaxed);
             self.lag_tiles.fetch_sub(1, Ordering::Relaxed);
         }
@@ -218,11 +239,19 @@ where
         let logs = self.logs(now).await?;
         let mut found = BTreeSet::new();
         let mut stats = CtRunStats::default();
+        let mut summaries = Vec::with_capacity(logs.len());
+        let mut tiles = 0u64;
+        let mut lag = 0u64;
         for log in logs.iter() {
-            match self
-                .read_log(log, &labels, now, &mut found, &mut stats)
-                .await
-            {
+            let mut pass = LogPass::default();
+            let result = self
+                .read_log(log, &labels, now, &mut pass, &mut stats)
+                .await;
+            tiles += pass.tiles;
+            lag += pass.lag_tiles;
+            summaries.push(log_summary(&log.description, &pass));
+            found.extend(pass.matched);
+            match result {
                 Ok(()) => {}
                 Err(CtError::Fetch(FetchError::RateLimited { .. })) => {
                     info!(log = %log.description, "ct log rate limited, resuming next run");
@@ -239,10 +268,13 @@ where
         stats.matched = u64::try_from(hosts.len()).unwrap_or(u64::MAX);
         info!(
             logs = logs.len(),
-            entries = stats.entries,
+            tiles_read = tiles,
+            certificates = stats.entries,
             names = stats.names,
             matched = stats.matched,
+            lag_tiles = lag,
             skipped_tiles = stats.skipped_tiles,
+            per_log = %summaries.join("; "),
             "ct ingestion pass"
         );
         if !hosts.is_empty() {

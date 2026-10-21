@@ -573,3 +573,67 @@ async fn a_long_step_keeps_the_status_fresh_with_a_heartbeat(pool: PgPool) {
     shutdown.send_replace(true);
     handle.await.unwrap();
 }
+
+struct BlockingStep {
+    name: &'static str,
+    release: Arc<tokio::sync::Notify>,
+}
+
+impl ListenerStep for BlockingStep {
+    fn name(&self) -> &str {
+        self.name
+    }
+
+    async fn is_active(&self) -> Result<bool, CoreError> {
+        Ok(true)
+    }
+
+    async fn run_once(&self) -> Result<StepOutcome, SourceRunError> {
+        self.release.notified().await;
+        Ok(StepOutcome {
+            processed: 1,
+            signals: 0,
+            backlog: Some(0),
+        })
+    }
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_listener_is_listed_while_its_first_pass_is_still_running(pool: PgPool) {
+    let release = Arc::new(tokio::sync::Notify::new());
+    let step = BlockingStep {
+        name: "public_page",
+        release: Arc::clone(&release),
+    };
+    let (shutdown, _) = watch::channel(false);
+    let handle = spawn(
+        Listener::new(
+            step,
+            pool.clone(),
+            "node-a".to_owned(),
+            settings(Duration::from_secs(3600)),
+        ),
+        &shutdown,
+    );
+
+    eventually(|| async {
+        status(&pool, "public_page")
+            .await
+            .is_some_and(|s| s.state == ListenerState::Listening && s.items_total == 0)
+    })
+    .await;
+    let row = status(&pool, "public_page").await.unwrap();
+    assert_eq!(row.holder.as_deref(), Some("node-a"));
+
+    release.notify_one();
+    eventually(|| async {
+        status(&pool, "public_page")
+            .await
+            .is_some_and(|s| s.items_total == 1)
+    })
+    .await;
+
+    shutdown.send_replace(true);
+    release.notify_one();
+    handle.await.unwrap();
+}
