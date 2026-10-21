@@ -19,11 +19,11 @@ export function AppSidebar(props: React.ComponentProps<typeof Sidebar>) {
 	const pending = usePendingDraftsCount()
 	const coreItems: NavItem[] = [
 		{ title: 'Leads', to: '/leads', icon: Users },
-		{ title: 'Drafts', to: '/drafts', icon: FileText, badge: pending },
+		{ title: 'Brouillons', to: '/drafts', icon: FileText, badge: pending },
 	]
 	const configItems: NavItem[] = [
-		{ title: 'Profiles', to: '/profiles', icon: Layers },
-		{ title: 'LLM providers', to: '/llm', icon: Cpu },
+		{ title: 'Profils', to: '/profiles', icon: Layers },
+		{ title: 'Fournisseurs LLM', to: '/llm', icon: Cpu },
 	]
 	return (
 		<Sidebar collapsible="icon" {...props}>

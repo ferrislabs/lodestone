@@ -80,9 +80,9 @@ describe('LeadsList', () => {
 		render(<Harness data={leads} state="ready" />)
 		expect(screen.getByText('acme.test')).toBeTruthy()
 		expect(screen.getByText('globex.test')).toBeTruthy()
-		expect(screen.getByText('qualified')).toBeTruthy()
+		expect(screen.getByText('Qualifié')).toBeTruthy()
 		expect(screen.getByText('42')).toBeTruthy()
-		expect(screen.getByText('Page 1 of 2 - 40 leads')).toBeTruthy()
+		expect(screen.getByText('Page 1 sur 2 - 40 leads')).toBeTruthy()
 	})
 
 	it('opens a lead when its domain is clicked', () => {
@@ -95,13 +95,15 @@ describe('LeadsList', () => {
 	it('requests an export in the chosen format', () => {
 		const onExport = vi.fn()
 		render(<Harness data={leads} state="ready" onExport={onExport} />)
-		fireEvent.click(screen.getByText('Export CSV'))
+		fireEvent.click(screen.getByText('Exporter en CSV'))
 		expect(onExport).toHaveBeenCalledWith('csv')
 	})
 
 	it('shows the empty state', () => {
 		render(<Harness data={[]} state="ready" />)
-		expect(screen.getByText('No leads match these filters.')).toBeTruthy()
+		expect(
+			screen.getByText('Aucun lead ne correspond à ces filtres.'),
+		).toBeTruthy()
 	})
 
 	it('shows the error state', () => {

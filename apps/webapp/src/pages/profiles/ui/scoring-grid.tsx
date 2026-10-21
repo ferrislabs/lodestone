@@ -1,4 +1,6 @@
 import { PlusIcon } from 'lucide-react'
+import { formatNumber } from '#/lib/format'
+import { pluralize } from '#/lib/labels'
 import type { Factor } from '#/pages/profiles/lib/scoring'
 import type { Problem } from '#/pages/profiles/lib/types'
 import { FactorCard } from '#/pages/profiles/ui/factor-card'
@@ -29,13 +31,13 @@ export function ScoringGrid({
 	onValue,
 }: ScoringGridProps) {
 	return (
-		<section aria-label="Scoring factors" className="flex flex-col gap-3">
+		<section aria-label="Facteurs de scoring" className="flex flex-col gap-3">
 			<p className="text-sm text-muted-foreground">
 				{factors.length === 0
-					? 'No scoring factor. Leads will all score 0.'
-					: `${factors.length} ${factors.length === 1 ? 'factor' : 'factors'} · max score ${maxScore} ${maxScore === 1 ? 'point' : 'points'}`}
+					? 'Aucun facteur de scoring. Tous les leads auront un score de 0.'
+					: `${factors.length} ${pluralize(factors.length, 'facteur', 'facteurs')} · score max ${formatNumber(maxScore)} ${pluralize(maxScore, 'point', 'points')}`}
 			</p>
-			<ul className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+			<ul className="grid gap-4 sm:grid-cols-2">
 				{factors.map((factor, index) => (
 					<FactorCard
 						// biome-ignore lint/suspicious/noArrayIndexKey: factors have no identity
@@ -58,7 +60,7 @@ export function ScoringGrid({
 						onClick={onAdd}
 					>
 						<PlusIcon className="size-5" />
-						Add factor
+						Ajouter un facteur
 					</button>
 				</li>
 			</ul>

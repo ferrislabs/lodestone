@@ -36,11 +36,39 @@ export interface Problem {
 	message: string
 }
 
+export interface FieldCopy {
+	label: string
+	description?: string
+}
+
+export interface UiMessages {
+	required: string
+	add: string
+	remove: string
+	addAria: (label: string) => string
+	removeAria: (label: string, position: number) => string
+	enableAria: (label: string) => string
+	typeAria: (label: string) => string
+}
+
 export interface UiHints {
 	hidden: readonly string[]
 	textarea: readonly string[]
 	defaults: Readonly<Record<string, JsonValue>>
 	labels: Readonly<Record<string, string>>
+	fields: Readonly<Record<string, FieldCopy>>
+	variants: Readonly<Record<string, string>>
+	messages: UiMessages
+}
+
+export const DEFAULT_MESSAGES: UiMessages = {
+	required: 'Required',
+	add: 'Add',
+	remove: 'Remove',
+	addAria: (label) => `Add ${label}`,
+	removeAria: (label, position) => `Remove ${label} ${position}`,
+	enableAria: (label) => `Enable ${label}`,
+	typeAria: (label) => `${label} type`,
 }
 
 export const NO_HINTS: UiHints = {
@@ -48,6 +76,9 @@ export const NO_HINTS: UiHints = {
 	textarea: [],
 	defaults: {},
 	labels: {},
+	fields: {},
+	variants: {},
+	messages: DEFAULT_MESSAGES,
 }
 
 export function isJsonObject(value: unknown): value is JsonObject {

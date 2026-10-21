@@ -4,6 +4,7 @@ import type { ReactNode } from 'react'
 import { Button } from '#/components/ui/button'
 import { Skeleton } from '#/components/ui/skeleton'
 import { isEdited } from '#/pages/drafts/lib/edit'
+import { draftStatusLabel } from '#/pages/drafts/lib/labels'
 import type { DraftEntry } from '#/pages/drafts/lib/types'
 import { DraftContext } from './draft-context'
 import { OriginalDraft } from './original-draft'
@@ -45,7 +46,7 @@ export function DraftReview({
 			<div>
 				<Button variant="ghost" size="sm" onClick={onBack}>
 					<ArrowLeft />
-					Back to drafts
+					Retour aux brouillons
 				</Button>
 			</div>
 			{state === 'loading' ? (
@@ -57,7 +58,7 @@ export function DraftReview({
 			) : null}
 			{state === 'error' ? (
 				<p role="alert" className="text-destructive">
-					Could not load this draft: {errorMessage}
+					Impossible de charger ce brouillon : {errorMessage}
 				</p>
 			) : null}
 			{state === 'ready' && entry ? (
@@ -67,11 +68,11 @@ export function DraftReview({
 					{pending ? (
 						<>
 							<section className="flex flex-col gap-3">
-								<h2 className="text-lg font-semibold">Draft</h2>
+								<h2 className="text-lg font-semibold">Brouillon</h2>
 								{editor}
 							</section>
 							<section className="flex flex-col gap-3">
-								<h2 className="text-lg font-semibold">Decision</h2>
+								<h2 className="text-lg font-semibold">Décision</h2>
 								{decisionError ? (
 									<p role="alert" className="text-sm text-destructive">
 										{decisionError}
@@ -79,19 +80,19 @@ export function DraftReview({
 								) : null}
 								{dirty ? (
 									<p className="text-sm text-muted-foreground">
-										Save your changes before deciding.
+										Enregistrez vos modifications avant de décider.
 									</p>
 								) : null}
 								<div className="flex flex-wrap items-center gap-3">
 									<Button disabled={dirty || deciding} onClick={onApprove}>
-										Approve (marks ready, nothing is sent)
+										Approuver (marque comme prêt, rien n'est envoyé)
 									</Button>
 									<Button
 										variant="outline"
 										disabled={deciding || rejectOpen}
 										onClick={onStartReject}
 									>
-										Reject
+										Rejeter
 									</Button>
 								</div>
 								{rejectOpen ? rejectForm : null}
@@ -99,7 +100,8 @@ export function DraftReview({
 						</>
 					) : (
 						<p className="text-sm text-muted-foreground">
-							This draft was already {entry.draft.status}.
+							Ce brouillon a déjà été{' '}
+							{draftStatusLabel(entry.draft.status).toLowerCase()}.
 						</p>
 					)}
 				</>

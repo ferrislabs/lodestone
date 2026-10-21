@@ -24,8 +24,8 @@ export function prettyDefinition(definition: Record<string, unknown>): string {
 
 export function saveResultMessage(previous: number, saved: number): string {
 	return saved > previous
-		? `Revision ${saved} created`
-		: `No change, revision ${saved} kept`
+		? `Révision ${saved} créée`
+		: `Aucun changement, révision ${saved} conservée`
 }
 
 export function exportFilename(name: string): string {

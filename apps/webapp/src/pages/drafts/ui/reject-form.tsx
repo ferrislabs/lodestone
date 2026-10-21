@@ -30,7 +30,7 @@ export function RejectForm({
 			}}
 		>
 			<div className="flex flex-col gap-1.5">
-				<Label htmlFor="reject-reason">Reason (optional)</Label>
+				<Label htmlFor="reject-reason">Motif (facultatif)</Label>
 				<Textarea
 					id="reject-reason"
 					rows={3}
@@ -56,10 +56,10 @@ export function RejectForm({
 			) : null}
 			<div className="flex gap-2">
 				<Button type="submit" variant="destructive" disabled={rejecting}>
-					{rejecting ? 'Rejecting...' : 'Confirm rejection'}
+					{rejecting ? 'Rejet en cours…' : 'Confirmer le rejet'}
 				</Button>
 				<Button type="button" variant="ghost" onClick={onCancel}>
-					Cancel
+					Annuler
 				</Button>
 			</div>
 		</form>

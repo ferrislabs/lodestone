@@ -10,6 +10,7 @@ import {
 	TableHeader,
 	TableRow,
 } from '#/components/ui/table'
+import { pluralize } from '#/lib/labels'
 import { previewText } from '#/pages/drafts/lib/edit'
 import type {
 	DraftEntry,
@@ -55,21 +56,22 @@ export function DraftsList({
 	return (
 		<div className="flex flex-col gap-4 p-4 md:p-8">
 			<div className="flex flex-col gap-1">
-				<h1 className="text-2xl font-bold tracking-tight">Drafts</h1>
+				<h1 className="text-2xl font-bold tracking-tight">Brouillons</h1>
 				<p className="text-sm text-muted-foreground">
-					Message drafts waiting for review. Lodestone never sends a message:
-					approving only marks a draft as ready.
+					Brouillons de messages en attente de relecture. Lodestone n'envoie
+					jamais de message : approuver marque seulement un brouillon comme
+					prêt.
 				</p>
 			</div>
 			<div className="flex max-w-sm flex-col gap-1.5">
-				<Label htmlFor="draft-profile">Profile</Label>
+				<Label htmlFor="draft-profile">Profil</Label>
 				<select
 					id="draft-profile"
 					className={SELECT_CLASS}
 					value={profileId}
 					onChange={(event) => onProfileChange(event.target.value)}
 				>
-					<option value="">All profiles</option>
+					<option value="">Tous les profils</option>
 					{profiles.map((profile) => (
 						<option key={profile.id} value={profile.id}>
 							{profile.name}
@@ -82,11 +84,11 @@ export function DraftsList({
 					<TableHeader>
 						<TableRow>
 							<TableHead>Lead</TableHead>
-							<TableHead>Profile</TableHead>
+							<TableHead>Profil</TableHead>
 							<TableHead>Score</TableHead>
-							<TableHead>Subject</TableHead>
+							<TableHead>Objet</TableHead>
 							<TableHead>Contact</TableHead>
-							<TableHead>Created</TableHead>
+							<TableHead>Créé le</TableHead>
 						</TableRow>
 					</TableHeader>
 					<TableBody>
@@ -106,7 +108,7 @@ export function DraftsList({
 									className="py-10 text-center text-destructive"
 									role="alert"
 								>
-									Could not load drafts: {errorMessage}
+									Impossible de charger les brouillons : {errorMessage}
 								</TableCell>
 							</TableRow>
 						) : null}
@@ -116,7 +118,7 @@ export function DraftsList({
 									colSpan={COLUMNS}
 									className="py-10 text-center text-muted-foreground"
 								>
-									No drafts waiting for review.
+									Aucun brouillon en attente de relecture.
 								</TableCell>
 							</TableRow>
 						) : null}
@@ -144,7 +146,7 @@ export function DraftsList({
 											{previewText(entry.draft.subject, 80)}
 										</TableCell>
 										<TableCell className="text-muted-foreground">
-											{entry.contact ? entry.contact.address : 'No contact'}
+											{entry.contact ? entry.contact.address : 'Aucun contact'}
 										</TableCell>
 										<TableCell className="text-muted-foreground">
 											{formatDateTime(entry.created_at)}
@@ -159,10 +161,10 @@ export function DraftsList({
 				<div className="flex items-center justify-between text-sm text-muted-foreground">
 					<span>
 						Page {pagination.current_page}
-						{pagination.last_page ? ` of ${pagination.last_page}` : ''}
+						{pagination.last_page ? ` sur ${pagination.last_page}` : ''}
 						{pagination.total === null || pagination.total === undefined
 							? ''
-							: ` - ${pagination.total} drafts`}
+							: ` - ${pagination.total} ${pluralize(pagination.total, 'brouillon', 'brouillons')}`}
 					</span>
 					<div className="flex gap-2">
 						<Button
@@ -171,7 +173,7 @@ export function DraftsList({
 							disabled={!pagination.prev_page}
 							onClick={() => onPageChange(pagination.prev_page ?? 1)}
 						>
-							Previous
+							Précédent
 						</Button>
 						<Button
 							variant="outline"
@@ -181,7 +183,7 @@ export function DraftsList({
 								onPageChange(pagination.next_page ?? pagination.current_page)
 							}
 						>
-							Next
+							Suivant
 						</Button>
 					</div>
 				</div>

@@ -1,3 +1,5 @@
+import { formatNumber, formatPercent } from '#/lib/format'
+import { pluralize } from '#/lib/labels'
 import {
 	DISTINCT_SIGNALS,
 	type Factor,
@@ -13,32 +15,36 @@ export interface StrengthRow {
 }
 
 export const STRENGTH_ROWS: readonly StrengthRow[] = [
-	{ origin: 'HTTP probe', signal: 'Product detected', strength: 0.9 },
-	{ origin: 'HTTP probe', signal: 'Debt marker', strength: 0.6 },
-	{ origin: 'DNS CNAME', signal: 'SaaS provider', strength: 0.9 },
+	{ origin: 'Sonde HTTP', signal: 'Produit détecté', strength: 0.9 },
 	{
-		origin: 'Keyword candidate accepted by the rules',
-		signal: 'Public tenders, job offers',
+		origin: 'Sonde HTTP',
+		signal: 'Marqueur de dette technique',
+		strength: 0.6,
+	},
+	{ origin: 'DNS CNAME', signal: 'Fournisseur SaaS', strength: 0.9 },
+	{
+		origin: 'Candidat par mots-clés accepté par les règles',
+		signal: "Appels d'offres, offres d'emploi",
 		strength: 0.7,
 	},
 	{
-		origin: 'Candidate accepted by the LLM',
-		signal: 'Public tenders, job offers',
+		origin: 'Candidat accepté par le LLM',
+		signal: "Appels d'offres, offres d'emploi",
 		strength: 0.6,
 	},
 	{
-		origin: 'Address found in security.txt',
-		signal: 'Role contact found',
+		origin: 'Adresse trouvée dans security.txt',
+		signal: 'Contact par rôle trouvé',
 		strength: 0.7,
 	},
 	{
-		origin: 'Address extracted by the LLM',
-		signal: 'Role contact found',
+		origin: 'Adresse extraite par le LLM',
+		signal: 'Contact par rôle trouvé',
 		strength: 0.5,
 	},
 	{
-		origin: 'Address guessed from a role',
-		signal: 'Role contact found',
+		origin: "Adresse devinée à partir d'un rôle",
+		signal: 'Contact par rôle trouvé',
 		strength: 0.2,
 	},
 ]
@@ -76,7 +82,7 @@ export function workedExample(factors: readonly Factor[]): string | null {
 	)
 	const [a, b] = parts
 	if (a === undefined || b === undefined) return null
-	return `A lead with a "${a.title}" signal (strength ${a.strength}) and a "${b.title}" signal (strength ${b.strength}): ${a.weight} × ${a.strength} + ${b.weight} × ${b.strength} = ${formatPoints(total)} points`
+	return `Un lead avec un signal « ${a.title} » (force ${formatNumber(a.strength)}) et un signal « ${b.title} » (force ${formatNumber(b.strength)}) : ${a.weight} × ${formatNumber(a.strength)} + ${b.weight} × ${formatNumber(b.strength)} = ${formatPoints(total)} ${pluralize(total, 'point', 'points')}`
 }
 
 export function thresholdSummary(
@@ -84,5 +90,5 @@ export function thresholdSummary(
 	points: number | null,
 ): string | null {
 	if (threshold === null || points === null) return null
-	return `Current threshold: ${threshold}% = ${formatPoints(points)} points`
+	return `Seuil actuel : ${formatPercent(threshold / 100)} = ${formatPoints(points)} ${pluralize(points, 'point', 'points')}`
 }

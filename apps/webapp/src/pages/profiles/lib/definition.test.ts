@@ -9,11 +9,13 @@ import {
 
 describe('saveResultMessage', () => {
 	it('announces a created revision', () => {
-		expect(saveResultMessage(2, 3)).toBe('Revision 3 created')
+		expect(saveResultMessage(2, 3)).toBe('Révision 3 créée')
 	})
 
 	it('announces an unchanged definition', () => {
-		expect(saveResultMessage(3, 3)).toBe('No change, revision 3 kept')
+		expect(saveResultMessage(3, 3)).toBe(
+			'Aucun changement, révision 3 conservée',
+		)
 	})
 })
 

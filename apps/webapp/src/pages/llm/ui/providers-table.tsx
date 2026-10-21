@@ -9,6 +9,12 @@ import {
 	TableHeader,
 	TableRow,
 } from '#/components/ui/table'
+import { translateApiMessage } from '#/lib/api-errors'
+import {
+	providerKindLabel,
+	testErrorLabel,
+	tierLabel,
+} from '#/pages/llm/lib/labels'
 import { keyLabel } from '#/pages/llm/lib/tiers'
 import type { Provider, TestResult } from '#/pages/llm/lib/types'
 
@@ -67,13 +73,13 @@ export function ProvidersTable({
 				<Table>
 					<TableHeader>
 						<TableRow>
-							<TableHead>Name</TableHead>
-							<TableHead>Kind</TableHead>
-							<TableHead>Model</TableHead>
-							<TableHead>Base URL</TableHead>
-							<TableHead>Status</TableHead>
-							<TableHead>API key</TableHead>
-							<TableHead>Tiers</TableHead>
+							<TableHead>Nom</TableHead>
+							<TableHead>Type</TableHead>
+							<TableHead>Modèle</TableHead>
+							<TableHead>URL de base</TableHead>
+							<TableHead>Statut</TableHead>
+							<TableHead>Clé API</TableHead>
+							<TableHead>Niveaux</TableHead>
 							<TableHead className="text-right">Actions</TableHead>
 						</TableRow>
 					</TableHeader>
@@ -94,7 +100,7 @@ export function ProvidersTable({
 									className="py-10 text-center text-destructive"
 									role="alert"
 								>
-									Could not load providers: {errorMessage}
+									Impossible de charger les fournisseurs : {errorMessage}
 								</TableCell>
 							</TableRow>
 						) : null}
@@ -104,7 +110,7 @@ export function ProvidersTable({
 									colSpan={COLUMNS}
 									className="py-10 text-center text-muted-foreground"
 								>
-									No providers yet.
+									Aucun fournisseur pour le moment.
 								</TableCell>
 							</TableRow>
 						) : null}
@@ -120,7 +126,7 @@ export function ProvidersTable({
 												{provider.name}
 											</button>
 										</TableCell>
-										<TableCell>{provider.kind}</TableCell>
+										<TableCell>{providerKindLabel(provider.kind)}</TableCell>
 										<TableCell>{provider.model}</TableCell>
 										<TableCell className="max-w-48 truncate text-muted-foreground">
 											{provider.base_url}
@@ -129,7 +135,7 @@ export function ProvidersTable({
 											<Badge
 												variant={provider.enabled ? 'default' : 'secondary'}
 											>
-												{provider.enabled ? 'Enabled' : 'Disabled'}
+												{provider.enabled ? 'Activé' : 'Désactivé'}
 											</Badge>
 										</TableCell>
 										<TableCell>
@@ -143,7 +149,7 @@ export function ProvidersTable({
 											<div className="flex flex-wrap gap-1">
 												{provider.tiers.map((tier) => (
 													<Badge key={tier} variant="secondary">
-														{tier}
+														{tierLabel(tier)}
 													</Badge>
 												))}
 											</div>
@@ -158,14 +164,14 @@ export function ProvidersTable({
 															disabled={busyId === provider.id}
 															onClick={() => onConfirmDelete(provider.id)}
 														>
-															Confirm delete
+															Confirmer la suppression
 														</Button>
 														<Button
 															size="sm"
 															variant="outline"
 															onClick={onCancelDelete}
 														>
-															Cancel
+															Annuler
 														</Button>
 													</>
 												) : (
@@ -177,8 +183,8 @@ export function ProvidersTable({
 															onClick={() => onTest(provider.id)}
 														>
 															{testingId === provider.id
-																? 'Testing...'
-																: 'Test connection'}
+																? 'Test en cours…'
+																: 'Tester la connexion'}
 														</Button>
 														<Button
 															size="sm"
@@ -186,14 +192,14 @@ export function ProvidersTable({
 															disabled={busyId === provider.id}
 															onClick={() => onToggleEnabled(provider)}
 														>
-															{provider.enabled ? 'Disable' : 'Enable'}
+															{provider.enabled ? 'Désactiver' : 'Activer'}
 														</Button>
 														<Button
 															size="sm"
 															variant="outline"
 															onClick={() => onRequestDelete(provider.id)}
 														>
-															Delete
+															Supprimer
 														</Button>
 													</>
 												)}
@@ -213,7 +219,7 @@ function TestOutcomeView({ outcome }: { outcome: TestOutcome }) {
 	if (outcome.error) {
 		return (
 			<p role="alert" className="text-sm text-destructive">
-				Test of {outcome.providerName} failed: {outcome.error}
+				Échec du test de {outcome.providerName} : {outcome.error}
 			</p>
 		)
 	}
@@ -221,15 +227,15 @@ function TestOutcomeView({ outcome }: { outcome: TestOutcome }) {
 	if (result?.ok) {
 		return (
 			<output className="block text-sm">
-				{outcome.providerName}: connection ok, model {result.model}, latency{' '}
-				{result.latency_ms} ms
+				{outcome.providerName} : connexion réussie, modèle {result.model},
+				latence {result.latency_ms} ms
 			</output>
 		)
 	}
 	return (
 		<p role="alert" className="text-sm text-destructive">
-			{outcome.providerName}: {result?.error?.kind ?? 'error'} -{' '}
-			{result?.error?.message ?? 'the test failed'}
+			{outcome.providerName} : {testErrorLabel(result?.error?.kind ?? 'other')}{' '}
+			- {translateApiMessage(result?.error?.message ?? 'The test failed')}
 		</p>
 	)
 }

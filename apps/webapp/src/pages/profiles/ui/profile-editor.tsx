@@ -36,7 +36,7 @@ export function ProfileEditor({
 		>
 			<ProfileProblems
 				problems={problems}
-				title="Problems not tied to a field"
+				title="Problèmes non liés à un champ"
 			/>
 			{form}
 			{notice ? (
@@ -49,12 +49,14 @@ export function ProfileEditor({
 					type="submit"
 					disabled={saving || !dirty || blockedReason !== null}
 				>
-					{saving ? 'Saving...' : saveLabel}
+					{saving ? 'Enregistrement…' : saveLabel}
 				</Button>
 				{blockedReason ? (
 					<span className="text-xs text-muted-foreground">{blockedReason}</span>
 				) : dirty ? (
-					<span className="text-xs text-muted-foreground">Unsaved changes</span>
+					<span className="text-xs text-muted-foreground">
+						Modifications non enregistrées
+					</span>
 				) : null}
 			</div>
 		</form>

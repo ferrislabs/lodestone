@@ -1,5 +1,6 @@
 import { z } from 'zod'
 
+import { translateApiMessage } from '#/lib/api-errors'
 import type { DefinitionParse, Problem } from '#/pages/profiles/lib/types'
 
 const detailsSchema = z.object({
@@ -11,14 +12,19 @@ const detailsSchema = z.object({
 
 export function problemsFromError(error: unknown): Problem[] {
 	if (!(error instanceof Error)) {
-		return [{ path: '$', message: 'Unexpected error' }]
+		return [{ path: '$', message: translateApiMessage('Unexpected error') }]
 	}
 	const body = detailsSchema.safeParse(
 		(error as Error & { data?: unknown }).data,
 	)
 	const details = body.success ? (body.data.details ?? []) : []
-	if (details.length > 0) return details
-	return [{ path: '$', message: error.message }]
+	if (details.length > 0) {
+		return details.map((detail) => ({
+			path: detail.path,
+			message: translateApiMessage(detail.message),
+		}))
+	}
+	return [{ path: '$', message: translateApiMessage(error.message) }]
 }
 
 export function problemsForPath(
@@ -44,16 +50,18 @@ export function parseDefinition(text: string): DefinitionParse {
 	try {
 		parsed = JSON.parse(text)
 	} catch (error) {
-		const reason = error instanceof Error ? error.message : 'invalid JSON'
+		const reason = error instanceof Error ? error.message : 'JSON invalide'
 		return {
 			ok: false,
-			problems: [{ path: '$', message: `malformed JSON: ${reason}` }],
+			problems: [{ path: '$', message: `JSON mal formé : ${reason}` }],
 		}
 	}
 	if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
 		return {
 			ok: false,
-			problems: [{ path: '$', message: 'must be a JSON object' }],
+			problems: [
+				{ path: '$', message: translateApiMessage('must be a JSON object') },
+			],
 		}
 	}
 	return { ok: true, value: Object.fromEntries(Object.entries(parsed)) }

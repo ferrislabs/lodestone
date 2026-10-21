@@ -90,16 +90,16 @@ describe('LeadDetail', () => {
 		renderDetail()
 		expect(screen.getByRole('heading', { name: 'acme.test' })).toBeTruthy()
 		expect(screen.getByText('Fintech')).toBeTruthy()
-		expect(screen.getByText('Score breakdown')).toBeTruthy()
-		expect(screen.getByText('Source: crawler')).toBeTruthy()
+		expect(screen.getByText('Détail du score')).toBeTruthy()
+		expect(screen.getByText('Source : crawler')).toBeTruthy()
 		expect(screen.getByText('ats-fr')).toBeTruthy()
 		expect(screen.getByText('jane@acme.test')).toBeTruthy()
 		expect(screen.getByText('Growing team')).toBeTruthy()
-		expect(screen.getByText('Model: model-x')).toBeTruthy()
-		expect(screen.getByText('Prompt: v2')).toBeTruthy()
-		expect(screen.getByText('Profile revision: 3')).toBeTruthy()
+		expect(screen.getByText('Modèle : model-x')).toBeTruthy()
+		expect(screen.getByText('Prompt : v2')).toBeTruthy()
+		expect(screen.getByText('Révision du profil : 3')).toBeTruthy()
 		expect(screen.getByText('Hello')).toBeTruthy()
-		expect(screen.getByText('pending')).toBeTruthy()
+		expect(screen.getByText('En attente')).toBeTruthy()
 	})
 
 	it('renders evidence as a blockquote with an external provenance link', () => {
@@ -114,14 +114,14 @@ describe('LeadDetail', () => {
 
 	it('only offers the allowed next statuses', () => {
 		renderDetail({ nextStatuses: ['validated', 'rejected', 'new'] })
-		expect(screen.getByRole('button', { name: 'validated' })).toBeTruthy()
-		expect(screen.queryByRole('button', { name: 'contacted' })).toBeNull()
+		expect(screen.getByRole('button', { name: 'Validé' })).toBeTruthy()
+		expect(screen.queryByRole('button', { name: 'Contacté' })).toBeNull()
 	})
 
 	it('reports the chosen status', () => {
 		const onChangeStatus = vi.fn()
 		renderDetail({ onChangeStatus })
-		fireEvent.click(screen.getByRole('button', { name: 'rejected' }))
+		fireEvent.click(screen.getByRole('button', { name: 'Rejeté' }))
 		expect(onChangeStatus).toHaveBeenCalledWith('rejected')
 	})
 

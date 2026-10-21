@@ -1,5 +1,6 @@
 import { Input } from '#/components/ui/input'
 import { Label } from '#/components/ui/label'
+import { pluralize } from '#/lib/labels'
 import {
 	formatPoints,
 	isValidThreshold,
@@ -37,7 +38,7 @@ export function ThresholdField({
 	return (
 		<div className="flex flex-col gap-1">
 			<Label htmlFor="llm-qualification-threshold">
-				Qualification threshold
+				Seuil de qualification
 			</Label>
 			<div className="relative max-w-40">
 				<Input
@@ -68,7 +69,7 @@ export function ThresholdField({
 					id="llm-qualification-threshold-help"
 					className="text-xs text-muted-foreground"
 				>
-					{`= ${points} points with the current factors (max ${formatPoints(maxScore)})`}
+					{`= ${points} ${pluralize(qualificationPoints(value ?? 0, maxScore), 'point', 'points')} avec les facteurs actuels (max ${formatPoints(maxScore)})`}
 				</p>
 			)}
 			{messages.map((message) => (

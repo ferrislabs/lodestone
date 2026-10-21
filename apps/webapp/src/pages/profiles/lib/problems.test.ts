@@ -33,10 +33,10 @@ describe('problemsFromError', () => {
 
 	it('falls back to a root problem without details', () => {
 		expect(problemsFromError(apiError(409, { message: 'duplicate' }))).toEqual([
-			{ path: '$', message: 'Request payload rejected' },
+			{ path: '$', message: 'Requête rejetée' },
 		])
 		expect(problemsFromError('boom')).toEqual([
-			{ path: '$', message: 'Unexpected error' },
+			{ path: '$', message: 'Erreur inattendue' },
 		])
 	})
 })
@@ -72,7 +72,7 @@ describe('parseDefinition', () => {
 		const result = parseDefinition('[1]')
 		expect(result).toEqual({
 			ok: false,
-			problems: [{ path: '$', message: 'must be a JSON object' }],
+			problems: [{ path: '$', message: 'Doit être un objet JSON' }],
 		})
 	})
 })

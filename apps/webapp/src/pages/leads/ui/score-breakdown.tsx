@@ -7,6 +7,7 @@ import {
 	TableHeader,
 	TableRow,
 } from '#/components/ui/table'
+import { signalKindLabel } from '#/lib/labels'
 import { formatScore } from '#/pages/leads/lib/format'
 import type { ScoreContribution } from '#/pages/leads/lib/types'
 
@@ -18,20 +19,20 @@ export function ScoreBreakdown({ contributions }: ScoreBreakdownProps) {
 	return (
 		<Card>
 			<CardHeader>
-				<CardTitle>Score breakdown</CardTitle>
+				<CardTitle>Détail du score</CardTitle>
 			</CardHeader>
 			<CardContent>
 				{contributions.length === 0 ? (
 					<p className="text-sm text-muted-foreground">
-						No score contribution.
+						Aucune contribution au score.
 					</p>
 				) : (
 					<Table>
 						<TableHeader>
 							<TableRow>
 								<TableHead>Signal</TableHead>
-								<TableHead>Value</TableHead>
-								<TableHead className="text-right">Weight</TableHead>
+								<TableHead>Valeur</TableHead>
+								<TableHead className="text-right">Poids</TableHead>
 								<TableHead className="text-right">Contribution</TableHead>
 							</TableRow>
 						</TableHeader>
@@ -40,7 +41,9 @@ export function ScoreBreakdown({ contributions }: ScoreBreakdownProps) {
 								<TableRow
 									key={`${item.signal}-${item.value ?? ''}-${item.contribution}`}
 								>
-									<TableCell className="font-medium">{item.signal}</TableCell>
+									<TableCell className="font-medium">
+										{signalKindLabel(item.signal)}
+									</TableCell>
 									<TableCell>{item.value ?? '-'}</TableCell>
 									<TableCell className="text-right font-mono">
 										{formatScore(item.weight)}

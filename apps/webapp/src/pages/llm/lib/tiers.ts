@@ -1,3 +1,4 @@
+import { tierLabel } from '#/pages/llm/lib/labels'
 import {
 	TIERS,
 	type TierAction,
@@ -44,10 +45,13 @@ export function tierDiff(
 }
 
 export function deleteConflictMessage(tiers: readonly string[]): string {
-	if (tiers.length === 0) return 'Cannot delete: the provider is in use'
-	return `Cannot delete: assigned to the ${tiers.join(' and ')} tier`
+	if (tiers.length === 0) {
+		return 'Suppression impossible : le fournisseur est utilisé'
+	}
+	const names = tiers.map(tierLabel).join(' et ')
+	return `Suppression impossible : affecté ${tiers.length > 1 ? 'aux niveaux' : 'au niveau'} ${names}`
 }
 
 export function keyLabel(hasApiKey: boolean): string {
-	return hasApiKey ? 'Key set' : 'No key'
+	return hasApiKey ? 'Clé définie' : 'Aucune clé'
 }

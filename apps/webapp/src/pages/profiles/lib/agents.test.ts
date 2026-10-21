@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
 	AGENT_KINDS,
+	agentSummary,
 	dependencyNote,
 	newAgent,
 	renameAgent,
@@ -42,7 +43,7 @@ describe('agents', () => {
 
 	it('validates count, slug and uniqueness', () => {
 		expect(validateAgents({ agents: [] })).toEqual([
-			{ path: 'agents', message: 'must contain at least one agent' },
+			{ path: 'agents', message: 'Doit contenir au moins un agent' },
 		])
 		const a = { ...newAgent('ats', []), id: 'Bad Id' }
 		const b = newAgent('ats', [])
@@ -81,5 +82,52 @@ describe('agents', () => {
 				{ path: '$', message: 'x' },
 			]),
 		).toEqual({ identity: 0, agents: 1, scoring: 0, settings: 1 })
+	})
+})
+
+describe('agentSummary', () => {
+	it('summarizes keyword sources', () => {
+		expect(
+			agentSummary({
+				source: {
+					kind: 'ats',
+					keywords: ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'],
+					exclusions: ['x', 'y', 'z'],
+				},
+			}),
+		).toBe('8 mots-clés · 3 exclusions')
+		expect(
+			agentSummary({
+				source: { kind: 'ted', keywords: ['a'], exclusions: [] },
+			}),
+		).toBe('1 mot-clé')
+	})
+
+	it('summarizes infrastructure sources', () => {
+		expect(
+			agentSummary({
+				source: { kind: 'certificate_transparency', labels: ['a', 'b'] },
+			}),
+		).toBe('2 labels')
+		expect(
+			agentSummary({ source: { kind: 'dns_cname', patterns: [{}, {}, {}] } }),
+		).toBe('3 motifs CNAME')
+		expect(
+			agentSummary({
+				source: {
+					kind: 'http_probe',
+					fingerprints: [{}, {}, {}, {}, {}],
+					excluded_products: ['mine'],
+				},
+			}),
+		).toBe('5 empreintes · 1 produit exclu')
+		expect(
+			agentSummary({ source: { kind: 'http_probe', fingerprints: [{}] } }),
+		).toBe('1 empreinte')
+	})
+
+	it('is empty for an unknown source', () => {
+		expect(agentSummary({ source: { kind: 'nope' } })).toBe('')
+		expect(agentSummary(undefined)).toBe('')
 	})
 })

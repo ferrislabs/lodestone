@@ -1,6 +1,7 @@
 import { Button } from '#/components/ui/button'
 import { Input } from '#/components/ui/input'
 import { Label } from '#/components/ui/label'
+import { leadStatusLabel } from '#/pages/leads/lib/labels'
 import {
 	filtersFromForm,
 	LEAD_SORTS,
@@ -10,11 +11,11 @@ import { LEAD_STATUSES } from '#/pages/leads/lib/transitions'
 import type { ProfileSummary } from '#/pages/leads/lib/types'
 
 const SORT_LABELS: Record<(typeof LEAD_SORTS)[number], string> = {
-	score_desc: 'Score, highest first',
-	score_asc: 'Score, lowest first',
-	last_seen_desc: 'Last seen, newest first',
-	first_seen_desc: 'First seen, newest first',
-	domain_asc: 'Domain, A to Z',
+	score_desc: 'Score décroissant',
+	score_asc: 'Score croissant',
+	last_seen_desc: 'Dernière détection, la plus récente',
+	first_seen_desc: 'Première détection, la plus récente',
+	domain_asc: 'Domaine, de A à Z',
 }
 
 const SELECT_CLASS =
@@ -40,7 +41,7 @@ export function LeadFiltersForm({
 	return (
 		<div className="flex flex-col gap-4">
 			<div className="flex max-w-sm flex-col gap-1.5">
-				<Label htmlFor="profile">Profile</Label>
+				<Label htmlFor="profile">Profil</Label>
 				<select
 					id="profile"
 					className={SELECT_CLASS}
@@ -50,7 +51,7 @@ export function LeadFiltersForm({
 					{profiles.map((profile) => (
 						<option key={profile.id} value={profile.id}>
 							{profile.name} ({profile.lead_count})
-							{profile.active ? '' : ' - inactive'}
+							{profile.active ? '' : ' - inactif'}
 						</option>
 					))}
 				</select>
@@ -64,23 +65,23 @@ export function LeadFiltersForm({
 				}}
 			>
 				<div className="flex flex-col gap-1.5">
-					<Label htmlFor="status">Status</Label>
+					<Label htmlFor="status">Statut</Label>
 					<select
 						id="status"
 						name="status"
 						className={SELECT_CLASS}
 						defaultValue={filters.status}
 					>
-						<option value="">Any</option>
+						<option value="">Tous</option>
 						{LEAD_STATUSES.map((status) => (
 							<option key={status} value={status}>
-								{status}
+								{leadStatusLabel(status)}
 							</option>
 						))}
 					</select>
 				</div>
 				<div className="flex flex-col gap-1.5">
-					<Label htmlFor="min_score">Min score</Label>
+					<Label htmlFor="min_score">Score minimum</Label>
 					<Input
 						id="min_score"
 						name="min_score"
@@ -91,20 +92,20 @@ export function LeadFiltersForm({
 					/>
 				</div>
 				<div className="flex flex-col gap-1.5">
-					<Label htmlFor="domain">Domain contains</Label>
+					<Label htmlFor="domain">Domaine contenant</Label>
 					<Input id="domain" name="domain" defaultValue={filters.domain} />
 				</div>
 				<div className="flex flex-col gap-1.5">
-					<Label htmlFor="signal">Signal kind</Label>
+					<Label htmlFor="signal">Type de signal</Label>
 					<Input
 						id="signal"
 						name="signal"
-						placeholder="e.g. hiring_page"
+						placeholder="ex. job_offer"
 						defaultValue={filters.signal}
 					/>
 				</div>
 				<div className="flex flex-col gap-1.5">
-					<Label htmlFor="sort">Sort</Label>
+					<Label htmlFor="sort">Tri</Label>
 					<select
 						id="sort"
 						name="sort"
@@ -119,9 +120,9 @@ export function LeadFiltersForm({
 					</select>
 				</div>
 				<div className="flex items-end gap-2">
-					<Button type="submit">Apply</Button>
+					<Button type="submit">Appliquer</Button>
 					<Button type="button" variant="outline" onClick={onReset}>
-						Reset
+						Réinitialiser
 					</Button>
 				</div>
 			</form>

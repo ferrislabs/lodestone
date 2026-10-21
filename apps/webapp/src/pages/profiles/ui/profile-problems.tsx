@@ -8,7 +8,7 @@ interface ProfileProblemsProps {
 
 export function ProfileProblems({
 	problems,
-	title = 'The definition has problems',
+	title = 'La définition contient des problèmes',
 }: ProfileProblemsProps) {
 	if (problems.length === 0) return null
 	return (

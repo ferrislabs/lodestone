@@ -139,7 +139,7 @@ export function ProfileDetailFeature() {
 			notice={notice}
 			dirty={editor.dirty}
 			saving={update.isPending}
-			saveLabel="Save as new revision"
+			saveLabel="Enregistrer comme nouvelle révision"
 			onSave={save}
 		/>
 	)
@@ -158,7 +158,9 @@ export function ProfileDetailFeature() {
 				if (!revision) return
 				update.reset()
 				setLocalProblems([])
-				setNotice(`Revision ${revision.number} loaded, save to apply it`)
+				setNotice(
+					`Révision ${revision.number} chargée, enregistrer pour l'appliquer`,
+				)
 				editor.set(toJsonObject(revision.definition))
 				setTab('identity')
 			}}

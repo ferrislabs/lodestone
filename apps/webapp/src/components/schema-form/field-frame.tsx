@@ -8,14 +8,15 @@ interface FieldFrameProps {
 	label: string
 	description: string | undefined
 	required: boolean
+	requiredTitle: string
 	problems: readonly Problem[]
 	container?: boolean
 	children: ReactNode
 }
 
-export function RequiredMark() {
+export function RequiredMark({ title }: { title: string }) {
 	return (
-		<span className="text-destructive" title="Required">
+		<span className="text-destructive" title={title}>
 			*
 		</span>
 	)
@@ -49,6 +50,7 @@ export function FieldFrame({
 	label,
 	description,
 	required,
+	requiredTitle,
 	problems,
 	container = false,
 	children,
@@ -57,11 +59,11 @@ export function FieldFrame({
 		<div className="flex flex-col gap-1.5">
 			{container ? (
 				<p className="text-sm font-semibold">
-					{label} {required ? <RequiredMark /> : null}
+					{label} {required ? <RequiredMark title={requiredTitle} /> : null}
 				</p>
 			) : (
 				<Label htmlFor={id}>
-					{label} {required ? <RequiredMark /> : null}
+					{label} {required ? <RequiredMark title={requiredTitle} /> : null}
 				</Label>
 			)}
 			{description ? (
