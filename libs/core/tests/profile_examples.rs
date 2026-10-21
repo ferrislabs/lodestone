@@ -229,7 +229,7 @@ fn qualification_agent(profile: &ValidatedProfile, id: &str) -> Vec<(String, f64
 }
 
 #[test]
-fn iam_example_has_three_qualification_agents() {
+fn iam_example_has_six_qualification_agents() {
     let profile = parse(IAM);
     let definition = profile.definition();
     let names: Vec<_> = definition
@@ -242,7 +242,13 @@ fn iam_example_has_three_qualification_agents() {
         [
             ("pertinence", "Pertinence"),
             ("maturite-technique", "Maturité technique"),
-            ("type-organisation", "Type d'organisation"),
+            ("environnement", "Environnement"),
+            (
+                "type-et-taille-d-organisation",
+                "Type et taille d'organisation"
+            ),
+            ("marche", "Marché"),
+            ("opportunite", "Opportunité"),
         ]
     );
     assert!(
@@ -261,11 +267,30 @@ fn iam_example_has_three_qualification_agents() {
             ("inconnu".to_owned(), 0.3),
         ]
     );
-    let kinds: Vec<_> = qualification_agent(&profile, "type-organisation")
+    let kinds: Vec<_> = qualification_agent(&profile, "type-et-taille-d-organisation")
         .into_iter()
         .map(|(value, _)| value)
         .collect();
-    assert_eq!(kinds, ["public", "grande_entreprise", "pme", "inconnu"]);
+    assert_eq!(
+        kinds,
+        [
+            "secteur_public",
+            "grand_compte",
+            "eti",
+            "pme",
+            "startup",
+            "inconnu"
+        ]
+    );
+    for id in ["environnement", "marche", "opportunite"] {
+        let agent = definition
+            .qualification_agents
+            .iter()
+            .find(|agent| agent.id.as_str() == id)
+            .expect("agent exists");
+        assert_eq!(agent.questions.len(), 2, "{id}");
+        assert!(agent.enabled, "{id}");
+    }
     assert_eq!(definition.verdict.reliable_from, 70);
 }
 
@@ -346,10 +371,11 @@ fn the_current_example_upgrades_from_its_version_five_form() {
 fn contract_schema_follows_the_example_questions() {
     let profile = parse(IAM);
     let agent = &profile.definition().qualification_agents[2];
+    assert_eq!(agent.id.as_str(), "environnement");
     let schema = lodestone_core::contract_schema(agent);
     assert_eq!(
-        schema["properties"]["answers"]["properties"]["type"]["properties"]["choice"]["enum"],
-        serde_json::json!(["public", "grande_entreprise", "pme", "inconnu"])
+        schema["properties"]["answers"]["properties"]["environnement"]["properties"]["choice"]["enum"],
+        serde_json::json!(["production", "mixte", "hors_production", "inconnu"])
     );
 }
 
