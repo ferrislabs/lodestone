@@ -232,6 +232,12 @@ where
                     if let Some((output, model)) = fallback {
                         return SampleOutcome::Valid { output, model };
                     }
+                    warn!(
+                        agent = agent.id.as_str(),
+                        %error,
+                        provider_message = error.provider_message(),
+                        "scoring call failed"
+                    );
                     return SampleOutcome::Invalid {
                         error: format!("Échec de l'appel au modèle : {error}"),
                     };

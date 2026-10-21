@@ -219,8 +219,15 @@ const RULES: readonly Rule[] = [
 			`${m[1]} leads correspondent, plus que les ${m[2]} qu'un export peut contenir : affinez les filtres`,
 	],
 	[
-		/^The provider answered with status (\d+)\.$/,
-		(m) => `Le fournisseur a répondu avec le statut ${m[1]}.`,
+		/^The provider answered with status (\d+)(?:\.|: (.+))$/s,
+		(m) =>
+			m[2] === undefined
+				? `Le fournisseur a répondu avec le statut ${m[1]}.`
+				: `Le fournisseur a répondu avec le statut ${m[1]} : ${m[2]}`,
+	],
+	[
+		/^The provider rejected the credentials: (.+)$/s,
+		(m) => `Le fournisseur a refusé les identifiants : ${m[1]}`,
 	],
 	[
 		/^Insufficient permissions: required scope `(.*)`$/,

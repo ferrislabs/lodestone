@@ -946,6 +946,13 @@ fn scrub(text: &str, key: Option<&Secret>) -> String {
     }
 }
 
+fn with_provider_message(base: &str, message: Option<&str>) -> String {
+    match message {
+        Some(text) => format!("{base}: {text}"),
+        None => format!("{base}."),
+    }
+}
+
 fn classify(error: &LlmError, key: Option<&Secret>) -> TestResultDto {
     match error {
         LlmError::Timeout => failure("timeout", "The provider did not answer in time.", key),
@@ -954,14 +961,20 @@ fn classify(error: &LlmError, key: Option<&Secret>) -> TestResultDto {
             "The provider rate limited the request.",
             key,
         ),
-        LlmError::Status { status: 401 | 403 } => failure(
+        LlmError::Status {
+            status: 401 | 403,
+            message,
+        } => failure(
             "authentication",
-            "The provider rejected the credentials.",
+            &with_provider_message("The provider rejected the credentials", message.as_deref()),
             key,
         ),
-        LlmError::Status { status } => failure(
+        LlmError::Status { status, message } => failure(
             "other",
-            &format!("The provider answered with status {status}."),
+            &with_provider_message(
+                &format!("The provider answered with status {status}"),
+                message.as_deref(),
+            ),
             key,
         ),
         LlmError::Network(_) => failure("unreachable", "The endpoint could not be reached.", key),
@@ -1065,4 +1078,105 @@ pub async fn test_provider(
     actor(user)?;
     let record = state.usecase.get_llm_provider(provider_id(&raw)?).await?;
     Ok(Response::OK(run_test(&record, state.cipher.as_ref()).await))
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::Utc;
+    use httpmock::prelude::*;
+    use lodestone_core::{CipherError, SealedSecret};
+
+    use super::*;
+
+    const KEY: &str = "mistral-secret-key-0123456789";
+
+    struct PlainCipher;
+
+    impl SecretCipher for PlainCipher {
+        fn seal(&self, secret: &Secret, _: &[u8]) -> Result<SealedSecret, CipherError> {
+            Ok(SealedSecret {
+                nonce: Vec::new(),
+                ciphertext: secret.expose().as_bytes().to_vec(),
+            })
+        }
+
+        fn open(&self, sealed: &SealedSecret, _: &[u8]) -> Result<Secret, CipherError> {
+            Ok(Secret::new(String::from_utf8_lossy(&sealed.ciphertext)))
+        }
+    }
+
+    fn record(server: &MockServer) -> LlmProviderRecord {
+        let now = Utc::now();
+        LlmProviderRecord {
+            id: ProviderId(uuid::Uuid::nil()),
+            name: "mistral".to_owned(),
+            kind: ProviderKind::Mistral,
+            base_url: Url::parse(&server.base_url()).unwrap(),
+            model: "ministral-8b-2512".to_owned(),
+            timeout: Duration::from_secs(5),
+            max_retries: 0,
+            pricing: TokenPricing {
+                input_cents_per_mtok: 0,
+                output_cents_per_mtok: 0,
+            },
+            api_key: Some(SealedSecret {
+                nonce: Vec::new(),
+                ciphertext: KEY.as_bytes().to_vec(),
+            }),
+            enabled: true,
+            reasoning_effort: None,
+            generation: GenerationParams::default(),
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    #[tokio::test]
+    async fn tester_shows_the_provider_message() {
+        let server = MockServer::start();
+        server.mock(|when, then| {
+            when.method(POST);
+            then.status(400).json_body(json!({
+                "object": "error",
+                "message": "Extra inputs are not permitted: reasoning_effort",
+            }));
+        });
+        let result = run_test(&record(&server), &PlainCipher).await;
+        let error = result.error.unwrap();
+        assert!(!result.ok);
+        assert_eq!(error.kind, "other");
+        assert_eq!(
+            error.message,
+            "The provider answered with status 400: Extra inputs are not permitted: reasoning_effort"
+        );
+    }
+
+    #[tokio::test]
+    async fn tester_never_echoes_the_key() {
+        let server = MockServer::start();
+        server.mock(|when, then| {
+            when.method(POST);
+            then.status(401)
+                .json_body(json!({"error": {"message": format!("bad key {KEY}")}}));
+        });
+        let result = run_test(&record(&server), &PlainCipher).await;
+        let error = result.error.unwrap();
+        assert_eq!(error.kind, "authentication");
+        assert!(!error.message.contains(KEY));
+        assert!(error.message.contains("bad key [redacted]"));
+    }
+
+    #[tokio::test]
+    async fn tester_without_a_message_keeps_the_status_line() {
+        let server = MockServer::start();
+        server.mock(|when, then| {
+            when.method(POST);
+            then.status(502);
+        });
+        let result = run_test(&record(&server), &PlainCipher).await;
+        assert_eq!(
+            result.error.unwrap().message,
+            "The provider answered with status 502."
+        );
+    }
 }

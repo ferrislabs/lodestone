@@ -9,6 +9,8 @@ use reqwest::{Client, StatusCode, header};
 use serde::{Deserialize, Serialize};
 use tracing::{Instrument, field};
 
+use crate::provider_message;
+
 const COMPLETIONS_PATH: &str = "/v1/chat/completions";
 
 #[derive(Debug, Clone)]
@@ -174,8 +176,10 @@ impl OpenAiCompatibleProvider {
             return Err(LlmError::RateLimited { retry_after });
         }
         if !status.is_success() {
+            let key = self.api_key.as_ref().map(Secret::expose);
             return Err(LlmError::Status {
                 status: status.as_u16(),
+                message: provider_message::read(response, key).await,
             });
         }
         let parsed: ChatResponse = response.json().await.map_err(|error| {

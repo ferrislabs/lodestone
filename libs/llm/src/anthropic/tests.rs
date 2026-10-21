@@ -270,7 +270,10 @@ async fn errors_are_mapped_and_never_leak_the_key() {
             500,
             json!({"error": KEY}),
             vec![],
-            LlmError::Status { status: 500 },
+            LlmError::Status {
+                status: 500,
+                message: Some("[redacted]".to_owned()),
+            },
         ),
     ];
     for (status, body, headers, expected) in cases {
@@ -289,6 +292,35 @@ async fn errors_are_mapped_and_never_leak_the_key() {
         assert!(!format!("{error:?}").contains(KEY));
         assert!(!logs.contains(KEY));
     }
+}
+
+#[tokio::test]
+async fn client_error_keeps_the_provider_message() {
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST).path("/v1/messages");
+        then.status(400).json_body(json!({
+            "type": "error",
+            "error": {
+                "type": "invalid_request_error",
+                "message": format!("output_config.format: bad schema for {KEY}")
+            }
+        }));
+    });
+    let (result, logs) = run(&server, Duration::from_secs(5)).await;
+    let error = result.unwrap_err();
+    assert_eq!(
+        error,
+        LlmError::Status {
+            status: 400,
+            message: Some("output_config.format: bad schema for [redacted]".to_owned()),
+        }
+    );
+    assert_eq!(
+        error.to_string(),
+        "llm provider answered with status 400: output_config.format: bad schema for [redacted]"
+    );
+    assert!(!logs.contains(KEY));
 }
 
 #[tokio::test]

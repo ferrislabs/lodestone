@@ -58,7 +58,7 @@ pub struct AggregationReport {
 enum Outcome {
     Stored { verified: bool },
     Skipped,
-    Failed(&'static str),
+    Failed(String),
     BudgetExhausted,
 }
 
@@ -201,7 +201,7 @@ where
         };
         let mut current = base.clone();
         let mut candidate: Option<Candidate> = None;
-        let mut reason = REASON_CALL;
+        let mut reason = REASON_CALL.to_owned();
         for _ in 0..ATTEMPTS {
             let call = SchemaCall {
                 scope: &scope,
@@ -236,13 +236,21 @@ where
                 Ok(structured) => structured,
                 Err(LlmCallError::BudgetExhausted) => return Ok(Outcome::BudgetExhausted),
                 Err(error) => {
-                    warn!(lead_id = %lead.id, %error, "aggregation call failed");
+                    warn!(
+                        lead_id = %lead.id,
+                        %error,
+                        provider_message = error.provider_message(),
+                        "aggregation call failed"
+                    );
+                    if let Some(message) = error.provider_message() {
+                        reason = format!("{REASON_CALL} : {message}");
+                    }
                     break;
                 }
             };
             match AggregatorOutput::parse(&structured.value) {
                 Err(problem) => {
-                    reason = REASON_CONTRACT;
+                    reason = REASON_CONTRACT.to_owned();
                     warn!(lead_id = %lead.id, %problem, "aggregator answer broke the contract");
                     current = with_problem(
                         &base,
@@ -403,7 +411,8 @@ impl LodestoneUseCase {
                     Outcome::Skipped => {}
                     Outcome::Failed(reason) => {
                         report.failed += 1;
-                        self.note_summary_failure(lead, reason, clock.now()).await?;
+                        self.note_summary_failure(lead, &reason, clock.now())
+                            .await?;
                     }
                     Outcome::BudgetExhausted => {
                         report.budget_exhausted = true;

@@ -703,7 +703,10 @@ async fn test_endpoint_reports_a_rejected_key_without_echoing_it(pool: PgPool) {
             .is_empty()
     );
     assert!(!raw.contains(KEY));
-    assert!(!raw.contains("Incorrect"));
+    assert_eq!(
+        body["data"]["error"]["message"],
+        "The provider rejected the credentials: Incorrect API key provided: [redacted]"
+    );
 }
 
 #[sqlx::test(migrations = "../../migrations")]

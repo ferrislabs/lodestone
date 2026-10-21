@@ -137,6 +137,18 @@ describe('translateApiMessage', () => {
 		expect(translateApiMessage('The provider answered with status 502.')).toBe(
 			'Le fournisseur a répondu avec le statut 502.',
 		)
+		expect(
+			translateApiMessage(
+				'The provider answered with status 400: Extra inputs are not permitted',
+			),
+		).toBe(
+			'Le fournisseur a répondu avec le statut 400 : Extra inputs are not permitted',
+		)
+		expect(
+			translateApiMessage(
+				'The provider rejected the credentials: Unauthorized',
+			),
+		).toBe('Le fournisseur a refusé les identifiants : Unauthorized')
 		expect(translateApiMessage('HTTP 503: Service Unavailable')).toBe(
 			'Service indisponible',
 		)
