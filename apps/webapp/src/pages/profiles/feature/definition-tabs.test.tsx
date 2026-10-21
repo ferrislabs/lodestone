@@ -11,6 +11,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 
 import { defaultValue, type JsonObject, toJsonObject } from '#/lib/schema-form'
 import { DefinitionTabContent } from '#/pages/profiles/feature/definition-form'
+import { useDefinitionEditor } from '#/pages/profiles/feature/use-definition-editor'
 import {
 	AGENT_KINDS,
 	type AgentKind,
@@ -29,6 +30,12 @@ import type { Problem } from '#/pages/profiles/lib/types'
 import { ProfileEditor } from '#/pages/profiles/ui/profile-editor'
 import { TabBar } from '#/pages/profiles/ui/tab-bar'
 
+class NoopMediaQuery {
+	matches = false
+	addEventListener() {}
+	removeEventListener() {}
+}
+
 class NoopResizeObserver {
 	observe() {}
 	unobserve() {}
@@ -37,6 +44,7 @@ class NoopResizeObserver {
 
 beforeAll(() => {
 	vi.stubGlobal('ResizeObserver', NoopResizeObserver)
+	vi.stubGlobal('matchMedia', () => new NoopMediaQuery())
 })
 
 afterEach(cleanup)
@@ -56,7 +64,10 @@ function Harness({
 	problems?: readonly Problem[]
 	startTab?: EditorTab
 }) {
-	const [value, setValue] = useState(initial)
+	const [seed] = useState(initial)
+	const editor = useDefinitionEditor(seed)
+	const value = editor.value
+	const setValue = editor.set
 	const [tab, setTab] = useState<EditorTab>(startTab)
 	return (
 		<>
@@ -72,9 +83,13 @@ function Harness({
 				}
 				problems={[]}
 				notice={null}
-				dirty
+				dirty={editor.dirty}
 				saving={false}
 				saveLabel="Créer le profil"
+				confirmingReset={editor.confirmingReset}
+				onRequestReset={editor.requestReset}
+				onCancelReset={editor.cancelReset}
+				onConfirmReset={editor.reset}
 				blockedReason={
 					agentList(value).length === 0 ? 'Ajouter au moins un agent.' : null
 				}
@@ -91,6 +106,14 @@ function addAgent(kind: AgentKind) {
 			KIND_META[kind].label,
 		),
 	)
+}
+
+function closeSheet() {
+	fireEvent.keyDown(document, { key: 'Escape' })
+}
+
+function sheet() {
+	return within(screen.getByRole('dialog'))
 }
 
 describe('definition tabs', () => {
@@ -151,6 +174,9 @@ describe('definition tabs', () => {
 		expect(screen.queryByText('Ne doit pas être vide')).toBeNull()
 		fireEvent.click(screen.getByRole('button', { name: /Modifier/ }))
 		expect(screen.getByText('Ne doit pas être vide')).toBeTruthy()
+		expect(
+			document.querySelector('[data-tag="0"]')?.getAttribute('aria-invalid'),
+		).toBe('true')
 	})
 
 	it('shows the empty state and blocks creation without agents', () => {
@@ -160,12 +186,9 @@ describe('definition tabs', () => {
 				'Aucun agent pour le moment. Ajouter un agent pour démarrer la recherche.',
 			),
 		).toBeTruthy()
-		expect(
-			screen
-				.getByRole('button', { name: 'Créer le profil' })
-				.hasAttribute('disabled'),
-		).toBe(true)
+		expect(screen.queryByRole('button', { name: 'Créer le profil' })).toBeNull()
 		addAgent('boamp')
+		closeSheet()
 		expect(
 			screen
 				.getByRole('button', { name: 'Créer le profil' })
@@ -177,9 +200,7 @@ describe('definition tabs', () => {
 		it(`adds a ${kind} agent with only its fields`, async () => {
 			render(<Harness startTab="agents" />)
 			addAgent(kind)
-			const card = document.querySelector<HTMLElement>('[data-agent="0"]')
-			if (!card) throw new Error('card missing')
-			const scoped = within(card)
+			const scoped = sheet()
 			expect(scoped.getByLabelText('Nom')).toHaveProperty(
 				'value',
 				KIND_META[kind].label,
@@ -187,9 +208,9 @@ describe('definition tabs', () => {
 			await waitFor(() =>
 				expect(document.activeElement).toBe(scoped.getByLabelText('Nom')),
 			)
-			expect(scoped.queryAllByText('Critères LLM de cet agent').length).toBe(
-				KIND_META[kind].triaged ? 1 : 0,
-			)
+			expect(
+				scoped.queryAllByText('Critères LLM propres à cet agent').length,
+			).toBe(KIND_META[kind].triaged ? 1 : 0)
 			const has = (text: string) => scoped.queryAllByText(text).length > 0
 			if (kind === 'certificate_transparency') {
 				expect(has('Libellés')).toBe(true)
@@ -204,7 +225,7 @@ describe('definition tabs', () => {
 			} else {
 				expect(has('Mots-clés')).toBe(true)
 				expect(has('Exclusions')).toBe(true)
-				expect(has('Mots-clés minimum pour accepter')).toBe(true)
+				expect(has('Mots-clés distincts pour accepter sans LLM')).toBe(true)
 				expect(has('Empreintes')).toBe(false)
 				expect(has('Libellés')).toBe(false)
 			}
@@ -214,15 +235,17 @@ describe('definition tabs', () => {
 	it('suffixes ids of agents of the same kind', () => {
 		render(<Harness startTab="agents" />)
 		addAgent('ats')
+		closeSheet()
 		addAgent('ats')
-		expect(screen.getByLabelText('Identifiant')).toHaveProperty(
+		expect(sheet().getByLabelText('Identifiant')).toHaveProperty(
 			'value',
 			'ats-2',
 		)
+		closeSheet()
 		fireEvent.click(
 			screen.getAllByRole('button', { name: /Modifier/ })[0] as HTMLElement,
 		)
-		expect(screen.getByLabelText('Identifiant')).toHaveProperty('value', 'ats')
+		expect(sheet().getByLabelText('Identifiant')).toHaveProperty('value', 'ats')
 	})
 
 	it('lays agents out as grid cells with the add card last', () => {
@@ -244,9 +267,10 @@ describe('definition tabs', () => {
 			screen.getAllByRole('button', { name: /Modifier/ })[1] as HTMLElement,
 		)
 		const cards = grid?.querySelectorAll<HTMLElement>('[data-agent]') ?? []
-		expect(cards[1]?.className).toContain('xl:col-span-3')
-		expect(cards[0]?.className).not.toContain('col-span')
-		expect(cards[2]?.className).not.toContain('col-span')
+		expect(cards[1]?.className).toContain('ring-2')
+		expect(cards[0]?.className).not.toContain('ring-2')
+		expect(cards[2]?.className).not.toContain('ring-2')
+		expect(cards[1]?.className).not.toContain('col-span')
 		expect(screen.getAllByLabelText('Identifiant')).toHaveLength(1)
 	})
 
@@ -270,24 +294,153 @@ describe('definition tabs', () => {
 	it('removes an agent after an inline confirmation', () => {
 		render(<Harness startTab="agents" />)
 		addAgent('ats')
+		closeSheet()
 		fireEvent.click(screen.getByRole('button', { name: /Supprimer l'agent/ }))
 		fireEvent.click(screen.getByRole('button', { name: 'Conserver' }))
-		expect(screen.getAllByLabelText('Identifiant')).toHaveLength(1)
+		expect(document.querySelectorAll('[data-agent]')).toHaveLength(1)
 		fireEvent.click(screen.getByRole('button', { name: /Supprimer l'agent/ }))
 		fireEvent.click(
 			screen.getByRole('button', { name: 'Confirmer la suppression' }),
 		)
-		expect(screen.queryAllByLabelText('Identifiant')).toHaveLength(0)
+		expect(document.querySelectorAll('[data-agent]')).toHaveLength(0)
 		expect(screen.getByText(/Aucun agent pour le moment/)).toBeTruthy()
 	})
 
-	it('collapses and expands an agent', () => {
+	it('opens the sheet with the agent name and closes it on Escape or Fermer', () => {
+		const agent = { ...newAgent('ats', []), name: 'ATS français' }
+		render(
+			<Harness startTab="agents" initial={{ ...blank(), agents: [agent] }} />,
+		)
+		expect(screen.queryByRole('dialog')).toBeNull()
+		fireEvent.click(
+			screen.getByRole('button', { name: 'Modifier ATS français' }),
+		)
+		const dialog = screen.getByRole('dialog')
+		expect(within(dialog).getByRole('heading').textContent).toContain(
+			'ATS français',
+		)
+		expect(within(dialog).getByRole('heading').textContent).toContain(
+			KIND_META.ats.label,
+		)
+		expect(dialog.className).toContain('sm:max-w-2xl')
+		closeSheet()
+		expect(screen.queryByRole('dialog')).toBeNull()
+		fireEvent.click(
+			screen.getByRole('button', { name: 'Modifier ATS français' }),
+		)
+		const close = within(screen.getByRole('dialog')).getAllByRole('button', {
+			name: 'Fermer',
+		})
+		fireEvent.click(close[close.length - 1] as HTMLElement)
+		expect(screen.queryByRole('dialog')).toBeNull()
+	})
+
+	it('keeps the identifier behind a collapsed advanced section', () => {
 		render(<Harness startTab="agents" />)
 		addAgent('ats')
-		fireEvent.click(screen.getByRole('button', { name: /Replier/ }))
-		expect(screen.queryByLabelText('Identifiant')).toBeNull()
-		fireEvent.click(screen.getByRole('button', { name: /Modifier/ }))
-		expect(screen.getByLabelText('Identifiant')).toBeTruthy()
+		const advanced = sheet().getByText('Avancé').closest('details')
+		expect(advanced?.hasAttribute('open')).toBe(false)
+		expect(advanced?.contains(sheet().getByLabelText('Identifiant'))).toBe(true)
+	})
+
+	it('lays a keyword agent out with a 1 to 5 choice and two tag inputs', () => {
+		render(<Harness startTab="agents" />)
+		addAgent('boamp')
+		const scoped = sheet()
+		const keywords = scoped.getByLabelText('Mots-clés')
+		const exclusions = scoped.getByLabelText('Exclusions')
+		expect(keywords.closest('.md\\:grid-cols-2')).toBe(
+			exclusions.closest('.md\\:grid-cols-2'),
+		)
+		expect(keywords.closest('.md\\:grid-cols-2')).toBeTruthy()
+		const choice = scoped.getByRole('radiogroup', {
+			name: 'Mots-clés distincts pour accepter sans LLM',
+		})
+		const radios = within(choice).getAllByRole('radio')
+		expect(radios.map((radio) => radio.textContent)).toEqual([
+			'1',
+			'2',
+			'3',
+			'4',
+			'5',
+		])
+		expect(radios[1]?.getAttribute('aria-checked')).toBe('true')
+		fireEvent.click(radios[3] as HTMLElement)
+		expect(radios[3]?.getAttribute('aria-checked')).toBe('true')
+		expect(radios[1]?.getAttribute('aria-checked')).toBe('false')
+		fireEvent.change(keywords, { target: { value: 'cloud' } })
+		fireEvent.keyDown(keywords, { key: 'Enter' })
+		expect(scoped.getByLabelText('Retirer cloud')).toBeTruthy()
+		closeSheet()
+		expect(screen.getByText('1 mot-clé')).toBeTruthy()
+	})
+
+	it('lays a dns_cname agent out as compact rows', () => {
+		render(<Harness startTab="agents" />)
+		addAgent('dns_cname')
+		const scoped = sheet()
+		fireEvent.click(scoped.getByText('Ajouter un motif'))
+		const row = document.querySelector<HTMLElement>(
+			'[data-row="agents[0].source.patterns[0]"]',
+		) as HTMLElement
+		expect(within(row).getByLabelText('Fournisseur')).toBeTruthy()
+		expect(within(row).getByLabelText('Suffixe cible')).toBeTruthy()
+		fireEvent.click(within(row).getByRole('button', { name: /Supprimer/ }))
+		expect(
+			document.querySelector('[data-row="agents[0].source.patterns[0]"]'),
+		).toBeNull()
+	})
+
+	it('switches the variant of an http probe matcher inline', () => {
+		render(<Harness startTab="agents" />)
+		addAgent('http_probe')
+		const scoped = sheet()
+		fireEvent.click(scoped.getByLabelText('Ajouter : Empreintes'))
+		expect(scoped.getByText('Version et dette technique')).toBeTruthy()
+		fireEvent.click(scoped.getByText('Ajouter une condition'))
+		const select = scoped.getByLabelText(
+			'Type : Condition',
+		) as HTMLSelectElement
+		expect([...select.options].map((option) => option.textContent)).toEqual([
+			'Statut',
+			'En-tête',
+			'Corps',
+		])
+		expect(scoped.getByLabelText('Code de statut attendu')).toBeTruthy()
+		fireEvent.change(select, { target: { value: '1' } })
+		expect(scoped.getByLabelText("Nom de l'en-tête")).toBeTruthy()
+		expect(scoped.getByLabelText('Expression régulière')).toBeTruthy()
+		expect(scoped.queryByLabelText('Code de statut attendu')).toBeNull()
+		fireEvent.change(select, { target: { value: '2' } })
+		expect(scoped.queryByLabelText("Nom de l'en-tête")).toBeNull()
+		expect(scoped.getByLabelText('Expression régulière')).toBeTruthy()
+		expect(scoped.getByLabelText('Produits exclus')).toBeTruthy()
+	})
+
+	it('shows the save bar only when dirty and cancel resets after a confirmation', () => {
+		render(<Harness startTab="agents" />)
+		expect(screen.queryByTestId('save-bar')).toBeNull()
+		addAgent('ats')
+		closeSheet()
+		const bar = within(screen.getByTestId('save-bar'))
+		expect(bar.getByText('Modifications non enregistrées')).toBeTruthy()
+		expect(bar.getByRole('button', { name: 'Créer le profil' })).toBeTruthy()
+		expect(
+			screen.getAllByRole('button', { name: 'Créer le profil' }),
+		).toHaveLength(1)
+		fireEvent.click(
+			bar.getByRole('button', { name: 'Annuler les modifications' }),
+		)
+		fireEvent.click(
+			bar.getByRole('button', { name: 'Conserver mes modifications' }),
+		)
+		expect(screen.getByTestId('save-bar')).toBeTruthy()
+		fireEvent.click(
+			bar.getByRole('button', { name: 'Annuler les modifications' }),
+		)
+		fireEvent.click(bar.getByRole('button', { name: "Confirmer l'annulation" }))
+		expect(screen.queryByTestId('save-bar')).toBeNull()
+		expect(screen.getByText(/Aucun agent pour le moment/)).toBeTruthy()
 	})
 
 	it('warns when an http probe has no certificate transparency agent', () => {
@@ -296,6 +449,7 @@ describe('definition tabs', () => {
 		expect(screen.getByRole('alert').textContent).toContain(
 			'Sonde les hôtes trouvés par un agent Transparence des certificats',
 		)
+		closeSheet()
 		addAgent('certificate_transparency')
 		expect(screen.queryByRole('alert')).toBeNull()
 		expect(
@@ -308,7 +462,7 @@ describe('definition tabs', () => {
 	it('stores agent criteria and drops them when emptied', () => {
 		render(<Harness startTab="agents" />)
 		addAgent('ats')
-		const field = screen.getByLabelText('Critères LLM de cet agent')
+		const field = screen.getByLabelText('Critères LLM propres à cet agent')
 		fireEvent.change(field, { target: { value: 'only devs' } })
 		expect(field).toHaveProperty('value', 'only devs')
 		fireEvent.change(field, { target: { value: '' } })

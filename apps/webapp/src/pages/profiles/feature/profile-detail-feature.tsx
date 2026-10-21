@@ -140,6 +140,15 @@ export function ProfileDetailFeature() {
 			dirty={editor.dirty}
 			saving={update.isPending}
 			saveLabel="Enregistrer comme nouvelle révision"
+			confirmingReset={editor.confirmingReset}
+			onRequestReset={editor.requestReset}
+			onCancelReset={editor.cancelReset}
+			onConfirmReset={() => {
+				if (update.isError) update.reset()
+				setLocalProblems([])
+				setNotice(null)
+				editor.reset()
+			}}
 			onSave={save}
 		/>
 	)

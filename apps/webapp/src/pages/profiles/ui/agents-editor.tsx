@@ -10,18 +10,20 @@ import {
 } from '#/pages/profiles/lib/agents'
 import { AgentCard } from '#/pages/profiles/ui/agent-card'
 import { AgentPicker } from '#/pages/profiles/ui/agent-picker'
+import { AgentSheet } from '#/pages/profiles/ui/agent-sheet'
 
 interface AgentsEditorProps {
 	context: FormContext
 	agents: readonly JsonValue[]
 	problems: readonly Problem[]
-	collapsed: ReadonlySet<number>
+	editing: number | null
 	confirmingRemove: number | null
 	picking: boolean
 	onOpenPicker: () => void
 	onClosePicker: () => void
 	onAdd: (kind: AgentKind) => void
-	onToggleCollapsed: (index: number) => void
+	onEdit: (index: number) => void
+	onCloseEdit: () => void
 	onEnabled: (index: number, enabled: boolean) => void
 	onName: (index: number, name: string) => void
 	onId: (index: number, id: string) => void
@@ -35,13 +37,14 @@ export function AgentsEditor({
 	context,
 	agents,
 	problems,
-	collapsed,
+	editing,
 	confirmingRemove,
 	picking,
 	onOpenPicker,
 	onClosePicker,
 	onAdd,
-	onToggleCollapsed,
+	onEdit,
+	onCloseEdit,
 	onEnabled,
 	onName,
 	onId,
@@ -50,6 +53,7 @@ export function AgentsEditor({
 	onConfirmRemove,
 	onCancelRemove,
 }: AgentsEditorProps) {
+	const editingAgent = editing === null ? undefined : agents[editing]
 	return (
 		<div className="flex flex-col gap-3">
 			<FieldErrors
@@ -69,18 +73,14 @@ export function AgentsEditor({
 					return (
 						<AgentCard
 							key={slot}
-							context={context}
 							agent={agent ?? null}
 							index={index}
 							problems={problems}
 							note={dependencyNote(agentKind(agent), agents)}
-							collapsed={collapsed.has(index)}
+							editing={editing === index}
 							confirmingRemove={confirmingRemove === index}
-							onToggleCollapsed={() => onToggleCollapsed(index)}
+							onEdit={() => onEdit(index)}
 							onEnabled={(enabled) => onEnabled(index, enabled)}
-							onName={(name) => onName(index, name)}
-							onId={(id) => onId(index, id)}
-							onCriteria={(criteria) => onCriteria(index, criteria)}
 							onRequestRemove={() => onRequestRemove(index)}
 							onConfirmRemove={() => onConfirmRemove(index)}
 							onCancelRemove={onCancelRemove}
@@ -99,6 +99,21 @@ export function AgentsEditor({
 				</li>
 			</ul>
 			{picking ? <AgentPicker onPick={onAdd} onCancel={onClosePicker} /> : null}
+			{editingAgent !== undefined && editing !== null ? (
+				<AgentSheet
+					key={editing}
+					context={context}
+					agent={editingAgent}
+					index={editing}
+					problems={problems}
+					note={dependencyNote(agentKind(editingAgent), agents)}
+					onClose={onCloseEdit}
+					onEnabled={(enabled) => onEnabled(editing, enabled)}
+					onName={(name) => onName(editing, name)}
+					onId={(id) => onId(editing, id)}
+					onCriteria={(criteria) => onCriteria(editing, criteria)}
+				/>
+			) : null}
 		</div>
 	)
 }

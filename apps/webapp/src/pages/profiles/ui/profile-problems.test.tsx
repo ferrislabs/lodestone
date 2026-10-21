@@ -38,7 +38,11 @@ describe('ProfileEditor', () => {
 				dirty
 				saving={false}
 				saveLabel="Save as new revision"
+				confirmingReset={false}
 				onSave={vi.fn()}
+				onRequestReset={vi.fn()}
+				onConfirmReset={vi.fn()}
+				onCancelReset={vi.fn()}
 			/>,
 		)
 		const alert = screen.getByRole('alert')

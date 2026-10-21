@@ -19,19 +19,11 @@ function asObject(next: JsonValue, fallback: JsonObject): JsonObject {
 	return isJsonObject(next) ? next : fallback
 }
 
-function focusName(index: number) {
-	requestAnimationFrame(() => {
-		document.getElementById(`agent-name-${index}`)?.focus()
-	})
-}
-
 export function useAgentsUi(
 	value: JsonObject,
 	onChange: (next: JsonObject) => void,
 ) {
-	const [collapsed, setCollapsed] = useState<ReadonlySet<number>>(
-		() => new Set(agentList(value).map((_, index) => index)),
-	)
+	const [editing, setEditing] = useState<number | null>(null)
 	const [confirmingRemove, setConfirmingRemove] = useState<number | null>(null)
 	const [picking, setPicking] = useState(false)
 	const agents = agentList(value)
@@ -41,25 +33,18 @@ export function useAgentsUi(
 
 	return {
 		agents,
-		collapsed,
+		editing,
 		confirmingRemove,
 		picking,
 		openPicker: () => setPicking(true),
 		closePicker: () => setPicking(false),
 		add: (kind: AgentKind) => {
 			onChange(withAgents(value, [...agents, newAgent(kind, agents)]))
-			setCollapsed(new Set(agents.map((_, index) => index)))
 			setPicking(false)
-			focusName(agents.length)
+			setEditing(agents.length)
 		},
-		toggleCollapsed: (index: number) =>
-			setCollapsed((current) =>
-				current.has(index)
-					? new Set(
-							agents.map((_, position) => position).filter((p) => p !== index),
-						)
-					: new Set(agents.map((_, position) => position)),
-			),
+		edit: setEditing,
+		closeEdit: () => setEditing(null),
 		setEnabled: (index: number, enabled: boolean) =>
 			patch(['agents', index, 'enabled'], enabled),
 		setName: (index: number, name: string) =>
@@ -82,14 +67,10 @@ export function useAgentsUi(
 				),
 			)
 			setConfirmingRemove(null)
-			setCollapsed(
-				(current) =>
-					new Set(
-						[...current]
-							.filter((position) => position !== index)
-							.map((position) => (position > index ? position - 1 : position)),
-					),
-			)
+			setEditing((current) => {
+				if (current === null || current === index) return null
+				return current > index ? current - 1 : current
+			})
 		},
 	}
 }

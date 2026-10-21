@@ -39,6 +39,17 @@ export interface Problem {
 export interface FieldCopy {
 	label: string
 	description?: string
+	add?: string
+}
+
+export interface ObjectLayout {
+	row?: readonly string[]
+	collapsed?: { title: string; keys: readonly string[] }
+}
+
+export interface NumberRange {
+	min: number
+	max: number
 }
 
 export interface UiMessages {
@@ -59,6 +70,8 @@ export interface UiHints {
 	fields: Readonly<Record<string, FieldCopy>>
 	variants: Readonly<Record<string, string>>
 	messages: UiMessages
+	layout?: Readonly<Record<string, ObjectLayout>>
+	choices?: Readonly<Record<string, NumberRange>>
 }
 
 export const DEFAULT_MESSAGES: UiMessages = {
