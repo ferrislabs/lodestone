@@ -126,6 +126,7 @@ mod tests {
             exclusion_threshold: threshold,
             samples: 1,
             sampling_temperature: 0.7,
+            learned_calibration: true,
             questions,
         }
     }

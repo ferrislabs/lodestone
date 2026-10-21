@@ -26,7 +26,7 @@ pub(crate) const INDICATORS_NOTE: &str = "The document whose source is \"indicat
 fn contract_rules(definition: &ProfileDefinition, schema: &Value) -> String {
     format!(
         "Answer only with one JSON object that follows this contract and nothing else. `criteria` has an entry for every criterion with `type` set to \"choice\", `choice` set to one option value, `evidence` set to the sentence that justifies the choice, copied verbatim and at most {EVIDENCE_MAX_CHARS} characters, taken only from the lead facts, a signal, the company dossier, or a summary or a quote of a qualification report; never from a score, an agreement, a status, a weight, a probability or the indicators, which are not evidence, `confidence` between 0 and 1, and `probabilities` giving a probability between 0 and 1 for every option value, summing to 1. Every criterion has one unknown option, marked in the list of options: choose it, with an empty `evidence`, when nothing in the documents supports an answer. Any other choice without a verbatim quote is replaced by the unknown option. `score` is an integer from 0 (not worth contacting) to {MAX_SCORE} (contact first). `verdict` has `choice` set to fiable (a credible prospect worth contacting), a_verifier (promising, a human must check) or ecarte (not a prospect), `confidence` between 0 and 1, and `probabilities` giving a probability between 0 and 1 for fiable, a_verifier and ecarte, summing to 1. `reasons` has 1 to {MAX_REASONS} short sentences of at most {REASON_MAX_CHARS} characters, written in {}, that explain the score and the verdict. Quote exactly, never paraphrase or translate.\n\nContract JSON schema:\n{schema}",
-        definition.llm.language.name()
+        definition.language.name()
     )
 }
 

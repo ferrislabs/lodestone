@@ -1,9 +1,10 @@
 {
-  "schema_version": 13,
+  "schema_version": 14,
   "identity": {
     "offer": "Migration of Magento 1 and Magento 2 shops to a modern e-commerce platform, by a web agency",
     "target_customer": "Merchants and organizations running an outdated Magento storefront"
   },
+  "language": "fr",
   "agents": [
     {
       "id": "http-probe",
@@ -251,16 +252,8 @@
       "saas_provider": 365
     }
   },
-  "calibration": {
-    "learned": true
-  },
   "contact_ranking": {
     "preferred_local_parts": ["contact", "commercial", "info"],
     "guess_local_parts": ["contact"]
-  },
-  "llm": {
-    "qualification_threshold": 50,
-    "relevance_criteria": "The organization runs an online shop on Magento, preferably an outdated version, or is hiring or tendering for a rebuild of its merchant site.",
-    "language": "fr"
   }
 }

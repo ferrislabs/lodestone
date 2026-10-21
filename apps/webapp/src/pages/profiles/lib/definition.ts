@@ -1,9 +1,10 @@
 export const NEW_PROFILE_TEMPLATE = `{
-  "schema_version": 13,
+  "schema_version": 14,
   "identity": {
     "offer": "",
     "target_customer": ""
   },
+  "language": "fr",
   "agents": [],
   "qualification_agents": [],
   "scoring_agents": [],
@@ -42,16 +43,8 @@ export const NEW_PROFILE_TEMPLATE = `{
       "default": 180
     }
   },
-  "calibration": {
-    "learned": true
-  },
   "contact_ranking": {
     "preferred_local_parts": []
-  },
-  "llm": {
-    "qualification_threshold": 50,
-    "relevance_criteria": "",
-    "language": "fr"
   }
 }
 `

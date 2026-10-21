@@ -48,6 +48,7 @@ export interface QualificationActions extends AxisActions {
 	setId: (index: number, id: string) => void
 	setProvider: (index: number, providerId: string) => void
 	setWeight: (index: number, weight: number) => void
+	setLearnedCalibration: (index: number, learned: boolean) => void
 	setExclusionThreshold: (index: number, percent: number | null) => void
 	setSamples: (index: number, samples: number | null) => void
 	setSamplingTemperature: (index: number, temperature: number | null) => void
@@ -81,6 +82,7 @@ export interface ScoringActions extends AxisActions {
 	setId: (index: number, id: string) => void
 	setProvider: (index: number, providerId: string) => void
 	setWeight: (index: number, weight: number) => void
+	setLearnedCalibration: (index: number, learned: boolean) => void
 	setSamples: (index: number, samples: number | null) => void
 	setSamplingTemperature: (index: number, temperature: number | null) => void
 	setPrompt: (index: number, prompt: string) => void

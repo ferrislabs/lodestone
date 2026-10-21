@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 use crate::domain::values::SourceName;
 
-pub const PROFILE_SCHEMA_VERSION: u32 = 13;
+pub const PROFILE_SCHEMA_VERSION: u32 = 14;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -15,9 +15,15 @@ pub const PROFILE_SCHEMA_VERSION: u32 = 13;
     description = "Describes one market: what is sold, which agents scan which sources, which qualification agents judge a lead, which scoring agents decide its score and verdict, how an aggregator sums it up and which contacts to prefer."
 )]
 pub struct ProfileDefinition {
-    #[schemars(description = "Profile format version. Must be 13.")]
+    #[schemars(description = "Profile format version. Must be 14.")]
     pub schema_version: u32,
     pub identity: Identity,
+    #[serde(default)]
+    #[schemars(
+        title = "Answer language",
+        description = "Language of every free-text field the LLM writes: triage reason, qualification summary, approach angle and draft. Evidence quotes stay in the source language."
+    )]
+    pub language: Language,
     #[schemars(description = "Detection agents. At least one is required.")]
     pub agents: Vec<Agent>,
     #[schemars(
@@ -36,30 +42,7 @@ pub struct ProfileDefinition {
     pub verdict: VerdictThresholds,
     #[serde(default)]
     pub evidence: EvidenceSettings,
-    #[serde(default)]
-    pub calibration: CalibrationSettings,
     pub contact_ranking: ContactRanking,
-    pub llm: LlmSettings,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-#[schemars(
-    title = "Calibration",
-    description = "Learns from the validate and reject decisions how far the probabilities of the agents can be trusted."
-)]
-pub struct CalibrationSettings {
-    #[serde(default = "default_enabled")]
-    #[schemars(
-        description = "When true, the verdict probabilities of the scoring agents and the scores of the qualification agents are corrected by an isotonic map learned daily from the human decisions, once at least 50 leads are labelled with 10 of each class. Default true."
-    )]
-    pub learned: bool,
-}
-
-impl Default for CalibrationSettings {
-    fn default() -> Self {
-        Self { learned: true }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -169,6 +152,11 @@ pub struct QualificationAgent {
         description = "Questions the agent answers. At least one is required."
     )]
     pub questions: Vec<Question>,
+    #[serde(default = "default_enabled")]
+    #[schemars(
+        description = "When true, once at least 50 leads are labelled with 10 of each class, the score of this agent is corrected by an isotonic map learned daily from the human decisions. The fit always runs so the quality page keeps its figures. Default true."
+    )]
+    pub learned_calibration: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -226,6 +214,11 @@ pub struct ScoringAgent {
         description = "Temperature of the calls when samples is above 1, overriding the provider temperature. Default 0.7."
     )]
     pub sampling_temperature: f64,
+    #[serde(default = "default_enabled")]
+    #[schemars(
+        description = "When true, once at least 50 leads are labelled with 10 of each class, the verdict probabilities of this agent are corrected by an isotonic map learned daily from the human decisions. The fit always runs so the quality page keeps its figures. Default true."
+    )]
+    pub learned_calibration: bool,
 }
 
 pub const DEFAULT_SCORING_SAMPLES: u8 = 1;
@@ -623,19 +616,6 @@ pub struct Agent {
     pub enabled: bool,
     #[schemars(description = "The source searched and its settings.")]
     pub source: AgentSource,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(description = "LLM settings specific to this agent.")]
-    pub llm: Option<AgentLlm>,
-}
-
-impl Agent {
-    pub fn relevance_criteria(&self) -> Option<&str> {
-        self.llm
-            .as_ref()
-            .and_then(|llm| llm.relevance_criteria.as_deref())
-            .map(str::trim)
-            .filter(|criteria| !criteria.is_empty())
-    }
 }
 
 fn default_enabled() -> bool {
@@ -712,20 +692,6 @@ impl AgentSource {
             Self::Ats(_) => SourceName::Ats,
         }
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-#[schemars(
-    title = "Agent LLM settings",
-    description = "LLM settings of one agent."
-)]
-pub struct AgentLlm {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(
-        description = "Criteria given to the LLM to triage this agent's candidates. The profile criteria apply when absent."
-    )]
-    pub relevance_criteria: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -908,28 +874,6 @@ pub struct ContactRanking {
     #[serde(default)]
     #[schemars(description = "Local parts to guess when no address is found.")]
     pub guess_local_parts: Vec<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-#[schemars(
-    title = "LLM settings",
-    description = "Qualification threshold, relevance criteria and answer language given to the model."
-)]
-pub struct LlmSettings {
-    #[schemars(
-        range(min = 0, max = 100),
-        description = "Percentage of the maximum possible score from which a lead is qualified."
-    )]
-    pub qualification_threshold: u8,
-    #[schemars(description = "Criteria given to the LLM to judge a lead relevance.")]
-    pub relevance_criteria: String,
-    #[serde(default)]
-    #[schemars(
-        title = "Answer language",
-        description = "Language of every free-text field the LLM writes: triage reason, qualification summary, approach angle and draft. Evidence quotes stay in the source language."
-    )]
-    pub language: Language,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

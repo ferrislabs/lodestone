@@ -92,7 +92,7 @@ fn verdict_name(verdict: Option<Verdict>) -> &'static str {
 fn language_line(definition: &ProfileDefinition) -> String {
     format!(
         "Write every free-text field (summary, verdict_narrative, approach_angle, draft_message.subject, draft_message.body) in {}. Evidence quotes stay in the language of the document they come from.",
-        definition.llm.language.name()
+        definition.language.name()
     )
 }
 

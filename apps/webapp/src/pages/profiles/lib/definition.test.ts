@@ -35,7 +35,7 @@ describe('definition text', () => {
 
 	it('ships a template at the current version that fits the bundled schema', () => {
 		const template = JSON.parse(NEW_PROFILE_TEMPLATE)
-		expect(template.schema_version).toBe(13)
+		expect(template.schema_version).toBe(14)
 		const properties = Object.keys(PROFILE_SCHEMA.properties ?? {})
 		for (const key of Object.keys(template)) expect(properties).toContain(key)
 		for (const key of PROFILE_SCHEMA.required ?? [])

@@ -142,7 +142,8 @@ impl LodestoneUseCase {
                     .first()
                     .map(|result| result.profile_revision)
             });
-        let (qualification_agents, scoring_agents, learned) = match revision_number {
+        let stored = calibrations.list(lead.profile_id).await?;
+        let (qualification_agents, scoring_agents, calibrations) = match revision_number {
             Some(number) => profiles
                 .list_revisions(lead.profile_id)
                 .await?
@@ -153,14 +154,12 @@ impl LodestoneUseCase {
                     (
                         definition.qualification_agents.clone(),
                         definition.scoring_agents.clone(),
-                        definition.calibration.learned,
+                        Calibrations::for_definition(stored, definition),
                     )
                 })
                 .unwrap_or_default(),
-            None => (Vec::new(), Vec::new(), false),
+            None => (Vec::new(), Vec::new(), Calibrations::none()),
         };
-        let calibrations =
-            Calibrations::applied(calibrations.list(lead.profile_id).await?, learned);
         let summary_state = qualification.summary_state(lead_id).await?;
         let scoring = qualification.scorings(&[lead_id]).await?.remove(&lead_id);
         let lead_signals = signals.list_for_lead(lead_id).await?;

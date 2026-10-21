@@ -72,8 +72,8 @@ impl Api {
     }
 }
 
-fn with_threshold(mut definition: Value, threshold: u8) -> Value {
-    definition["llm"]["qualification_threshold"] = json!(threshold);
+fn with_offer(mut definition: Value, offer: &str) -> Value {
+    definition["identity"]["offer"] = json!(offer);
     definition
 }
 
@@ -138,14 +138,14 @@ async fn invalid_definitions_are_rejected_with_the_faulty_field_path(pool: PgPoo
     removed_weights["scoring"] = json!({"factors": []});
     let mut removed_reference = iam();
     removed_reference["evidence"]["reference_score"] = json!(50);
-    let mut bad_threshold = iam();
-    bad_threshold["llm"]["qualification_threshold"] = json!(101);
+    let mut removed_llm = iam();
+    removed_llm["llm"] = json!({"language": "fr"});
 
     let cases = [
         (bad_influence, "evidence.influence"),
         (removed_weights, "scoring"),
         (removed_reference, "evidence.reference_score"),
-        (bad_threshold, "llm.qualification_threshold"),
+        (removed_llm, "llm"),
         (bad_version, "schema_version"),
         (unknown_field, "identity.colour"),
     ];
@@ -218,7 +218,7 @@ async fn malformed_json_and_envelopes_are_rejected_with_a_path(pool: PgPool) {
 async fn update_appends_a_revision_and_leaves_the_past_one_intact(pool: PgPool) {
     let api = Api::new(pool).await;
     let id = api.create("iam", iam()).await;
-    let changed = with_threshold(iam(), 9);
+    let changed = with_offer(iam(), "Managed IAM v2");
 
     let (status, body) = api.update(&id, changed.clone()).await;
 
@@ -254,7 +254,7 @@ async fn invalid_update_creates_no_revision(pool: PgPool) {
     let api = Api::new(pool).await;
     let id = api.create("iam", iam()).await;
     let mut bad = iam();
-    bad["schema_version"] = json!(14);
+    bad["schema_version"] = json!(15);
 
     let (status, body) = api.update(&id, bad).await;
 

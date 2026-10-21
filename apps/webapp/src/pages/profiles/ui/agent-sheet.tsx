@@ -29,7 +29,6 @@ interface AgentSheetProps {
 	onEnabled: (enabled: boolean) => void
 	onName: (name: string) => void
 	onId: (id: string) => void
-	onCriteria: (criteria: string) => void
 }
 
 export function AgentSheet({
@@ -42,7 +41,6 @@ export function AgentSheet({
 	onEnabled,
 	onName,
 	onId,
-	onCriteria,
 }: AgentSheetProps) {
 	const kind = agentKind(agent)
 	const name = agentField(agent, 'name')
@@ -83,7 +81,6 @@ export function AgentSheet({
 						onEnabled={onEnabled}
 						onName={onName}
 						onId={onId}
-						onCriteria={onCriteria}
 					/>
 				</div>
 				<SheetFooter className="flex-row justify-end border-t">

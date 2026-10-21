@@ -16,6 +16,12 @@ const MATCHER_EQUALS: FieldCopy = {
 	description: 'Code de statut HTTP attendu dans la réponse.',
 }
 
+export const LEARNED_CALIBRATION_COPY: FieldCopy = {
+	label: 'Calibration apprise',
+	description:
+		"Corrige chaque jour les probabilités de cet agent d'après vos décisions, dès 50 leads étiquetés dont au moins 10 de chaque classe.",
+}
+
 const FINGERPRINT = 'agents[].source.fingerprints[]'
 const MARKER = `${FINGERPRINT}.debt_markers[]`
 
@@ -55,15 +61,6 @@ export const FIELD_COPY: Readonly<Record<string, FieldCopy>> = {
 	'agents[].source': {
 		label: 'Source',
 		description: 'La source interrogée et ses réglages.',
-	},
-	'agents[].llm': {
-		label: "Réglages LLM de l'agent",
-		description: 'Réglages LLM propres à cet agent.',
-	},
-	'agents[].llm.relevance_criteria': {
-		label: 'Critères de pertinence',
-		description:
-			"Critères donnés au LLM pour trier les candidats de cet agent. Les critères du profil s'appliquent à défaut.",
 	},
 	'agents[].source.labels': {
 		label: 'Libellés',
@@ -178,6 +175,7 @@ export const FIELD_COPY: Readonly<Record<string, FieldCopy>> = {
 		description:
 			"Mots-clés qui envoient un candidat au tri par le LLM lorsqu'ils sont présents.",
 	},
+	'qualification_agents[].learned_calibration': LEARNED_CALIBRATION_COPY,
 	qualification_agents: {
 		label: 'Agents de qualification',
 		description:
@@ -289,6 +287,7 @@ export const FIELD_COPY: Readonly<Record<string, FieldCopy>> = {
 		description:
 			"Quand l'agent choisit cette option avec une preuve vérifiée et une probabilité au moins égale au seuil d'exclusion, le lead est écarté. Jamais sur l'option « inconnu ».",
 	},
+	'scoring_agents[].learned_calibration': LEARNED_CALIBRATION_COPY,
 	scoring_agents: {
 		label: 'Agents de scoring',
 		description:
@@ -458,16 +457,6 @@ export const FIELD_COPY: Readonly<Record<string, FieldCopy>> = {
 		description:
 			"Solidité des preuves derrière un lead (signaux indépendants et vieillis, diversité des sources et des types, environnement des hôtes, force des signaux), calculée sur l'entreprise entière quand plusieurs domaines partagent un SIREN. Elle pondère l'avis des agents dans la confiance.",
 	},
-	calibration: {
-		label: 'Calibration apprise',
-		description:
-			"Corrige les probabilités des agents d'après les décisions validées et rejetées par les humains.",
-	},
-	'calibration.learned': {
-		label: 'Calibration apprise activée',
-		description:
-			"Corrige chaque jour les probabilités de verdict des agents de scoring et les scores des agents de qualification d'après vos décisions, dès que 50 leads sont étiquetés dont au moins 10 de chaque classe. Désactivée, les probabilités brutes sont utilisées. Activée par défaut.",
-	},
 	'evidence.influence': {
 		label: 'Influence des preuves',
 		description:
@@ -504,36 +493,22 @@ export const FIELD_COPY: Readonly<Record<string, FieldCopy>> = {
 			"Âge en jours auquel un signal ne compte plus que pour moitié dans le volume et la force des preuves, par type de signal. « default » s'applique aux types non listés.",
 	},
 	contact_ranking: {
-		label: 'Classement des contacts',
+		label: 'Contacts',
 		description:
-			"Parties locales d'adresses e-mail préférées, la plus préférée en premier.",
+			'Quelles adresses e-mail retenir pour contacter une entreprise détectée.',
 	},
 	'contact_ranking.preferred_local_parts': {
-		label: 'Parties locales préférées',
+		label: 'Adresses à privilégier',
 		description:
-			"Parties locales d'adresses e-mail préférées, la plus préférée en premier.",
+			"Débuts d'adresse e-mail (la partie avant le @, par exemple security ou contact) à retenir en priorité parmi celles trouvées, la plus recherchée en premier.",
 	},
 	'contact_ranking.guess_local_parts': {
-		label: 'Parties locales à deviner',
+		label: 'Adresses à deviner',
 		description:
-			"Parties locales à deviner lorsqu'aucune adresse n'est trouvée.",
+			"Débuts d'adresse e-mail à essayer lorsqu'aucune adresse n'est trouvée. Chacun doit aussi figurer dans les adresses à privilégier.",
 	},
-	llm: {
-		label: 'LLM',
-		description:
-			'Seuil de qualification, critères de pertinence et langue des réponses donnés au modèle.',
-	},
-	'llm.qualification_threshold': {
-		label: 'Seuil de qualification',
-		description:
-			'Pourcentage du score maximal possible à partir duquel un lead est qualifié.',
-	},
-	'llm.relevance_criteria': {
-		label: 'Critères de pertinence',
-		description: "Critères donnés au LLM pour juger la pertinence d'un lead.",
-	},
-	'llm.language': {
-		label: 'Langue des réponses du LLM',
+	language: {
+		label: 'Langue des réponses',
 		description:
 			"Langue du bilan, de l'angle d'approche, du brouillon et des raisons de tri. Les citations restent dans la langue de la source.",
 	},

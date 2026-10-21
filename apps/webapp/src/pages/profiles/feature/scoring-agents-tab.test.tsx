@@ -10,6 +10,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 
 import type { JsonObject } from '#/lib/schema-form'
 import { DefinitionTabContent } from '#/pages/profiles/feature/definition-form'
+import type { CalibrationStates } from '#/pages/profiles/lib/agent-calibration'
 import { newAgent } from '#/pages/profiles/lib/agents'
 import {
 	DEFAULT_AGGREGATOR_PROMPT,
@@ -58,7 +59,7 @@ const PROVIDERS: ProviderOption[] = [
 function base(): JsonObject {
 	const taken = new Set(['ats', 'pertinence'])
 	return {
-		schema_version: 13,
+		schema_version: 14,
 		identity: { offer: 'o', target_customer: 't' },
 		agents: [newAgent('ats', [])],
 		qualification_agents: [
@@ -68,7 +69,7 @@ function base(): JsonObject {
 		aggregator: { provider_id: null, system_prompt: DEFAULT_AGGREGATOR_PROMPT },
 		verdict: { reliable_from: 70, discard_below: 30 },
 		contact_ranking: { preferred_local_parts: [] },
-		llm: { qualification_threshold: 50, relevance_criteria: 'r' },
+		language: 'fr',
 	}
 }
 
@@ -76,11 +77,13 @@ function Harness({
 	initial = base(),
 	problems = [],
 	startTab = 'scoring',
+	calibration,
 	onValue,
 }: {
 	initial?: JsonObject
 	problems?: readonly Problem[]
 	startTab?: EditorTab
+	calibration?: CalibrationStates
 	onValue?: (value: JsonObject) => void
 }) {
 	const [value, setValue] = useState(initial)
@@ -93,6 +96,7 @@ function Harness({
 				value={value}
 				problems={problems}
 				providers={PROVIDERS}
+				calibration={calibration}
 				onChange={(next) => {
 					setValue(next)
 					onValue?.(next)
@@ -381,5 +385,41 @@ describe('scoring tab', () => {
 		openFirst()
 		expect(sheet().getByText('Doit être de 1 à 10')).toBeTruthy()
 		expect(sheet().getByText('Doit être unique')).toBeTruthy()
+	})
+
+	it('has no calibration section in the tab itself', () => {
+		render(<Harness />)
+		expect(screen.queryByText('Calibration apprise')).toBeNull()
+	})
+
+	it('switches the learned calibration of a scoring agent and shows its state', () => {
+		const seen = vi.fn()
+		render(
+			<Harness
+				onValue={seen}
+				calibration={{
+					'scoring:score-global': {
+						status: 'active',
+						n: 80,
+						required: 50,
+						brierBefore: 0.31,
+						brierAfter: 0.22,
+					},
+				}}
+			/>,
+		)
+		openFirst()
+		const toggle = sheet().getByLabelText('Calibration apprise')
+		expect(toggle.getAttribute('aria-checked')).toBe('true')
+		expect(sheet().getByText('Active')).toBeTruthy()
+		expect(
+			sheet().getByText(/Score de Brier avant 0,31, après 0,22/),
+		).toBeTruthy()
+		fireEvent.click(toggle)
+		expect(toggle.getAttribute('aria-checked')).toBe('false')
+		expect(scoringList(lastValue(seen))[0]).toMatchObject({
+			learned_calibration: false,
+		})
+		expect(sheet().getByText('Désactivée')).toBeTruthy()
 	})
 })

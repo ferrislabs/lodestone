@@ -21,7 +21,7 @@
 | suppression list | Domains and addresses never to contact, across all profiles. | blacklist, blocklist |
 | signal strength | The "Force des signaux" of a lead, stored in `leads.score` (exports and webhook: `score`): the mean of the three strongest independent signals, each strength given by its source and decayed by its age, from 0 to 100. No profile setting. | score, rating |
 | triage | Cheap LLM tier that decides relevance of ambiguous items. | pre-filter |
-| qualification | Strong LLM tier that writes an assessment for leads above the profile threshold. | enrichment |
+| qualification | Strong LLM tier that writes an assessment for each lead with a signal. | enrichment |
 | assessment | LLM output for a lead: summary, approach angle, quoted evidence, draft, model, prompt version, profile revision. | analysis, review |
 | evidence | A verbatim excerpt of stored source content that an assessment cites. | proof |
 | unknown option | The option of a question marked `is_unknown`, exactly one per question. A qualification agent picks it when nothing in the documents supports an answer; an answer without a verified quote is downgraded to it. | other, n/a |
@@ -47,5 +47,5 @@
 | indicators | The values computed in code and given to the scoring agents: the agents' opinion, the evidence strength with its components, independent signals and decayed volume. Shown as "Calcul" on the lead page. | metrics, features |
 | lead score | The score from 0 to 100 of a lead: the weighted mean of the scores of the scoring agents. Distinct from the signal score, the sum of the weighted signals of the sourcing. | rating |
 | verdict source | `scoring` when the verdict comes from the scoring agents, `indicators` for a lead qualified before they existed and not scored since. | n/a |
-| learned calibration | The correction of the probabilities of an agent by an isotonic map fitted daily on the human decisions (issue 171, `quality.calibrate` job). Applied from 50 labelled leads with 10 of each class. Distinct from the calibration floor (`verdict.calibration_floor`), the fixed clamp of the answer probabilities. | training, tuning |
+| learned calibration | The correction of the probabilities of an agent by an isotonic map fitted daily on the human decisions (issue 171, `quality.calibrate` job). Applied from 50 labelled leads with 10 of each class, to the agents whose `learned_calibration` is on. Distinct from the calibration floor (`verdict.calibration_floor`), the fixed clamp of the answer probabilities. | training, tuning |
 | Brier score | The mean squared error between a predicted probability and the outcome (1 validated, 0 rejected); the lower the better. Shown before and after calibration, in-sample. | n/a |

@@ -74,6 +74,8 @@ export function useQualificationUi(
 			),
 		setWeight: (index, weight) =>
 			onChange(setAgentField(value, index, 'weight', weight)),
+		setLearnedCalibration: (index, learned) =>
+			onChange(setAgentField(value, index, 'learned_calibration', learned)),
 		setExclusionThreshold: (index, percent) =>
 			onChange(
 				setAgentField(value, index, 'exclusion_threshold', toFraction(percent)),

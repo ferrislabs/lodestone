@@ -14,12 +14,6 @@
 		"aggregator": {
 			"$ref": "#/$defs/Aggregator"
 		},
-		"calibration": {
-			"$ref": "#/$defs/CalibrationSettings",
-			"default": {
-				"learned": true
-			}
-		},
 		"contact_ranking": {
 			"$ref": "#/$defs/ContactRanking"
 		},
@@ -57,8 +51,11 @@
 		"identity": {
 			"$ref": "#/$defs/Identity"
 		},
-		"llm": {
-			"$ref": "#/$defs/LlmSettings"
+		"language": {
+			"title": "Answer language",
+			"description": "Language of every free-text field the LLM writes: triage reason, qualification summary, approach angle and draft. Evidence quotes stay in the source language.",
+			"$ref": "#/$defs/Language",
+			"default": "fr"
 		},
 		"qualification_agents": {
 			"description": "Qualification agents. Each one evaluates every lead of the profile from one angle. At least one is required.",
@@ -68,7 +65,7 @@
 			}
 		},
 		"schema_version": {
-			"description": "Profile format version. Must be 13.",
+			"description": "Profile format version. Must be 14.",
 			"type": "integer",
 			"format": "uint32",
 			"minimum": 0
@@ -98,8 +95,7 @@
 		"agents",
 		"qualification_agents",
 		"aggregator",
-		"contact_ranking",
-		"llm"
+		"contact_ranking"
 	],
 	"$defs": {
 		"Agent": {
@@ -115,17 +111,6 @@
 				"id": {
 					"description": "Unique slug in the profile, for example ats-en.",
 					"$ref": "#/$defs/AgentId"
-				},
-				"llm": {
-					"description": "LLM settings specific to this agent.",
-					"anyOf": [
-						{
-							"$ref": "#/$defs/AgentLlm"
-						},
-						{
-							"type": "null"
-						}
-					]
 				},
 				"name": {
 					"description": "Display name.",
@@ -146,18 +131,6 @@
 			"maxLength": 63,
 			"minLength": 1,
 			"pattern": "^[a-z0-9][a-z0-9-]{0,62}$"
-		},
-		"AgentLlm": {
-			"title": "Agent LLM settings",
-			"description": "LLM settings of one agent.",
-			"type": "object",
-			"properties": {
-				"relevance_criteria": {
-					"description": "Criteria given to the LLM to triage this agent's candidates. The profile criteria apply when absent.",
-					"type": ["string", "null"]
-				}
-			},
-			"additionalProperties": false
 		},
 		"AgentSource": {
 			"title": "Agent source",
@@ -432,19 +405,6 @@
 			},
 			"additionalProperties": false,
 			"required": ["system_prompt"]
-		},
-		"CalibrationSettings": {
-			"title": "Calibration",
-			"description": "Learns from the validate and reject decisions how far the probabilities of the agents can be trusted.",
-			"type": "object",
-			"properties": {
-				"learned": {
-					"description": "When true, the verdict probabilities of the scoring agents and the scores of the qualification agents are corrected by an isotonic map learned daily from the human decisions, once at least 50 leads are labelled with 10 of each class. Default true.",
-					"type": "boolean",
-					"default": true
-				}
-			},
-			"additionalProperties": false
 		},
 		"CnamePattern": {
 			"title": "CNAME pattern",
@@ -724,32 +684,6 @@
 			"type": "string",
 			"enum": ["fr", "en"]
 		},
-		"LlmSettings": {
-			"title": "LLM settings",
-			"description": "Qualification threshold, relevance criteria and answer language given to the model.",
-			"type": "object",
-			"properties": {
-				"language": {
-					"title": "Answer language",
-					"description": "Language of every free-text field the LLM writes: triage reason, qualification summary, approach angle and draft. Evidence quotes stay in the source language.",
-					"$ref": "#/$defs/Language",
-					"default": "fr"
-				},
-				"qualification_threshold": {
-					"description": "Percentage of the maximum possible score from which a lead is qualified.",
-					"type": "integer",
-					"format": "uint8",
-					"maximum": 100,
-					"minimum": 0
-				},
-				"relevance_criteria": {
-					"description": "Criteria given to the LLM to judge a lead relevance.",
-					"type": "string"
-				}
-			},
-			"additionalProperties": false,
-			"required": ["qualification_threshold", "relevance_criteria"]
-		},
 		"Matcher": {
 			"title": "Matcher",
 			"description": "A condition on the HTTP response.",
@@ -838,6 +772,11 @@
 				"id": {
 					"description": "Unique slug among all agents of the profile, sourcing and qualification, for example maturite-technique.",
 					"$ref": "#/$defs/AgentId"
+				},
+				"learned_calibration": {
+					"description": "When true, once at least 50 leads are labelled with 10 of each class, the score of this agent is corrected by an isotonic map learned daily from the human decisions. The fit always runs so the quality page keeps its figures. Default true.",
+					"type": "boolean",
+					"default": true
 				},
 				"name": {
 					"description": "Display name.",
@@ -991,6 +930,11 @@
 				"id": {
 					"description": "Unique slug among all agents of the profile, sourcing, qualification and scoring, for example score-global.",
 					"$ref": "#/$defs/AgentId"
+				},
+				"learned_calibration": {
+					"description": "When true, once at least 50 leads are labelled with 10 of each class, the verdict probabilities of this agent are corrected by an isotonic map learned daily from the human decisions. The fit always runs so the quality page keeps its figures. Default true.",
+					"type": "boolean",
+					"default": true
 				},
 				"name": {
 					"description": "Display name.",

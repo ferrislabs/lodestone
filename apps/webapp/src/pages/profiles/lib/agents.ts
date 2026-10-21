@@ -28,7 +28,6 @@ export type AgentKind = (typeof AGENT_KINDS)[number]
 export interface KindMeta {
 	label: string
 	description: string
-	triaged: boolean
 }
 
 export const KIND_META: Record<AgentKind, KindMeta> = {
@@ -36,47 +35,39 @@ export const KIND_META: Record<AgentKind, KindMeta> = {
 		label: sourceLabel('certificate_transparency'),
 		description:
 			"Trouve des entreprises à partir des noms d'hôte des journaux de certificats publics.",
-		triaged: false,
 	},
 	dns_cname: {
 		label: sourceLabel('dns_cname'),
 		description:
 			'Identifie des fournisseurs à partir de la cible CNAME de domaines connus.',
-		triaged: false,
 	},
 	http_probe: {
 		label: sourceLabel('http_probe'),
 		description:
 			"Sonde des hôtes en HTTP à la recherche d'empreintes de produits.",
-		triaged: false,
 	},
 	boamp: {
 		label: sourceLabel('boamp'),
 		description:
 			'Recherche par mots-clés des avis de marchés publics français.',
-		triaged: true,
 	},
 	decp: {
 		label: sourceLabel('decp'),
 		description:
 			'Recherche par mots-clés des données de marchés publics français.',
-		triaged: true,
 	},
 	ted: {
 		label: sourceLabel('ted'),
 		description: "Recherche par mots-clés des appels d'offres européens.",
-		triaged: true,
 	},
 	france_travail: {
 		label: sourceLabel('france_travail'),
 		description: "Recherche par mots-clés des offres d'emploi France Travail.",
-		triaged: true,
 	},
 	ats: {
 		label: sourceLabel('ats'),
 		description:
 			"Recherche les offres d'emploi des entreprises déjà détectées.",
-		triaged: true,
 	},
 }
 
@@ -120,14 +111,6 @@ export function agentField(agent: JsonValue | undefined, key: string): string {
 
 export function agentEnabled(agent: JsonValue | undefined): boolean {
 	return isJsonObject(agent) ? agent.enabled !== false : true
-}
-
-export function agentCriteria(agent: JsonValue | undefined): string {
-	if (!isJsonObject(agent)) return ''
-	const llm = agent.llm
-	if (!isJsonObject(llm)) return ''
-	const criteria = llm.relevance_criteria
-	return typeof criteria === 'string' ? criteria : ''
 }
 
 export function slugify(text: string): string {

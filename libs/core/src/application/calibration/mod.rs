@@ -124,7 +124,7 @@ impl LodestoneUseCase {
         let qualification = calibrations.labelled_qualification(profile_id).await?;
         let after = fit_profile(profile_id, definition, &scoring, &qualification, now);
         calibrations.replace(profile_id, &after).await?;
-        let rescored = if definition.calibration.learned && effect_changed(&before, &after) {
+        let rescored = if effect_changed(definition, &before, &after) {
             calibrations.mark_stale(profile_id).await?
         } else {
             0
@@ -139,13 +139,9 @@ impl LodestoneUseCase {
         active: &ActiveProfile,
     ) -> Result<Calibrations, CoreError> {
         let mut calibrations = calibration_repository;
-        let learned = active.revision.definition.definition().calibration.learned;
-        if !learned {
-            return Ok(Calibrations::none());
-        }
-        Ok(Calibrations::applied(
+        Ok(Calibrations::for_definition(
             calibrations.list(active.profile.id).await?,
-            learned,
+            active.revision.definition.definition(),
         ))
     }
 

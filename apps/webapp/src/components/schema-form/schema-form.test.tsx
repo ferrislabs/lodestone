@@ -56,16 +56,17 @@ describe('SchemaForm', () => {
 		expect(screen.getByText('Offre').parentElement?.textContent).toContain('*')
 		expect(screen.getAllByTitle('Obligatoire').length).toBeGreaterThan(5)
 		expect(screen.queryByLabelText(/Version du schéma/)).toBeNull()
-		expect(screen.getByLabelText(/Seuil de qualification/)).toHaveProperty(
+		expect(screen.getByLabelText('Langue des réponses')).toHaveProperty(
 			'value',
-			'50',
+			'fr',
 		)
+		expect(screen.queryByLabelText(/Seuil de qualification/)).toBeNull()
 	})
 
 	it('edits a list of strings as tags', () => {
 		const seen = vi.fn()
 		render(<Harness onValue={seen} />)
-		const input = screen.getByLabelText('Parties locales préférées')
+		const input = screen.getByLabelText('Adresses à privilégier')
 		fireEvent.change(input, { target: { value: 'contact' } })
 		fireEvent.keyDown(input, { key: 'Enter' })
 		fireEvent.keyDown(input, { key: ',' })
@@ -78,7 +79,7 @@ describe('SchemaForm', () => {
 		expect(seen.mock.calls.at(-1)?.[0]).toMatchObject({
 			contact_ranking: { preferred_local_parts: ['contact'] },
 		})
-		expect(screen.queryByLabelText('Parties locales préférées 1')).toBeNull()
+		expect(screen.queryByLabelText('Adresses à privilégier 1')).toBeNull()
 	})
 
 	it('uses tags for keywords and rows for objects', () => {
@@ -171,24 +172,36 @@ describe('SchemaForm', () => {
 					id: 'a',
 					name: 'A',
 					enabled: true,
-					source: { kind: 'ats', keywords: ['x'], exclusions: [] },
+					source: {
+						kind: 'http_probe',
+						fingerprints: [
+							{
+								id: 'f',
+								path: '/x',
+								product: 'p',
+								matchers: [],
+								debt_markers: [],
+							},
+						],
+						excluded_products: [],
+					},
 				},
 			],
 		)
 		const seen = vi.fn()
 		render(<Harness initial={initial} onValue={seen} />)
-		const before = screen.getAllByLabelText(/Critères de pertinence/).length
-		fireEvent.click(screen.getByLabelText("Activer : Réglages LLM de l'agent"))
-		expect(screen.getAllByLabelText(/Critères de pertinence/)).toHaveLength(
+		const before = screen.queryAllByLabelText(/Expression régulière/).length
+		fireEvent.click(screen.getByLabelText('Activer : Extracteur de version'))
+		expect(screen.getAllByLabelText(/Expression régulière/)).toHaveLength(
 			before + 1,
 		)
-		expect(seen.mock.calls.at(-1)?.[0]).toMatchObject({
-			agents: [{ llm: {} }],
-		})
-		fireEvent.click(screen.getByLabelText("Activer : Réglages LLM de l'agent"))
+		expect(seen.mock.calls.at(-1)?.[0]).toHaveProperty(
+			'agents.0.source.fingerprints.0.version',
+		)
+		fireEvent.click(screen.getByLabelText('Activer : Extracteur de version'))
 		const last = seen.mock.calls.at(-1)?.[0]
-		expect(last).not.toHaveProperty('agents.0.llm')
-		expect(screen.getAllByLabelText(/Critères de pertinence/)).toHaveLength(
+		expect(last).not.toHaveProperty('agents.0.source.fingerprints.0.version')
+		expect(screen.queryAllByLabelText(/Expression régulière/)).toHaveLength(
 			before,
 		)
 	})

@@ -645,7 +645,6 @@ async fn the_calibration_lists_every_agent_with_its_state(pool: PgPool) {
     let profiles = data["profiles"].as_array().unwrap();
     assert_eq!(profiles.len(), 1);
     assert_eq!(profiles[0]["profile_id"], alpha);
-    assert_eq!(profiles[0]["learned"], true);
     let agents = profiles[0]["agents"].as_array().unwrap();
     assert_eq!(agents.len(), 2);
     assert_eq!(agents[0]["kind"], "scoring");
@@ -664,13 +663,13 @@ async fn the_calibration_lists_every_agent_with_its_state(pool: PgPool) {
 }
 
 #[sqlx::test(migrations = "../../migrations")]
-async fn a_profile_that_does_not_learn_reports_disabled_agents(pool: PgPool) {
+async fn an_agent_that_does_not_learn_is_reported_as_disabled(pool: PgPool) {
     let alpha = profile(&pool, "alpha").await;
     let mut definition: Value = serde_json::from_str(CALIBRATED_PROFILE).unwrap();
     definition["schema_version"] = json!(5);
     let parsed = lodestone_core::ValidatedProfile::parse(definition).unwrap();
     let mut current = parsed.to_json();
-    current["calibration"] = json!({"learned": false});
+    current["scoring_agents"][0]["learned_calibration"] = json!(false);
     sqlx::query(
         "INSERT INTO profile_revisions (profile_id, revision, definition, created_at) VALUES ($1::uuid, 1, $2, now())",
     )
@@ -683,10 +682,11 @@ async fn a_profile_that_does_not_learn_reports_disabled_agents(pool: PgPool) {
 
     let (_, body) = api.get("/api/v1/quality/calibration").await;
 
-    assert_eq!(body["data"]["profiles"][0]["learned"], false);
-    for agent in body["data"]["profiles"][0]["agents"].as_array().unwrap() {
-        assert_eq!(agent["status"], "disabled");
-    }
+    let agents = body["data"]["profiles"][0]["agents"].as_array().unwrap();
+    assert_eq!(agents[0]["kind"], "scoring");
+    assert_eq!(agents[0]["status"], "disabled");
+    assert_eq!(agents[1]["kind"], "qualification");
+    assert_eq!(agents[1]["status"], "insufficient");
 }
 
 async fn run_calibration(api: &Api) -> (StatusCode, Value, String) {

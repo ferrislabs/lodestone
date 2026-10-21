@@ -4,7 +4,6 @@ import {
 	isJsonObject,
 	type JsonObject,
 	type JsonValue,
-	removeIn,
 	setIn,
 } from '#/lib/schema-form'
 import {
@@ -50,13 +49,6 @@ export function useAgentsUi(
 		setName: (index: number, name: string) =>
 			onChange(withAgents(value, renameAgent(agents, index, name))),
 		setId: (index: number, id: string) => patch(['agents', index, 'id'], id),
-		setCriteria: (index: number, criteria: string) => {
-			if (criteria === '') {
-				onChange(asObject(removeIn(value, ['agents', index, 'llm']), value))
-			} else {
-				patch(['agents', index, 'llm'], { relevance_criteria: criteria })
-			}
-		},
 		requestRemove: setConfirmingRemove,
 		cancelRemove: () => setConfirmingRemove(null),
 		confirmRemove: (index: number) => {

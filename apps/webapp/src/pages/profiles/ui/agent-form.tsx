@@ -4,15 +4,12 @@ import { ObjectFields } from '#/components/schema-form/fields'
 import { Input } from '#/components/ui/input'
 import { Label } from '#/components/ui/label'
 import { Switch } from '#/components/ui/switch'
-import { Textarea } from '#/components/ui/textarea'
 import { isJsonObject, type JsonValue, type Problem } from '#/lib/schema-form'
 import {
-	agentCriteria,
 	agentEnabled,
 	agentField,
 	agentKind,
 	type DependencyNote,
-	KIND_META,
 	sourceSchema,
 } from '#/pages/profiles/lib/agents'
 
@@ -25,7 +22,6 @@ interface AgentFormProps {
 	onEnabled: (enabled: boolean) => void
 	onName: (name: string) => void
 	onId: (id: string) => void
-	onCriteria: (criteria: string) => void
 }
 
 function messages(problems: readonly Problem[], path: string): Problem[] {
@@ -59,17 +55,14 @@ export function AgentForm({
 	onEnabled,
 	onName,
 	onId,
-	onCriteria,
 }: AgentFormProps) {
 	const base = `agents[${index}]`
 	const kind = agentKind(agent)
 	const nameId = `agent-name-${index}`
 	const idId = `agent-id-${index}`
 	const enabledId = `agent-enabled-${index}`
-	const criteriaId = `agent-criteria-${index}`
 	const nameProblems = messages(problems, `${base}.name`)
 	const idProblems = messages(problems, `${base}.id`)
-	const criteriaProblems = messages(problems, `${base}.llm.relevance_criteria`)
 	const source = isJsonObject(agent) ? agent.source : undefined
 
 	return (
@@ -123,23 +116,6 @@ export function AgentForm({
 					path={['agents', index, 'source']}
 					value={source}
 				/>
-			) : null}
-			{kind && KIND_META[kind].triaged ? (
-				<div className="flex flex-col gap-1.5">
-					<Label htmlFor={criteriaId}>Critères LLM propres à cet agent</Label>
-					<p className="text-xs text-muted-foreground">
-						Utilisés lorsque les candidats de cet agent sont triés par le LLM. À
-						défaut, les critères du profil s'appliquent.
-					</p>
-					<Textarea
-						id={criteriaId}
-						rows={3}
-						aria-invalid={criteriaProblems.length > 0}
-						value={agentCriteria(agent)}
-						onChange={(event) => onCriteria(event.target.value)}
-					/>
-					<FieldErrors id={criteriaId} problems={criteriaProblems} />
-				</div>
 			) : null}
 		</div>
 	)

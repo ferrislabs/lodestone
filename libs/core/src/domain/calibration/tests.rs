@@ -246,14 +246,49 @@ fn a_change_of_effect_is_detected_only_when_an_applied_map_differs() {
         fitted_at: at() + chrono::Duration::days(1),
         ..base[0].clone()
     }];
-    assert!(!effect_changed(&base, &refit));
+    let mut definition = definition();
+    definition.scoring_agents[0].id = agent.clone();
+    assert!(!effect_changed(&definition, &base, &refit));
     let moved = vec![stored(CalibrationKind::Scoring, &agent, true, 0.5)];
-    assert!(effect_changed(&base, &moved));
+    assert!(effect_changed(&definition, &base, &moved));
     let dropped = vec![stored(CalibrationKind::Scoring, &agent, false, 0.4)];
-    assert!(effect_changed(&base, &dropped));
-    assert!(effect_changed(&[], &base));
-    assert!(!effect_changed(&[], &dropped));
-    assert!(!effect_changed(&dropped, &[]));
+    assert!(effect_changed(&definition, &base, &dropped));
+    assert!(effect_changed(&definition, &[], &base));
+    assert!(!effect_changed(&definition, &[], &dropped));
+    assert!(!effect_changed(&definition, &dropped, &[]));
+}
+
+#[test]
+fn a_changed_map_marks_nothing_stale_for_an_agent_that_does_not_learn() {
+    let agent = AgentId::new("a");
+    let base = vec![stored(CalibrationKind::Scoring, &agent, true, 0.4)];
+    let moved = vec![stored(CalibrationKind::Scoring, &agent, true, 0.5)];
+    let mut definition = definition();
+    definition.scoring_agents[0].id = agent.clone();
+    definition.scoring_agents[0].learned_calibration = false;
+    assert!(!effect_changed(&definition, &base, &moved));
+    assert!(!effect_changed(&definition, &[], &base));
+}
+
+#[test]
+fn each_agent_applies_its_own_map_only_when_its_flag_is_set() {
+    let mut definition = definition();
+    let scoring = definition.scoring_agents[0].id.clone();
+    let qualification = definition.qualification_agents[0].id.clone();
+    let rows = vec![
+        stored(CalibrationKind::Scoring, &scoring, true, 0.4),
+        stored(CalibrationKind::Qualification, &qualification, true, 0.4),
+    ];
+    definition.scoring_agents[0].learned_calibration = false;
+    definition.qualification_agents[0].learned_calibration = true;
+    let applied = Calibrations::for_definition(rows.clone(), &definition);
+    assert!(applied.scoring(&scoring).is_none());
+    assert!(applied.qualification(&qualification).is_some());
+    definition.scoring_agents[0].learned_calibration = true;
+    definition.qualification_agents[0].learned_calibration = false;
+    let applied = Calibrations::for_definition(rows, &definition);
+    assert!(applied.scoring(&scoring).is_some());
+    assert!(applied.qualification(&qualification).is_none());
 }
 
 fn scoring_row(
@@ -432,7 +467,6 @@ fn the_report_lists_every_agent_with_its_state() {
     let scoring_id = definition.scoring_agents[0].id.clone();
     let stored_rows = vec![stored(CalibrationKind::Scoring, &scoring_id, true, 0.4)];
     let report = profile_report(profile_id(), "IAM", &definition, &stored_rows);
-    assert!(report.learned);
     assert_eq!(report.name, "IAM");
     assert_eq!(
         report.agents.len(),
@@ -449,13 +483,17 @@ fn the_report_lists_every_agent_with_its_state() {
 }
 
 #[test]
-fn a_profile_that_does_not_learn_reports_every_agent_as_disabled() {
+fn an_agent_that_does_not_learn_is_reported_as_disabled_but_keeps_its_figures() {
     let mut definition = definition();
-    definition.calibration.learned = false;
+    for agent in &mut definition.scoring_agents {
+        agent.learned_calibration = false;
+    }
+    for agent in &mut definition.qualification_agents {
+        agent.learned_calibration = false;
+    }
     let scoring_id = definition.scoring_agents[0].id.clone();
     let stored_rows = vec![stored(CalibrationKind::Scoring, &scoring_id, true, 0.4)];
     let report = profile_report(profile_id(), "IAM", &definition, &stored_rows);
-    assert!(!report.learned);
     assert!(
         report
             .agents
