@@ -166,7 +166,7 @@ async fn buyers_become_leads_and_holders_become_partners(pool: PgPool) {
 
     assert!(has_lead(&pool, profile, "ille-et-vilaine.fr").await);
     assert!(has_lead(&pool, profile, "lorient-agglo.bzh").await);
-    assert!(has_lead(&pool, profile, "lorient.bzh").await);
+    assert!(!has_lead(&pool, profile, "lorient.bzh").await);
     assert!(!has_lead(&pool, profile, "megalis.bretagne.bzh").await);
     assert!(!has_lead(&pool, other, "ille-et-vilaine.fr").await);
 
@@ -178,7 +178,7 @@ async fn buyers_become_leads_and_holders_become_partners(pool: PgPool) {
     );
     let liksi = &found[0];
     assert_eq!(liksi.name.as_deref(), Some("LIKSI RENNES"));
-    assert_eq!(liksi.award_count, 3);
+    assert_eq!(liksi.award_count, 2);
     assert_eq!(
         liksi.last_award_at.map(|date| date.to_string()).as_deref(),
         Some("2026-04-14")
@@ -199,10 +199,10 @@ async fn a_second_daily_run_changes_nothing(pool: PgPool) {
         .fetch_one(&pool)
         .await
         .unwrap();
-    assert_eq!(awards, 5);
+    assert_eq!(awards, 4);
     let signals = sqlx::query_scalar!("SELECT COUNT(*) AS \"count!\" FROM signals")
         .fetch_one(&pool)
         .await
         .unwrap();
-    assert_eq!(signals, 3);
+    assert_eq!(signals, 2);
 }

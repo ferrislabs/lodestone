@@ -233,20 +233,17 @@ async fn the_window_spans_both_months_and_lists_the_candidates() {
     assert_eq!(stats.files, 2);
     assert_eq!(stats.contracts, 11);
     assert_eq!(stats.in_window, 8);
-    assert_eq!(stats.matched, 5);
+    assert_eq!(stats.matched, 4);
     assert_eq!(stats.duplicates, 1);
     assert_eq!(stats.skipped_malformed, 1);
     assert_eq!(stats.unresolved_buyers, 1);
-    assert_eq!(stats.candidates, 3);
+    assert_eq!(stats.candidates, 2);
     let mut domains: Vec<String> = candidates
         .iter()
         .map(|candidate| candidate.domain.to_string())
         .collect();
     domains.sort();
-    assert_eq!(
-        domains,
-        ["ille-et-vilaine.fr", "lorient-agglo.bzh", "lorient.bzh"]
-    );
+    assert_eq!(domains, ["ille-et-vilaine.fr", "lorient-agglo.bzh"]);
 }
 
 #[tokio::test]
@@ -368,9 +365,9 @@ async fn holders_of_other_kinds_are_ignored() {
 async fn lookups_are_cached_for_the_run() {
     let (source, fetcher) = source(FixtureFetcher::new());
     let (_, stats) = source.collect_with_stats(&[iam()], now()).await.unwrap();
-    assert_eq!(fetcher.count("api-lannuaire.service-public.fr"), 4);
-    assert_eq!(fetcher.count("recherche-entreprises.api.gouv.fr"), 7);
-    assert_eq!(stats.lookups, 10);
+    assert_eq!(fetcher.count("api-lannuaire.service-public.fr"), 3);
+    assert_eq!(fetcher.count("recherche-entreprises.api.gouv.fr"), 6);
+    assert_eq!(stats.lookups, 8);
 }
 
 #[tokio::test(start_paused = true)]
@@ -410,6 +407,38 @@ async fn ambiguous_contracts_still_produce_partner_awards() {
     let (source, _) = source(FixtureFetcher::new());
     source.collect_with_stats(&[iam()], now()).await.unwrap();
     let contracts = source.take_awards();
+    let rules = SearchAgent::new(
+        AgentId::new("strict"),
+        "Strict",
+        &["decp"],
+        &["SSO", "MFA"],
+        &[],
+    );
+    let awards = partner_awards(&rules, &contracts);
+    let single: Vec<_> = awards
+        .iter()
+        .filter(|award| award.contract_id == "25351449100047-2026S04026")
+        .collect();
+    assert_eq!(single.len(), 1);
+    assert_eq!(single[0].matched, ["SSO"]);
+    assert_eq!(awards.len(), 4);
+}
+
+#[tokio::test]
+async fn a_contract_matching_an_exclusion_is_not_kept() {
+    let (source, _) = source(FixtureFetcher::new());
+    let (candidates, _) = source.collect_with_stats(&[iam()], now()).await.unwrap();
+    let contracts = source.take_awards();
+    assert!(
+        candidates
+            .iter()
+            .all(|candidate| candidate.details["contract_id"] != "2026S09002")
+    );
+    assert!(
+        contracts
+            .iter()
+            .all(|contract| contract.key != "21560121200016-2026S09002")
+    );
     let rules = iam()
         .revision
         .definition
@@ -418,20 +447,32 @@ async fn ambiguous_contracts_still_produce_partner_awards() {
         .next()
         .cloned()
         .unwrap();
-    let awards = partner_awards(&rules, &contracts);
-    let standard: Vec<_> = awards
+    let kept = partner_awards(&rules, &contracts);
+    assert!(
+        kept.iter()
+            .all(|award| award.contract_id != "21560121200016-2026S09002")
+    );
+    let held = contracts
         .iter()
-        .filter(|award| award.contract_id == "21560121200016-2026S09002")
-        .collect();
-    assert_eq!(standard.len(), 1);
-    assert_eq!(awards.len(), 5);
+        .find(|contract| !contract.holders.is_empty())
+        .unwrap();
+    let plain = AwardedContract {
+        content: "Annuaire et SSO".to_owned(),
+        ..held.clone()
+    };
+    let phonebook = AwardedContract {
+        content: "Annuaire TELEPHONIQUE et SSO".to_owned(),
+        ..held.clone()
+    };
+    assert!(!partner_awards(&rules, &[plain]).is_empty());
+    assert!(partner_awards(&rules, &[phonebook]).is_empty());
 }
 
 #[tokio::test]
 async fn take_awards_drains_the_previous_run() {
     let (source, _) = source(FixtureFetcher::new());
     source.collect_with_stats(&[iam()], now()).await.unwrap();
-    assert_eq!(source.take_awards().len(), 4);
+    assert_eq!(source.take_awards().len(), 3);
     assert!(source.take_awards().is_empty());
 }
 

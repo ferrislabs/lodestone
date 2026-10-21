@@ -125,7 +125,7 @@
           "type": "object",
           "properties": {
             "accept_min_keywords": {
-              "description": "Distinct keywords a candidate needs for a strong signal. Fewer, or any exclusion, still keeps the candidate with a weaker signal.",
+              "description": "Distinct keywords a candidate needs for a strong signal. Fewer still keep the candidate with a weaker signal.",
               "type": "integer",
               "format": "uint8",
               "default": 2,
@@ -138,7 +138,7 @@
               "default": true
             },
             "exclusions": {
-              "description": "Keywords that weaken the signal of a candidate when present. They never reject it: only a candidate without any keyword is rejected.",
+              "description": "Keywords that reject a candidate when present, even if it matches enough keywords.",
               "type": "array",
               "default": [],
               "items": {

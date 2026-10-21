@@ -854,14 +854,14 @@ pub struct SearchAgent {
     pub keywords: Vec<String>,
     #[serde(default)]
     #[schemars(
-        description = "Keywords that weaken the signal of a candidate when present. They never reject it: only a candidate without any keyword is rejected."
+        description = "Keywords that reject a candidate when present, even if it matches enough keywords."
     )]
     pub exclusions: Vec<String>,
     #[serde(default)]
     pub filters: SearchFilters,
     #[serde(default = "default_accept_min_keywords")]
     #[schemars(
-        description = "Distinct keywords a candidate needs for a strong signal. Fewer, or any exclusion, still keeps the candidate with a weaker signal."
+        description = "Distinct keywords a candidate needs for a strong signal. Fewer still keep the candidate with a weaker signal."
     )]
     pub accept_min_keywords: u8,
 }

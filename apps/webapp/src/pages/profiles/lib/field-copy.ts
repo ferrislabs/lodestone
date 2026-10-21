@@ -228,12 +228,12 @@ export const FIELD_COPY: Readonly<Record<string, FieldCopy>> = {
 	'agents[].accept_min_keywords': {
 		label: 'Mots-clés distincts pour un signal fort',
 		description:
-			"Nombre de mots-clés distincts qu'une annonce doit contenir pour donner un signal fort. En dessous, ou si une exclusion y figure, l'annonce est gardée avec un signal plus faible. Une annonce sans aucun mot-clé est écartée.",
+			"Nombre de mots-clés distincts qu'une annonce doit contenir pour donner un signal fort. En dessous, l'annonce est gardée avec un signal plus faible. Une annonce sans aucun mot-clé est écartée.",
 	},
 	'agents[].exclusions': {
 		label: 'Exclusions',
 		description:
-			"Mots qui affaiblissent le signal d'une annonce lorsqu'ils y figurent. Ils ne l'écartent pas : seule une annonce sans aucun mot-clé est écartée.",
+			"Mots qui écartent une annonce lorsqu'ils y figurent, même si elle contient assez de mots-clés.",
 	},
 	'qualification_agents[].learned_calibration': LEARNED_CALIBRATION_COPY,
 	qualification_agents: {
