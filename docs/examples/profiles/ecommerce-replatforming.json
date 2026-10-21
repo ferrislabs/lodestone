@@ -1,5 +1,5 @@
 {
-  "schema_version": 16,
+  "schema_version": 17,
   "identity": {
     "offer": "Migration of Magento 1 and Magento 2 shops to a modern e-commerce platform, by a web agency",
     "target_customer": "Merchants and organizations running an outdated Magento storefront"
@@ -7,49 +7,84 @@
   "language": "fr",
   "agents": [
     {
-      "type": "signal",
-      "id": "http-probe",
-      "name": "HTTP probe",
-      "enabled": true,
-      "source": {
-        "provider": "http_probe",
-        "fingerprints": [
-          {
-            "id": "magento-version",
-            "path": "/magento_version",
-            "product": "magento",
-            "matchers": [
-              { "kind": "status", "equals": 200 },
-              { "kind": "body", "pattern": "^Magento/" }
-            ],
-            "version": { "from": "body", "pattern": "^Magento/(\\d+\\.\\d+)" },
-            "debt_markers": [
-              {
-                "id": "outdated_magento",
-                "rule": { "kind": "version_below", "version": "2.4" }
-              }
-            ]
-          }
-        ]
-      }
-    },
-    {
       "type": "search",
       "id": "boamp",
       "name": "BOAMP",
       "enabled": true,
-      "providers": ["boamp"],
-      "keywords": ["site e-commerce", "Magento", "refonte de site marchand", "boutique en ligne", "plateforme de vente en ligne"]
+      "providers": [
+        "boamp"
+      ],
+      "keywords": [
+        "site e-commerce",
+        "Magento",
+        "refonte de site marchand",
+        "boutique en ligne",
+        "plateforme de vente en ligne"
+      ]
     },
     {
       "type": "search",
       "id": "france-travail",
       "name": "France Travail",
       "enabled": true,
-      "providers": ["france_travail"],
-      "keywords": ["Magento", "développeur Magento", "e-commerce", "refonte de site marchand", "migration Magento"]
+      "providers": [
+        "france_travail"
+      ],
+      "keywords": [
+        "Magento",
+        "développeur Magento",
+        "e-commerce",
+        "refonte de site marchand",
+        "migration Magento"
+      ]
     }
   ],
+  "enrichment": {
+    "http_probe": {
+      "enabled": true,
+      "fingerprints": [
+        {
+          "id": "magento-version",
+          "path": "/magento_version",
+          "product": "magento",
+          "matchers": [
+            {
+              "kind": "status",
+              "equals": 200
+            },
+            {
+              "kind": "body",
+              "pattern": "^Magento/"
+            }
+          ],
+          "version": {
+            "from": "body",
+            "pattern": "^Magento/(\\d+\\.\\d+)"
+          },
+          "debt_markers": [
+            {
+              "id": "outdated_magento",
+              "rule": {
+                "kind": "version_below",
+                "version": "2.4"
+              }
+            }
+          ]
+        }
+      ],
+      "excluded_products": [],
+      "extra_subdomains": [
+        "www",
+        "shop",
+        "boutique"
+      ]
+    },
+    "company_jobs": {
+      "enabled": false,
+      "keywords": [],
+      "accept_min_keywords": 2
+    }
+  },
   "qualification_agents": [
     {
       "id": "pertinence",
@@ -237,7 +272,12 @@
   },
   "evidence": {
     "influence": 0.6,
-    "weights": { "volume": 1, "diversity": 1, "environment": 1, "strength": 1 },
+    "weights": {
+      "volume": 1,
+      "diversity": 1,
+      "environment": 1,
+      "strength": 1
+    },
     "half_life_days": {
       "awarded_contract": 365,
       "contact": 365,
@@ -251,7 +291,13 @@
     }
   },
   "contact_ranking": {
-    "preferred_local_parts": ["contact", "commercial", "info"],
-    "guess_local_parts": ["contact"]
+    "preferred_local_parts": [
+      "contact",
+      "commercial",
+      "info"
+    ],
+    "guess_local_parts": [
+      "contact"
+    ]
   }
 }

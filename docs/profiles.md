@@ -1,6 +1,6 @@
 # Detection profiles
 
-A detection profile describes one market: what is sold, which agents scan which sources, which qualification agents judge a lead, which scoring agents decide its score and verdict, how an aggregator sums it up, how signals are weighted and which contacts to prefer.
+A detection profile describes one market: what is sold, which sourcing agents find leads in which sources, which enrichment steps complete every lead, which qualification agents judge a lead, which scoring agents decide its score and verdict, how an aggregator sums it up, how signals are weighted and which contacts to prefer.
 
 ## Storage
 
@@ -8,7 +8,7 @@ Profiles live in Postgres. Each edit creates a new revision; earlier revisions a
 
 ## Schema
 
-The JSON Schema is `docs/schemas/profile.v16.schema.json`. It is generated from `ProfileDefinition` and must not be edited by hand. Regenerate it with:
+The JSON Schema is `docs/schemas/profile.v17.schema.json`. It is generated from `ProfileDefinition` and must not be edited by hand. Regenerate it with:
 
 ```
 UPDATE_SCHEMA=1 cargo test -p lodestone-core --test profile_examples
@@ -18,17 +18,21 @@ Without `UPDATE_SCHEMA=1` the same test fails if the committed file is stale. Th
 
 ## Examples
 
-- `docs/examples/profiles/iam-ferriskey.json`: sells FerrisKey and Autharie to organizations running Keycloak or a SaaS IAM. Uses certificate transparency, HTTP probes, CNAME patterns, one search agent « Marchés publics » over the BOAMP, DECP and TED providers, and two job agents of the same kind (`ats-fr`, `ats-en`), the second with its own relevance criteria, written in the prompt of the `pertinence` agent.
-- `docs/examples/profiles/ecommerce-replatforming.json`: sells Magento migrations. Uses one HTTP probe with a version extractor, BOAMP and France Travail. It has no IAM-specific field.
+- `docs/examples/profiles/iam-ferriskey.json`: sells FerrisKey and Autharie to organizations running Keycloak or a SaaS IAM. Sourcing agents « Certificats » (certificate labels), « DNS » (CNAME patterns), « Marchés publics » over BOAMP, DECP and TED and « Offres et missions » over France Travail and Hacker News. Enrichment: the HTTP probe with the Keycloak, Authentik and Zitadel fingerprints, and the company job offers with the job keywords, whose relevance criteria are written in the prompt of the `pertinence` agent.
+- `docs/examples/profiles/ecommerce-replatforming.json`: sells Magento migrations. Search agents over BOAMP and France Travail, and an HTTP probe enrichment with a version extractor. It has no IAM-specific field.
 
 ## Sections
 
-- `schema_version`: must be 16. See [Older versions](#older-versions).
+- `schema_version`: must be 17. See [Older versions](#older-versions).
 - `identity`: the offer and the target customer, in free text.
 - `language`: `fr` or `en`, default `fr` (was `llm.language` before 14). The language of every free-text field the LLM writes: the aggregator's summary, verdict narrative, approach angle, draft subject and body, the qualification summaries and the scoring reasons. The system prompts state it (`Write every free-text field (...) in French. Evidence quotes stay in the language of the document they come from.`), so evidence quotes stay in the source language and the verbatim check is unchanged. Changing the language changes the system prompt, hence the LLM cache key: answers are regenerated.
-- `agents`: the detection agents; at least one is required (see ADR 0005). `type` selects `search` or `signal`. `id` (slug matching `^[a-z0-9][a-z0-9-]{0,62}$`, unique in the profile), `name` (not empty) and `enabled` (default `true`, a disabled agent is kept but not run) are common.
-  - `search` agent: looks for keywords across catalog providers (ADR 0010). `providers`: at least one catalog key that supports keyword search (`boamp`, `decp`, `ted`, `france_travail`, `hacker_news_hiring`, `ats`), no duplicate; an unknown key (`UnknownProvider`) or a provider without keyword search (`ProviderCannotSearch`) is rejected, a provider that is not ready is accepted but skipped at run time. `keywords` (at least one), `exclusions`, `accept_min_keywords` and `filters` are defined once for every provider (see "Search agents").
-  - `signal` agent: reads one technical provider with its own settings. `source.provider` is its catalog key (`certificate_transparency`, `dns_cname`, `http_probe`) and the other fields of `source` are its settings (table in "Signal agents").
+- `agents`: the sourcing agents, they find leads (ADR 0005, ADR 0011). At least one is required unless an enrichment step is enabled (`NoAgent`). `type` selects `search`, `certificates` or `dns`. `id` (slug matching `^[a-z0-9][a-z0-9-]{0,62}$`, unique in the profile), `name` (not empty) and `enabled` (default `true`, a disabled agent is kept but not run) are common.
+  - `search` agent: looks for keywords across catalog providers (ADR 0010). `providers`: at least one catalog key that supports keyword search (`boamp`, `decp`, `ted`, `france_travail`, `hacker_news_hiring`), no duplicate; an unknown key (`UnknownProvider`) or a provider without keyword search (`ProviderCannotSearch`, `ats` included since schema 17) is rejected, a provider that is not ready is accepted but skipped at run time. `keywords` (at least one), `exclusions`, `accept_min_keywords` and `filters` are defined once for every provider (see "Search agents").
+  - `certificates` agent: `labels`, hostname labels looked for in certificate transparency logs (lowercase labels, at least one). A matching host creates or updates a lead (see "Certificates and DNS agents").
+  - `dns` agent: `patterns`, provider names with the CNAME target suffix that identifies them (at least one).
+- `enrichment`: steps run on every lead of the profile, whatever the agent that found it (ADR 0011, see "Enrichment"). The section and each field are optional.
+  - `http_probe`: `enabled` (default `false`), `fingerprints` (at least one when enabled; path, matchers, optional version extractor, debt markers, unique ids), `excluded_products` and `extra_subdomains` (hostname labels, no duplicate, default `auth`, `sso`, `login`, `id`, `idp`, `accounts`).
+  - `company_jobs`: `enabled` (default `false`), `keywords` (empty means the union of the keywords of the enabled search agents; an enabled step needs at least one keyword in the end) and `accept_min_keywords` (default 2, at least 1).
 - `qualification_agents`: at least one (ADR 0007). Each agent evaluates every lead of the profile, from every source, from one angle.
   - `id`: slug, unique among all agents of the profile, sourcing and qualification together.
   - `name`: display name, not empty. `enabled`: defaults to `true`.
@@ -249,6 +253,7 @@ Strengths set by the sources:
 
 | Origin | Signal | Strength |
 | --- | --- | --- |
+| Certificates agent | `certificate_seen` | 0.3 |
 | HTTP probe | `product_detected` | 0.9 |
 | HTTP probe | `debt_marker` | 0.6 |
 | DNS CNAME | `saas_provider` | 0.9 |
@@ -278,7 +283,7 @@ Each provider filters natively what its API supports (`capabilities.filters` of 
 | `france_travail` | `contracts` as `typeContrat` (`freelance`: `FRA,LIB`; `employee`: `CDD,CDI,MIS,SAI`). Keywords are queried once per distinct native filter. | `remote`, `countries`, and `contracts` again on the offer contract code and text. |
 | `ted` | `countries` as `buyer-country` (alpha-3 code derived from the alpha-2; a country without alpha-3 code is left to the post-filter). Without `countries`, the operator default `TED_BUYER_COUNTRIES` applies. | `remote` (not applicable to notices, they pass), `contracts` (a notice is a `public_contract`). |
 | `hacker_news_hiring` | none | all three filters, on the work mode, contract and country read from the post header (see "Hacker News parsing"). |
-| `boamp`, `decp`, `ats` | none | all three filters. |
+| `boamp`, `decp` | none | all three filters. |
 
 Post-filter rules, best effort on the title and text of the candidate, accents ignored:
 
@@ -300,15 +305,24 @@ The editor lists, per selected provider, what it filters natively and what is ap
 - The company domain is the first URL of the comment (links first, then URLs in the text, `www.` included) whose host is not `news.ycombinator.com`, a job board, an applicant tracking system, a code or social host, or a webmail. A post without such a URL is skipped and counted in `skipped_no_domain`: a company name alone cannot be a lead.
 - The signal is a `job_offer` whose provenance is `https://news.ycombinator.com/item?id=<item id>` and whose observation date is the comment date.
 
-## Signal agents
+## Certificates and DNS agents
 
-| `source.provider` | Settings |
-| --- | --- |
-| `certificate_transparency` | `labels`: hostname labels to look for in certificate logs. |
-| `http_probe` | `fingerprints` (path, matchers, optional version extractor, debt markers) and `excluded_products`. |
-| `dns_cname` | `patterns`: provider names with the CNAME target suffix that identifies them. |
+| `type` | Settings | Effect |
+| --- | --- | --- |
+| `certificates` | `labels`: hostname labels to look for in certificate logs. | A new certificate host with one of the labels in its subdomain part creates or updates the lead of its registrable domain with a `certificate_seen` signal (value: the host, `raw.labels`: the matched labels, provenance `https://crt.sh/?q=<host>`, strength 0.3). The host is recorded as a candidate host for the DNS lookup and the HTTP probe. |
+| `dns` | `patterns`: provider names with the CNAME target suffix that identifies them. | A candidate host whose CNAME chain ends with a suffix creates or updates the lead of its domain with a `saas_provider` signal. |
 
-Validation paths include the agent index, for example `agents[1].keywords[0]`, `agents[1].providers[0]`, `agents[0].source.labels[1]` or `contact_ranking.guess_local_parts[1]`.
+Validation paths include the agent index, for example `agents[1].keywords[0]`, `agents[1].providers[0]`, `agents[0].labels[1]`, `enrichment.http_probe.fingerprints[0].path` or `contact_ranking.guess_local_parts[1]`.
+
+## Enrichment
+
+Enrichment completes every lead of the active profiles that enable it, whatever its source (ADR 0011). Its signals carry no agent. It never creates a lead: a probe or job offer match is recorded only on the lead that already exists for that domain in the same profile, and a match on a domain without a lead in a profile is skipped for that profile (`skipped_no_lead` in the run report and the logs).
+
+- **HTTP probe.** The hosts of a lead are its registrable domain, the candidate hosts known for that domain and the `extra_subdomains`. Before each pass the HTTP probe listener inserts the missing ones as candidate hosts of origin `lead` for the leads of the profile that were never seeded, then probes every due candidate host with the paths of the fingerprints of every enabled profile (revisit interval `OUTBOUND_REVISIT_INTERVAL_HOURS`, unchanged). The step has run for a lead once every candidate host of its domain has been probed.
+- **Company job offers** (catalog provider `ats`, « Offres d'emploi de l'entreprise »). The scheduled `ats` job reads the home page, then the career pages, of every lead domain of the profiles that enable the step, finds the recruiting board (Greenhouse, Lever, Ashby) and reads its offers. Offers go through the keyword routing with `enrichment.company_jobs.keywords` and `accept_min_keywords`, without exclusions or filters, and become `job_offer` signals. A domain is scanned again after the revisit interval, or earlier when one of its leads has never had the step. The step has run for a lead once its domain was scanned.
+- **State.** `lead_enrichments (lead_id, step, ran_at)` keeps the last run of each step per lead (`ran_at` is null while the probe of the seeded hosts is pending).
+- **Qualification.** A lead is due for its qualification agents once each enabled step ran for it, or once `ENRICHMENT_WAIT_MINUTES` (default 30, 0 disables the wait) have passed since `leads.created_at`. A lead whose only evidence is `certificate_seen` (contact signals from `security_txt`, `public_page` and `role_guess` do not count) is never sent to the models, whatever the wait; it becomes due when a signal of another kind arrives.
+- **API.** The lead detail carries `enrichment`: `steps` (`step`: `http_probe` or `company_jobs`, `enabled`, `ran_at`), `status` (`disabled`, `pending`, `complete`, `timed_out`), `waiting_reason` (`awaiting_enrichment`, `awaiting_enrichment_evidence` or null) and `wait_until` while pending.
 
 ## Provider URLs
 
@@ -316,15 +330,15 @@ The URL settings of the catalog (`boamp.base_url`, `decp.dataset_api_url`, `ted.
 
 ## Dependencies between kinds
 
-- `http_probe` probes hosts found by certificate transparency. Without a `certificate_transparency` agent, it only probes hosts imported by an operator.
-- `ats` only visits companies already detected by `certificate_transparency`, `http_probe` or `dns_cname` signals.
+- The DNS lookup and the HTTP probe read candidate hosts: hosts found in certificates, imported by an operator, or derived from the leads (origin `lead`).
+- Company job offers visit every lead domain of the profiles that enable them.
 
 ## Run a source now
 
 Sources come in two modes (ADR 0006).
 
-- **Continuous** sources listen around the clock inside the binary: `certificate_transparency`, `dns_cname`, `http_probe`, `security_txt`, `public_page` and `role_guess`. They have no recurring job and nothing to run on demand: an edited agent is picked up on the listener's next loop (a few seconds when idle), and a new certificate or lead flows through the pipeline within minutes. A listener is active while at least one enabled agent of its kind exists in an active profile (contact finders are always active); otherwise it is "Inactif (aucun agent)". With several replicas one holds each listener at a time (Postgres advisory lock); the others show "En veille (autre instance)" and take over when it stops.
-- **Scheduled** sources (`boamp`, `decp`, `ted`, `france_travail`, `hacker_news_hiring`, `ats`) run on a recurring job, so an edited agent otherwise waits for the next interval. "Lancer maintenant" on the Sources screen (Configuration > Sources), or "Lancer la source" on an agent card, moves the pending job to the present.
+- **Continuous** sources listen around the clock inside the binary: `certificate_transparency`, `dns_cname`, `http_probe`, `security_txt`, `public_page` and `role_guess`. They have no recurring job and nothing to run on demand: an edited agent is picked up on the listener's next loop (a few seconds when idle), and a new certificate or lead flows through the pipeline within minutes. A listener is active while at least one enabled agent of its kind exists in an active profile, or for `http_probe` an enabled HTTP probe enrichment (contact finders are always active); otherwise it is "Inactif (aucun agent)". With several replicas one holds each listener at a time (Postgres advisory lock); the others show "En veille (autre instance)" and take over when it stops.
+- **Scheduled** sources (`boamp`, `decp`, `ted`, `france_travail`, `hacker_news_hiring`, and `ats` for the company job offers enrichment) run on a recurring job, so an edited agent otherwise waits for the next interval. "Lancer maintenant" on the Sources screen (Configuration > Sources), or "Lancer la source" on an agent card, moves the pending job to the present.
 
 The Sources screen shows continuous sources in their own "Écoute continue" group with the listener state, last activity, backlog (tiles of lag for certificate transparency, hosts to probe, contact targets), totals and last error. Agent cards of continuous kinds show an "En écoute" status line instead of the run button.
 
@@ -341,7 +355,7 @@ A host or domain whose lookup, probe or crawl fails is marked checked like a suc
 
 ## Older versions
 
-Stored revisions are never rewritten. Versions 1 to 15 are accepted and upgraded when read; new revisions are written in version 16. Errors on an older document keep that document's paths.
+Stored revisions are never rewritten. Versions 1 to 16 are accepted and upgraded when read; new revisions are written in version 17. Errors on an older document keep that document's paths.
 
 ### Version 1 to 2
 
@@ -416,3 +430,14 @@ The `scoring` section (weighted factors) and `evidence.reference_score` are remo
 ### Version 15 to 16
 
 `agents[]` becomes a tagged union. Every agent of a keyword kind (`boamp`, `decp`, `ted`, `france_travail`, `ats`) becomes a `search` agent whose `providers` is `[kind]`, with the same `keywords`, `exclusions` and `accept_min_keywords` and open `filters`. Agents of the signal kinds (`certificate_transparency`, `dns_cname`, `http_probe`) become `signal` agents and `source.kind` is renamed `source.provider`. Ids, names, order and `enabled` are kept. Agents with identical keywords are not merged; the operator can do it by hand. The IAM example merges its three public procurement agents into one `marches-publics` agent over `boamp`, `decp` and `ted`.
+
+### Version 16 to 17
+
+Sourcing and enrichment are separated (ADR 0011). In this order:
+
+1. `http_probe` signal agents leave `agents` for `enrichment.http_probe`: fingerprints are merged in agent order and deduplicated by id (the first wins), excluded products are merged, `extra_subdomains` takes its default, and the step is enabled when one of those agents was.
+2. `ats` is removed from the `providers` of every search agent. `enrichment.company_jobs` gets the union of the keywords of those agents (case-insensitive, first spelling kept) and the `accept_min_keywords` of the first one, and is enabled when one of them was. Their exclusions and filters are dropped. A search agent left without provider is dropped.
+3. Search agents with identical keywords and exclusions (in any order), filters, `accept_min_keywords` and `enabled` are merged into one, at the place of the first, with the union of their providers. The merged agent is named « Offres et missions » when all its providers are in the jobs and missions category, « Marchés publics » when all are public procurement, else it keeps the name of the first agent. Its id is the slug of the name (lowercase, accents removed, other characters replaced by `-`), followed by `-2`, `-3` when another agent of the profile already uses it. A lone agent keeps its id and name.
+4. `certificate_transparency` and `dns_cname` signal agents become `certificates` and `dns` agents with the same id, name, `enabled`, `labels` or `patterns`.
+
+The IAM example of version 16 upgrades to « Certificate transparency », « DNS CNAME », « Marchés publics » (BOAMP, DECP, TED) and « France Travail », with its five fingerprints and the keywords of its two job agents in the enrichment.

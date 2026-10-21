@@ -282,15 +282,11 @@ impl<S: ListenerStep> Listener<S> {
 
 impl LodestoneUseCase {
     pub async fn has_enabled_agent(&self, source: SourceName) -> Result<bool, CoreError> {
-        Ok(self.list_active_profiles().await?.iter().any(|active| {
-            active
-                .revision
-                .definition
-                .definition()
-                .enabled_agents(source)
-                .next()
-                .is_some()
-        }))
+        Ok(self
+            .list_active_profiles()
+            .await?
+            .iter()
+            .any(|active| active.revision.definition.definition().has_targets(source)))
     }
 
     pub async fn list_listener_statuses(&self) -> Result<Vec<ListenerStatus>, CoreError> {

@@ -113,6 +113,7 @@ const detail: LeadDetailData = {
 	},
 	scoring_results: [],
 	agent_failures: [],
+	enrichment: { status: 'disabled', steps: [] },
 	qualification_results: [
 		{
 			agent_id: 'pertinence',

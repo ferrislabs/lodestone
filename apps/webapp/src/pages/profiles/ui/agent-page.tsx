@@ -8,7 +8,7 @@ import { Button } from '#/components/ui/button'
 import { Input } from '#/components/ui/input'
 import { Label } from '#/components/ui/label'
 import { Switch } from '#/components/ui/switch'
-import { isJsonObject, type JsonValue, type Problem } from '#/lib/schema-form'
+import type { JsonValue, Problem } from '#/lib/schema-form'
 import { cn } from '#/lib/utils'
 import {
 	agentEnabled,
@@ -19,7 +19,8 @@ import {
 	type DependencyNote,
 	isSignalKind,
 	KIND_META,
-	sourceSchema,
+	SIGNAL_PROVIDERS,
+	settingsSchema,
 } from '#/pages/profiles/lib/agents'
 import { criteriaMatrix } from '#/pages/profiles/lib/matrix'
 import { providerTiles } from '#/pages/profiles/lib/provider-tiles'
@@ -212,9 +213,9 @@ export function AgentPage({
 						<>
 							<ObjectFields
 								context={context}
-								schema={sourceSchema(kind)}
-								path={['agents', index, 'source']}
-								value={isJsonObject(agent) ? agent.source : undefined}
+								schema={settingsSchema(kind)}
+								path={['agents', index]}
+								value={agent}
 							/>
 							<details
 								open={idProblems.length > 0}
@@ -267,7 +268,7 @@ export function AgentPage({
 					) : null}
 					{isSignalKind(kind) ? (
 						<SignalProvider
-							providerKey={kind}
+							providerKey={SIGNAL_PROVIDERS[kind]}
 							catalog={catalog}
 							onOpenProvider={actions.onOpenProvider}
 						/>

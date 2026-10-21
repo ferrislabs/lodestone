@@ -3,10 +3,12 @@ use std::{collections::HashMap, sync::Mutex};
 use chrono::TimeZone;
 use common::CoreError;
 use lodestone_core::{
-    Route,
+    Profile, ProfileName, ProfileRevision, RevisionNumber, Route, ValidatedProfile,
     definition::{AgentId, SearchAgent},
     route,
 };
+use serde_json::{from_str, json};
+use uuid::Uuid;
 
 use super::{
     discover::{Board, Vendor, careers_links, extract_boards},
@@ -567,19 +569,25 @@ async fn a_rate_limit_longer_than_the_wait_ends_the_scan() {
     assert!(matches!(result, Err(SourceError::RateLimited { .. })));
 }
 
+type Asked = (Vec<ProfileId>, DateTime<Utc>, u32);
+
 struct FakeTargets {
     due: Vec<NormalizedDomain>,
     checked: Mutex<Vec<NormalizedDomain>>,
-    asked: Mutex<Vec<(DateTime<Utc>, u32)>>,
+    asked: Mutex<Vec<Asked>>,
 }
 
 impl AtsTargets for FakeTargets {
     async fn list_due(
         &self,
+        profiles: &[ProfileId],
         checked_before: DateTime<Utc>,
         limit: u32,
     ) -> Result<Vec<NormalizedDomain>, CoreError> {
-        self.asked.lock().unwrap().push((checked_before, limit));
+        self.asked
+            .lock()
+            .unwrap()
+            .push((profiles.to_vec(), checked_before, limit));
         Ok(self.due.clone())
     }
 
@@ -626,9 +634,61 @@ async fn collect_marks_every_scanned_domain_checked_and_returns_candidates() {
     );
     assert_eq!(
         *source.targets.asked.lock().unwrap(),
-        [(now() - chrono::Duration::days(7), 20)]
+        [(Vec::new(), now() - chrono::Duration::days(7), 20)]
     );
     assert_eq!(source.name(), SourceName::Ats);
+}
+
+fn active(id: u128, company_jobs: bool) -> ActiveProfile {
+    let mut value = ValidatedProfile::parse(
+        from_str(include_str!(
+            "../../../../docs/examples/profiles/iam-ferriskey.json"
+        ))
+        .unwrap(),
+    )
+    .unwrap()
+    .to_json();
+    value["enrichment"]["company_jobs"]["enabled"] = json!(company_jobs);
+    let profile_id = ProfileId(Uuid::from_u128(id));
+    ActiveProfile {
+        profile: Profile {
+            id: profile_id,
+            name: ProfileName::parse("p").unwrap(),
+            active: true,
+            created_at: now(),
+            updated_at: now(),
+        },
+        revision: ProfileRevision {
+            profile_id,
+            number: RevisionNumber::FIRST,
+            definition: ValidatedProfile::parse(value).unwrap(),
+            created_by: None,
+            created_at: now(),
+        },
+    }
+}
+
+#[tokio::test]
+async fn collect_reads_the_leads_of_the_profiles_that_enrich_with_company_jobs() {
+    let fetcher = Arc::new(FakeFetcher::new(Vec::new()));
+    let targets = FakeTargets {
+        due: Vec::new(),
+        checked: Mutex::new(Vec::new()),
+        asked: Mutex::new(Vec::new()),
+    };
+    let source = AtsSource::new(fetcher, targets, settings());
+    source
+        .collect(&[active(1, true), active(2, false)], now())
+        .await
+        .unwrap();
+    assert_eq!(
+        *source.targets.asked.lock().unwrap(),
+        [(
+            vec![ProfileId(Uuid::from_u128(1))],
+            now() - chrono::Duration::days(7),
+            20
+        )]
+    );
 }
 
 #[tokio::test]

@@ -32,6 +32,11 @@ pub use domain::{
         recipient::{NotARecipient, Recipient},
         select_for_profile,
     },
+    enrichment::{
+        CERTIFICATE_SEEN_KIND, EnrichmentState, EnrichmentStatus, EnrichmentStep,
+        LeadEnrichmentRecord, StepRun, StepState, WaitingReason, enrichment_state,
+        only_certificates,
+    },
     facts::{
         CompanyFacts, Country, CountryBasis, Environment, HostFact, IndependentSignal, LeadFacts,
         OfficialFacts, SiblingSignals, environment_of, signal_sentence,

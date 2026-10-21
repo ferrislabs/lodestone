@@ -5,7 +5,7 @@
   "type": "object",
   "properties": {
     "agents": {
-      "description": "Detection agents. At least one is required.",
+      "description": "Sourcing agents: they find leads. At least one is required unless an enrichment step is enabled.",
       "type": "array",
       "items": {
         "$ref": "#/$defs/Agent"
@@ -16,6 +16,29 @@
     },
     "contact_ranking": {
       "$ref": "#/$defs/ContactRanking"
+    },
+    "enrichment": {
+      "$ref": "#/$defs/Enrichment",
+      "default": {
+        "company_jobs": {
+          "accept_min_keywords": 2,
+          "enabled": false,
+          "keywords": []
+        },
+        "http_probe": {
+          "enabled": false,
+          "excluded_products": [],
+          "extra_subdomains": [
+            "auth",
+            "sso",
+            "login",
+            "id",
+            "idp",
+            "accounts"
+          ],
+          "fingerprints": []
+        }
+      }
     },
     "escalation": {
       "$ref": "#/$defs/Escalation",
@@ -65,7 +88,7 @@
       }
     },
     "schema_version": {
-      "description": "Profile format version. Must be 16.",
+      "description": "Profile format version. Must be 17.",
       "type": "integer",
       "format": "uint32",
       "minimum": 0
@@ -100,7 +123,7 @@
   "$defs": {
     "Agent": {
       "title": "Agent",
-      "description": "A detection agent, selected by type. A search agent looks for keywords across catalog providers. A signal agent reads one technical signal provider with its own settings.",
+      "description": "A sourcing agent, selected by type. A search agent looks for keywords across catalog providers, a certificates agent reads hostnames in certificate transparency logs, a DNS agent recognises providers by the CNAME target of hosts.",
       "oneOf": [
         {
           "title": "Search agent",
@@ -152,7 +175,7 @@
               "type": "string"
             },
             "providers": {
-              "description": "Catalog provider keys searched by this agent, for example boamp, decp, ted, france_travail or ats. Each one must exist in the catalog and support keyword search. A provider that is not ready is skipped at run time.",
+              "description": "Catalog provider keys searched by this agent, for example boamp, decp, ted, france_travail or hacker_news_hiring. Each one must exist in the catalog and support keyword search. A provider that is not ready is skipped at run time.",
               "type": "array",
               "items": {
                 "type": "string"
@@ -174,8 +197,8 @@
           ]
         },
         {
-          "title": "Signal agent",
-          "description": "Reads one technical signal provider with its own settings. The provider is its catalog key.",
+          "title": "Certificates agent",
+          "description": "Reads new certificates in the certificate transparency logs. A hostname with one of the labels creates or updates a lead for its registrable domain.",
           "type": "object",
           "properties": {
             "enabled": {
@@ -184,20 +207,23 @@
               "default": true
             },
             "id": {
-              "description": "Unique slug in the profile, for example certificate-transparency.",
+              "description": "Unique slug in the profile, for example certificats.",
               "$ref": "#/$defs/AgentId"
+            },
+            "labels": {
+              "description": "Hostname labels to look for, for example auth or sso.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
             },
             "name": {
               "description": "Display name.",
               "type": "string"
             },
-            "source": {
-              "description": "The signal provider and its settings.",
-              "$ref": "#/$defs/SignalSource"
-            },
             "type": {
               "type": "string",
-              "const": "signal"
+              "const": "certificates"
             }
           },
           "additionalProperties": false,
@@ -205,7 +231,45 @@
             "type",
             "id",
             "name",
-            "source"
+            "labels"
+          ]
+        },
+        {
+          "title": "DNS agent",
+          "description": "Resolves the CNAME chain of candidate hosts. A target matching a pattern creates or updates a lead for the registrable domain of the host.",
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "description": "A disabled agent is kept but not run.",
+              "type": "boolean",
+              "default": true
+            },
+            "id": {
+              "description": "Unique slug in the profile, for example dns.",
+              "$ref": "#/$defs/AgentId"
+            },
+            "name": {
+              "description": "Display name.",
+              "type": "string"
+            },
+            "patterns": {
+              "description": "Provider and target suffix pairs.",
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/CnamePattern"
+              }
+            },
+            "type": {
+              "type": "string",
+              "const": "dns"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "name",
+            "patterns"
           ]
         }
       ]
@@ -262,6 +326,35 @@
         "provider",
         "target_suffix"
       ]
+    },
+    "CompanyJobsEnrichment": {
+      "title": "Company job offers enrichment",
+      "description": "Finds the careers page or the recruiting board of every lead from its domain and reads its job offers. An offer with the keywords becomes a job_offer signal.",
+      "type": "object",
+      "properties": {
+        "accept_min_keywords": {
+          "description": "Distinct keywords an offer needs for a strong signal. Fewer still keeps it with a weaker signal. Default 2.",
+          "type": "integer",
+          "format": "uint8",
+          "default": 2,
+          "maximum": 255,
+          "minimum": 0
+        },
+        "enabled": {
+          "description": "When false, the job offers of the leads are not read. Default false.",
+          "type": "boolean",
+          "default": false
+        },
+        "keywords": {
+          "description": "Keywords looked for in the offers. Empty means the union of the keywords of the enabled search agents.",
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
     },
     "ContactRanking": {
       "title": "Contact ranking",
@@ -370,6 +463,38 @@
           ]
         }
       ]
+    },
+    "Enrichment": {
+      "title": "Enrichment",
+      "description": "Steps run on every lead of the profile, whatever the agent that found it. A lead is qualified once its enabled steps ran for it, or after a wait.",
+      "type": "object",
+      "properties": {
+        "company_jobs": {
+          "$ref": "#/$defs/CompanyJobsEnrichment",
+          "default": {
+            "accept_min_keywords": 2,
+            "enabled": false,
+            "keywords": []
+          }
+        },
+        "http_probe": {
+          "$ref": "#/$defs/HttpProbeEnrichment",
+          "default": {
+            "enabled": false,
+            "excluded_products": [],
+            "extra_subdomains": [
+              "auth",
+              "sso",
+              "login",
+              "id",
+              "idp",
+              "accounts"
+            ],
+            "fingerprints": []
+          }
+        }
+      },
+      "additionalProperties": false
     },
     "Escalation": {
       "title": "Escalation",
@@ -539,6 +664,50 @@
         "product",
         "matchers"
       ]
+    },
+    "HttpProbeEnrichment": {
+      "title": "HTTP probe enrichment",
+      "description": "Probes the hosts of every lead: its registrable domain, the candidate hosts known for it and the extra subdomains, with the fingerprints below.",
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "description": "When false, the hosts of the leads are not probed. Default false.",
+          "type": "boolean",
+          "default": false
+        },
+        "excluded_products": {
+          "description": "Products to ignore, for example your own.",
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        },
+        "extra_subdomains": {
+          "description": "Subdomains of the lead domain probed as well, as hostname labels. Default auth, sso, login, id, idp, accounts.",
+          "type": "array",
+          "default": [
+            "auth",
+            "sso",
+            "login",
+            "id",
+            "idp",
+            "accounts"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "fingerprints": {
+          "description": "Fingerprints to probe on each host. At least one when enabled.",
+          "type": "array",
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Fingerprint"
+          }
+        }
+      },
+      "additionalProperties": false
     },
     "Identity": {
       "title": "Identity",
@@ -928,89 +1097,6 @@
         }
       },
       "additionalProperties": false
-    },
-    "SignalSource": {
-      "title": "Signal source",
-      "description": "The signal provider an agent reads, selected by its catalog key.",
-      "oneOf": [
-        {
-          "title": "Certificate transparency",
-          "description": "Hostname labels to look for in certificate logs.",
-          "type": "object",
-          "properties": {
-            "labels": {
-              "description": "Hostname labels to look for, for example auth or sso.",
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            },
-            "provider": {
-              "type": "string",
-              "const": "certificate_transparency"
-            }
-          },
-          "additionalProperties": false,
-          "required": [
-            "provider",
-            "labels"
-          ]
-        },
-        {
-          "title": "DNS CNAME",
-          "description": "Providers identified by the CNAME target of a domain.",
-          "type": "object",
-          "properties": {
-            "patterns": {
-              "description": "Provider and target suffix pairs.",
-              "type": "array",
-              "items": {
-                "$ref": "#/$defs/CnamePattern"
-              }
-            },
-            "provider": {
-              "type": "string",
-              "const": "dns_cname"
-            }
-          },
-          "additionalProperties": false,
-          "required": [
-            "provider",
-            "patterns"
-          ]
-        },
-        {
-          "title": "HTTP probe",
-          "description": "Fingerprints probed over HTTP and products to ignore.",
-          "type": "object",
-          "properties": {
-            "excluded_products": {
-              "description": "Products to ignore, for example your own.",
-              "type": "array",
-              "default": [],
-              "items": {
-                "type": "string"
-              }
-            },
-            "fingerprints": {
-              "description": "Fingerprints to probe on each domain.",
-              "type": "array",
-              "items": {
-                "$ref": "#/$defs/Fingerprint"
-              }
-            },
-            "provider": {
-              "type": "string",
-              "const": "http_probe"
-            }
-          },
-          "additionalProperties": false,
-          "required": [
-            "provider",
-            "fingerprints"
-          ]
-        }
-      ]
     },
     "VerdictThresholds": {
       "title": "Verdict thresholds",

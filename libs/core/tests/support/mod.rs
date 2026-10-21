@@ -25,7 +25,8 @@ pub const MINIMAL_PROFILE: &str = r#"{
                 "debt_markers": [{"id": "old", "rule": {"kind": "version_below", "version": "22.0"}}]
             }],
             "excluded_products": ["ferriskey"]
-        }
+        },
+        "dns_cname": {"patterns": [{"provider": "okta", "target_suffix": "okta.com"}]}
     },
     "scoring": {"factors": [{"signal": "product_detected", "value": "keycloak", "weight": 10.0}]},
     "contact_ranking": {"preferred_local_parts": ["security", "contact"]},

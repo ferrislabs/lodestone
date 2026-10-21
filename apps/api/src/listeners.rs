@@ -29,6 +29,7 @@ use sources::{
     contact_pages::PublicPageFinder, ct::CtSource, dns_cname::DnsCnameSource,
     http_probe::HttpProbeSource, role_guess::RoleGuessFinder, security_txt::SecurityTxtFinder,
 };
+use tracing::info;
 
 pub type CertificateTransparency = CtSource<PoliteFetcher, PgCandidateHosts, PgCtCursors>;
 pub type DnsCname = DnsCnameSource<HickoryResolver, PgCandidateHosts>;
@@ -104,6 +105,13 @@ impl<S: Source> ListenerStep for HostStep<S> {
             .usecase
             .listen_source(&self.source, &SystemClock)
             .await?;
+        if report.skipped_no_lead > 0 {
+            info!(
+                source = %self.source.name(),
+                skipped_no_lead = report.skipped_no_lead,
+                "enrichment matches without a lead in the profile were skipped"
+            );
+        }
         let backlog = self
             .hosts
             .count_due(self.source.name(), due_before(Utc::now(), self.revisit)?)

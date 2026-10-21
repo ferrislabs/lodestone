@@ -150,15 +150,12 @@ static CATALOG: [SourceProviderDescriptor; 11] = [
     },
     SourceProviderDescriptor {
         key: ATS,
-        name: "Pages carrières",
-        description: "Offres d'emploi lues sur les pages carrières publiques des entreprises et leurs plateformes de recrutement.",
-        category: ProviderCategory::JobsAndMissions,
+        name: "Offres d'emploi de l'entreprise",
+        description: "Enrichissement : lit les offres d'emploi d'une entreprise dont le domaine est connu, sur sa page carrières ou sa plateforme de recrutement. Ce n'est pas une recherche par mot-clé : chaque lead est visité, quel que soit l'agent qui l'a trouvé.",
+        category: ProviderCategory::Companies,
         auth: AuthSpec::None,
         fields: &[],
-        capabilities: Capabilities {
-            keyword_search: true,
-            filters: NO_FILTERS,
-        },
+        capabilities: NO_SEARCH,
         terms_note: Some(
             "Pages publiques uniquement : robots.txt est respecté et le débit par hôte est limité.",
         ),
@@ -334,6 +331,15 @@ mod tests {
             );
             assert!(descriptor.terms_note.is_some());
         }
+    }
+
+    #[test]
+    fn company_job_offers_enrich_known_companies_and_cannot_be_searched() {
+        let ats = descriptor(ATS).unwrap();
+        assert_eq!(ats.name, "Offres d'emploi de l'entreprise");
+        assert_eq!(ats.category, ProviderCategory::Companies);
+        assert!(!ats.capabilities.keyword_search);
+        assert!(ats.description.contains("domaine est connu"));
     }
 
     #[test]

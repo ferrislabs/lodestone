@@ -8,8 +8,8 @@ use crate::domain::{
     llm::provider::ProviderId,
     profile::{ProfileId, RevisionNumber},
     qualification::{
-        AgentCallFailure, AgentFailure, Completion, LeadScoring, QualificationResult, Rescoring,
-        SummaryState,
+        AgentCallFailure, AgentFailure, Completion, DueGates, LeadScoring, QualificationResult,
+        Rescoring, SummaryState,
     },
 };
 
@@ -20,7 +20,7 @@ pub trait QualificationRepository: Send {
         profile_id: ProfileId,
         revision: RevisionNumber,
         limit: u32,
-        dossier_gate: Option<DateTime<Utc>>,
+        gates: DueGates,
         now: DateTime<Utc>,
     ) -> impl Future<Output = Result<Vec<Lead>, CoreError>> + Send;
 
@@ -28,7 +28,7 @@ pub trait QualificationRepository: Send {
         &mut self,
         profile_id: ProfileId,
         revision: RevisionNumber,
-        dossier_gate: Option<DateTime<Utc>>,
+        gates: DueGates,
         now: DateTime<Utc>,
     ) -> impl Future<Output = Result<u64, CoreError>> + Send;
 

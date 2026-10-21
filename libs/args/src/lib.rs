@@ -3,10 +3,11 @@ use common::{Config, SettingsError};
 
 use crate::{
     ats::AtsArgs, auth::AuthArgs, boamp::BoampArgs, company::CompanyArgs, contacts::ContactArgs,
-    ct::CtArgs, database::DatabaseArgs, decp::DecpArgs, france_travail::FranceTravailArgs,
-    hacker_news::HackerNewsArgs, jobs::JobsArgs, listeners::ListenerArgs, llm::LlmArgs,
-    log::LogArgs, observability::ObservabilityArgs, outbound::OutboundArgs,
-    rate_limit::RateLimitArgs, server::ServerArgs, ted::TedArgs, webhook::WebhookArgs,
+    ct::CtArgs, database::DatabaseArgs, decp::DecpArgs, enrichment::EnrichmentArgs,
+    france_travail::FranceTravailArgs, hacker_news::HackerNewsArgs, jobs::JobsArgs,
+    listeners::ListenerArgs, llm::LlmArgs, log::LogArgs, observability::ObservabilityArgs,
+    outbound::OutboundArgs, rate_limit::RateLimitArgs, server::ServerArgs, ted::TedArgs,
+    webhook::WebhookArgs,
 };
 
 pub mod ats;
@@ -17,6 +18,7 @@ pub mod contacts;
 pub mod ct;
 pub mod database;
 pub mod decp;
+pub mod enrichment;
 pub mod france_travail;
 pub mod hacker_news;
 pub mod jobs;
@@ -70,6 +72,9 @@ pub struct Args {
 
     #[command(flatten)]
     pub company: CompanyArgs,
+
+    #[command(flatten)]
+    pub enrichment: EnrichmentArgs,
 
     #[command(flatten)]
     pub boamp: BoampArgs,

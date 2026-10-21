@@ -8,11 +8,7 @@ import type {
 
 export const CONTINUOUS_GROUP_TITLE = 'Écoute continue'
 
-export const CONTINUOUS_AGENT_KINDS: readonly string[] = [
-	'certificate_transparency',
-	'dns_cname',
-	'http_probe',
-]
+export const CONTINUOUS_AGENT_KINDS: readonly string[] = ['certificates', 'dns']
 
 export type ListenerTone = 'active' | 'standby' | 'inactive' | 'error' | 'stale'
 

@@ -224,16 +224,12 @@ describe('definition tabs', () => {
 				screen.queryAllByText('Critères LLM propres à cet agent').length,
 			).toBe(0)
 			const has = (text: string) => screen.queryAllByText(text).length > 0
-			if (kind === 'certificate_transparency') {
+			if (kind === 'certificates') {
 				expect(has('Libellés')).toBe(true)
 				expect(has('Mots-clés')).toBe(false)
-			} else if (kind === 'dns_cname') {
+			} else if (kind === 'dns') {
 				expect(has('Motifs CNAME')).toBe(true)
 				expect(has('Libellés')).toBe(false)
-			} else if (kind === 'http_probe') {
-				expect(has('Empreintes')).toBe(true)
-				expect(has('Produits exclus')).toBe(true)
-				expect(has('Mots-clés')).toBe(false)
 			} else {
 				expect(has('Mots-clés')).toBe(true)
 				expect(has('Exclusions')).toBe(true)
@@ -382,48 +378,21 @@ describe('definition tabs', () => {
 		expect(screen.getByText('2 mots-clés')).toBeTruthy()
 	})
 
-	it('lays a dns_cname agent out as compact rows', () => {
+	it('lays a dns agent out as compact rows', () => {
 		render(<Harness startTab="sourcing" />)
-		addAgent('dns_cname')
+		addAgent('dns')
 		openAgent()
 		const scoped = screen
 		fireEvent.click(scoped.getByText('Ajouter un motif'))
 		const row = document.querySelector<HTMLElement>(
-			'[data-row="agents[0].source.patterns[0]"]',
+			'[data-row="agents[0].patterns[0]"]',
 		) as HTMLElement
 		expect(within(row).getByLabelText('Fournisseur')).toBeTruthy()
 		expect(within(row).getByLabelText('Suffixe cible')).toBeTruthy()
 		fireEvent.click(within(row).getByRole('button', { name: /Supprimer/ }))
 		expect(
-			document.querySelector('[data-row="agents[0].source.patterns[0]"]'),
+			document.querySelector('[data-row="agents[0].patterns[0]"]'),
 		).toBeNull()
-	})
-
-	it('switches the variant of an http probe matcher inline', () => {
-		render(<Harness startTab="sourcing" />)
-		addAgent('http_probe')
-		openAgent()
-		const scoped = screen
-		fireEvent.click(scoped.getByLabelText('Ajouter : Empreintes'))
-		expect(scoped.getByText('Version et dette technique')).toBeTruthy()
-		fireEvent.click(scoped.getByText('Ajouter une condition'))
-		const select = scoped.getByLabelText(
-			'Type : Condition',
-		) as HTMLSelectElement
-		expect([...select.options].map((option) => option.textContent)).toEqual([
-			'Statut',
-			'En-tête',
-			'Corps',
-		])
-		expect(scoped.getByLabelText('Code de statut attendu')).toBeTruthy()
-		fireEvent.change(select, { target: { value: '1' } })
-		expect(scoped.getByLabelText("Nom de l'en-tête")).toBeTruthy()
-		expect(scoped.getByLabelText('Expression régulière')).toBeTruthy()
-		expect(scoped.queryByLabelText('Code de statut attendu')).toBeNull()
-		fireEvent.change(select, { target: { value: '2' } })
-		expect(scoped.queryByLabelText("Nom de l'en-tête")).toBeNull()
-		expect(scoped.getByLabelText('Expression régulière')).toBeTruthy()
-		expect(scoped.getByLabelText('Produits exclus')).toBeTruthy()
 	})
 
 	it('shows the save bar only when dirty and cancel resets after a confirmation', () => {
@@ -451,18 +420,16 @@ describe('definition tabs', () => {
 		expect(screen.getByText(/Aucun agent pour le moment/)).toBeTruthy()
 	})
 
-	it('warns when an http probe has no certificate transparency agent', () => {
+	it('warns when a dns agent has no certificates agent', () => {
 		render(<Harness startTab="sourcing" />)
-		addAgent('http_probe')
+		addAgent('dns')
 		expect(screen.getByRole('alert').textContent).toContain(
-			'Sonde les hôtes trouvés par un agent Transparence des certificats',
+			'Résout les hôtes trouvés par un agent Certificats',
 		)
-		addAgent('certificate_transparency')
+		addAgent('certificates')
 		expect(screen.queryByRole('alert')).toBeNull()
 		expect(
-			screen.getByText(
-				/Sonde les hôtes trouvés par un agent Transparence des certificats/,
-			),
+			screen.getByText(/Résout les hôtes trouvés par un agent Certificats/),
 		).toBeTruthy()
 	})
 
@@ -529,7 +496,7 @@ describe('definition tabs', () => {
 		render(
 			<Harness
 				startTab="sourcing"
-				initial={{ ...blank(), agents: [newAgent('http_probe', [])] }}
+				initial={{ ...blank(), agents: [newAgent('dns', [])] }}
 			/>,
 		)
 		for (const tab of tabs) {

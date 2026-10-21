@@ -1,4 +1,4 @@
-import { pluralize, sourceLabel } from '#/lib/labels'
+import { pluralize } from '#/lib/labels'
 import {
 	classify,
 	defaultValue,
@@ -12,11 +12,7 @@ import {
 import { PROFILE_HINTS } from '#/pages/profiles/lib/form-hints'
 import { PROFILE_SCHEMA } from '#/pages/profiles/lib/profile-schema'
 
-export const SIGNAL_KINDS = [
-	'certificate_transparency',
-	'dns_cname',
-	'http_probe',
-] as const
+export const SIGNAL_KINDS = ['certificates', 'dns'] as const
 
 export type SignalKind = (typeof SIGNAL_KINDS)[number]
 
@@ -35,21 +31,21 @@ export const KIND_META: Record<AgentKind, KindMeta> = {
 		description:
 			'Recherche par mots-clés sur un ou plusieurs fournisseurs du catalogue, avec des critères communs.',
 	},
-	certificate_transparency: {
-		label: sourceLabel('certificate_transparency'),
+	certificates: {
+		label: 'Certificats',
 		description:
-			"Trouve des entreprises à partir des noms d'hôte des journaux de certificats publics.",
+			"Crée des leads à partir des noms d'hôte des journaux de certificats publics.",
 	},
-	dns_cname: {
-		label: sourceLabel('dns_cname'),
+	dns: {
+		label: 'DNS',
 		description:
-			'Identifie des fournisseurs à partir de la cible CNAME de domaines connus.',
+			'Identifie des fournisseurs à partir de la cible CNAME des hôtes connus.',
 	},
-	http_probe: {
-		label: sourceLabel('http_probe'),
-		description:
-			"Sonde des hôtes en HTTP à la recherche d'empreintes de produits.",
-	},
+}
+
+export const SIGNAL_PROVIDERS: Record<SignalKind, string> = {
+	certificates: 'certificate_transparency',
+	dns: 'dns_cname',
 }
 
 export const KIND_GROUPS: { title: string; kinds: readonly AgentKind[] }[] = [
@@ -80,10 +76,7 @@ export function withAgents(
 export function agentKind(agent: JsonValue | undefined): AgentKind | null {
 	if (!isJsonObject(agent)) return null
 	if (agent.type === 'search') return 'search'
-	if (agent.type !== 'signal') return null
-	const source = agent.source
-	if (!isJsonObject(source)) return null
-	return isSignalKind(source.provider) ? source.provider : null
+	return isSignalKind(agent.type) ? agent.type : null
 }
 
 export function agentProviders(agent: JsonValue | undefined): string[] {
@@ -95,7 +88,7 @@ export function agentProviders(agent: JsonValue | undefined): string[] {
 			: []
 	}
 	const kind = agentKind(agent)
-	return kind === null || kind === 'search' ? [] : [kind]
+	return kind === null || kind === 'search' ? [] : [SIGNAL_PROVIDERS[kind]]
 }
 
 export function agentTypeLabel(agent: JsonValue | undefined): string {
@@ -147,7 +140,7 @@ function idsExcept(
 	return ids
 }
 
-function agentVariant(type: 'search' | 'signal') {
+function agentVariant(type: AgentKind) {
 	const node = classify(
 		PROFILE_SCHEMA,
 		PROFILE_SCHEMA.properties?.agents?.items ?? {},
@@ -156,23 +149,26 @@ function agentVariant(type: 'search' | 'signal') {
 	return node.variants.find((variant) => variant.value === type) ?? null
 }
 
-function sourceVariant(kind: SignalKind) {
-	const source = agentVariant('signal')?.schema.properties?.source
-	if (source === undefined) return null
-	const node = classify(PROFILE_SCHEMA, source)
-	if (node.kind !== 'union') return null
-	return node.variants.find((variant) => variant.value === kind) ?? null
-}
+const COMMON_FIELDS = ['type', 'id', 'name', 'enabled']
 
-export function sourceSchema(kind: SignalKind) {
-	return sourceVariant(kind)?.schema ?? {}
+export function settingsSchema(kind: SignalKind): Schema {
+	const schema = agentVariant(kind)?.schema ?? {}
+	const keys = Object.keys(schema.properties ?? {}).filter(
+		(key) => !COMMON_FIELDS.includes(key),
+	)
+	return pickProperties(
+		kind,
+		keys,
+		(schema.required ?? []).filter((key) => keys.includes(key)),
+	)
 }
 
 function pickProperties(
+	kind: AgentKind,
 	keys: readonly string[],
 	required: readonly string[],
 ): Schema {
-	const properties = agentVariant('search')?.schema.properties ?? {}
+	const properties = agentVariant(kind)?.schema.properties ?? {}
 	const picked: Record<string, Schema> = {}
 	for (const key of keys) {
 		const property = properties[key]
@@ -182,22 +178,18 @@ function pickProperties(
 }
 
 export function keywordFieldsSchema(): Schema {
-	return pickProperties(['keywords', 'exclusions'], ['keywords'])
+	return pickProperties('search', ['keywords', 'exclusions'], ['keywords'])
 }
 
 export function advancedFieldsSchema(): Schema {
-	return pickProperties(['accept_min_keywords'], [])
+	return pickProperties('search', ['accept_min_keywords'], [])
 }
 
-export function defaultSource(kind: SignalKind): JsonObject {
-	const variant = sourceVariant(kind)
-	if (variant === null) return { provider: kind }
+function defaultSettings(kind: SignalKind): JsonObject {
+	const variant = agentVariant(kind)
+	if (variant === null) return {}
 	return toJsonObject(
-		defaultValue(PROFILE_SCHEMA, variant.schema, PROFILE_HINTS, [
-			'agents',
-			0,
-			'source',
-		]),
+		defaultValue(PROFILE_SCHEMA, variant.schema, PROFILE_HINTS, ['agents', 0]),
 	)
 }
 
@@ -221,11 +213,11 @@ export function newAgent(
 		}
 	}
 	return {
-		type: 'signal',
+		...defaultSettings(kind),
+		type: kind,
 		id,
 		name: KIND_META[kind].label,
 		enabled: true,
-		source: defaultSource(kind),
 	}
 }
 
@@ -265,10 +257,6 @@ function listCount(holder: JsonValue | undefined, field: string): number {
 	return Array.isArray(items) ? items.length : 0
 }
 
-function sourceCount(agent: JsonValue | undefined, field: string): number {
-	return isJsonObject(agent) ? listCount(agent.source, field) : 0
-}
-
 export function agentSummary(agent: JsonValue | undefined): string {
 	const kind = agentKind(agent)
 	if (kind === null) return ''
@@ -282,25 +270,14 @@ export function agentSummary(agent: JsonValue | undefined): string {
 				`${exclusions} ${pluralize(exclusions, 'exclusion', 'exclusions')}`,
 			)
 		}
-	} else if (kind === 'certificate_transparency') {
-		const labels = sourceCount(agent, 'labels')
+	} else if (kind === 'certificates') {
+		const labels = listCount(agent, 'labels')
 		parts.push(`${labels} ${pluralize(labels, 'label', 'labels')}`)
-	} else if (kind === 'dns_cname') {
-		const patterns = sourceCount(agent, 'patterns')
+	} else {
+		const patterns = listCount(agent, 'patterns')
 		parts.push(
 			`${patterns} ${pluralize(patterns, 'motif CNAME', 'motifs CNAME')}`,
 		)
-	} else {
-		const fingerprints = sourceCount(agent, 'fingerprints')
-		parts.push(
-			`${fingerprints} ${pluralize(fingerprints, 'empreinte', 'empreintes')}`,
-		)
-		const excluded = sourceCount(agent, 'excluded_products')
-		if (excluded > 0) {
-			parts.push(
-				`${excluded} ${pluralize(excluded, 'produit exclu', 'produits exclus')}`,
-			)
-		}
 	}
 	return parts.join(' · ')
 }
@@ -310,38 +287,31 @@ export interface DependencyNote {
 	warn: boolean
 }
 
-const SIGNAL_FEEDERS: readonly (AgentKind | null)[] = [
-	'certificate_transparency',
-	'http_probe',
-	'dns_cname',
-]
-
 export function dependencyNote(
 	agent: JsonValue | undefined,
 	agents: readonly JsonValue[],
 ): DependencyNote | null {
-	const kind = agentKind(agent)
-	const kinds = agents.map(agentKind)
-	if (kind === 'http_probe') {
-		return {
-			text: 'Sonde les hôtes trouvés par un agent Transparence des certificats.',
-			warn: !kinds.includes('certificate_transparency'),
-		}
+	if (agentKind(agent) !== 'dns') return null
+	return {
+		text: 'Résout les hôtes trouvés par un agent Certificats, importés ou dérivés des leads.',
+		warn: !agents.map(agentKind).includes('certificates'),
 	}
-	if (kind === 'search' && agentProviders(agent).includes('ats')) {
-		return {
-			text: 'Pages carrières : ne visite que les entreprises déjà détectées par des agents Transparence des certificats, Sonde HTTP ou DNS CNAME.',
-			warn: !kinds.some((other) => SIGNAL_FEEDERS.includes(other)),
-		}
-	}
-	return null
 }
 
 const SLUG = /^[a-z0-9][a-z0-9-]{0,62}$/
 
+function enrichmentEnabled(value: JsonObject): boolean {
+	const enrichment = value.enrichment
+	if (!isJsonObject(enrichment)) return false
+	return ['http_probe', 'company_jobs'].some((step) => {
+		const settings = enrichment[step]
+		return isJsonObject(settings) && settings.enabled === true
+	})
+}
+
 export function validateAgents(value: JsonObject): Problem[] {
 	const agents = agentList(value)
-	if (agents.length === 0) {
+	if (agents.length === 0 && !enrichmentEnabled(value)) {
 		return [{ path: 'agents', message: 'Doit contenir au moins un agent' }]
 	}
 	const problems: Problem[] = []

@@ -14,7 +14,7 @@ use common::CoreError;
 use lodestone_core::{
     ActiveProfile, CandidateHost, CandidateHosts, Clock, HostOrigin, Hostname, ListenerState,
     LodestoneUseCase, Observation, Source, SourceError, SourceName, StepOutcome,
-    definition::Agent,
+    definition::SourceTarget,
     infrastructure::{candidate_host::PgCandidateHosts, listener::postgres::PgListenerLock},
     listeners::{Listener, ListenerSettings, ListenerStep},
     lock_key,
@@ -487,7 +487,12 @@ impl Source for BatchSource {
         Ok(std::mem::take(&mut *self.hosts.lock().unwrap()))
     }
 
-    fn evaluate(&self, _: &Self::Item, _: &ActiveProfile, _: &Agent) -> Vec<Observation> {
+    fn evaluate(
+        &self,
+        _: &Self::Item,
+        _: &ActiveProfile,
+        _: &SourceTarget<'_>,
+    ) -> Vec<Observation> {
         Vec::new()
     }
 }

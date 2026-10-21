@@ -17,7 +17,7 @@ use crate::{
         },
         profile::{
             ActiveProfile,
-            definition::{Agent, EvidenceSettings},
+            definition::{EvidenceSettings, SourceTarget},
         },
         run::{Run, RunId, RunOutcome, ports::RunRepository},
         scoring::{signal_strength, strength_score},
@@ -35,6 +35,22 @@ pub struct SourceRunReport {
     pub runs: Vec<RunId>,
     pub items: u64,
     pub signals: u64,
+    pub skipped_no_lead: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LeadCreation {
+    Create,
+    ExistingOnly,
+}
+
+impl LeadCreation {
+    pub fn of(target: &SourceTarget<'_>) -> Self {
+        match target {
+            SourceTarget::Agent(_) => Self::Create,
+            SourceTarget::HttpProbe(_) | SourceTarget::CompanyJobs(_) => Self::ExistingOnly,
+        }
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -124,25 +140,18 @@ impl LodestoneUseCase {
             .list_active_profiles()
             .await?
             .into_iter()
-            .filter(|active| {
-                active
-                    .revision
-                    .definition
-                    .definition()
-                    .enabled_agents(name)
-                    .next()
-                    .is_some()
-            })
+            .filter(|active| active.revision.definition.definition().has_targets(name))
             .collect();
-        let targets: Vec<(&ActiveProfile, &Agent)> = profiles
+        let targets: Vec<(&ActiveProfile, SourceTarget<'_>)> = profiles
             .iter()
             .flat_map(|active| {
                 active
                     .revision
                     .definition
                     .definition()
-                    .enabled_agents(name)
-                    .map(move |agent| (active, agent))
+                    .targets(name)
+                    .into_iter()
+                    .map(move |target| (active, target))
             })
             .collect();
         if targets.is_empty() {
@@ -150,18 +159,19 @@ impl LodestoneUseCase {
                 runs: Vec::new(),
                 items: 0,
                 signals: 0,
+                skipped_no_lead: 0,
             });
         }
 
         let started_at = clock.now();
         let runs: Vec<Run> = targets
             .iter()
-            .map(|(active, agent)| {
+            .map(|(active, target)| {
                 Run::start(
                     RunId(generate_uuid_v7()),
                     active.profile.id,
                     name,
-                    Some(agent.id().clone()),
+                    target.agent_id().cloned(),
                     started_at,
                 )
             })
@@ -196,30 +206,39 @@ impl LodestoneUseCase {
                 runs: Vec::new(),
                 items: 0,
                 signals: 0,
+                skipped_no_lead: 0,
             });
         }
 
         let mut total_signals = 0;
-        for ((active, agent), run) in targets.iter().zip(&runs) {
+        let mut skipped_no_lead = 0;
+        for ((active, target), run) in targets.iter().zip(&runs) {
             let served: Vec<&S::Item> = items
                 .iter()
-                .filter(|item| source.serves(item, agent))
+                .filter(|item| source.serves(item, target))
                 .collect();
             let volume = count(served.len());
             let observations: Vec<Observation> = served
                 .iter()
-                .flat_map(|item| source.evaluate(item, active, agent))
+                .flat_map(|item| source.evaluate(item, active, target))
                 .map(|observation| Observation {
-                    agent: Some(agent.id().clone()),
+                    agent: target.agent_id().cloned(),
                     ..observation
                 })
                 .collect();
-            let signals = count(observations.len());
             let recorded = self
-                .record_observations_at(active, name, &observations, clock.now())
+                .record_observations_with(
+                    active,
+                    name,
+                    &observations,
+                    clock.now(),
+                    LeadCreation::of(target),
+                )
                 .await;
+            let skipped = recorded.as_ref().map_or(0, |skipped| *skipped);
+            let signals = count(observations.len()).saturating_sub(skipped);
             let outcome = match &recorded {
-                Ok(()) => RunOutcome::Succeeded { volume, signals },
+                Ok(_) => RunOutcome::Succeeded { volume, signals },
                 Err(error) => RunOutcome::Failed {
                     volume,
                     signals: 0,
@@ -229,12 +248,14 @@ impl LodestoneUseCase {
             self.finish_run(run.id, &outcome, clock.now()).await?;
             recorded?;
             total_signals += signals;
+            skipped_no_lead += skipped;
         }
 
         Ok(SourceRunReport {
             runs: runs.iter().map(|run| run.id).collect(),
             items: count(items.len()),
             signals: total_signals,
+            skipped_no_lead,
         })
     }
 
@@ -269,7 +290,6 @@ impl LodestoneUseCase {
             .await
     }
 
-    #[transactional(lead, signal, suppression)]
     pub async fn record_observations_at(
         &self,
         active: &ActiveProfile,
@@ -277,7 +297,22 @@ impl LodestoneUseCase {
         observations: &[Observation],
         now: DateTime<Utc>,
     ) -> Result<(), CoreError> {
+        self.record_observations_with(active, source, observations, now, LeadCreation::Create)
+            .await
+            .map(drop)
+    }
+
+    #[transactional(lead, signal, suppression)]
+    pub async fn record_observations_with(
+        &self,
+        active: &ActiveProfile,
+        source: SourceName,
+        observations: &[Observation],
+        now: DateTime<Utc>,
+        creation: LeadCreation,
+    ) -> Result<u64, CoreError> {
         let mut leads = lead_repository;
+        let mut skipped = 0;
         let mut signals = signal_repository;
         let mut suppressions = suppression_repository;
         let mut touched = Vec::new();
@@ -297,6 +332,15 @@ impl LodestoneUseCase {
                 }
             };
             if blocked {
+                continue;
+            }
+            if creation == LeadCreation::ExistingOnly
+                && leads
+                    .find_by_domain(active.profile.id, &observation.domain)
+                    .await?
+                    .is_none()
+            {
+                skipped += 1;
                 continue;
             }
             let lead = leads
@@ -328,7 +372,7 @@ impl LodestoneUseCase {
         for lead_id in touched {
             rescore(&mut leads, &mut signals, lead_id, evidence, now).await?;
         }
-        Ok(())
+        Ok(skipped)
     }
 }
 

@@ -1,10 +1,12 @@
 use serde::Deserialize;
 
-use super::definition::{
-    Agent, AgentId, Aggregator, CertificateTransparency, ContactRanking, DnsCname, Escalation,
-    EvidenceSettings, HttpProbe, Identity, Language, PROFILE_SCHEMA_VERSION, ProfileDefinition,
-    QualificationAgent, ScoringAgent, SearchAgent, SearchFilters, SignalAgent, SignalSource,
-    VerdictThresholds, default_accept_min_keywords,
+use super::{
+    definition::{
+        AgentId, Aggregator, CertificateTransparency, ContactRanking, DnsCname, Escalation,
+        EvidenceSettings, HttpProbe, Identity, Language, ProfileDefinition, QualificationAgent,
+        ScoringAgent, SearchAgent, SearchFilters, VerdictThresholds, default_accept_min_keywords,
+    },
+    v16::{AgentV16, ProfileDefinitionV16, SignalAgentV16, SignalSourceV16},
 };
 
 #[derive(Debug, Deserialize)]
@@ -45,7 +47,7 @@ pub(super) struct AgentV15 {
 }
 
 impl AgentV15 {
-    fn upgrade(self) -> Agent {
+    fn upgrade(self) -> AgentV16 {
         let Self {
             id,
             name,
@@ -58,14 +60,14 @@ impl AgentV15 {
                     id,
                     name,
                     enabled,
-                    SignalSource::CertificateTransparency(rules),
+                    SignalSourceV16::CertificateTransparency(rules),
                 );
             }
             AgentSourceV15::DnsCname(rules) => {
-                return signal(id, name, enabled, SignalSource::DnsCname(rules));
+                return signal(id, name, enabled, SignalSourceV16::DnsCname(rules));
             }
             AgentSourceV15::HttpProbe(rules) => {
-                return signal(id, name, enabled, SignalSource::HttpProbe(rules));
+                return signal(id, name, enabled, SignalSourceV16::HttpProbe(rules));
             }
             AgentSourceV15::Boamp(rules) => ("boamp", rules),
             AgentSourceV15::Decp(rules) => ("decp", rules),
@@ -73,7 +75,7 @@ impl AgentV15 {
             AgentSourceV15::FranceTravail(rules) => ("france_travail", rules),
             AgentSourceV15::Ats(rules) => ("ats", rules),
         };
-        Agent::Search(SearchAgent {
+        AgentV16::Search(SearchAgent {
             id,
             name,
             enabled,
@@ -86,8 +88,8 @@ impl AgentV15 {
     }
 }
 
-fn signal(id: AgentId, name: String, enabled: bool, source: SignalSource) -> Agent {
-    Agent::Signal(SignalAgent {
+fn signal(id: AgentId, name: String, enabled: bool, source: SignalSourceV16) -> AgentV16 {
+    AgentV16::Signal(SignalAgentV16 {
         id,
         name,
         enabled,
@@ -119,8 +121,8 @@ pub(super) struct ProfileDefinitionV15 {
 
 impl ProfileDefinitionV15 {
     pub(super) fn upgrade(self) -> ProfileDefinition {
-        ProfileDefinition {
-            schema_version: PROFILE_SCHEMA_VERSION,
+        ProfileDefinitionV16 {
+            _schema_version: 16,
             identity: self.identity,
             language: self.language,
             agents: self.agents.into_iter().map(AgentV15::upgrade).collect(),
@@ -132,5 +134,6 @@ impl ProfileDefinitionV15 {
             evidence: self.evidence,
             contact_ranking: self.contact_ranking,
         }
+        .upgrade()
     }
 }

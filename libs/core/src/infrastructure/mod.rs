@@ -7,6 +7,7 @@ pub mod contact_target;
 pub mod crypto;
 pub mod ct_cursor;
 pub mod decision;
+pub mod enrichment;
 pub mod host_visit;
 pub mod job;
 pub mod lead;

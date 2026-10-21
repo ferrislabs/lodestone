@@ -47,6 +47,7 @@ pub async fn state(args: Arc<Args>) -> Result<AppState, ServerError> {
 
     let stale_after = lodestone_core::stale_after(args.listeners.idle());
     let company_wait = args.company.wait();
+    let enrichment_wait = args.enrichment.wait();
     let service = create_service(config).await.unwrap();
 
     Ok(AppState {
@@ -56,7 +57,8 @@ pub async fn state(args: Arc<Args>) -> Result<AppState, ServerError> {
             .usecase
             .with_webhooks(webhooks)
             .with_listener_stale_after(stale_after)
-            .with_company_wait(company_wait),
+            .with_company_wait(company_wait)
+            .with_enrichment_wait(enrichment_wait),
         rate_limit: service.rate_limit,
         rate_limit_quota: service.rate_limit_quota,
         cipher: Arc::new(cipher),

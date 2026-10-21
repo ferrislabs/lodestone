@@ -97,14 +97,11 @@ describe('SchemaForm', () => {
 					exclusions: [],
 				},
 				{
-					type: 'signal',
+					type: 'dns',
 					id: 'b',
 					name: 'B',
 					enabled: true,
-					source: {
-						provider: 'dns_cname',
-						patterns: [{ provider: 'Okta', target_suffix: 'okta.com' }],
-					},
+					patterns: [{ provider: 'Okta', target_suffix: 'okta.com' }],
 				},
 			],
 		)
@@ -113,7 +110,7 @@ describe('SchemaForm', () => {
 		expect(screen.getByLabelText('Retirer y')).toBeTruthy()
 		expect(screen.queryByLabelText('Mots-clés 1')).toBeNull()
 		const row = document.querySelector<HTMLElement>(
-			'[data-row="agents[1].source.patterns[0]"]',
+			'[data-row="agents[1].patterns[0]"]',
 		)
 		expect(row).toBeTruthy()
 		expect(
@@ -127,7 +124,11 @@ describe('SchemaForm', () => {
 
 	it('marks the faulty chip and lists the message under the field', () => {
 		const initial = setIn(
-			defaultValue(root, root, PROFILE_HINTS),
+			setIn(
+				defaultValue(root, root, PROFILE_HINTS),
+				['enrichment', 'http_probe', 'extra_subdomains'],
+				[],
+			),
 			['agents'],
 			[
 				{
@@ -173,28 +174,21 @@ describe('SchemaForm', () => {
 	it('toggles optional sections and omits the key when off', () => {
 		const initial = setIn(
 			defaultValue(root, root, PROFILE_HINTS),
-			['agents'],
-			[
-				{
-					type: 'signal',
-					id: 'a',
-					name: 'A',
-					enabled: true,
-					source: {
-						provider: 'http_probe',
-						fingerprints: [
-							{
-								id: 'f',
-								path: '/x',
-								product: 'p',
-								matchers: [],
-								debt_markers: [],
-							},
-						],
-						excluded_products: [],
+			['enrichment', 'http_probe'],
+			{
+				enabled: true,
+				fingerprints: [
+					{
+						id: 'f',
+						path: '/x',
+						product: 'p',
+						matchers: [],
+						debt_markers: [],
 					},
-				},
-			],
+				],
+				excluded_products: [],
+				extra_subdomains: [],
+			},
 		)
 		const seen = vi.fn()
 		render(<Harness initial={initial} onValue={seen} />)
@@ -204,11 +198,13 @@ describe('SchemaForm', () => {
 			before + 1,
 		)
 		expect(seen.mock.calls.at(-1)?.[0]).toHaveProperty(
-			'agents.0.source.fingerprints.0.version',
+			'enrichment.http_probe.fingerprints.0.version',
 		)
 		fireEvent.click(screen.getByLabelText('Activer : Extracteur de version'))
 		const last = seen.mock.calls.at(-1)?.[0]
-		expect(last).not.toHaveProperty('agents.0.source.fingerprints.0.version')
+		expect(last).not.toHaveProperty(
+			'enrichment.http_probe.fingerprints.0.version',
+		)
 		expect(screen.queryAllByLabelText(/Expression régulière/)).toHaveLength(
 			before,
 		)
@@ -217,46 +213,38 @@ describe('SchemaForm', () => {
 	it('switches union variants and resets their fields', () => {
 		const initial = setIn(
 			defaultValue(root, root, PROFILE_HINTS),
-			['agents'],
-			[
-				{
-					type: 'signal',
-					id: 'a',
-					name: 'A',
-					enabled: true,
-					source: {
-						provider: 'http_probe',
-						fingerprints: [
-							{
-								id: 'a',
-								path: '/',
-								product: 'p',
-								matchers: [{ kind: 'header', name: 'x', pattern: 'y' }],
-							},
-						],
+			['enrichment', 'http_probe'],
+			{
+				enabled: true,
+				fingerprints: [
+					{
+						id: 'a',
+						path: '/',
+						product: 'p',
+						matchers: [{ kind: 'header', name: 'x', pattern: 'y' }],
 					},
-				},
-			],
+				],
+				excluded_products: [],
+				extra_subdomains: [],
+			},
 		)
 		const seen = vi.fn()
 		render(<Harness initial={initial} onValue={seen} />)
-		expect(screen.getAllByLabelText(/^Nom/)).toHaveLength(2)
+		expect(screen.getAllByLabelText(/^Nom/)).toHaveLength(1)
 		fireEvent.change(screen.getByLabelText('Type : Condition'), {
 			target: { value: '2' },
 		})
-		expect(screen.getAllByLabelText(/^Nom/)).toHaveLength(1)
+		expect(screen.queryAllByLabelText(/^Nom/)).toHaveLength(0)
 		expect(screen.getByLabelText(/Expression régulière/)).toHaveProperty(
 			'value',
 			'',
 		)
 		expect(seen.mock.calls.at(-1)?.[0]).toMatchObject({
-			agents: [
-				{
-					source: {
-						fingerprints: [{ matchers: [{ kind: 'body', pattern: '' }] }],
-					},
+			enrichment: {
+				http_probe: {
+					fingerprints: [{ matchers: [{ kind: 'body', pattern: '' }] }],
 				},
-			],
+			},
 		})
 	})
 

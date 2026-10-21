@@ -38,12 +38,10 @@ describe('agents', () => {
 			accept_min_keywords: 2,
 		})
 		for (const kind of AGENT_KINDS.filter((kind) => kind !== 'search')) {
-			expect(newAgent(kind, [])).toMatchObject({
-				type: 'signal',
-				enabled: true,
-				source: { provider: kind },
-			})
+			expect(newAgent(kind, [])).toMatchObject({ type: kind, enabled: true })
 		}
+		expect(newAgent('certificates', [])).toMatchObject({ labels: [] })
+		expect(newAgent('dns', [])).toMatchObject({ patterns: [] })
 	})
 
 	it('derives the id from the name until it is edited', () => {
@@ -62,6 +60,12 @@ describe('agents', () => {
 		expect(validateAgents({ agents: [] })).toEqual([
 			{ path: 'agents', message: 'Doit contenir au moins un agent' },
 		])
+		expect(
+			validateAgents({
+				agents: [],
+				enrichment: { http_probe: { enabled: true } },
+			}),
+		).toEqual([])
 		const a = { ...newAgent('search', [], ['ted']), id: 'Bad Id' }
 		const b = newAgent('search', [], ['ted'])
 		const c = newAgent('search', [], ['ted'])
@@ -82,15 +86,13 @@ describe('agents', () => {
 	})
 
 	it('flags a missing dependency', () => {
-		const probe = newAgent('http_probe', [])
-		expect(dependencyNote(probe, [probe])?.warn).toBe(true)
-		const ct = newAgent('certificate_transparency', [])
-		expect(dependencyNote(probe, [probe, ct])?.warn).toBe(false)
+		const dns = newAgent('dns', [])
+		expect(dependencyNote(dns, [dns])?.warn).toBe(true)
+		const ct = newAgent('certificates', [])
+		expect(dependencyNote(dns, [dns, ct])?.warn).toBe(false)
 		const boamp = newAgent('search', [], ['boamp'])
-		expect(dependencyNote(boamp, [probe])).toBeNull()
-		const careers = newAgent('search', [], ['ats'])
-		expect(dependencyNote(careers, [careers])?.warn).toBe(true)
-		expect(dependencyNote(careers, [careers, probe])?.warn).toBe(false)
+		expect(dependencyNote(boamp, [dns])).toBeNull()
+		expect(dependencyNote(ct, [ct])).toBeNull()
 	})
 
 	it('refuses to save without agents', () => {
@@ -126,7 +128,7 @@ describe('agentSummary', () => {
 		expect(
 			agentSummary({
 				type: 'search',
-				providers: ['ats'],
+				providers: ['boamp'],
 				keywords: ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'],
 				exclusions: ['x', 'y', 'z'],
 			}),
@@ -141,35 +143,14 @@ describe('agentSummary', () => {
 		).toBe('1 mot-clé')
 	})
 
-	it('summarizes signal agents', () => {
-		expect(
-			agentSummary({
-				type: 'signal',
-				source: { provider: 'certificate_transparency', labels: ['a', 'b'] },
-			}),
-		).toBe('2 labels')
-		expect(
-			agentSummary({
-				type: 'signal',
-				source: { provider: 'dns_cname', patterns: [{}, {}, {}] },
-			}),
-		).toBe('3 motifs CNAME')
-		expect(
-			agentSummary({
-				type: 'signal',
-				source: {
-					provider: 'http_probe',
-					fingerprints: [{}, {}, {}, {}, {}],
-					excluded_products: ['mine'],
-				},
-			}),
-		).toBe('5 empreintes · 1 produit exclu')
-		expect(
-			agentSummary({
-				type: 'signal',
-				source: { provider: 'http_probe', fingerprints: [{}] },
-			}),
-		).toBe('1 empreinte')
+	it('summarizes certificates and dns agents', () => {
+		expect(agentSummary({ type: 'certificates', labels: ['a', 'b'] })).toBe(
+			'2 labels',
+		)
+		expect(agentSummary({ type: 'dns', patterns: [{}, {}, {}] })).toBe(
+			'3 motifs CNAME',
+		)
+		expect(agentSummary({ type: 'dns', patterns: [{}] })).toBe('1 motif CNAME')
 	})
 
 	it('is empty for an unknown agent', () => {
@@ -186,10 +167,11 @@ describe('agent types', () => {
 		expect(agentKind(search)).toBe('search')
 		expect(agentTypeLabel(search)).toBe('Recherche')
 		expect(agentProviders(search)).toEqual(['boamp', 'decp'])
-		const probe = newAgent('http_probe', [])
-		expect(agentKind(probe)).toBe('http_probe')
-		expect(agentTypeLabel(probe)).toBe('Signal')
-		expect(agentProviders(probe)).toEqual(['http_probe'])
+		const certificates = newAgent('certificates', [])
+		expect(agentKind(certificates)).toBe('certificates')
+		expect(agentTypeLabel(certificates)).toBe('Signal')
+		expect(agentProviders(certificates)).toEqual(['certificate_transparency'])
+		expect(agentProviders(newAgent('dns', []))).toEqual(['dns_cname'])
 		expect(agentKind({ type: 'search' })).toBe('search')
 		expect(agentKind({ source: { kind: 'ats' } })).toBeNull()
 	})

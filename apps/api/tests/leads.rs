@@ -3,7 +3,7 @@ mod support;
 use axum::Router;
 use http::{Method, StatusCode};
 use serde_json::{Value, json};
-use sqlx::PgPool;
+use sqlx::{PgPool, query};
 use support::{Harness, call, lazy_pool, send};
 use utoipa::OpenApi;
 
@@ -2048,4 +2048,53 @@ async fn the_agents_retry_is_for_users_and_for_known_visible_leads_only(pool: Pg
     )
     .await;
     assert_eq!(malformed, StatusCode::BAD_REQUEST);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_detail_exposes_the_enrichment_steps_status_and_waiting_reason(pool: PgPool) {
+    let seed = Seed { pool: pool.clone() };
+    let profile = seed.qualified_profile("keycloak-ops").await;
+    let lead = seed.lead(&profile, "acme.com", "new", 3.0, 1).await;
+    seed.host_signal(
+        &lead,
+        "certificate_seen",
+        "sso.acme.com",
+        "certificate_transparency",
+        "sso.acme.com",
+    )
+    .await;
+    let api = Api::new(pool.clone()).await;
+    let uri = format!("/api/v1/leads/{lead}");
+
+    let (status, body) = api.get(&uri).await;
+    assert_eq!(status, StatusCode::OK);
+    let enrichment = &body["data"]["enrichment"];
+    assert_eq!(enrichment["status"], "pending");
+    assert_eq!(enrichment["waiting_reason"], "awaiting_enrichment_evidence");
+    assert!(enrichment["wait_until"].is_string());
+    assert_eq!(
+        enrichment["steps"],
+        json!([
+            {"step": "http_probe", "enabled": false, "ran_at": null},
+            {"step": "company_jobs", "enabled": true, "ran_at": null}
+        ])
+    );
+
+    query(
+        "INSERT INTO lead_enrichments (lead_id, step, ran_at) VALUES ($1::uuid, 'company_jobs', now())",
+    )
+    .bind(&lead)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let (_, body) = api.get(&uri).await;
+    let enrichment = &body["data"]["enrichment"];
+    assert_eq!(enrichment["status"], "complete");
+    assert_eq!(enrichment["waiting_reason"], "awaiting_enrichment_evidence");
+    assert!(enrichment["wait_until"].is_null());
+    assert!(enrichment["steps"][1]["ran_at"].is_string());
+
+    seed.signal(&lead, "product_detected").await;
+    let (_, body) = api.get(&uri).await;
+    assert!(body["data"]["enrichment"]["waiting_reason"].is_null());
 }

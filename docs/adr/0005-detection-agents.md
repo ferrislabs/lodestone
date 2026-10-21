@@ -24,6 +24,8 @@ Schema version 2 replaces `sources` with `agents`. A version 1 document is still
 
 ## Dependencies between kinds
 
+Superseded by ADR 0011: the HTTP probe and the company job offers are enrichment steps run on every lead.
+
 - `http_probe` probes hosts found by certificate transparency. A profile with an HTTP probe agent and no certificate transparency agent only probes hosts imported by an operator.
 - `ats` only visits companies already detected by `certificate_transparency`, `http_probe` or `dns_cname` signals (#49).
 
