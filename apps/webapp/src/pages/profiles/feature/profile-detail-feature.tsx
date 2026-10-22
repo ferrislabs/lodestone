@@ -3,6 +3,7 @@ import { useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import { useMemo, useState } from 'react'
 
 import { errorMessage, lodestoneApi } from '#/api/lodestone'
+import { parseApiError } from '#/lib/api-errors'
 import { toJsonObject } from '#/lib/schema-form'
 import {
 	DefinitionTabContent,
@@ -14,8 +15,10 @@ import { useAgentCalibration } from '#/pages/profiles/feature/use-agent-calibrat
 import { useDefinitionEditor } from '#/pages/profiles/feature/use-definition-editor'
 import { useEcosystemUi } from '#/pages/profiles/feature/use-ecosystem-ui'
 import { useProfileActivation } from '#/pages/profiles/feature/use-profile-activation'
+import { useProfileTrials } from '#/pages/profiles/feature/use-profile-trials'
 import { useProviderOptions } from '#/pages/profiles/feature/use-provider-options'
 import { useSourceCatalog } from '#/pages/profiles/feature/use-source-catalog'
+import { useTrialLauncher } from '#/pages/profiles/feature/use-trial-launcher'
 import {
 	prettyDefinition,
 	saveResultMessage,
@@ -24,19 +27,30 @@ import { problemsFromError } from '#/pages/profiles/lib/problems'
 import { prepareSave } from '#/pages/profiles/lib/save'
 import {
 	editorTabItems,
+	isEditorTab,
 	type ProfileTab,
 	TAB_LABELS,
 	type TabItem,
 } from '#/pages/profiles/lib/tabs'
-import type { Problem, RevisionSummary } from '#/pages/profiles/lib/types'
+import { parseTrialLimits } from '#/pages/profiles/lib/trials'
+import type {
+	Problem,
+	RevisionSummary,
+	Trial,
+} from '#/pages/profiles/lib/types'
 import { ProfileActivation } from '#/pages/profiles/ui/profile-activation'
 import { ProfileDetail } from '#/pages/profiles/ui/profile-detail'
 import { ProfileEditor } from '#/pages/profiles/ui/profile-editor'
 import { RevisionHistory } from '#/pages/profiles/ui/revision-history'
+import { TrialLauncher } from '#/pages/profiles/ui/trial-launcher'
+import { TrialsPanel } from '#/pages/profiles/ui/trials-panel'
 import { useSourceTrigger } from '#/pages/sources/feature/use-source-trigger'
 import { listenerSummaries } from '#/pages/sources/lib/listener'
 
 const NO_REVISIONS: RevisionSummary[] = []
+const NO_TRIALS: Trial[] = []
+const TRIAL_REFUSED =
+	'Le brouillon est refusé : corrigez les problèmes signalés.'
 const LISTENER_REFRESH_MS = 15_000
 
 export function ProfileDetailFeature() {
@@ -63,6 +77,13 @@ export function ProfileDetailFeature() {
 			search: { tab: next },
 			replace: true,
 		})
+	const setTrial = (trial: string) =>
+		void navigate({
+			to: '/profiles/$profileId',
+			params: { profileId },
+			search: { tab: 'trials', trial },
+			replace: true,
+		})
 	const setAgent = (agent: string | null, replace: boolean) =>
 		void navigate({
 			to: '/profiles/$profileId',
@@ -75,6 +96,9 @@ export function ProfileDetailFeature() {
 	const [selected, setSelected] = useState<number | null>(null)
 	const [exporting, setExporting] = useState(false)
 	const [exportError, setExportError] = useState<string | null>(null)
+	const launcher = useTrialLauncher()
+	const trialId = search.trial ?? null
+	const profileTrials = useProfileTrials(profileId, trialId, tab === 'trials')
 
 	const profileQuery = useQuery(
 		lodestoneApi().get('/api/v1/profiles/{profile_id}', {
@@ -105,15 +129,24 @@ export function ProfileDetailFeature() {
 			.mutationOptions,
 		onSuccess: async (response) => {
 			editor.set(toJsonObject(response.data.definition))
+			launcher.close()
 			setNotice(saveResultMessage(profile?.revision ?? 0, response.data.number))
 			await invalidateProfiles(queryClient)
 		},
 	})
 
+	const startFailure = profileTrials.start.isError
+		? parseApiError(profileTrials.start.error)
+		: null
+	const startRefused = startFailure?.status === 422
 	const problems = [
 		...localProblems,
 		...(update.isError ? problemsFromError(update.error) : []),
+		...(startRefused ? problemsFromError(profileTrials.start.error) : []),
 	]
+	const launcherMessage =
+		launcher.message ??
+		(startRefused ? TRIAL_REFUSED : (startFailure?.message ?? null))
 
 	const save = () => {
 		setNotice(null)
@@ -129,6 +162,50 @@ export function ProfileDetailFeature() {
 		})
 	}
 
+	const requestTrial = () => {
+		setNotice(null)
+		profileTrials.start.reset()
+		const parsed = prepareSave(editor.value)
+		if (!parsed.ok) {
+			setLocalProblems(parsed.problems)
+			launcher.close()
+			return
+		}
+		setLocalProblems([])
+		launcher.show()
+	}
+
+	const launchTrial = () => {
+		const parsed = prepareSave(editor.value)
+		if (!parsed.ok) {
+			setLocalProblems(parsed.problems)
+			launcher.close()
+			return
+		}
+		setLocalProblems([])
+		const limits = parseTrialLimits(launcher.sampleSize, launcher.budgetCents)
+		if (!limits.ok) {
+			launcher.fail(limits.message)
+			return
+		}
+		profileTrials.start.mutate(
+			{
+				path: { profile_id: profileId },
+				body: {
+					definition: parsed.value,
+					sample_size: limits.sampleSize,
+					budget_cents: limits.budgetCents,
+				},
+			},
+			{
+				onSuccess: (response) => {
+					launcher.close()
+					setTrial(response.data.id)
+				},
+			},
+		)
+	}
+
 	const revision = revisionQuery.data?.data
 	const state = profileQuery.isError
 		? 'error'
@@ -139,12 +216,13 @@ export function ProfileDetailFeature() {
 	const tabItems: TabItem[] = [
 		...editorTabItems(problems),
 		{ id: 'history', label: TAB_LABELS.history, problems: 0 },
+		{ id: 'trials', label: TAB_LABELS.trials, problems: 0 },
 	]
 
 	const definition = (
 		<ProfileEditor
 			form={
-				tab === 'history' ? null : (
+				isEditorTab(tab) ? (
 					<DefinitionTabContent
 						tab={tab}
 						value={editor.value}
@@ -163,12 +241,13 @@ export function ProfileDetailFeature() {
 						now={Date.now()}
 						onChange={(next) => {
 							if (update.isError) update.reset()
+							if (profileTrials.start.isError) profileTrials.start.reset()
 							setLocalProblems([])
 							setNotice(null)
 							editor.set(next)
 						}}
 					/>
-				)
+				) : null
 			}
 			problems={unmatchedProblems(editor.value, problems)}
 			notice={notice}
@@ -180,10 +259,27 @@ export function ProfileDetailFeature() {
 			onCancelReset={editor.cancelReset}
 			onConfirmReset={() => {
 				if (update.isError) update.reset()
+				profileTrials.start.reset()
+				launcher.close()
 				setLocalProblems([])
 				setNotice(null)
 				editor.reset()
 			}}
+			trialPanel={
+				launcher.open ? (
+					<TrialLauncher
+						sampleSize={launcher.sampleSize}
+						budgetCents={launcher.budgetCents}
+						busy={profileTrials.start.isPending}
+						message={launcherMessage}
+						onSampleSize={launcher.setSampleSize}
+						onBudgetCents={launcher.setBudgetCents}
+						onLaunch={launchTrial}
+						onCancel={launcher.close}
+					/>
+				) : null
+			}
+			onTry={requestTrial}
 			onSave={save}
 		/>
 	)
@@ -208,6 +304,30 @@ export function ProfileDetailFeature() {
 				editor.set(toJsonObject(revision.definition))
 				setTab('identity')
 			}}
+		/>
+	)
+
+	const trialsPanel = (
+		<TrialsPanel
+			trials={profileTrials.list.data?.data ?? NO_TRIALS}
+			loading={profileTrials.list.isPending}
+			error={
+				profileTrials.list.isError
+					? errorMessage(profileTrials.list.error)
+					: null
+			}
+			selected={trialId}
+			detail={profileTrials.detail.data?.data ?? null}
+			loadingDetail={trialId !== null && profileTrials.detail.isPending}
+			detailError={
+				profileTrials.detail.isError
+					? errorMessage(profileTrials.detail.error)
+					: null
+			}
+			onSelect={setTrial}
+			onOpenLead={(leadId) =>
+				void navigate({ to: '/leads/$leadId', params: { leadId } })
+			}
 		/>
 	)
 
@@ -237,6 +357,7 @@ export function ProfileDetailFeature() {
 			exportError={exportError ?? activation.error}
 			definition={definition}
 			history={history}
+			trials={trialsPanel}
 			onTabChange={setTab}
 			onExport={() => {
 				if (!profile) return

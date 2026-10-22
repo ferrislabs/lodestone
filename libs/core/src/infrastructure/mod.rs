@@ -28,4 +28,5 @@ pub mod signal;
 pub mod source_provider;
 pub mod suppression;
 pub mod timeline;
+pub mod trial;
 pub mod user;

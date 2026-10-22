@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+	asEditorTab,
 	EDITOR_TABS,
 	editorTabItems,
+	isEditorTab,
 	problemCounts,
 	TAB_LABELS,
 	tabOfPath,
@@ -37,6 +39,26 @@ describe('tabs', () => {
 		expect(tabSearchSchema.parse({ tab: 'history' }).tab).toBe('history')
 		expect(tabSearchSchema.parse({ tab: 'nope' }).tab).toBeUndefined()
 		expect(tabSearchSchema.parse({}).tab).toBeUndefined()
+	})
+
+	it('reads the trials tab and the selected trial from the search', () => {
+		expect(TAB_LABELS.trials).toBe('Essais')
+		expect(tabSearchSchema.parse({ tab: 'trials', trial: 't1' })).toEqual({
+			tab: 'trials',
+			trial: 't1',
+		})
+		expect(tabSearchSchema.parse({ tab: 'trials' }).trial).toBeUndefined()
+		expect(tabSearchSchema.parse({ trial: 4 }).trial).toBeUndefined()
+	})
+
+	it('tells editor tabs from the history and the trials', () => {
+		expect(isEditorTab('scoring')).toBe(true)
+		expect(isEditorTab('history')).toBe(false)
+		expect(isEditorTab('trials')).toBe(false)
+		expect(asEditorTab('trials')).toBe('identity')
+		expect(asEditorTab('history')).toBe('identity')
+		expect(asEditorTab('scoring')).toBe('scoring')
+		expect(asEditorTab(undefined)).toBe('identity')
 	})
 
 	it('reads the open sourcing agent from the search', () => {

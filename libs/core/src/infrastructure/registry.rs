@@ -23,6 +23,7 @@ pub mod domain {
     pub struct OrganisationSetting;
     pub struct Partner;
     pub struct Profile;
+    pub struct ProfileTrial;
     pub struct Qualification;
     pub struct Run;
     pub struct ScoringAgent;

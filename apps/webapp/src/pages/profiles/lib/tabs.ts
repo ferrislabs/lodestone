@@ -11,7 +11,7 @@ export const EDITOR_TABS = [
 ] as const
 
 export type EditorTab = (typeof EDITOR_TABS)[number]
-export type ProfileTab = EditorTab | 'history'
+export type ProfileTab = EditorTab | 'history' | 'trials'
 
 export const TAB_LABELS: Record<ProfileTab, string> = {
 	identity: 'Identité',
@@ -20,6 +20,7 @@ export const TAB_LABELS: Record<ProfileTab, string> = {
 	qualification: 'Qualification',
 	scoring: 'Scoring',
 	history: 'Historique des révisions',
+	trials: 'Essais',
 }
 
 const LEGACY_TABS: Readonly<Record<string, ProfileTab>> = {
@@ -31,11 +32,12 @@ export const tabSearchSchema = z.object({
 	tab: z
 		.preprocess(
 			(raw) => (typeof raw === 'string' ? (LEGACY_TABS[raw] ?? raw) : raw),
-			z.enum([...EDITOR_TABS, 'history']),
+			z.enum([...EDITOR_TABS, 'history', 'trials']),
 		)
 		.optional()
 		.catch(undefined),
 	agent: z.string().optional().catch(undefined),
+	trial: z.string().optional().catch(undefined),
 })
 
 export interface TabItem<T extends string = ProfileTab> {
@@ -102,8 +104,12 @@ export function editorTabItems(
 	}))
 }
 
+export function isEditorTab(tab: ProfileTab | undefined): tab is EditorTab {
+	return tab !== undefined && tab !== 'history' && tab !== 'trials'
+}
+
 export function asEditorTab(tab: ProfileTab | undefined): EditorTab {
-	return tab === undefined || tab === 'history' ? 'identity' : tab
+	return isEditorTab(tab) ? tab : 'identity'
 }
 
 export function belongsToPath(path: string, root: string): boolean {

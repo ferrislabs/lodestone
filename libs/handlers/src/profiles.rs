@@ -211,7 +211,7 @@ fn parse_document(bytes: &[u8]) -> Result<Value, ApiError> {
     serde_json::from_slice(bytes).map_err(|error| reject("$", format!("malformed JSON: {error}")))
 }
 
-fn validate(document: Value) -> Result<ValidatedProfile, ApiError> {
+pub(crate) fn validate(document: Value) -> Result<ValidatedProfile, ApiError> {
     ValidatedProfile::parse(document)
         .map_err(|error| reject(&error.path, error.problem.to_string()))
 }

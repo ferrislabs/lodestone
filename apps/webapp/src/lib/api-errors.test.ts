@@ -228,6 +228,26 @@ describe('source run errors', () => {
 	})
 })
 
+describe('trial messages', () => {
+	it('translates the conflicts of a trial start', () => {
+		const live = parseApiError(
+			apiError(409, {
+				code: 'E_CONFLICT',
+				message:
+					'Conflict: a trial is already pending or running for this profile',
+				status: 409,
+			}),
+		)
+		expect(live.status).toBe(409)
+		expect(live.message).toBe(
+			'Un essai est déjà en attente ou en cours pour ce profil',
+		)
+		expect(translateApiMessage('Conflict: no decided lead to try')).toBe(
+			"Aucun lead décidé à essayer : validez ou rejetez d'abord quelques leads",
+		)
+	})
+})
+
 describe('rejection messages', () => {
 	it('translates the reason requirements', () => {
 		expect(translateApiMessage('is required to reject')).toBe(

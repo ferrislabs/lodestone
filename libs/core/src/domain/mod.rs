@@ -30,6 +30,7 @@ pub(crate) mod suppression;
 pub(crate) mod territory;
 pub(crate) mod timeline;
 pub(crate) mod triage;
+pub(crate) mod trial;
 pub(crate) mod user;
 pub(crate) mod values;
 

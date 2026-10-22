@@ -4,6 +4,10 @@ export type ProfileSummary = Schemas.ProfileSummaryDto
 export type ProfileDetail = Schemas.ProfileDetailDto
 export type RevisionSummary = Schemas.RevisionSummaryDto
 export type Revision = Schemas.RevisionDto
+export type Trial = Schemas.TrialDto
+export type TrialDetail = Schemas.TrialDetailDto
+export type TrialLead = Schemas.TrialLeadDto
+export type VersionSummary = Schemas.VersionSummaryDto
 
 export interface Problem {
 	path: string

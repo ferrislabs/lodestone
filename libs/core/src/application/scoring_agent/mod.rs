@@ -11,8 +11,8 @@ use crate::{
     application::{
         LodestoneUseCase,
         evaluation::{
-            CALL_FAILURE_PREFIX, CallFailure, EvaluationSettings, LeadStep, Loaded,
-            ProviderBuilder, Providers, count, lead_step, load_cached, render_signal,
+            CALL_FAILURE_PREFIX, CallFailure, EvaluationSettings, LeadMaterial, LeadStep, Loaded,
+            ProviderBuilder, Providers, count, lead_step, load_cached,
         },
         llm::gateway::{
             CallSettings, LlmCallError, Prompt, RunBudget, SchemaCall, Structured,
@@ -34,10 +34,15 @@ use crate::{
             provenance::DEFAULT_SAMPLES,
             provider::{ProviderId, SecretCipher, Tier},
         },
-        profile::{ActiveProfile, contract::scoring_contract_schema, definition::ScoringAgent},
+        profile::{
+            ActiveProfile,
+            contract::scoring_contract_schema,
+            definition::{ProfileDefinition, QualificationAgent, ScoringAgent},
+        },
         qualification::{
-            AgentKind, EvidenceStrength, ResultStatus, Verdict, exclusions, judge,
-            prompt::{AgentPrompt, lead_document, with_ungrounded},
+            AgentKind, EvidenceStrength, Exclusion, Judgement, QualificationResult, ResultStatus,
+            Verdict, exclusions, judge,
+            prompt::{AgentPrompt, with_ungrounded},
         },
         scoring_agent::{
             ScoringOutput, ScoringResult, ScoringResultId, ScoringViolations, decide,
@@ -53,6 +58,10 @@ use crate::{
         },
     },
 };
+
+mod trial;
+
+pub(crate) use trial::{Scored, Scoring, score_in_memory};
 
 const PROVIDER_UNAVAILABLE: &str = "fournisseur indisponible";
 const NO_REPORT: &str = "aucun rapport de qualification valide";
@@ -129,6 +138,75 @@ fn scoring_works(usecase: &LodestoneUseCase, active: &ActiveProfile) -> Vec<Agen
         .collect();
     works.push(usecase.agent_work(active, WorkTarget::aggregator()));
     works
+}
+
+struct ScoringInputs {
+    reports: Vec<(String, String)>,
+    indicators: String,
+    evidence_texts: Vec<(String, String)>,
+}
+
+fn scoring_inputs(
+    definition: &ProfileDefinition,
+    qualification: &[QualificationResult],
+    judgement: &Judgement,
+    found: &[Exclusion],
+) -> ScoringInputs {
+    let enabled = || {
+        definition
+            .qualification_agents
+            .iter()
+            .filter(|agent| agent.enabled)
+    };
+    let result_of = |agent: &QualificationAgent| {
+        qualification
+            .iter()
+            .find(|result| result.agent_id == agent.id)
+    };
+    ScoringInputs {
+        reports: enabled()
+            .map(|agent| {
+                (
+                    report_source(agent),
+                    render_report(agent, result_of(agent), found),
+                )
+            })
+            .collect(),
+        indicators: render_indicators(judgement.opinion, &judgement.evidence, judgement.confidence),
+        evidence_texts: enabled()
+            .map(|agent| {
+                (
+                    report_source(agent),
+                    render_report_evidence(agent, result_of(agent)),
+                )
+            })
+            .collect(),
+    }
+}
+
+type ScoringDocuments<'a> = (Vec<UntrustedDocument<'a>>, Vec<UntrustedDocument<'a>>);
+
+impl ScoringInputs {
+    fn documents<'a>(&'a self, base: &[UntrustedDocument<'a>]) -> ScoringDocuments<'a> {
+        let mut documents = Vec::with_capacity(base.len() + self.reports.len() + 1);
+        documents.extend_from_slice(base);
+        documents.extend(
+            self.reports
+                .iter()
+                .map(|(source, content)| UntrustedDocument { source, content }),
+        );
+        documents.push(UntrustedDocument {
+            source: INDICATORS_SOURCE,
+            content: &self.indicators,
+        });
+        let mut grounding = base.to_vec();
+        grounding.extend(
+            self.evidence_texts
+                .iter()
+                .map(|(source, content)| UntrustedDocument { source, content }),
+        );
+        (documents, grounding)
+    }
 }
 
 struct Scorer<'a, B, S, C> {
@@ -482,75 +560,19 @@ where
         };
         let at = clock.now();
         let qualification = usecase.lead_qualification_results(lead.id).await?;
-        let (signals, facts, dossier) = usecase.signals_with_facts(lead).await?;
+        let material = LeadMaterial::load(usecase, lead).await?;
         let calibrations = usecase.profile_calibrations(active).await?;
         let (opinions, _) = stored_opinions(definition, &qualification, &calibrations);
         let judgement = judge(
             &opinions,
-            EvidenceStrength::compute(&facts, &definition.evidence, at),
+            EvidenceStrength::compute(&material.facts, &definition.evidence, at),
             definition.verdict,
             &definition.evidence,
         );
         let found = exclusions(&qualification, &definition.qualification_agents);
-        let overview = lead_document(lead.domain.as_str(), &facts);
-        let contents: Vec<String> = signals.iter().map(render_signal).collect();
-        let dossier_documents = usecase.grounding_documents(lead, dossier.as_ref()).await?;
-        let reports: Vec<(String, String)> = definition
-            .qualification_agents
-            .iter()
-            .filter(|agent| agent.enabled)
-            .map(|agent| {
-                let result = qualification
-                    .iter()
-                    .find(|result| result.agent_id == agent.id);
-                (report_source(agent), render_report(agent, result, &found))
-            })
-            .collect();
-        let indicators =
-            render_indicators(judgement.opinion, &judgement.evidence, judgement.confidence);
-        let mut documents =
-            Vec::with_capacity(signals.len() + dossier_documents.len() + reports.len() + 2);
-        documents.push(UntrustedDocument {
-            source: "lead",
-            content: &overview,
-        });
-        documents.extend(signals.iter().zip(&contents).map(|(signal, content)| {
-            UntrustedDocument {
-                source: signal.provenance.as_str(),
-                content,
-            }
-        }));
-        documents.extend(dossier_documents.iter().map(|document| UntrustedDocument {
-            source: &document.source,
-            content: &document.content,
-        }));
-        documents.extend(
-            reports
-                .iter()
-                .map(|(source, content)| UntrustedDocument { source, content }),
-        );
-        documents.push(UntrustedDocument {
-            source: INDICATORS_SOURCE,
-            content: &indicators,
-        });
-        let evidence_texts: Vec<(String, String)> = definition
-            .qualification_agents
-            .iter()
-            .filter(|agent| agent.enabled)
-            .map(|agent| {
-                let result = qualification
-                    .iter()
-                    .find(|result| result.agent_id == agent.id);
-                (report_source(agent), render_report_evidence(agent, result))
-            })
-            .collect();
-        let grounding_count = 1 + signals.len() + dossier_documents.len();
-        let mut grounding: Vec<UntrustedDocument<'_>> = documents[..grounding_count].to_vec();
-        grounding.extend(
-            evidence_texts
-                .iter()
-                .map(|(source, content)| UntrustedDocument { source, content }),
-        );
+        let base = material.documents();
+        let inputs = scoring_inputs(definition, &qualification, &judgement, &found);
+        let (documents, grounding) = inputs.documents(&base);
         let subject = Subject {
             active,
             lead,
