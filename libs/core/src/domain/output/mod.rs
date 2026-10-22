@@ -120,7 +120,7 @@ pub struct LeadRecord {
     pub profile: ProfileRecord,
     pub domain: String,
     pub status: String,
-    /// Signal strength in percent from 0 to 100: mean of the three strongest independent signals, each given by its source and decayed by its age.
+    /// Signal strength in percent from 0 to 100: the strongest independent signal raised by the next two, each given by its source and decayed by its age, so a weaker signal never lowers it.
     pub score: f64,
     pub first_seen_at: DateTime<Utc>,
     pub last_seen_at: DateTime<Utc>,

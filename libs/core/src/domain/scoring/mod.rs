@@ -8,6 +8,7 @@ use crate::domain::{
 };
 
 pub const STRONGEST_SIGNALS: usize = 3;
+pub const RANK_DAMPING: f64 = 0.5;
 
 pub fn signal_strength(
     signals: &[IndependentSignal],
@@ -25,12 +26,13 @@ pub fn signal_strength(
         })
         .collect();
     weighted.sort_by(|left, right| right.total_cmp(left));
-    let strongest = &weighted[..weighted.len().min(STRONGEST_SIGNALS)];
-    if strongest.is_empty() {
-        return 0.0;
+    let mut rank_weight = 1.0;
+    let mut missed = 1.0;
+    for strength in weighted.iter().take(STRONGEST_SIGNALS) {
+        missed *= 1.0 - rank_weight * strength;
+        rank_weight *= RANK_DAMPING;
     }
-    let count = f64::from(u32::try_from(strongest.len()).unwrap_or(u32::MAX));
-    (strongest.iter().sum::<f64>() / count).clamp(0.0, 1.0)
+    (1.0 - missed).clamp(0.0, 1.0)
 }
 
 pub fn strength_score(strength: f64) -> Score {
@@ -43,7 +45,7 @@ mod tests {
     use proptest::prelude::*;
 
     use super::*;
-    use crate::domain::values::{SignalKind, UnitInterval};
+    use crate::domain::values::{SignalKind, SourceName, UnitInterval};
 
     fn now() -> DateTime<Utc> {
         Utc.timestamp_opt(1_800_000_000, 0).unwrap()
@@ -52,6 +54,7 @@ mod tests {
     fn signal(kind: &str, strength: f64, age_days: i64) -> IndependentSignal {
         IndependentSignal {
             kind: SignalKind::parse(kind).unwrap(),
+            source: SourceName::DnsCname,
             strength: UnitInterval::new(strength).unwrap(),
             observed_at: now() - chrono::Duration::days(age_days),
         }
@@ -68,11 +71,29 @@ mod tests {
     }
 
     #[test]
-    fn fewer_than_three_signals_are_averaged_among_themselves() {
-        let one = [signal("saas_provider", 0.8, 0)];
-        assert!((strength_of(&one) - 0.8).abs() < 1e-9);
+    fn one_signal_keeps_its_own_strength() {
+        let one = [signal("saas_provider", 0.7, 0)];
+        assert!((strength_of(&one) - 0.7).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_weaker_signal_raises_the_strength_instead_of_lowering_it() {
+        let tender = signal("public_tender", 0.7, 0);
+        let certificate = signal("certificate_seen", 0.3, 0);
+        assert!((strength_of(&[tender.clone(), certificate.clone()]) - 0.745).abs() < 1e-9);
+        assert!(strength_of(&[tender, certificate]) >= 0.7);
+    }
+
+    #[test]
+    fn each_rank_is_damped_by_half_of_the_previous_one() {
         let two = [signal("saas_provider", 0.8, 0), signal("job_offer", 0.4, 0)];
-        assert!((strength_of(&two) - 0.6).abs() < 1e-9);
+        assert!((strength_of(&two) - 0.84).abs() < 1e-9);
+        let three = [
+            signal("saas_provider", 0.8, 0),
+            signal("job_offer", 0.4, 0),
+            signal("public_tender", 0.4, 0),
+        ];
+        assert!((strength_of(&three) - (1.0 - 0.2 * 0.8 * 0.9)).abs() < 1e-9);
     }
 
     #[test]
@@ -84,7 +105,8 @@ mod tests {
             signal("saas_provider", 0.1, 0),
             signal("saas_provider", 0.05, 0),
         ];
-        assert!((strength_of(&signals) - 0.6).abs() < 1e-9);
+        let expected = 1.0 - 0.1 * 0.7 * 0.925;
+        assert!((strength_of(&signals) - expected).abs() < 1e-9);
     }
 
     #[test]
@@ -103,7 +125,7 @@ mod tests {
             signal("saas_provider", 0.4, 0),
             signal("saas_provider", 0.3, 0),
         ];
-        let expected = (0.5 + 0.4 + 0.3) / 3.0;
+        let expected = 1.0 - 0.5 * 0.8 * 0.925;
         assert!((strength_of(&signals) - expected).abs() < 1e-9);
     }
 
@@ -128,7 +150,7 @@ mod tests {
         }
 
         #[test]
-        fn adding_a_signal_never_lowers_the_best_single_signal_bound(
+        fn the_strength_is_never_below_the_best_single_signal(
             raw in proptest::collection::vec(0.0f64..=1.0, 1..10)
         ) {
             let signals: Vec<IndependentSignal> = raw
@@ -136,7 +158,24 @@ mod tests {
                 .map(|strength| signal("saas_provider", *strength, 0))
                 .collect();
             let best = raw.iter().copied().fold(0.0, f64::max);
-            prop_assert!(strength_of(&signals) <= best + 1e-9);
+            prop_assert!(strength_of(&signals) >= best - 1e-9);
+        }
+
+        #[test]
+        fn adding_a_signal_never_lowers_the_strength(
+            raw in proptest::collection::vec((0.0f64..=1.0, 0i64..2000), 0..10),
+            extra in (0.0f64..=1.0, 0i64..2000),
+            extra_kind in 0usize..3,
+        ) {
+            let kinds = ["saas_provider", "job_offer", "certificate_seen"];
+            let mut signals: Vec<IndependentSignal> = raw
+                .iter()
+                .enumerate()
+                .map(|(index, (strength, age))| signal(kinds[index % kinds.len()], *strength, *age))
+                .collect();
+            let without = strength_of(&signals);
+            signals.push(signal(kinds[extra_kind], extra.0, extra.1));
+            prop_assert!(strength_of(&signals) >= without - 1e-12);
         }
     }
 }

@@ -216,12 +216,14 @@ export function VerdictPanel({
 				<h3 className="text-sm font-semibold">Solidité des preuves</h3>
 				<p className="text-xs text-muted-foreground">
 					Mesurée par le code à partir des signaux du lead et de ceux des autres
-					domaines de la même entreprise : volume de signaux indépendants (un
-					même signal vu par la même source compte une fois, et vieillit),
+					domaines de la même entreprise : volume de signaux indépendants (une
+					même offre ou un même appel d'offres vu sur plusieurs sources compte
+					une fois, et vieillit ; les contacts trouvés ne comptent pas),
 					diversité des sources et des types de signaux, environnement des hôtes
-					et force des signaux (moyenne des trois signaux indépendants les plus
-					forts, chacun avec la force donnée par sa source et diminué selon son
-					âge). Confiance = avis des agents × ((1 − influence) + influence ×
+					et force des signaux (le signal indépendant le plus fort, relevé par
+					les deux suivants : un signal plus faible ne la fait jamais baisser ;
+					chacun avec la force donnée par sa source et diminué selon son âge).
+					Confiance = avis des agents × ((1 − influence) + influence ×
 					solidité).
 				</p>
 				<div className="flex flex-wrap gap-4">

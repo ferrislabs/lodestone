@@ -503,7 +503,7 @@ pub struct EvidenceWeights {
     #[serde(default = "default_evidence_weight")]
     #[schemars(
         range(min = 0, max = 10),
-        description = "Mean of the three strongest independent signals, each strength given by its source and decayed by its age."
+        description = "The strongest independent signal raised by the next two, each strength given by its source and decayed by its age, so a weaker signal never lowers it."
     )]
     pub strength: u8,
 }

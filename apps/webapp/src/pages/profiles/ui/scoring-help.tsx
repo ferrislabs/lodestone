@@ -42,10 +42,13 @@ export function ScoringHelp({
 					: 'Avec un seul agent, son score et son verdict sont ceux du lead. Le poids de l’agent n’apparaît qu’à partir de deux agents de scoring.'}
 			</p>
 			<p>
-				La force des signaux (0 à 100) ordonne la liste des leads. C'est la
-				moyenne des trois signaux indépendants les plus forts, chacun avec la
-				force donnée par sa source et diminué selon son âge. Elle ne décide pas
-				du verdict et ne se règle pas dans le profil.
+				La force des signaux (0 à 100) ordonne la liste des leads. C'est le
+				signal indépendant le plus fort, relevé par les deux suivants : un
+				signal plus faible ne la fait jamais baisser. Chacun a la force donnée
+				par sa source, diminuée selon son âge. Une même offre ou un même appel
+				d'offres vu sur plusieurs sources compte une fois, et les contacts
+				trouvés ne comptent pas. Elle ne décide pas du verdict et ne se règle
+				pas dans le profil.
 			</p>
 			<div className="flex flex-col gap-1 text-xs">
 				<p className="font-medium text-sm">Force du signal selon l'origine</p>
