@@ -1,6 +1,7 @@
 import { Label } from '#/components/ui/label'
 import { Skeleton } from '#/components/ui/skeleton'
 import { visibleProfiles } from '#/pages/quality/lib/calibration'
+import { droppedReviewHref } from '#/pages/quality/lib/dropped'
 import { hasDecisions } from '#/pages/quality/lib/format'
 import { PERIOD_LABELS, PERIODS, type Period } from '#/pages/quality/lib/period'
 import type {
@@ -8,6 +9,7 @@ import type {
 	ExclusionCandidate,
 	ProfileSummary,
 	Quality,
+	TriageRecall,
 } from '#/pages/quality/lib/types'
 import { AgentsCard } from '#/pages/quality/ui/agents-card'
 import { CalibrationCard } from '#/pages/quality/ui/calibration-card'
@@ -17,6 +19,7 @@ import { DiscardedCard } from '#/pages/quality/ui/discarded-card'
 import { ExclusionsCard } from '#/pages/quality/ui/exclusions-card'
 import { RejectionReasonsCard } from '#/pages/quality/ui/rejection-reasons-card'
 import { SuggestionsCard } from '#/pages/quality/ui/suggestions-card'
+import { TriageRecallCard } from '#/pages/quality/ui/triage-recall-card'
 import { VerdictPrecisionCard } from '#/pages/quality/ui/verdict-precision-card'
 import { VersionsCard } from '#/pages/quality/ui/versions-card'
 
@@ -43,6 +46,8 @@ interface QualityPageProps {
 	calibrationNotice: string | null
 	calibrationError: string | null
 	onRecalibrate: () => void
+	onReviewTriage: (row: TriageRecall) => void
+	onOpenDropped: (profileId: string) => void
 }
 
 export function QualityPage({
@@ -63,6 +68,8 @@ export function QualityPage({
 	calibrationNotice,
 	calibrationError,
 	onRecalibrate,
+	onReviewTriage,
+	onOpenDropped,
 }: QualityPageProps) {
 	const calibrationCard =
 		state === 'ready' && calibration !== null ? (
@@ -88,6 +95,16 @@ export function QualityPage({
 				onCopy={onCopyExclusion}
 			/>
 		) : null
+	const triageCard =
+		state === 'ready' &&
+		quality !== null &&
+		quality.triage_recall.length > 0 ? (
+			<TriageRecallCard
+				rows={quality.triage_recall}
+				profiles={profiles}
+				onReview={onReviewTriage}
+			/>
+		) : null
 	return (
 		<div className="flex flex-col gap-6 p-4 md:p-8">
 			<div className="flex flex-col gap-1">
@@ -98,6 +115,16 @@ export function QualityPage({
 					Chaque décision garde l'état de la qualification au moment où elle a
 					été prise.
 				</p>
+				<a
+					href={droppedReviewHref(profileId)}
+					className="w-fit text-sm font-medium text-orange-600 hover:underline"
+					onClick={(event) => {
+						event.preventDefault()
+						onOpenDropped(profileId)
+					}}
+				>
+					Revoir les annonces écartées
+				</a>
 			</div>
 			<div className="flex flex-wrap items-end gap-x-8 gap-y-3">
 				<fieldset className="flex flex-col gap-1.5">
@@ -155,9 +182,12 @@ export function QualityPage({
 					sera mesurée ici.
 				</output>
 			) : null}
-			{state === 'ready' && quality !== null && !hasDecisions(quality)
-				? exclusionsCard
-				: null}
+			{state === 'ready' && quality !== null && !hasDecisions(quality) ? (
+				<>
+					{exclusionsCard}
+					{triageCard}
+				</>
+			) : null}
 			{state === 'ready' && quality !== null && hasDecisions(quality) ? (
 				<>
 					<DecisionsCard decisions={quality.decisions} />
@@ -170,6 +200,7 @@ export function QualityPage({
 					<VersionsCard versions={quality.versions} />
 					<RejectionReasonsCard profiles={quality.profiles} />
 					{exclusionsCard}
+					{triageCard}
 					<SuggestionsCard
 						profiles={quality.profiles}
 						onOpenProfile={onOpenProfile}

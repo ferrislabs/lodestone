@@ -4,6 +4,11 @@ import { useMemo, useState } from 'react'
 
 import { errorMessage, lodestoneApi } from '#/api/lodestone'
 import { recalibrationNotice } from '#/pages/quality/lib/calibration'
+import {
+	DEFAULT_REVIEW_STATE,
+	droppedSearchFor,
+	recallSearch,
+} from '#/pages/quality/lib/dropped'
 import { clipboardText } from '#/pages/quality/lib/exclusions'
 import { periodOf, queryFor, searchFor } from '#/pages/quality/lib/period'
 import type { ExclusionCandidate } from '#/pages/quality/lib/types'
@@ -88,6 +93,20 @@ export function QualityFeature() {
 						: null
 			}
 			onRecalibrate={() => recalibrate.mutate(NO_PARAMETERS)}
+			onReviewTriage={(row) =>
+				void navigate({ to: '/quality/dropped', search: recallSearch(row) })
+			}
+			onOpenDropped={(profileId) =>
+				void navigate({
+					to: '/quality/dropped',
+					search: droppedSearchFor({
+						profile: profileId,
+						reason: '',
+						agent: null,
+						state: DEFAULT_REVIEW_STATE,
+					}),
+				})
+			}
 			onOpenProfile={(profileId) =>
 				void navigate({
 					to: '/profiles/$profileId',

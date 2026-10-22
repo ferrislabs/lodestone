@@ -297,6 +297,29 @@ Post-filter rules, best effort on the title and text of the candidate, accents i
 
 The editor lists, per selected provider, what it filters natively and what is applied after collection.
 
+### Dropped candidates
+
+The keyword triage keeps what it drops (issue 255). Each candidate that an agent drops is stored in `dropped_candidates` with the profile, the agent (absent for the company job offers read without an agent), the source, the kind, the domain, the title, the provenance, the observation date and the `reason`:
+
+| Reason | Meaning | `matched` | `excluded` | `excerpts` |
+| --- | --- | --- | --- | --- |
+| `no_keyword` | No keyword of the agent was found. | empty | empty | The opening of the text: its first 300 characters, whitespace collapsed, cut at a word boundary and closed with « … » when cut. |
+| `exclusion` | A keyword and an exclusion were found. | the keywords found | the exclusions found | The passages around the excluded words (same rules as the kept candidates, see above). |
+| `filter_remote`, `filter_country`, `filter_contract` | The first failing filter, checked in that order. | the keywords found, empty when none | the exclusions found | The passages around the matched keywords, or the opening of the text when no keyword was found. |
+
+Only the body of the candidate is read for the passages, never the title, which is stored apart. A candidate dropped by the filters is checked against the keywords too, so the reviewer sees whether it would have matched.
+
+At most 200 candidates are stored per agent and per run, the first 200 in the order the source returned them. The others are counted in `dropped_not_kept` in the log line of the run (`dropped_kept` counts the stored ones). The same candidate (profile, agent, provenance) dropped again by a later run updates its row: title, passages, reason, keywords, observation date and `dropped_at` are refreshed, the identifier and the review are kept. A storage failure is logged as a warning and never fails the run. Rows never reviewed are deleted after 30 days by the daily `triage.purge_dropped` job; reviewed rows are kept, they are the labels of the recall below.
+
+An operator lists a sample with `GET /api/v1/profiles/{profile_id}/dropped` (`reason`, `agent`, `reviewed`, `order=recent|random`, `limit` from 1 to 100, default 20) and reviews a candidate with `POST /api/v1/dropped/{dropped_id}/review`:
+
+- `rightly_dropped` only records the review.
+- `should_have_kept` recovers the candidate: it is recorded as a signal of the agent, of the same source, kind, provenance and observation date, with `raw.route` set to `recovered` and a strength of 0.5 (below a rule match at 0.7, like an ambiguous match), carrying the title, the matched keywords, the details and the passages. A lead is created when the agent is known and none exists. A candidate of the company job offers (no agent) only attaches to a lead that already exists, as in the run itself; the review is recorded either way and `lead_id` is absent when there is no lead. The profile must be active: recovering under an inactive profile is refused with a conflict and nothing is recorded.
+
+A candidate is reviewed once; a second review is a conflict.
+
+The quality report (`GET /api/v1/quality`) carries `triage_recall`, per profile, agent and reason, for the same profile and period as the rest of the report (the period is the one of `dropped_at`): `dropped`, `reviewed`, `should_have_kept` and `share`, the part of the reviewed candidates that should have been kept (`should_have_kept` over `reviewed`, absent while nothing is reviewed). It measures the recall of the triage on a sample, which the decision labels of reviewed leads cannot do (ADR 0008).
+
 ### Welcome to the Jungle
 
 `welcome_to_the_jungle` searches the job offers of welcometothejungle.com through the search backend of its public search page (Algolia), under an authorisation the operator declares in the catalog (`authorised`, dated in `authorised_at`, and `authorisation_reference`). Scope: keyword search of offers and the company of each offer, nothing else. Every run reads `/api/env` for the application id and the public search-only key (never stored), and sends the `Referer` value the operator entered (`referer`, an https URL on welcometothejungle.com) with the Lodestone User-Agent; no other browser header is sent. The jobs index is `jobs_index` when set, otherwise it is discovered once per process in the public scripts of `/fr/jobs` (at most 8 scripts). Each distinct keyword is searched (`max_pages` pages of 30 offers, 1 to 3, default 3) and an offer found twice is kept once (by object id). The company website comes from the offer when present, otherwise from the organisation index (one lookup per company, cached, at most 60 per run); an offer without a website is counted as `skipped_no_domain`. The signal is a `job_offer` titled « offer — company » whose provenance is the offer page on welcometothejungle.com and whose date is the publication date. Requests to one host are spaced to `requests_per_minute` (default 10, 1 to 30). A `429` stops the run as rate limited; a `403` naming the referer, any other `403` or a challenge marks the provider `failing` with the reason and stops the run, without retry nor workaround.

@@ -38,6 +38,10 @@ pub use domain::{
         recipient::{NotARecipient, Recipient},
         select_for_profile,
     },
+    dropped::{
+        DropReason, DropReview, DroppedCandidate, DroppedFilter, DroppedId, RecallRow,
+        dropped_excerpts, ports::DroppedCandidateRepository,
+    },
     ecosystem::{
         DomainEcosystem, DueBatch, DueDomain, EcosystemFinding, EcosystemModule,
         EcosystemReadiness, FindingExample, HOSTING_PLATFORMS, Inspection, InspectionSettings,
@@ -182,7 +186,9 @@ pub use domain::{
         ports::TimelineRepository,
         rounds,
     },
-    triage::{Candidate, Route, countries::alpha3_of, passes_filters, route},
+    triage::{
+        Candidate, FilterKind, Route, countries::alpha3_of, failing_filter, passes_filters, route,
+    },
     user::commands::CreateUserCommand,
     values::{EmailAddress, Provenance, SignalKind, SourceName, UnitInterval, ValueError},
 };

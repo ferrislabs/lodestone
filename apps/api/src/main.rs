@@ -5,8 +5,8 @@ use api::{
     fetchers::ct_fetch_settings,
     internal_router::internal_router,
     jobs::{
-        Intervals, JobRouter, WiredSources, schedule_calibration, schedule_page_recheck,
-        schedule_timeline_purge, schedule_wired_sources,
+        Intervals, JobRouter, WiredSources, schedule_calibration, schedule_dropped_purge,
+        schedule_page_recheck, schedule_timeline_purge, schedule_wired_sources,
     },
     listeners::{CompanyStep, ContactStep, CtStep, HostStep, InspectionStep, QualificationStep},
     logger::init_tracing_and_logging,
@@ -345,6 +345,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     schedule_calibration(&queue).await?;
     schedule_page_recheck(&queue, &app_state.usecase).await?;
     schedule_timeline_purge(&queue).await?;
+    schedule_dropped_purge(&queue).await?;
     let platform_dossiers = app_state
         .usecase
         .settle_platform_dossiers(args.company.refresh_interval(), &SystemClock)
