@@ -5,8 +5,8 @@ use api::{
     fetchers::ct_fetch_settings,
     internal_router::internal_router,
     jobs::{
-        Intervals, JobRouter, WiredSources, schedule_calibration, schedule_page_recheck,
-        schedule_timeline_purge, schedule_wired_sources,
+        Intervals, JobRouter, TrialRuntime, WiredSources, schedule_calibration,
+        schedule_page_recheck, schedule_timeline_purge, schedule_wired_sources,
     },
     listeners::{CompanyStep, ContactStep, CtStep, HostStep, InspectionStep, QualificationStep},
     logger::init_tracing_and_logging,
@@ -333,7 +333,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
     )
     .with_webhook(webhook)
     .with_page_verifier(company_research.clone())
-    .with_timeline_retention(u32::from(args.jobs.lead_events_retention_days.get()));
+    .with_timeline_retention(u32::from(args.jobs.lead_events_retention_days.get()))
+    .with_trials(TrialRuntime {
+        cipher: AesGcmCipher::new(&llm_config.encryption_key)?,
+        cache: PgLlmCache::new(pool.clone()),
+        concurrency: args.listeners.evaluation_concurrency,
+    });
     provision_providers(
         &app_state.usecase,
         &app_state.providers,

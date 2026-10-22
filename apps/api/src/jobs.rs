@@ -1,19 +1,28 @@
-use std::{sync::Arc, time::Duration};
+use std::{
+    num::{NonZeroU32, NonZeroUsize},
+    sync::Arc,
+    time::Duration,
+};
 
 use chrono::{DateTime, Duration as Delta, Utc};
 use common::CoreError;
 use fetch::PoliteFetcher;
 use lodestone_core::{
     CALIBRATION_JOB_KIND, Clock, DEFAULT_RETENTION_DAYS, Job, JobQueue, LodestoneUseCase,
-    PartnerAward, SourceName, WEBHOOK_JOB_KIND,
+    NO_LLM_PROVIDER, PartnerAward, SourceName, WEBHOOK_JOB_KIND,
     calibration::{calibration_job, is_recurring_calibration, next_calibration},
     company::{PAGE_RECHECK_JOB_KIND, page_recheck_job},
-    infrastructure::{contact_target::postgres::PgAtsTargets, job::postgres::PgJobQueue},
+    evaluation::EvaluationSettings,
+    infrastructure::{
+        contact_target::postgres::PgAtsTargets, crypto::AesGcmCipher, job::postgres::PgJobQueue,
+        llm_cache::postgres::PgLlmCache,
+    },
     is_continuous,
     jobs::{JobError, JobHandler, JobOutcome, SystemClock},
     sources::{SOURCE_JOB_KIND, SourceRunError, source_job, source_of_job},
     timeline::{TIMELINE_PURGE_JOB_KIND, next_timeline_purge, timeline_purge_job},
     triage::{CandidateSource, TriageReport},
+    trial::{PROFILE_TRIAL_JOB_KIND, trial_of_job},
 };
 use sources::{
     ats::AtsSource,
@@ -28,6 +37,7 @@ use sources::{
 use tracing::info;
 
 use crate::{
+    listeners::{AnyProviderBuilder, QUALIFICATION_BASE_DELAY, QUALIFICATION_MAX_TOKENS},
     providers::{CatalogAccess, NOT_READY_RECHECK, blocking_provider},
     webhook::{WebhookSink, run_webhook_job},
 };
@@ -71,12 +81,19 @@ pub struct Intervals {
     pub hacker_news: Duration,
 }
 
+pub struct TrialRuntime {
+    pub cipher: AesGcmCipher,
+    pub cache: PgLlmCache,
+    pub concurrency: NonZeroUsize,
+}
+
 pub struct JobRouter {
     usecase: LodestoneUseCase,
     sources: WiredSources,
     intervals: Intervals,
     webhook: Option<WebhookSink>,
     pages: Option<CompanyPages>,
+    trials: Option<TrialRuntime>,
     retention_days: u32,
 }
 
@@ -88,6 +105,7 @@ impl JobRouter {
             intervals,
             webhook: None,
             pages: None,
+            trials: None,
             retention_days: DEFAULT_RETENTION_DAYS,
         }
     }
@@ -115,6 +133,57 @@ impl JobRouter {
     pub fn with_page_verifier(mut self, pages: CompanyPages) -> Self {
         self.pages = Some(pages);
         self
+    }
+
+    pub fn with_trials(mut self, runtime: TrialRuntime) -> Self {
+        self.trials = Some(runtime);
+        self
+    }
+
+    async fn run_trial(&self, job: &Job) -> Result<JobOutcome, JobError> {
+        let id = trial_of_job(job)?;
+        let retryable = |error: CoreError| JobError::Retryable(error.to_string());
+        let Some(runtime) = &self.trials else {
+            self.usecase
+                .fail_profile_trial(id, NO_LLM_PROVIDER, SystemClock.now())
+                .await
+                .map_err(retryable)?;
+            return Ok(JobOutcome::Done);
+        };
+        let settings = EvaluationSettings {
+            max_tokens: QUALIFICATION_MAX_TOKENS,
+            budget_cents: NonZeroU32::MIN,
+            batch_size: 1,
+            base_delay: QUALIFICATION_BASE_DELAY,
+            concurrency: runtime.concurrency,
+        };
+        match self
+            .usecase
+            .run_profile_trial(
+                id,
+                &AnyProviderBuilder,
+                &runtime.cipher,
+                &runtime.cache,
+                settings,
+                &SystemClock,
+            )
+            .await
+        {
+            Ok(status) => {
+                info!(trial = %id, status = status.as_str(), "profile trial run finished");
+                Ok(JobOutcome::Done)
+            }
+            Err(CoreError::NotFound) => Ok(JobOutcome::Done),
+            Err(error) => {
+                if job.attempts >= job.max_attempts.get() {
+                    self.usecase
+                        .fail_profile_trial(id, &error.to_string(), SystemClock.now())
+                        .await
+                        .map_err(retryable)?;
+                }
+                Err(retryable(error))
+            }
+        }
     }
 
     pub fn with_webhook(mut self, webhook: Option<WebhookSink>) -> Self {
@@ -356,6 +425,7 @@ impl JobHandler for JobRouter {
             CALIBRATION_JOB_KIND => self.run_calibration(job).await,
             PAGE_RECHECK_JOB_KIND => self.run_page_recheck().await,
             TIMELINE_PURGE_JOB_KIND => self.run_timeline_purge().await,
+            PROFILE_TRIAL_JOB_KIND => self.run_trial(job).await,
             other => Err(JobError::Permanent(format!(
                 "no handler for job kind `{other}`"
             ))),

@@ -183,6 +183,13 @@ pub use domain::{
         rounds,
     },
     triage::{Candidate, Route, countries::alpha3_of, passes_filters, route},
+    trial::{
+        DEFAULT_BUDGET_CENTS, DEFAULT_SAMPLE_SIZE, DecidedLead, MAX_BUDGET_CENTS, MAX_SAMPLE_SIZE,
+        MIN_BUDGET_CENTS, MIN_SAMPLE_SIZE, NO_DECIDED_LEAD, NO_LLM_PROVIDER, NewTrial,
+        ProfileTrial, SampleSize, TRIAL_LIST_LIMIT, TrialBudget, TrialId, TrialLabel, TrialLead,
+        TrialLimitError, TrialStatus, TrialSummary, VersionSummary, ports::ProfileTrialRepository,
+        select_sample,
+    },
     user::commands::CreateUserCommand,
     values::{EmailAddress, Provenance, SignalKind, SourceName, UnitInterval, ValueError},
 };

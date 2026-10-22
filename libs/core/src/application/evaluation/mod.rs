@@ -34,6 +34,7 @@ use crate::{
             AgentWork, CancelReason, WorkKind, WorkTarget, first_stop, ports::AgentWorkRepository,
         },
         calibration::{Calibrations, opinion_score},
+        company::{CompanyDossier, DossierDocument},
         facts::{LeadFacts, signal_sentence},
         job::ports::Clock,
         lead::{Lead, LeadId, Signal},
@@ -63,6 +64,10 @@ use crate::{
         },
     },
 };
+
+mod trial;
+
+pub(crate) use trial::{Attempt, Qualified, TrialWorks, qualify_in_memory};
 
 pub const QUALIFICATION_LISTENER: &str = "qualification";
 const RESCORE_BATCH_SIZE: u32 = 500;
@@ -201,6 +206,52 @@ pub fn render_signal(signal: &Signal) -> String {
             .observed_at
             .to_rfc3339_opts(SecondsFormat::Secs, true),
     )
+}
+
+pub(crate) struct LeadMaterial {
+    pub(crate) signals: Vec<Signal>,
+    pub(crate) facts: LeadFacts,
+    pub(crate) dossier: Option<CompanyDossier>,
+    overview: String,
+    contents: Vec<String>,
+    grounding: Vec<DossierDocument>,
+}
+
+impl LeadMaterial {
+    pub(crate) async fn load(usecase: &LodestoneUseCase, lead: &Lead) -> Result<Self, CoreError> {
+        let (signals, facts, dossier) = usecase.signals_with_facts(lead).await?;
+        let grounding = usecase.grounding_documents(lead, dossier.as_ref()).await?;
+        Ok(Self {
+            overview: lead_document(lead.domain.as_str(), &facts),
+            contents: signals.iter().map(render_signal).collect(),
+            signals,
+            facts,
+            dossier,
+            grounding,
+        })
+    }
+
+    pub(crate) fn documents(&self) -> Vec<UntrustedDocument<'_>> {
+        let mut documents = Vec::with_capacity(self.signals.len() + self.grounding.len() + 1);
+        documents.push(UntrustedDocument {
+            source: "lead",
+            content: &self.overview,
+        });
+        documents.extend(
+            self.signals
+                .iter()
+                .zip(&self.contents)
+                .map(|(signal, content)| UntrustedDocument {
+                    source: signal.provenance.as_str(),
+                    content,
+                }),
+        );
+        documents.extend(self.grounding.iter().map(|document| UntrustedDocument {
+            source: &document.source,
+            content: &document.content,
+        }));
+        documents
+    }
 }
 
 type Entry<P> = (Option<ProviderId>, Option<Arc<Loaded<P>>>);
@@ -994,25 +1045,8 @@ where
         let fresh = usecase.lead_fresh_calls(lead.id).await?;
         let definition = active.revision.definition.definition();
         let calibrations = usecase.profile_calibrations(active).await?;
-        let (signals, facts, dossier) = usecase.signals_with_facts(lead).await?;
-        let overview = lead_document(lead.domain.as_str(), &facts);
-        let contents: Vec<String> = signals.iter().map(render_signal).collect();
-        let dossier_documents = usecase.grounding_documents(lead, dossier.as_ref()).await?;
-        let mut documents = Vec::with_capacity(signals.len() + dossier_documents.len() + 1);
-        documents.push(UntrustedDocument {
-            source: "lead",
-            content: &overview,
-        });
-        documents.extend(signals.iter().zip(&contents).map(|(signal, content)| {
-            UntrustedDocument {
-                source: signal.provenance.as_str(),
-                content,
-            }
-        }));
-        documents.extend(dossier_documents.iter().map(|document| UntrustedDocument {
-            source: &document.source,
-            content: &document.content,
-        }));
+        let material = LeadMaterial::load(usecase, lead).await?;
+        let documents = material.documents();
         let round = round_key(lead.qualified_at);
         let trigger = if lead.qualified_at.is_none() {
             "first"
@@ -1066,7 +1100,7 @@ where
         let scored = |pass: &Pass| -> Vec<AgentOpinion> {
             pass.opinions.iter().flatten().copied().collect()
         };
-        let mut judgement = judgement_of(definition, &facts, &scored(&pass), at);
+        let mut judgement = judgement_of(definition, &material.facts, &scored(&pass), at);
         if escalated_revision.is_none()
             && let (Some(provider), Some(confidence)) =
                 (definition.escalation.provider, judgement.confidence)
@@ -1101,7 +1135,7 @@ where
                 }
                 Escalated::Replaced(true) => {
                     escalated_revision = Some(revision);
-                    judgement = judgement_of(definition, &facts, &scored(&pass), at);
+                    judgement = judgement_of(definition, &material.facts, &scored(&pass), at);
                     info!(
                         monotonic_counter.qualification_escalations = 1u64,
                         "lead escalated"
@@ -1112,7 +1146,8 @@ where
         }
         let valid = count(pass.opinions.iter().flatten().count());
         let invalid = count(pass.results.len()) - valid;
-        let mut sources: Vec<String> = signals
+        let mut sources: Vec<String> = material
+            .signals
             .iter()
             .map(|signal| signal.source.as_str().to_owned())
             .collect();
@@ -1137,7 +1172,10 @@ where
             judgement,
             exclusions: exclusions(&pass.results, &definition.qualification_agents),
             scoring_version: SCORING_VERSION,
-            dossier_at: dossier.as_ref().and_then(|dossier| dossier.content_at),
+            dossier_at: material
+                .dossier
+                .as_ref()
+                .and_then(|dossier| dossier.content_at),
             escalated_revision,
             read_at,
             at,

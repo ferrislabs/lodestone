@@ -16,7 +16,7 @@ use crate::{
     response::{DataEnvelope, Response},
     settings, source_providers, sources,
     state::AppState,
-    timeline,
+    timeline, trials,
 };
 
 pub const API_PREFIX: &str = "/api/v1";
@@ -55,6 +55,11 @@ pub fn router(state: AppState) -> Router<AppState> {
             "/profiles/{profile_id}/export",
             get(profiles::export_profile),
         )
+        .route(
+            "/profiles/{profile_id}/trials",
+            get(trials::list_trials).post(trials::create_trial),
+        )
+        .route("/trials/{trial_id}", get(trials::get_trial))
         .route("/profiles/{profile_id}/leads", get(leads::list_leads))
         .route(
             "/profiles/{profile_id}/leads/export",

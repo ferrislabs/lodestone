@@ -39,6 +39,7 @@ pub mod sources;
 pub mod suppression;
 pub mod timeline;
 pub mod triage;
+pub mod trial;
 pub mod user;
 
 pub type LodestoneAuthService = AuthService<FerrisKeyRepository>;

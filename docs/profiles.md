@@ -385,6 +385,23 @@ A host or domain whose lookup, probe or crawl fails is marked checked like a suc
 
 `LISTENER_IDLE_SECONDS` (default 15) is the sleep after a loop that found nothing; `LISTENER_LOCK_RETRY_SECONDS` (default 15) is how often a standby replica retries the lock.
 
+## Trying a revision
+
+A draft revision can be tried on leads a human already decided before it is published (issue 257). A trial reads the draft and the stored leads, calls the models and writes nothing to the leads.
+
+- **What runs.** For each lead of the sample, the trial builds the same documents as the live pipeline (lead overview, signals, dossier and ecosystem findings), runs every enabled qualification agent of the draft with its primary plan (no escalation), computes the indicators, then runs the enabled scoring agents of the draft on the reports it just produced and combines them. The trial verdict and confidence are the scoring decision when it gives a verdict, otherwise the indicators judgement. The calibrations are the ones of the profile. Calls are served by the LLM cache when a prompt did not change.
+- **What is never written.** No lead, signal, qualification result, scoring result, agent failure, stop or timeline event is created or changed, and no summary is queued. A trial only writes `profile_trials` and `profile_trial_leads`, and the LLM cache.
+- **Sample.** The leads of the profile whose latest lead decision is validated or rejected, newest decision first. The sample is balanced: up to half of its size (rounded up) of validated leads, then rejected leads to fill it, then validated leads again if the rejected ones run short. The same decisions always give the same sample. A profile without any decided lead cannot be tried (409 "no decided lead to try"). The size is 1 to 50, 20 by default.
+- **Budget.** Each trial has its own spending cap, 1 to 2000 cents, 200 by default. Calls count in it like in a live run. When the cap is reached the trial stops with the status `budget_exhausted` and keeps the leads it already tried; a lead whose agents did not all answer before the cap is not recorded.
+- **Errors.** A model call that fails, or an agent that cannot answer, records the lead with an `error` and the trial goes on. Such a lead is left out of both versions in the summary and counted in `errors`.
+- **One at a time.** A profile has at most one pending or running trial. The job `profile.trial` (3 attempts, deduplicated by `trial:{id}`) replays after a crash: it resumes the trial and skips the leads already recorded. A trial that cannot run (no LLM provider configured, or every attempt failed) ends `failed` with its `error`.
+
+The summary compares the current verdicts (those stored on the leads) with the trial verdicts, on the leads without error: `reliable` (verdict `fiable`), `reliable_validated`, `precision` (`reliable_validated / reliable`, absent without a reliable lead), `rejected` (human label) and `rejected_discarded` (rejected leads with the verdict `ecarte`), plus `changed` (leads whose verdict differs) and `errors`.
+
+- `POST /api/v1/profiles/{profile_id}/trials` with `{ "definition": {...}, "sample_size": 20, "budget_cents": 200 }` answers 202 with the trial (`id`, `profile_id`, `base_revision`, `status`, `sample_size`, `budget_cents`, `spent_cents` (what the models cost so far, kept up to date lead by lead and carried over a replay), `leads_tried`, `error`, `created_at`, `started_at`, `finished_at`). 422 for an invalid definition (same `details` as `PUT /api/v1/profiles/{profile_id}`), 400 for a limit out of range or a malformed body, 404 for an unknown profile, 409 when a trial is already pending or running or when no lead is decided, 403 for service accounts.
+- `GET /api/v1/profiles/{profile_id}/trials` lists the 20 latest trials, newest first.
+- `GET /api/v1/trials/{trial_id}` adds the `summary` and the `leads` (`lead_id`, `domain`, `label`, `current_verdict`, `current_confidence`, `trial_verdict`, `trial_confidence`, `error`).
+
 ## Older versions
 
 Stored revisions are never rewritten. Versions 1 to 17 are accepted and upgraded when read; new revisions are written in version 18. Errors on an older document keep that document's paths.

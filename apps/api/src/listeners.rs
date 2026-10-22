@@ -248,9 +248,9 @@ pub type RoleGuessStep = ContactStep<RoleGuessFinder<HickoryResolver>>;
 pub type DnsCnameStep = HostStep<DnsCname>;
 pub type HttpProbeStep = HostStep<HttpProbe>;
 
-const QUALIFICATION_MAX_TOKENS: u32 = 2048;
+pub const QUALIFICATION_MAX_TOKENS: u32 = 2048;
 const QUALIFICATION_BATCH_SIZE: u32 = 10;
-const QUALIFICATION_BASE_DELAY: Duration = Duration::from_secs(2);
+pub const QUALIFICATION_BASE_DELAY: Duration = Duration::from_secs(2);
 
 pub struct AnyProviderBuilder;
 
