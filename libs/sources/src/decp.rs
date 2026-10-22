@@ -266,8 +266,8 @@ pub fn partner_awards(rules: &SearchAgent, contracts: &[AwardedContract]) -> Vec
     let mut awards = Vec::new();
     for contract in contracts {
         let matched = match route(&contract.content, rules) {
-            Route::Reject => continue,
-            Route::Accept { matched } | Route::Ambiguous { matched, .. } => matched,
+            Route::Reject | Route::Excluded { .. } => continue,
+            Route::Accept { matched } | Route::Ambiguous { matched } => matched,
         };
         for holder in &contract.holders {
             awards.push(PartnerAward {
@@ -536,10 +536,12 @@ impl<F: Fetcher> DecpSource<F> {
                 continue;
             };
             let content = candidate_content(&parsed.object, &parsed.text);
-            if !rules
-                .iter()
-                .any(|rules| route(&content, rules) != Route::Reject)
-            {
+            if !rules.iter().any(|rules| {
+                matches!(
+                    route(&content, rules),
+                    Route::Accept { .. } | Route::Ambiguous { .. }
+                )
+            }) {
                 continue;
             }
             state.stats.matched += 1;

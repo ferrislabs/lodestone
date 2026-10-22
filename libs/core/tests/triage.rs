@@ -124,9 +124,10 @@ async fn ambiguous_candidates_become_leads_without_any_llm_call(pool: PgPool) {
 
     assert_eq!(report.candidates, 4);
     assert_eq!(report.accepted_by_rules, 1);
-    assert_eq!(report.accepted_ambiguous, 2);
+    assert_eq!(report.accepted_ambiguous, 1);
     assert_eq!(report.rejected_by_rules, 1);
-    assert_eq!(report.accepted(), 3);
+    assert_eq!(report.rejected_by_exclusions, 1);
+    assert_eq!(report.accepted(), 2);
 
     let accepted = signals(&pool, profile, "mairie.fr").await;
     assert_eq!(accepted.len(), 1);
@@ -136,32 +137,91 @@ async fn ambiguous_candidates_become_leads_without_any_llm_call(pool: PgPool) {
     assert_eq!(accepted[0].strength.get(), 0.7);
     assert!(signals(&pool, profile, "meubles.fr").await.is_empty());
 
-    let ambiguous = signals(&pool, profile, "acme.com").await;
+    assert!(signals(&pool, profile, "acme.com").await.is_empty());
+
+    let ambiguous = signals(&pool, profile, "region.fr").await;
     assert_eq!(ambiguous.len(), 1);
     assert_eq!(ambiguous[0].raw["route"], "keywords_ambiguous");
-    assert_eq!(ambiguous[0].raw["matched"], json!(["SSO"]));
-    assert_eq!(ambiguous[0].raw["excluded"], json!(["badge"]));
-    assert_eq!(ambiguous[0].raw["details"]["idweb"], "acme.com");
+    assert_eq!(ambiguous[0].raw["matched"], json!(["IAM"]));
+    assert_eq!(ambiguous[0].raw.get("excluded"), None);
+    assert_eq!(ambiguous[0].raw["details"]["idweb"], "region.fr");
     assert_eq!(ambiguous[0].strength.get(), 0.5);
     assert!(ambiguous[0].strength.get() < accepted[0].strength.get());
-
-    let below_threshold = signals(&pool, profile, "region.fr").await;
-    assert_eq!(below_threshold.len(), 1);
-    assert_eq!(below_threshold[0].raw["route"], "keywords_ambiguous");
-    assert_eq!(below_threshold[0].raw["excluded"], json!([]));
 
     let recorded = runs(&pool).await;
     assert_eq!(recorded.len(), 1);
     assert_eq!(recorded[0].status, RunStatus::Succeeded);
     assert_eq!(recorded[0].volume, 4);
-    assert_eq!(recorded[0].signals, 3);
+    assert_eq!(recorded[0].signals, 2);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_matching_exclusion_rejects_the_candidate_whatever_its_keywords(pool: PgPool) {
+    let profile = iam_profile(&pool).await;
+    let source = FakeSource {
+        candidates: vec![
+            candidate("acme.com", "Badge d'acces et SSO"),
+            candidate("mairie.fr", "SSO, MFA et controle d'acces physique"),
+            candidate("ville.fr", "Annuaire TELEPHONIQUE avec SSO et MFA"),
+            candidate("badges.fr", "Fourniture de badges"),
+        ],
+    };
+
+    let report = run_triage(&pool, &source).await;
+
+    assert_eq!(report.candidates, 4);
+    assert_eq!(report.rejected_by_exclusions, 3);
+    assert_eq!(report.rejected_by_rules, 1);
+    assert_eq!(report.accepted_by_rules, 0);
+    assert_eq!(report.accepted_ambiguous, 0);
+    assert_eq!(report.accepted(), 0);
+    for host in ["acme.com", "mairie.fr", "ville.fr", "badges.fr"] {
+        assert!(signals(&pool, profile, host).await.is_empty());
+        assert!(!has_lead(&pool, profile, host).await);
+    }
+    let recorded = runs(&pool).await;
+    assert_eq!(recorded.len(), 1);
+    assert_eq!(recorded[0].status, RunStatus::Succeeded);
+    assert_eq!(recorded[0].volume, 4);
+    assert_eq!(recorded[0].signals, 0);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn keywords_match_without_accents_case_or_hyphens(pool: PgPool) {
+    let profile = boamp_profile(
+        &pool,
+        vec![boamp_agent(
+            "boamp-fr",
+            true,
+            &["identite", "single sign-on"],
+            1,
+        )],
+    )
+    .await;
+    let source = FakeSource {
+        candidates: vec![
+            candidate("ville.fr", "Gestion de l'IDENTITÉ"),
+            candidate("region.fr", "Projet de Single Sign On"),
+            candidate("meubles.fr", "Fourniture de mobilier"),
+        ],
+    };
+
+    let report = run_triage(&pool, &source).await;
+
+    assert_eq!(report.accepted_by_rules, 2);
+    assert_eq!(report.rejected_by_rules, 1);
+    let accepted = signals(&pool, profile, "ville.fr").await;
+    assert_eq!(accepted.len(), 1);
+    assert_eq!(accepted[0].raw["matched"], json!(["identite"]));
+    assert_eq!(signals(&pool, profile, "region.fr").await.len(), 1);
+    assert!(signals(&pool, profile, "meubles.fr").await.is_empty());
 }
 
 #[sqlx::test(migrations = "../../migrations")]
 async fn a_second_run_does_not_duplicate_signals(pool: PgPool) {
     let profile = iam_profile(&pool).await;
     let source = FakeSource {
-        candidates: vec![candidate("acme.com", "Badge d'acces et SSO")],
+        candidates: vec![candidate("acme.com", "Projet IAM pour acme")],
     };
 
     run_triage(&pool, &source).await;
@@ -181,8 +241,8 @@ async fn suppressed_domains_record_nothing(pool: PgPool) {
         .unwrap();
     let source = FakeSource {
         candidates: vec![
-            candidate("bad.fr", "Badge et SSO pour bad"),
-            candidate("good.fr", "Badge et SSO pour good"),
+            candidate("bad.fr", "Projet SSO pour bad"),
+            candidate("good.fr", "Projet SSO pour good"),
         ],
     };
 

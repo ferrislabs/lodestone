@@ -54,8 +54,8 @@ async fn iam_keywords_against_real_careers_pages_and_boards() {
                         accept += 1;
                         println!("    accept: {} | {matched:?}", candidate.title);
                     }
-                    Route::Reject => reject += 1,
-                    Route::Ambiguous { matched, .. } => {
+                    Route::Reject | Route::Excluded { .. } => reject += 1,
+                    Route::Ambiguous { matched } => {
                         ambiguous += 1;
                         println!("    ambiguous: {} | {matched:?}", candidate.title);
                     }

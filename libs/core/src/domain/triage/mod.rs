@@ -3,6 +3,7 @@ use chrono::{DateTime, Utc};
 use crate::domain::{
     NormalizedDomain,
     profile::definition::SearchAgent,
+    text::fold_with,
     values::{Provenance, SignalKind, SourceName},
 };
 
@@ -29,17 +30,21 @@ pub enum Route {
         matched: Vec<String>,
     },
     Reject,
-    Ambiguous {
+    Excluded {
         matched: Vec<String>,
         excluded: Vec<String>,
     },
+    Ambiguous {
+        matched: Vec<String>,
+    },
+}
+
+fn is_hyphen(letter: char) -> bool {
+    matches!(letter, '-' | '\u{2010}' | '\u{2011}')
 }
 
 fn normalize(text: &str) -> String {
-    text.to_lowercase()
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
+    fold_with(text, |letter| letter.is_whitespace() || is_hyphen(letter))
 }
 
 fn contains_phrase(haystack: &str, needle: &str) -> bool {
@@ -76,10 +81,12 @@ pub fn route(candidate_text: &str, rules: &SearchAgent) -> Route {
         return Route::Reject;
     }
     let excluded = matching(&haystack, &rules.exclusions);
-    if excluded.is_empty() && matched.len() >= usize::from(rules.accept_min_keywords) {
+    if !excluded.is_empty() {
+        Route::Excluded { matched, excluded }
+    } else if matched.len() >= usize::from(rules.accept_min_keywords) {
         Route::Accept { matched }
     } else {
-        Route::Ambiguous { matched, excluded }
+        Route::Ambiguous { matched }
     }
 }
 
@@ -135,8 +142,7 @@ mod tests {
         assert_eq!(
             route,
             Route::Ambiguous {
-                matched: vec!["sso".to_owned()],
-                excluded: Vec::new()
+                matched: vec!["sso".to_owned()]
             }
         );
     }
@@ -150,15 +156,132 @@ mod tests {
     }
 
     #[test]
-    fn an_exclusion_makes_enough_keywords_ambiguous() {
+    fn an_exclusion_rejects_enough_keywords() {
         let route = route("SSO, MFA et badge", &rules(&["sso", "mfa"], &["badge"], 2));
         assert_eq!(
             route,
-            Route::Ambiguous {
+            Route::Excluded {
                 matched: vec!["sso".to_owned(), "mfa".to_owned()],
                 excluded: vec!["badge".to_owned()]
             }
         );
+    }
+
+    #[test]
+    fn an_exclusion_rejects_a_single_keyword_below_threshold() {
+        let route = route("Badge et SSO", &rules(&["sso", "mfa"], &["badge"], 2));
+        assert_eq!(
+            route,
+            Route::Excluded {
+                matched: vec!["sso".to_owned()],
+                excluded: vec!["badge".to_owned()]
+            }
+        );
+    }
+
+    #[test]
+    fn an_exclusion_rejects_whatever_the_threshold() {
+        assert!(matches!(
+            route("Badge et SSO", &rules(&["sso"], &["badge"], 1)),
+            Route::Excluded { .. }
+        ));
+        assert!(matches!(
+            route("Badge et SSO", &rules(&["sso"], &["badge"], 0)),
+            Route::Excluded { .. }
+        ));
+    }
+
+    #[test]
+    fn an_exclusion_that_is_absent_changes_nothing() {
+        assert!(matches!(
+            route("SSO et MFA", &rules(&["sso", "mfa"], &["badge"], 2)),
+            Route::Accept { .. }
+        ));
+        assert!(matches!(
+            route("SSO seul", &rules(&["sso", "mfa"], &["badge"], 2)),
+            Route::Ambiguous { .. }
+        ));
+    }
+
+    #[test]
+    fn exclusions_match_without_accents_case_or_hyphens() {
+        let rules = rules(&["sso"], &["annuaire téléphonique", "e-mail"], 1);
+        assert!(matches!(
+            route("SSO et ANNUAIRE TELEPHONIQUE", &rules),
+            Route::Excluded { .. }
+        ));
+        assert!(matches!(
+            route("SSO et e mail", &rules),
+            Route::Excluded { .. }
+        ));
+    }
+
+    #[test]
+    fn accents_are_ignored_in_either_direction() {
+        assert_eq!(
+            route("Gestion de l'identité", &rules(&["identite"], &[], 1)),
+            Route::Accept {
+                matched: vec!["identite".to_owned()]
+            }
+        );
+        assert_eq!(
+            route("IDENTITE", &rules(&["identité"], &[], 1)),
+            Route::Accept {
+                matched: vec!["identité".to_owned()]
+            }
+        );
+    }
+
+    #[test]
+    fn accent_folding_keeps_whole_word_matching() {
+        assert_eq!(
+            route("Gestion des identités", &rules(&["identite"], &[], 1)),
+            Route::Reject
+        );
+    }
+
+    #[test]
+    fn hyphens_are_ignored_in_either_direction() {
+        let hyphenated = rules(&["sign-on"], &[], 1);
+        assert!(matches!(
+            route("single sign on", &hyphenated),
+            Route::Accept { .. }
+        ));
+        assert!(matches!(
+            route("single sign-on", &hyphenated),
+            Route::Accept { .. }
+        ));
+        assert!(matches!(
+            route("single sign\u{2010}on", &hyphenated),
+            Route::Accept { .. }
+        ));
+        assert!(matches!(
+            route("single sign\u{2011}on", &hyphenated),
+            Route::Accept { .. }
+        ));
+        assert!(matches!(
+            route("single sign-on", &rules(&["sign on"], &[], 1)),
+            Route::Accept { .. }
+        ));
+    }
+
+    #[test]
+    fn hyphens_still_respect_word_boundaries() {
+        let rules = rules(&["sign on"], &[], 1);
+        assert_eq!(route("single sign-onboarding", &rules), Route::Reject);
+        assert_eq!(route("design-on", &rules), Route::Reject);
+    }
+
+    #[test]
+    fn punctuation_inside_keywords_is_kept() {
+        assert!(matches!(
+            route("Développeur C# senior", &rules(&["c#"], &[], 1)),
+            Route::Accept { .. }
+        ));
+        assert!(matches!(
+            route("Expert .NET confirmé", &rules(&[".net"], &[], 1)),
+            Route::Accept { .. }
+        ));
     }
 
     #[test]
@@ -201,6 +324,16 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn matched_keywords_keep_their_original_spelling() {
+        assert_eq!(
+            route("Mise en place d'un annuaire", &rules(&["Annuaire"], &[], 1)),
+            Route::Accept {
+                matched: vec!["Annuaire".to_owned()]
+            }
+        );
+    }
+
     proptest! {
         #[test]
         fn route_never_panics(
@@ -239,6 +372,24 @@ mod tests {
             let accepted_before = matches!(before, Route::Accept { .. });
             let accepted_after = matches!(after, Route::Accept { .. });
             prop_assert!(accepted_before || !accepted_after);
+        }
+
+        #[test]
+        fn case_and_hyphens_never_change_the_route(
+            text in "[a-cA-C \\-]{0,30}",
+            keywords in proptest::collection::vec("[a-c]{1,3}", 0..4),
+            exclusions in proptest::collection::vec("[a-c]{1,3}", 0..3),
+            min in 1u8..4,
+        ) {
+            let agent = SearchAgent {
+                keywords,
+                exclusions,
+                accept_min_keywords: min,
+                ..empty_agent()
+            };
+            let reference = route(&text, &agent);
+            prop_assert_eq!(&reference, &route(&text.to_uppercase(), &agent));
+            prop_assert_eq!(&reference, &route(&text.replace('-', " "), &agent));
         }
     }
 }

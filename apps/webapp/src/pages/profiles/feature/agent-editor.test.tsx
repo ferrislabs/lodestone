@@ -405,9 +405,7 @@ describe('sourcing agent page', () => {
 			within(advanced).getByText(/gardée avec un signal plus faible/),
 		).toBeTruthy()
 		expect(
-			screen.getByText(
-				/Ils ne l'écartent pas : seule une annonce sans aucun mot-clé est écartée/,
-			),
+			screen.getByText(/même si elle contient assez de mots-clés/),
 		).toBeTruthy()
 		expect(document.body.textContent).not.toMatch(/LLM/)
 	})

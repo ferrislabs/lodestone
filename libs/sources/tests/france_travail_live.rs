@@ -164,7 +164,7 @@ async fn iam_profile_against_the_real_france_travail_api() {
         let content = format!("{}\n\n{}", candidate.title, candidate.text);
         match route(&content, &rules) {
             Route::Accept { .. } => accepted += 1,
-            Route::Reject => rejected += 1,
+            Route::Reject | Route::Excluded { .. } => rejected += 1,
             Route::Ambiguous { .. } => ambiguous += 1,
         }
     }

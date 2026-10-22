@@ -134,6 +134,7 @@ impl JobRouter {
             accepted_by_rules = report.accepted_by_rules,
             accepted_ambiguous = report.accepted_ambiguous,
             rejected_by_rules = report.rejected_by_rules,
+            rejected_by_exclusions = report.rejected_by_exclusions,
             rejected_by_filters = report.rejected_by_filters,
             skipped_no_lead = report.skipped_no_lead,
             cancelled = report.cancelled,

@@ -45,6 +45,7 @@ pub struct TriageReport {
     pub accepted_by_rules: u64,
     pub accepted_ambiguous: u64,
     pub rejected_by_rules: u64,
+    pub rejected_by_exclusions: u64,
     pub rejected_by_filters: u64,
     pub skipped_no_lead: u64,
     pub runs: u64,
@@ -117,19 +118,15 @@ fn observation(
     candidate: &Candidate,
     agent: Option<&AgentId>,
     matched: &[String],
-    excluded: Option<&[String]>,
     route: &str,
     strength: f64,
 ) -> Result<Observation, CoreError> {
-    let mut raw = json!({
+    let raw = json!({
         "title": candidate.title,
         "matched": matched,
         "route": route,
         "details": candidate.details,
     });
-    if let Some(excluded) = excluded {
-        raw["excluded"] = json!(excluded);
-    }
     Ok(Observation {
         domain: candidate.domain.clone(),
         kind: candidate.kind.clone(),
@@ -156,24 +153,23 @@ fn decide(
         }
         match route(&candidate_text(candidate), agent) {
             Route::Reject => report.rejected_by_rules += 1,
+            Route::Excluded { .. } => report.rejected_by_exclusions += 1,
             Route::Accept { matched } => {
                 report.accepted_by_rules += 1;
                 observations.push(observation(
                     candidate,
                     target.agent,
                     &matched,
-                    None,
                     "keywords",
                     RULES_STRENGTH,
                 )?);
             }
-            Route::Ambiguous { matched, excluded } => {
+            Route::Ambiguous { matched } => {
                 report.accepted_ambiguous += 1;
                 observations.push(observation(
                     candidate,
                     target.agent,
                     &matched,
-                    Some(&excluded),
                     "keywords_ambiguous",
                     AMBIGUOUS_STRENGTH,
                 )?);
