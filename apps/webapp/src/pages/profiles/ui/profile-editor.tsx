@@ -13,6 +13,8 @@ interface ProfileEditorProps {
 	saveLabel: string
 	blockedReason?: string | null
 	confirmingReset: boolean
+	trialPanel?: ReactNode
+	onTry?: () => void
 	onSave: () => void
 	onRequestReset: () => void
 	onConfirmReset: () => void
@@ -28,6 +30,8 @@ export function ProfileEditor({
 	saveLabel,
 	blockedReason = null,
 	confirmingReset,
+	trialPanel = null,
+	onTry,
 	onSave,
 	onRequestReset,
 	onConfirmReset,
@@ -55,51 +59,66 @@ export function ProfileEditor({
 			{dirty ? (
 				<div
 					data-testid="save-bar"
-					className="sticky bottom-0 z-10 -mx-4 flex flex-wrap items-center justify-between gap-3 border-t bg-background px-4 py-3 md:-mx-8 md:px-8"
+					className="sticky bottom-0 z-10 -mx-4 flex flex-col gap-3 border-t bg-background px-4 py-3 md:-mx-8 md:px-8"
 				>
-					<div className="flex flex-col text-sm">
-						<span className="font-medium">Modifications non enregistrées</span>
-						{blockedReason ? (
-							<span className="text-xs text-muted-foreground">
-								{blockedReason}
+					{trialPanel}
+					<div className="flex flex-wrap items-center justify-between gap-3">
+						<div className="flex flex-col text-sm">
+							<span className="font-medium">
+								Modifications non enregistrées
 							</span>
-						) : null}
-					</div>
-					<div className="flex flex-wrap items-center gap-2">
-						{confirmingReset ? (
-							<>
-								<Button
-									type="button"
-									variant="destructive"
-									size="sm"
-									disabled={saving}
-									onClick={onConfirmReset}
-								>
-									Confirmer l'annulation
-								</Button>
+							{blockedReason ? (
+								<span className="text-xs text-muted-foreground">
+									{blockedReason}
+								</span>
+							) : null}
+						</div>
+						<div className="flex flex-wrap items-center gap-2">
+							{confirmingReset ? (
+								<>
+									<Button
+										type="button"
+										variant="destructive"
+										size="sm"
+										disabled={saving}
+										onClick={onConfirmReset}
+									>
+										Confirmer l'annulation
+									</Button>
+									<Button
+										type="button"
+										variant="ghost"
+										size="sm"
+										onClick={onCancelReset}
+									>
+										Conserver mes modifications
+									</Button>
+								</>
+							) : (
 								<Button
 									type="button"
 									variant="ghost"
 									size="sm"
-									onClick={onCancelReset}
+									disabled={saving}
+									onClick={onRequestReset}
 								>
-									Conserver mes modifications
+									Annuler les modifications
 								</Button>
-							</>
-						) : (
-							<Button
-								type="button"
-								variant="ghost"
-								size="sm"
-								disabled={saving}
-								onClick={onRequestReset}
-							>
-								Annuler les modifications
+							)}
+							{onTry ? (
+								<Button
+									type="button"
+									variant="outline"
+									disabled={saving}
+									onClick={onTry}
+								>
+									Essayer sur les leads décidés
+								</Button>
+							) : null}
+							<Button type="submit" disabled={saving || blockedReason !== null}>
+								{saving ? 'Enregistrement…' : saveLabel}
 							</Button>
-						)}
-						<Button type="submit" disabled={saving || blockedReason !== null}>
-							{saving ? 'Enregistrement…' : saveLabel}
-						</Button>
+						</div>
 					</div>
 				</div>
 			) : null}

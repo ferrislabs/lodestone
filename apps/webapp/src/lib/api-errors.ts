@@ -111,6 +111,10 @@ const EXACT_MESSAGES: Readonly<Record<string, string>> = {
 		'Le fournisseur est un fournisseur par défaut',
 	'lead status changed concurrently, reload and retry':
 		'Le statut du lead a changé entre-temps, rechargez la page et réessayez',
+	'a trial is already pending or running for this profile':
+		'Un essai est déjà en attente ou en cours pour ce profil',
+	'no decided lead to try':
+		"Aucun lead décidé à essayer : validez ou rejetez d'abord quelques leads",
 	'revision number overflow': 'Nombre de révisions maximal atteint',
 	'Request payload rejected': 'Requête rejetée',
 	'Authentication failed': "Échec de l'authentification",

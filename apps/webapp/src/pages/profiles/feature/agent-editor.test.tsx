@@ -144,6 +144,7 @@ function Layout({ agents }: { agents: JsonObject[] }) {
 			tabs={[
 				...editorTabItems([]),
 				{ id: 'history', label: TAB_LABELS.history, problems: 0 },
+				{ id: 'trials', label: TAB_LABELS.trials, problems: 0 },
 			]}
 			exporting={false}
 			exportError={null}
@@ -174,6 +175,7 @@ function Layout({ agents }: { agents: JsonObject[] }) {
 				/>
 			}
 			history={<p>Historique</p>}
+			trials={<p>Essais</p>}
 			onTabChange={(next) => {
 				setTab(next)
 				setAgent(null)

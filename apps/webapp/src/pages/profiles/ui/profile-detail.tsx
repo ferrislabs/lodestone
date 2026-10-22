@@ -19,6 +19,7 @@ interface ProfileDetailProps {
 	exportError: string | null
 	definition: ReactNode
 	history: ReactNode
+	trials: ReactNode
 	onTabChange: (tab: ProfileTab) => void
 	onExport: () => void
 	onBack: () => void
@@ -35,6 +36,7 @@ export function ProfileDetail({
 	exportError,
 	definition,
 	history,
+	trials,
 	onTabChange,
 	onExport,
 	onBack,
@@ -86,7 +88,7 @@ export function ProfileDetail({
 						</p>
 					) : null}
 					<TabBar tabs={tabs} active={tab} onChange={onTabChange} />
-					{tab !== 'history' ? definition : history}
+					{tab === 'history' ? history : tab === 'trials' ? trials : definition}
 				</>
 			) : null}
 		</div>

@@ -200,6 +200,11 @@ export namespace Schemas {
     temperature?: (number | null) | undefined;
     timeout_seconds?: (number | null) | undefined;
   };
+  export type CreateTrialRequest = {
+    budget_cents?: (number | null) | undefined;
+    definition: Record<string, unknown>;
+    sample_size?: (number | null) | undefined;
+  };
   export type PaginationMetadata = {
     current_page: number;
     first_page: number;
@@ -824,6 +829,64 @@ export namespace Schemas {
     data: { provider_id?: (string | null) | undefined; tier: string };
     pagination?: (null | PaginationMetadata) | undefined;
   };
+  export type TrialDto = {
+    base_revision: number;
+    budget_cents: number;
+    created_at: string;
+    error?: (string | null) | undefined;
+    finished_at?: (string | null) | undefined;
+    id: string;
+    leads_tried: number;
+    profile_id: string;
+    sample_size: number;
+    spent_cents: number;
+    started_at?: (string | null) | undefined;
+    status: string;
+  };
+  export type TrialLeadDto = {
+    current_confidence?: (number | null) | undefined;
+    current_verdict?: (null | VerdictDto) | undefined;
+    domain: string;
+    error?: (string | null) | undefined;
+    label: string;
+    lead_id: string;
+    trial_confidence?: (number | null) | undefined;
+    trial_verdict?: (null | VerdictDto) | undefined;
+  };
+  export type VersionSummaryDto = {
+    precision?: (number | null) | undefined;
+    rejected: number;
+    rejected_discarded: number;
+    reliable: number;
+    reliable_validated: number;
+  };
+  export type TrialSummaryDto = {
+    changed: number;
+    current: VersionSummaryDto;
+    errors: number;
+    trial: VersionSummaryDto;
+  };
+  export type DataEnvelope_TrialDetailDto = {
+    data: TrialDto & { leads: Array<TrialLeadDto>; summary: TrialSummaryDto };
+    pagination?: (null | PaginationMetadata) | undefined;
+  };
+  export type DataEnvelope_TrialDto = {
+    data: {
+      base_revision: number;
+      budget_cents: number;
+      created_at: string;
+      error?: (string | null) | undefined;
+      finished_at?: (string | null) | undefined;
+      id: string;
+      leads_tried: number;
+      profile_id: string;
+      sample_size: number;
+      spent_cents: number;
+      started_at?: (string | null) | undefined;
+      status: string;
+    };
+    pagination?: (null | PaginationMetadata) | undefined;
+  };
   export type DataEnvelope_Vec_DraftEntryDto = {
     data: Array<{
       approach_angle: string;
@@ -964,6 +1027,23 @@ export namespace Schemas {
   };
   export type DataEnvelope_Vec_TierDto = {
     data: Array<{ provider_id?: (string | null) | undefined; tier: string }>;
+    pagination?: (null | PaginationMetadata) | undefined;
+  };
+  export type DataEnvelope_Vec_TrialDto = {
+    data: Array<{
+      base_revision: number;
+      budget_cents: number;
+      created_at: string;
+      error?: (string | null) | undefined;
+      finished_at?: (string | null) | undefined;
+      id: string;
+      leads_tried: number;
+      profile_id: string;
+      sample_size: number;
+      spent_cents: number;
+      started_at?: (string | null) | undefined;
+      status: string;
+    }>;
     pagination?: (null | PaginationMetadata) | undefined;
   };
   export type DraftEntryDto = {
@@ -1135,6 +1215,7 @@ export namespace Schemas {
     ok: boolean;
   };
   export type TierDto = { provider_id?: (string | null) | undefined; tier: string };
+  export type TrialDetailDto = TrialDto & { leads: Array<TrialLeadDto>; summary: TrialSummaryDto };
   export type UpdateCrawlSettingsRequest = { robots_policy: string };
   export type UpdateProfileRequest = { definition: Record<string, unknown> };
   export type UpdateProviderRequest = Partial<{
@@ -1630,6 +1711,34 @@ export namespace Endpoints {
     };
     responses: { 200: Schemas.DataEnvelope_RevisionDto; 400: unknown; 401: unknown; 404: unknown };
   };
+  export type get_List_trials = {
+    method: "GET";
+    path: "/api/v1/profiles/{profile_id}/trials";
+    requestFormat: "json";
+    parameters: {
+      path: { profile_id: string };
+    };
+    responses: { 200: Schemas.DataEnvelope_Vec_TrialDto; 400: unknown; 401: unknown; 403: unknown; 404: unknown };
+  };
+  export type post_Create_trial = {
+    method: "POST";
+    path: "/api/v1/profiles/{profile_id}/trials";
+    requestFormat: "json";
+    parameters: {
+      path: { profile_id: string };
+
+      body: Schemas.CreateTrialRequest;
+    };
+    responses: {
+      202: Schemas.DataEnvelope_TrialDto;
+      400: unknown;
+      401: unknown;
+      403: unknown;
+      404: unknown;
+      409: unknown;
+      422: Schemas.ErrorBody;
+    };
+  };
   export type get_Quality = {
     method: "GET";
     path: "/api/v1/quality";
@@ -1764,6 +1873,15 @@ export namespace Endpoints {
       409: unknown;
     };
   };
+  export type get_Get_trial = {
+    method: "GET";
+    path: "/api/v1/trials/{trial_id}";
+    requestFormat: "json";
+    parameters: {
+      path: { trial_id: string };
+    };
+    responses: { 200: Schemas.DataEnvelope_TrialDetailDto; 400: unknown; 401: unknown; 403: unknown; 404: unknown };
+  };
 
   // </Endpoints>
 }
@@ -1787,6 +1905,7 @@ export type EndpointByMethod = {
     "/api/v1/profiles/{profile_id}/leads/export": Endpoints.get_Export_leads;
     "/api/v1/profiles/{profile_id}/revisions": Endpoints.get_List_revisions;
     "/api/v1/profiles/{profile_id}/revisions/{number}": Endpoints.get_Get_revision;
+    "/api/v1/profiles/{profile_id}/trials": Endpoints.get_List_trials;
     "/api/v1/quality": Endpoints.get_Quality;
     "/api/v1/quality/calibration": Endpoints.get_Calibration;
     "/api/v1/settings/crawl": Endpoints.get_Get_crawl_settings;
@@ -1794,6 +1913,7 @@ export type EndpointByMethod = {
     "/api/v1/source-providers/oauth/callback": Endpoints.get_Source_provider_oauth_callback;
     "/api/v1/source-providers/{key}": Endpoints.get_Get_source_provider;
     "/api/v1/sources": Endpoints.get_List_sources;
+    "/api/v1/trials/{trial_id}": Endpoints.get_Get_trial;
   };
   patch: {
     "/api/v1/drafts/{assessment_id}": Endpoints.patch_Edit_draft;
@@ -1816,6 +1936,7 @@ export type EndpointByMethod = {
     "/api/v1/profiles/import": Endpoints.post_Import_profile;
     "/api/v1/profiles/{profile_id}/activate": Endpoints.post_Activate_profile;
     "/api/v1/profiles/{profile_id}/deactivate": Endpoints.post_Deactivate_profile;
+    "/api/v1/profiles/{profile_id}/trials": Endpoints.post_Create_trial;
     "/api/v1/quality/calibration/run": Endpoints.post_Run_calibration;
     "/api/v1/source-providers/{key}/disconnect": Endpoints.post_Disconnect_source_provider;
     "/api/v1/source-providers/{key}/oauth/start": Endpoints.post_Start_source_provider_oauth;
