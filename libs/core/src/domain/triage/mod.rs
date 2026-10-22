@@ -3,7 +3,7 @@ use chrono::{DateTime, Utc};
 use crate::domain::{
     NormalizedDomain,
     profile::definition::SearchAgent,
-    text::fold,
+    text::fold_with,
     values::{Provenance, SignalKind, SourceName},
 };
 
@@ -46,14 +46,7 @@ pub(crate) fn is_hyphen(letter: char) -> bool {
 }
 
 pub(crate) fn normalize(text: &str) -> String {
-    let unhyphenated: String = fold(text)
-        .chars()
-        .map(|letter| if is_hyphen(letter) { ' ' } else { letter })
-        .collect();
-    unhyphenated
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
+    fold_with(text, |letter| letter.is_whitespace() || is_hyphen(letter))
 }
 
 pub(crate) fn phrase_starts<'a>(
