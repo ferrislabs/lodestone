@@ -52,18 +52,24 @@ describe('classify', () => {
 
 	it('classifies every $def of the committed schema', () => {
 		const names = Object.keys(root.$defs ?? {})
-		expect(names.length).toBe(27)
+		expect(names.length).toBe(32)
 		for (const name of names) {
 			const node = classify(root, { $ref: `#/$defs/${name}` })
 			const expected = unions.includes(name)
 				? 'union'
-				: name === 'AgentId'
+				: ['AgentId', 'CountryCode', 'NafPrefix', 'DepartmentCode'].includes(
+							name,
+						)
 					? 'string'
-					: name === 'CountryCode'
-						? 'string'
-						: ['Language', 'RemoteFilter', 'ContractFilter'].includes(name)
-							? 'enum'
-							: 'object'
+					: [
+								'Language',
+								'RemoteFilter',
+								'ContractFilter',
+								'CompanyCategory',
+								'SectorFilter',
+							].includes(name)
+						? 'enum'
+						: 'object'
 			expect(node.kind, name).toBe(expected)
 		}
 	})

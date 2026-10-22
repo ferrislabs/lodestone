@@ -97,6 +97,12 @@ const LANGUAGE_SCHEMA: Schema = {
 	properties: { language: PROFILE_SCHEMA.properties?.language ?? {} },
 }
 
+const TARGET_COMPANIES_SCHEMA: Schema = {
+	properties: {
+		target_companies: PROFILE_SCHEMA.properties?.target_companies ?? {},
+	},
+}
+
 function sectionValue(value: JsonObject, key: string) {
 	return value[key]
 }
@@ -160,6 +166,12 @@ export function DefinitionTabContent({
 					<ObjectFields
 						context={context}
 						schema={LANGUAGE_SCHEMA}
+						path={[]}
+						value={value}
+					/>
+					<ObjectFields
+						context={context}
+						schema={TARGET_COMPANIES_SCHEMA}
 						path={[]}
 						value={value}
 					/>

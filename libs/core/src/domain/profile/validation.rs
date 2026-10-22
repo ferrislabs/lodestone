@@ -9,11 +9,12 @@ use crate::domain::{source_provider::descriptor as provider_descriptor, values::
 use super::{
     definition::{
         Agent, Aggregator, CnamePattern, ContactRanking, CountryCode, CustomInspection, DebtRule,
-        Escalation, EvidenceSettings, Fingerprint, Identity, MAX_CALIBRATION_FLOOR,
+        DepartmentCode, Escalation, EvidenceSettings, Fingerprint, Identity, MAX_CALIBRATION_FLOOR,
         MAX_DESCRIPTION_CHARS, MAX_HALF_LIFE_DAYS, MAX_OPTIONS, MAX_PROMPT_CHARS, MAX_SAMPLES,
         MAX_SAMPLING_TEMPERATURE, MIN_EXCLUSION_THRESHOLD, MIN_HALF_LIFE_DAYS, MIN_OPTIONS,
-        Matcher, PROFILE_SCHEMA_VERSION, ProfileDefinition, QualificationAgent, Question,
-        ScoringAgent, SearchAgent, SearchFilters, VerdictThresholds, VersionExtractor,
+        Matcher, NafPrefix, PROFILE_SCHEMA_VERSION, ProfileDefinition, QualificationAgent,
+        Question, ScoringAgent, SearchAgent, SearchFilters, TargetCompanies, VerdictThresholds,
+        VersionExtractor,
     },
     legacy::{
         ProfileDefinitionV1, ProfileDefinitionV2, ProfileDefinitionV3, ProfileDefinitionV4,
@@ -111,6 +112,14 @@ pub enum ProfileProblem {
     NoEvidenceWeight,
     #[error("must be an integer from {MIN_HALF_LIFE_DAYS} to {MAX_HALF_LIFE_DAYS} days")]
     InvalidHalfLife,
+    #[error("must be at most `max_employees`")]
+    MinAboveMax,
+    #[error("must be a NAF prefix such as `78`, `62.0` or `78.20Z`")]
+    InvalidNafPrefix,
+    #[error("must be a department code such as `75`, `2A` or `971`")]
+    InvalidDepartmentCode,
+    #[error("is also listed in `naf_include`")]
+    NafIncludedAndExcluded,
     #[error("must be a lowercase snake_case signal kind, or `default`")]
     InvalidSignalKind,
     #[error("must be a dotted numeric version")]
@@ -246,6 +255,10 @@ fn validate(definition: &ProfileDefinition) -> Check {
             }));
     }
     validate_identity(&definition.identity, &root.field("identity"))?;
+    validate_target_companies(
+        &definition.target_companies,
+        &root.field("target_companies"),
+    )?;
     validate_agents(definition, &root.field("agents"))?;
     validate_enrichment(definition, &root.field("enrichment"))?;
     validate_qualification_agents(
@@ -306,6 +319,64 @@ fn compile(pattern: &str, path: &Path) -> Result<regex::Regex, ProfileValidation
 fn validate_identity(identity: &Identity, path: &Path) -> Check {
     non_empty(&identity.offer, &path.field("offer"))?;
     non_empty(&identity.target_customer, &path.field("target_customer"))
+}
+
+fn validate_target_companies(rules: &TargetCompanies, path: &Path) -> Check {
+    if let (Some(min), Some(max)) = (rules.min_employees, rules.max_employees)
+        && min > max
+    {
+        return Err(path
+            .field("min_employees")
+            .fail(ProfileProblem::MinAboveMax));
+    }
+    unique(
+        rules
+            .categories
+            .iter()
+            .map(|category| category.as_str())
+            .enumerate(),
+        |index| path.field("categories").index(index),
+    )?;
+    validate_naf_prefixes(&rules.naf_include, &path.field("naf_include"))?;
+    validate_naf_prefixes(&rules.naf_exclude, &path.field("naf_exclude"))?;
+    let excluded = path.field("naf_exclude");
+    for (index, prefix) in rules.naf_exclude.iter().enumerate() {
+        if rules.naf_include.contains(prefix) {
+            return Err(excluded
+                .index(index)
+                .fail(ProfileProblem::NafIncludedAndExcluded));
+        }
+    }
+    validate_departments(&rules.departments, &path.field("departments"))
+}
+
+fn validate_naf_prefixes(prefixes: &[NafPrefix], path: &Path) -> Check {
+    for (index, prefix) in prefixes.iter().enumerate() {
+        if !prefix.is_valid() {
+            return Err(path.index(index).fail(ProfileProblem::InvalidNafPrefix));
+        }
+    }
+    unique(
+        prefixes.iter().map(|prefix| prefix.as_str()).enumerate(),
+        |index| path.index(index),
+    )
+}
+
+fn validate_departments(departments: &[DepartmentCode], path: &Path) -> Check {
+    for (index, department) in departments.iter().enumerate() {
+        if !department.is_valid() {
+            return Err(path
+                .index(index)
+                .fail(ProfileProblem::InvalidDepartmentCode));
+        }
+    }
+    unique(
+        departments
+            .iter()
+            .map(|department| department.as_str())
+            .enumerate(),
+        |index| path.index(index),
+    )
 }
 
 fn validate_agents(definition: &ProfileDefinition, path: &Path) -> Check {
@@ -922,7 +993,9 @@ mod tests {
     use super::*;
     use crate::domain::{
         profile::{
-            definition::{AgentId, Language, RemoteFilter, SourceTarget},
+            definition::{
+                AgentId, CompanyCategory, Language, RemoteFilter, SectorFilter, SourceTarget,
+            },
             fixtures::MINIMAL_PROFILE,
         },
         values::SourceName,
@@ -2924,5 +2997,153 @@ mod tests {
         agent["type"] = json!("crawler");
         let error = current_with(agent).unwrap_err();
         assert!(matches!(error.problem, ProfileProblem::Malformed(_)));
+    }
+
+    fn current() -> Value {
+        ValidatedProfile::parse(minimal()).unwrap().to_json()
+    }
+
+    fn targeting(section: Value) -> Result<ValidatedProfile, ProfileValidationError> {
+        let mut value = current();
+        value["target_companies"] = section;
+        ValidatedProfile::parse(value)
+    }
+
+    #[test]
+    fn a_profile_without_target_companies_serializes_without_the_section() {
+        assert!(current().get("target_companies").is_none());
+        let profile = targeting(json!({})).unwrap();
+        assert!(profile.definition().target_companies.is_empty());
+        assert!(profile.to_json().get("target_companies").is_none());
+        let explicit = targeting(json!({"sector": "any"})).unwrap();
+        assert_eq!(explicit, ValidatedProfile::parse(current()).unwrap());
+    }
+
+    #[test]
+    fn target_companies_are_parsed_and_round_trip() {
+        let section = json!({
+            "min_employees": 10,
+            "max_employees": 249,
+            "categories": ["PME", "ETI"],
+            "sector": "private",
+            "naf_include": ["62", "70.2"],
+            "naf_exclude": ["78.20Z"],
+            "departments": ["75", "2A", "971"]
+        });
+        let profile = targeting(section.clone()).unwrap();
+        let rules = &profile.definition().target_companies;
+        assert_eq!(rules.min_employees, Some(10));
+        assert_eq!(rules.max_employees, Some(249));
+        assert_eq!(
+            rules.categories,
+            [CompanyCategory::Pme, CompanyCategory::Eti]
+        );
+        assert_eq!(rules.sector, SectorFilter::Private);
+        assert_eq!(rules.naf_include.len(), 2);
+        assert_eq!(rules.naf_exclude[0].as_str(), "78.20Z");
+        assert_eq!(rules.departments.len(), 3);
+        assert_eq!(profile.to_json()["target_companies"], section);
+        assert_eq!(ValidatedProfile::parse(profile.to_json()).unwrap(), profile);
+    }
+
+    #[test]
+    fn a_minimum_above_the_maximum_is_rejected() {
+        let error = targeting(json!({"min_employees": 50, "max_employees": 10})).unwrap_err();
+        assert_eq!(error.path, "target_companies.min_employees");
+        assert_eq!(error.problem, ProfileProblem::MinAboveMax);
+        assert!(targeting(json!({"min_employees": 50, "max_employees": 50})).is_ok());
+        assert!(targeting(json!({"min_employees": 50})).is_ok());
+        assert!(targeting(json!({"max_employees": 0})).is_ok());
+    }
+
+    #[test]
+    fn naf_prefixes_follow_the_pattern() {
+        for valid in ["78", "62.0", "62.01", "78.20Z", "78.2", "78.2Z", "01.11Z"] {
+            let profile = targeting(json!({"naf_include": [valid]}));
+            assert!(profile.is_ok(), "{valid} should be valid");
+        }
+        for invalid in [
+            "7", "782", "78.", "78.200", "78.20z", "78.20ZZ", "ab", "78 ", ".20", "78.Z", "",
+        ] {
+            let error = targeting(json!({"naf_exclude": [invalid]})).unwrap_err();
+            assert_eq!(error.path, "target_companies.naf_exclude[0]", "{invalid}");
+            assert_eq!(error.problem, ProfileProblem::InvalidNafPrefix, "{invalid}");
+        }
+    }
+
+    #[test]
+    fn department_codes_follow_the_pattern() {
+        for valid in ["01", "75", "95", "2A", "2B", "971", "976", "20"] {
+            let profile = targeting(json!({"departments": [valid]}));
+            assert!(profile.is_ok(), "{valid} should be valid");
+        }
+        for invalid in ["1", "075", "2C", "2a", "970", "977", "9A", "", "7 5"] {
+            let error = targeting(json!({"departments": ["75", invalid]})).unwrap_err();
+            assert_eq!(error.path, "target_companies.departments[1]", "{invalid}");
+            assert_eq!(
+                error.problem,
+                ProfileProblem::InvalidDepartmentCode,
+                "{invalid}"
+            );
+        }
+    }
+
+    #[test]
+    fn duplicate_target_entries_are_rejected() {
+        let error = targeting(json!({"categories": ["PME", "GE", "PME"]})).unwrap_err();
+        assert_eq!(error.path, "target_companies.categories[2]");
+        assert_eq!(error.problem, ProfileProblem::Duplicate("PME".to_owned()));
+        let error = targeting(json!({"naf_include": ["62", "62"]})).unwrap_err();
+        assert_eq!(error.path, "target_companies.naf_include[1]");
+        assert_eq!(error.problem, ProfileProblem::Duplicate("62".to_owned()));
+        let error = targeting(json!({"naf_exclude": ["78", "78"]})).unwrap_err();
+        assert_eq!(error.path, "target_companies.naf_exclude[1]");
+        let error = targeting(json!({"departments": ["75", "75"]})).unwrap_err();
+        assert_eq!(error.path, "target_companies.departments[1]");
+        assert_eq!(error.problem, ProfileProblem::Duplicate("75".to_owned()));
+    }
+
+    #[test]
+    fn a_naf_prefix_cannot_be_included_and_excluded() {
+        let error =
+            targeting(json!({"naf_include": ["62", "78"], "naf_exclude": ["78"]})).unwrap_err();
+        assert_eq!(error.path, "target_companies.naf_exclude[0]");
+        assert_eq!(error.problem, ProfileProblem::NafIncludedAndExcluded);
+        assert!(targeting(json!({"naf_include": ["78"], "naf_exclude": ["78.20Z"]})).is_ok());
+    }
+
+    #[test]
+    fn unknown_categories_sectors_and_fields_are_malformed() {
+        for (section, path) in [
+            (
+                json!({"categories": ["XL"]}),
+                "target_companies.categories[0]",
+            ),
+            (
+                json!({"categories": ["pme"]}),
+                "target_companies.categories[0]",
+            ),
+            (json!({"sector": "mixed"}), "target_companies.sector"),
+            (json!({"extra": 1}), "target_companies.extra"),
+            (
+                json!({"min_employees": -1}),
+                "target_companies.min_employees",
+            ),
+        ] {
+            let error = targeting(section).unwrap_err();
+            assert_eq!(error.path, path);
+            assert!(matches!(error.problem, ProfileProblem::Malformed(_)));
+        }
+    }
+
+    #[test]
+    fn older_documents_gain_an_empty_target_companies_section() {
+        let profile = ValidatedProfile::parse(minimal()).unwrap();
+        assert!(profile.definition().target_companies.is_empty());
+        let mut eighteen = current();
+        eighteen["schema_version"] = json!(18);
+        let upgraded = ValidatedProfile::parse(eighteen).unwrap();
+        assert!(upgraded.definition().target_companies.is_empty());
+        assert_eq!(upgraded.definition().schema_version, 19);
     }
 }

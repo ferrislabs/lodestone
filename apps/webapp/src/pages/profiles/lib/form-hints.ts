@@ -45,6 +45,16 @@ export const PROFILE_HINTS: UiHints = {
 	},
 	optionLabels: {
 		language: { fr: 'Français', en: 'English' },
+		'target_companies.sector': {
+			any: 'Public et privé',
+			public: 'Public uniquement',
+			private: 'Privé uniquement',
+		},
+		'target_companies.categories': {
+			PME: 'PME',
+			ETI: 'ETI',
+			GE: 'Grande entreprise',
+		},
 	},
 	choices: {
 		'agents.accept_min_keywords': { min: 1, max: 5 },

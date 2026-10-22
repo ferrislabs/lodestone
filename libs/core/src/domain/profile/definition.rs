@@ -18,6 +18,8 @@ pub struct ProfileDefinition {
     #[schemars(description = "Profile format version. Must be 19.")]
     pub schema_version: u32,
     pub identity: Identity,
+    #[serde(default, skip_serializing_if = "TargetCompanies::is_empty")]
+    pub target_companies: TargetCompanies,
     #[serde(default)]
     #[schemars(
         title = "Answer language",
@@ -62,6 +64,146 @@ pub struct Identity {
     pub offer: String,
     #[schemars(description = "Who buys it, in free text.")]
     pub target_customer: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(
+    title = "Target companies",
+    description = "Which companies the profile aims at, judged on the official French company register before any model call. A lead whose company falls outside is excluded and leaves the lead list. Every rule is optional and a value the register does not give passes. Closed companies are excluded for every profile, with or without this section."
+)]
+pub struct TargetCompanies {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        description = "Minimum headcount. The register gives a headcount range, not a number: a company is kept when its range overlaps from min_employees to max_employees."
+    )]
+    pub min_employees: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        description = "Maximum headcount. The register gives a headcount range, not a number: a company is kept when its range overlaps from min_employees to max_employees."
+    )]
+    pub max_employees: Option<u32>,
+    #[serde(default)]
+    #[schemars(
+        description = "Company categories kept: PME (small and medium), ETI (mid-size) or GE (large). Empty means every category."
+    )]
+    pub categories: Vec<CompanyCategory>,
+    #[serde(default)]
+    #[schemars(
+        description = "public keeps only public-law entities, private excludes them, any keeps both. Default any."
+    )]
+    pub sector: SectorFilter,
+    #[serde(default)]
+    #[schemars(
+        description = "NAF code prefixes kept, for example 62, 62.0 or 62.01Z. A company whose main activity matches none of them is excluded. Empty means every activity."
+    )]
+    pub naf_include: Vec<NafPrefix>,
+    #[serde(default)]
+    #[schemars(
+        description = "NAF code prefixes excluded, for example 78, 78.2 or 78.20Z. A company whose main activity matches one of them is excluded. A prefix cannot also be in naf_include."
+    )]
+    pub naf_exclude: Vec<NafPrefix>,
+    #[serde(default)]
+    #[schemars(
+        description = "Departments of the head office kept, for example 75, 2A or 971. A head office abroad has no department and is kept. Empty means every department."
+    )]
+    pub departments: Vec<DepartmentCode>,
+}
+
+impl TargetCompanies {
+    pub fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "UPPERCASE")]
+#[schemars(
+    title = "Company category",
+    description = "Size category of the register: PME (small and medium), ETI (mid-size) or GE (large)."
+)]
+pub enum CompanyCategory {
+    Pme,
+    Eti,
+    Ge,
+}
+
+impl CompanyCategory {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Pme => "PME",
+            Self::Eti => "ETI",
+            Self::Ge => "GE",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+#[schemars(
+    title = "Sector filter",
+    description = "public keeps only public-law entities, private excludes them, any keeps both."
+)]
+pub enum SectorFilter {
+    #[default]
+    Any,
+    Public,
+    Private,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(transparent)]
+#[schemars(
+    title = "NAF prefix",
+    description = "Start of a NAF code: a division such as 78, a group or class such as 62.0 or 62.01, or a full code such as 78.20Z."
+)]
+pub struct NafPrefix(#[schemars(regex(pattern = "^[0-9]{2}(\\.[0-9]{1,2}[A-Z]?)?$"))] String);
+
+impl NafPrefix {
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn is_valid(&self) -> bool {
+        fn division(text: &str) -> bool {
+            text.len() == 2 && text.bytes().all(|byte| byte.is_ascii_digit())
+        }
+        let Some((head, tail)) = self.0.split_once('.') else {
+            return division(&self.0);
+        };
+        let digits = tail.bytes().take_while(u8::is_ascii_digit).count();
+        let rest = &tail.as_bytes()[digits..];
+        division(head) && (1..=2).contains(&digits) && matches!(rest, [] | [b'A'..=b'Z'])
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(transparent)]
+#[schemars(
+    title = "Department code",
+    description = "French department code: two digits, 2A or 2B for Corsica, or 971 to 976 for the overseas departments."
+)]
+pub struct DepartmentCode(#[schemars(regex(pattern = "^([0-9]{2}|2A|2B|97[1-6])$"))] String);
+
+impl DepartmentCode {
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn is_valid(&self) -> bool {
+        matches!(
+            self.0.as_bytes(),
+            [b'0'..=b'9', b'0'..=b'9'] | [b'9', b'7', b'1'..=b'6']
+        ) || matches!(self.0.as_str(), "2A" | "2B")
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]

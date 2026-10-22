@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 use common::CoreError;
-
+use serde_json::{Value, from_value};
 use uuid::Uuid;
 
 use crate::{
@@ -11,6 +11,7 @@ use crate::{
             Siren,
         },
         qualification::Verdict,
+        targeting::TargetedLead,
     },
 };
 
@@ -112,6 +113,25 @@ impl TryFrom<SiblingRow> for SiblingLead {
                 .map(|raw| Verdict::parse(raw).ok_or_else(|| invalid("verdict")))
                 .transpose()?,
             confidence: row.confidence,
+        })
+    }
+}
+
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct TargetedRow {
+    pub id: Uuid,
+    pub excluded_reason: Option<String>,
+    pub official: Value,
+}
+
+impl TryFrom<TargetedRow> for TargetedLead {
+    type Error = CoreError;
+
+    fn try_from(row: TargetedRow) -> Result<Self, Self::Error> {
+        Ok(Self {
+            lead_id: LeadId(row.id),
+            exclusion: row.excluded_reason,
+            official: from_value(row.official).map_err(|_| invalid("official data"))?,
         })
     }
 }

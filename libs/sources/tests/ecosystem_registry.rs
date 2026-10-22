@@ -234,8 +234,11 @@ async fn the_registry_modules_read_the_siren_found_by_the_identity_module(pool: 
             "activite_principale": "62.01Z",
             "section_activite_principale": "J",
             "tranche_effectif_salarie": "12",
+            "categorie_entreprise": "PME",
+            "nature_juridique": "5710",
+            "etat_administratif": "A",
             "date_creation": "2004-06-09",
-            "siege": {"code_postal": "69002", "libelle_commune": "LYON"}
+            "siege": {"code_postal": "69002", "libelle_commune": "LYON", "departement": "69"}
         }]}));
     });
     let mut failing = server.mock(|when, then| {

@@ -27,6 +27,7 @@ pub(crate) mod settings;
 pub(crate) mod source;
 pub(crate) mod source_provider;
 pub(crate) mod suppression;
+pub(crate) mod targeting;
 pub(crate) mod territory;
 pub(crate) mod timeline;
 pub(crate) mod triage;

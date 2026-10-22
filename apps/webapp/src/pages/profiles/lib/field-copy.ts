@@ -38,6 +38,50 @@ export const FIELD_COPY: Readonly<Record<string, FieldCopy>> = {
 		label: 'Client cible',
 		description: 'Qui achète, en texte libre.',
 	},
+	target_companies: {
+		label: 'Entreprises cibles',
+		description:
+			"Règles sur les données officielles des entreprises françaises, appliquées avant tout appel au modèle. Un lead dont l'entreprise est hors cible est exclu et quitte la liste. Une donnée absente du registre ne compte pas comme un échec. Les entreprises fermées sont toujours exclues.",
+	},
+	'target_companies.min_employees': {
+		label: 'Effectif minimum',
+		description:
+			"Le registre donne une tranche d'effectif : l'entreprise est gardée quand sa tranche croise l'intervalle entre l'effectif minimum et l'effectif maximum.",
+	},
+	'target_companies.max_employees': {
+		label: 'Effectif maximum',
+		description:
+			"Le registre donne une tranche d'effectif : l'entreprise est gardée quand sa tranche croise l'intervalle entre l'effectif minimum et l'effectif maximum.",
+	},
+	'target_companies.categories': {
+		label: "Catégories d'entreprise",
+		description:
+			'PME, ETI ou grande entreprise, selon le registre. Vide : toutes les catégories.',
+		add: 'Ajouter une catégorie',
+	},
+	'target_companies.sector': {
+		label: 'Secteur',
+		description:
+			'Public : seulement les personnes morales de droit public. Privé : sans elles.',
+	},
+	'target_companies.naf_include': {
+		label: 'Activités gardées (NAF)',
+		description:
+			"Débuts de code NAF gardés, par exemple 62, 62.0 ou 62.01Z. Une entreprise dont l'activité principale ne commence par aucun d'eux est exclue. Vide : toutes les activités.",
+		add: 'Ajouter un code',
+	},
+	'target_companies.naf_exclude': {
+		label: 'Activités exclues (NAF)',
+		description:
+			"Débuts de code NAF exclus, par exemple 78 pour les agences de recrutement et d'intérim, qui publient des offres pour leurs clients.",
+		add: 'Ajouter un code',
+	},
+	'target_companies.departments': {
+		label: 'Départements du siège',
+		description:
+			"Par exemple 75, 2A ou 971. Un siège à l'étranger n'a pas de département et reste gardé. Vide : tous les départements.",
+		add: 'Ajouter un département',
+	},
 	agents: {
 		label: 'Agents',
 		description:

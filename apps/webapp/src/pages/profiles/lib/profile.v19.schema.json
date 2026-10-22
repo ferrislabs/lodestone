@@ -95,6 +95,9 @@
 				"$ref": "#/$defs/ScoringAgent"
 			}
 		},
+		"target_companies": {
+			"$ref": "#/$defs/TargetCompanies"
+		},
 		"verdict": {
 			"$ref": "#/$defs/VerdictThresholds",
 			"default": {
@@ -313,6 +316,12 @@
 			"additionalProperties": false,
 			"required": ["provider", "target_suffix"]
 		},
+		"CompanyCategory": {
+			"title": "Company category",
+			"description": "Size category of the register: PME (small and medium), ETI (mid-size) or GE (large).",
+			"type": "string",
+			"enum": ["PME", "ETI", "GE"]
+		},
 		"ContactRanking": {
 			"title": "Contact ranking",
 			"description": "Preferred email local parts, most preferred first.",
@@ -436,6 +445,12 @@
 					"required": ["kind", "version"]
 				}
 			]
+		},
+		"DepartmentCode": {
+			"title": "Department code",
+			"description": "French department code: two digits, 2A or 2B for Corsica, or 971 to 976 for the overseas departments.",
+			"type": "string",
+			"pattern": "^([0-9]{2}|2A|2B|97[1-6])$"
 		},
 		"Enrichment": {
 			"title": "Enrichment",
@@ -717,6 +732,12 @@
 				}
 			]
 		},
+		"NafPrefix": {
+			"title": "NAF prefix",
+			"description": "Start of a NAF code: a division such as 78, a group or class such as 62.0 or 62.01, or a full code such as 78.20Z.",
+			"type": "string",
+			"pattern": "^[0-9]{2}(\\.[0-9]{1,2}[A-Z]?)?$"
+		},
 		"QualificationAgent": {
 			"title": "Qualification agent",
 			"description": "Evaluates every lead of the profile from one angle by asking a model a list of questions.",
@@ -973,6 +994,69 @@
 				"remote": {
 					"description": "Remote work requirement. Default any.",
 					"$ref": "#/$defs/RemoteFilter",
+					"default": "any"
+				}
+			},
+			"additionalProperties": false
+		},
+		"SectorFilter": {
+			"title": "Sector filter",
+			"description": "public keeps only public-law entities, private excludes them, any keeps both.",
+			"type": "string",
+			"enum": ["any", "public", "private"]
+		},
+		"TargetCompanies": {
+			"title": "Target companies",
+			"description": "Which companies the profile aims at, judged on the official French company register before any model call. A lead whose company falls outside is excluded and leaves the lead list. Every rule is optional and a value the register does not give passes. Closed companies are excluded for every profile, with or without this section.",
+			"type": "object",
+			"properties": {
+				"categories": {
+					"description": "Company categories kept: PME (small and medium), ETI (mid-size) or GE (large). Empty means every category.",
+					"type": "array",
+					"default": [],
+					"items": {
+						"$ref": "#/$defs/CompanyCategory"
+					}
+				},
+				"departments": {
+					"description": "Departments of the head office kept, for example 75, 2A or 971. A head office abroad has no department and is kept. Empty means every department.",
+					"type": "array",
+					"default": [],
+					"items": {
+						"$ref": "#/$defs/DepartmentCode"
+					}
+				},
+				"max_employees": {
+					"description": "Maximum headcount. The register gives a headcount range, not a number: a company is kept when its range overlaps from min_employees to max_employees.",
+					"type": ["integer", "null"],
+					"format": "uint32",
+					"minimum": 0
+				},
+				"min_employees": {
+					"description": "Minimum headcount. The register gives a headcount range, not a number: a company is kept when its range overlaps from min_employees to max_employees.",
+					"type": ["integer", "null"],
+					"format": "uint32",
+					"minimum": 0
+				},
+				"naf_exclude": {
+					"description": "NAF code prefixes excluded, for example 78, 78.2 or 78.20Z. A company whose main activity matches one of them is excluded. A prefix cannot also be in naf_include.",
+					"type": "array",
+					"default": [],
+					"items": {
+						"$ref": "#/$defs/NafPrefix"
+					}
+				},
+				"naf_include": {
+					"description": "NAF code prefixes kept, for example 62, 62.0 or 62.01Z. A company whose main activity matches none of them is excluded. Empty means every activity.",
+					"type": "array",
+					"default": [],
+					"items": {
+						"$ref": "#/$defs/NafPrefix"
+					}
+				},
+				"sector": {
+					"description": "public keeps only public-law entities, private excludes them, any keeps both. Default any.",
+					"$ref": "#/$defs/SectorFilter",
 					"default": "any"
 				}
 			},

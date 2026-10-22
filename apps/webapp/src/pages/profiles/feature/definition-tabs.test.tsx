@@ -29,6 +29,7 @@ import {
 	type EditorTab,
 	editorTabItems,
 	TAB_LABELS,
+	tabOfPath,
 } from '#/pages/profiles/lib/tabs'
 import type { Problem } from '#/pages/profiles/lib/types'
 import { ProfileEditor } from '#/pages/profiles/ui/profile-editor'
@@ -821,6 +822,32 @@ describe('definition tabs', () => {
 		).toEqual(['Français', 'English'])
 		fireEvent.change(select, { target: { value: 'en' } })
 		expect(select).toHaveProperty('value', 'en')
+	})
+
+	it('edits the target companies in the identity tab with french choices', () => {
+		render(<Harness />)
+		expect(screen.getByText('Entreprises cibles')).toBeTruthy()
+		expect(
+			screen.getByText(/Les entreprises fermées sont toujours exclues/),
+		).toBeTruthy()
+		expect(screen.queryByLabelText('Secteur')).toBeNull()
+		fireEvent.click(screen.getByLabelText('Activer : Entreprises cibles'))
+		const sector = screen.getByLabelText('Secteur')
+		expect(sector).toHaveProperty('value', 'any')
+		expect(
+			within(sector)
+				.getAllByRole('option')
+				.map((option) => option.textContent),
+		).toEqual(['Public et privé', 'Public uniquement', 'Privé uniquement'])
+		fireEvent.change(sector, { target: { value: 'public' } })
+		expect(screen.getByLabelText('Secteur')).toHaveProperty('value', 'public')
+		expect(screen.getByText('Activités exclues (NAF)')).toBeTruthy()
+		expect(screen.getByText('Départements du siège')).toBeTruthy()
+		expect(screen.getByLabelText('Activer : Effectif minimum')).toBeTruthy()
+	})
+
+	it('counts a target companies problem on the identity tab', () => {
+		expect(tabOfPath('target_companies.naf_exclude[0]')).toBe('identity')
 	})
 
 	it('puts the contact ranking in a Contacts section at the bottom of the sourcing tab', () => {

@@ -638,6 +638,10 @@ mod tests {
             head_office_country: Some("France".to_owned()),
             head_office_country_code: code.map(str::to_owned),
             created_on: None,
+            active: None,
+            category: None,
+            legal_nature: None,
+            head_office_department: None,
         }
     }
 

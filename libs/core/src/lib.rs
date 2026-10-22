@@ -172,6 +172,10 @@ pub use domain::{
     suppression::{
         SuppressionEntry, SuppressionId, SuppressionTarget, ports::SuppressionRepository,
     },
+    targeting::{
+        CLOSED_COMPANY_REASON, Ruling, TARGET_REASON_PREFIX, TargetedLead, department_of,
+        is_target_reason, ruling, target_exclusion,
+    },
     timeline::{
         DEFAULT_RETENTION_DAYS, EventActor, EventStatus, InFlightStep, RECONSTRUCTED,
         ROUND_STARTED, RoundSlot, RoundTrigger, TimelineEntry, TimelineEvent, TimelineRound,

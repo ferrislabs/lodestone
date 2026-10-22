@@ -1,13 +1,18 @@
+use chrono::Utc;
 use common::CoreError;
 use lodestone_macros::transactional;
 
 use crate::{
-    application::LodestoneUseCase,
-    domain::profile::{
-        ActiveProfile, Profile, ProfileId, ProfileRevision, Revised,
-        commands::{CreateProfileCommand, ReviseProfileCommand},
-        service::ProfileService,
+    application::{LodestoneUseCase, targeting::sweep_job},
+    domain::{
+        output::ports::JobOutbox,
+        profile::{
+            ActiveProfile, Profile, ProfileId, ProfileRevision, Revised,
+            commands::{CreateProfileCommand, ReviseProfileCommand},
+            service::ProfileService,
+        },
     },
+    infrastructure::job::postgres::PgJobOutbox,
 };
 
 impl LodestoneUseCase {
@@ -17,7 +22,15 @@ impl LodestoneUseCase {
         command: CreateProfileCommand,
     ) -> Result<ActiveProfile, CoreError> {
         let mut service = ProfileService::new(profile_repository);
-        service.create_profile(command).await
+        let created = service.create_profile(command).await?;
+        let now = Utc::now();
+        PgJobOutbox::new(&tx)
+            .enqueue(
+                &sweep_job(created.profile.id, created.revision.number, now)?,
+                now,
+            )
+            .await?;
+        Ok(created)
     }
 
     #[transactional(profile)]
@@ -26,7 +39,19 @@ impl LodestoneUseCase {
         command: ReviseProfileCommand,
     ) -> Result<Revised, CoreError> {
         let mut service = ProfileService::new(profile_repository);
-        service.revise_profile(command).await
+        let revised = service.revise_profile(command).await?;
+        let now = Utc::now();
+        PgJobOutbox::new(&tx)
+            .enqueue(
+                &sweep_job(
+                    revised.revision().profile_id,
+                    revised.revision().number,
+                    now,
+                )?,
+                now,
+            )
+            .await?;
+        Ok(revised)
     }
 
     #[transactional(profile)]

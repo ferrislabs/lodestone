@@ -76,6 +76,14 @@ pub struct OfficialData {
     pub head_office_country: Option<String>,
     pub head_office_country_code: Option<String>,
     pub created_on: Option<NaiveDate>,
+    #[serde(default)]
+    pub active: Option<bool>,
+    #[serde(default)]
+    pub category: Option<String>,
+    #[serde(default)]
+    pub legal_nature: Option<String>,
+    #[serde(default)]
+    pub head_office_department: Option<String>,
 }
 
 impl OfficialData {
@@ -417,6 +425,10 @@ mod tests {
             head_office_country: Some("France".to_owned()),
             head_office_country_code: Some("FR".to_owned()),
             created_on: NaiveDate::from_ymd_opt(1955, 1, 1),
+            active: Some(true),
+            category: Some("GE".to_owned()),
+            legal_nature: Some("5599".to_owned()),
+            head_office_department: Some("75".to_owned()),
         }
     }
 

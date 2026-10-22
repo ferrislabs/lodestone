@@ -77,7 +77,7 @@ fn register_answer(register: &MockServer) -> Mock<'_> {
         then.status(200)
             .header("content-type", "application/json")
             .body(format!(
-                r#"{{"results":[{{"siren":"{SIREN}","nom_complet":"ACME INDUSTRIE","activite_principale":"62.01Z","section_activite_principale":"J","tranche_effectif_salarie":"12","date_creation":"2010-05-04","siege":{{"code_postal":"69002","libelle_commune":"LYON"}}}}]}}"#
+                r#"{{"results":[{{"siren":"{SIREN}","nom_complet":"ACME INDUSTRIE","activite_principale":"62.01Z","section_activite_principale":"J","tranche_effectif_salarie":"12","categorie_entreprise":"PME","nature_juridique":"5710","etat_administratif":"A","date_creation":"2010-05-04","siege":{{"code_postal":"69002","libelle_commune":"LYON","departement":"69"}}}}]}}"#
             ));
     })
 }
@@ -117,6 +117,10 @@ async fn a_legal_notice_with_a_siret_gives_the_official_data_of_its_siren() {
         Some("20 à 49 salariés")
     );
     assert_eq!(official.head_office_city.as_deref(), Some("LYON"));
+    assert_eq!(official.active, Some(true));
+    assert_eq!(official.category.as_deref(), Some("PME"));
+    assert_eq!(official.legal_nature.as_deref(), Some("5710"));
+    assert_eq!(official.head_office_department.as_deref(), Some("69"));
     assert_eq!(build.pages.len(), 3);
     assert!(build.pages[0].text.contains("ACME Industrie"));
     assert!(
