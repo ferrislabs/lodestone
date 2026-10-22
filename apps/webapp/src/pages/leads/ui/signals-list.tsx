@@ -1,7 +1,7 @@
 import { Badge } from '#/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '#/components/ui/card'
 import { sourceLabel } from '#/lib/labels'
-import { signalTitle } from '#/pages/leads/lib/enrichment'
+import { signalExcerpts, signalTitle } from '#/pages/leads/lib/enrichment'
 import { formatDateTime, formatRatio } from '#/pages/leads/lib/format'
 import type { Signal } from '#/pages/leads/lib/types'
 import { ProvenanceLink } from './provenance-link'
@@ -36,6 +36,14 @@ export function SignalsList({ signals }: SignalsListProps) {
 									<span>Force : {formatRatio(signal.strength)}</span>
 									<span>Observé : {formatDateTime(signal.observed_at)}</span>
 								</div>
+								{signalExcerpts(signal).map((excerpt) => (
+									<blockquote
+										key={excerpt}
+										className="border-l-2 pl-2 text-xs text-muted-foreground"
+									>
+										{excerpt}
+									</blockquote>
+								))}
 								<ProvenanceLink provenance={signal.provenance} />
 							</li>
 						))}

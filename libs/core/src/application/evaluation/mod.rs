@@ -34,7 +34,7 @@ use crate::{
             AgentWork, CancelReason, WorkKind, WorkTarget, first_stop, ports::AgentWorkRepository,
         },
         calibration::{Calibrations, opinion_score},
-        facts::{LeadFacts, signal_sentence},
+        facts::{LeadFacts, signal_excerpts, signal_sentence},
         job::ports::Clock,
         lead::{Lead, LeadId, Signal},
         llm::{
@@ -193,14 +193,19 @@ where
 }
 
 pub fn render_signal(signal: &Signal) -> String {
-    format!(
+    let mut rendered = format!(
         "{}\nsource: {}\nobserved: {}",
         signal_sentence(signal),
         signal.source.as_str(),
         signal
             .observed_at
             .to_rfc3339_opts(SecondsFormat::Secs, true),
-    )
+    );
+    for passage in signal_excerpts(signal) {
+        rendered.push_str("\nexcerpt: ");
+        rendered.push_str(passage);
+    }
+    rendered
 }
 
 type Entry<P> = (Option<ProviderId>, Option<Arc<Loaded<P>>>);
@@ -1409,7 +1414,7 @@ impl LodestoneUseCase {
 #[cfg(test)]
 mod tests {
     use chrono::TimeZone;
-    use serde_json::json;
+    use serde_json::{Value, json};
 
     use super::*;
     use crate::domain::{
@@ -1471,5 +1476,62 @@ mod tests {
     #[test]
     fn the_raw_json_is_not_given_to_the_model() {
         assert!(!render_signal(&signal(Some("keycloak"))).contains('{'));
+    }
+
+    fn offer(excerpts: Value) -> Signal {
+        Signal {
+            kind: SignalKind::parse("job_offer").unwrap(),
+            value: Some("Ingénieur IAM".to_owned()),
+            source: SourceName::FranceTravail,
+            raw: json!({
+                "matched": ["keycloak"],
+                "details": {"company": "Acme"},
+                "excerpts": excerpts
+            }),
+            provenance: Provenance::parse("https://candidat.francetravail.fr/offres/1").unwrap(),
+            ..signal(None)
+        }
+    }
+
+    #[test]
+    fn each_excerpt_is_a_line_after_the_metadata() {
+        assert_eq!(
+            render_signal(&offer(json!([
+                "…migration vers Keycloak pour le SSO…",
+                "annuaire LDAP"
+            ]))),
+            "Offre d'emploi : Ingénieur IAM (entreprise : Acme ; mots-clés : keycloak)\nsource: france_travail\nobserved: 2027-01-15T08:00:00Z\nexcerpt: …migration vers Keycloak pour le SSO…\nexcerpt: annuaire LDAP"
+        );
+    }
+
+    #[test]
+    fn a_signal_without_excerpts_renders_without_an_excerpt_line() {
+        for excerpts in [json!([]), json!([" "]), json!(null), json!("texte")] {
+            let content = render_signal(&offer(excerpts));
+            assert!(!content.contains("excerpt:"));
+            assert!(content.ends_with("observed: 2027-01-15T08:00:00Z"));
+        }
+    }
+
+    #[test]
+    fn a_quote_copied_from_an_excerpt_passes_the_evidence_check() {
+        let content = render_signal(&offer(json!(["…migration vers Keycloak pour le SSO…"])));
+        let documents = [UntrustedDocument {
+            source: "https://candidat.francetravail.fr/offres/1",
+            content: &content,
+        }];
+        let quotes = [
+            EvidenceQuote {
+                document_index: 0,
+                quote: "migration vers Keycloak pour le SSO".to_owned(),
+            },
+            EvidenceQuote {
+                document_index: 0,
+                quote: "migration vers Okta".to_owned(),
+            },
+        ];
+        let check = check_evidence(&quotes, &documents);
+        assert_eq!(check.verified.len(), 1);
+        assert_eq!(check.rejected, 1);
     }
 }

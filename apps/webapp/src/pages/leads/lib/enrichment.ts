@@ -42,3 +42,20 @@ export function signalTitle(signal: Signal): string {
 	}
 	return signal.sentence
 }
+
+export function signalExcerpts(signal: Signal): string[] {
+	const raw: unknown = signal.raw
+	if (typeof raw !== 'object' || raw === null) {
+		return []
+	}
+	const excerpts: unknown = (raw as Record<string, unknown>).excerpts
+	if (!Array.isArray(excerpts)) {
+		return []
+	}
+	const passages = excerpts.flatMap((excerpt: unknown) =>
+		typeof excerpt === 'string' && excerpt.trim() !== ''
+			? [excerpt.trim()]
+			: [],
+	)
+	return [...new Set(passages)]
+}

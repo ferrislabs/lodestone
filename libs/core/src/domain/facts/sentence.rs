@@ -135,6 +135,19 @@ pub fn signal_sentence(signal: &Signal) -> String {
     }
 }
 
+pub fn signal_excerpts(signal: &Signal) -> Vec<&str> {
+    signal
+        .raw
+        .get("excerpts")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(str::trim)
+        .filter(|passage| !passage.is_empty())
+        .collect()
+}
+
 fn fallback(kind: &str, value: Option<&str>) -> String {
     match value {
         Some(value) => format!("{kind} : {value}"),
@@ -404,6 +417,54 @@ mod tests {
             "dns:sso.acme.com?type=CNAME",
         );
         assert_eq!(signal_sentence(&signal), "saas_provider");
+    }
+
+    #[test]
+    fn excerpts_are_read_in_order_from_the_raw_signal() {
+        let signal = signal(
+            "job_offer",
+            Some("Ingénieur IAM"),
+            SourceName::FranceTravail,
+            json!({"matched": ["iam"], "excerpts": ["…migration vers Keycloak…", "projet IAM"]}),
+            "https://candidat.francetravail.fr/offres/1",
+        );
+        assert_eq!(
+            signal_excerpts(&signal),
+            ["…migration vers Keycloak…", "projet IAM"]
+        );
+    }
+
+    #[test]
+    fn excerpts_skip_non_strings_and_blanks() {
+        let signal = signal(
+            "public_tender",
+            Some("Marché IAM"),
+            SourceName::Boamp,
+            json!({"excerpts": ["un", 3, null, "  ", {"a": 1}, " deux "]}),
+            "https://www.boamp.fr/avis/1",
+        );
+        assert_eq!(signal_excerpts(&signal), ["un", "deux"]);
+    }
+
+    #[test]
+    fn a_signal_without_usable_excerpts_has_none() {
+        for raw in [
+            json!({}),
+            json!({"excerpts": []}),
+            json!({"excerpts": "texte"}),
+            json!({"excerpts": {"a": "b"}}),
+            json!({"excerpts": null}),
+            json!("excerpts"),
+        ] {
+            let signal = signal(
+                "public_tender",
+                Some("Marché IAM"),
+                SourceName::Boamp,
+                raw,
+                "https://www.boamp.fr/avis/1",
+            );
+            assert!(signal_excerpts(&signal).is_empty());
+        }
     }
 
     #[test]

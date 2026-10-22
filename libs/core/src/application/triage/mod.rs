@@ -20,7 +20,7 @@ use crate::{
         },
         run::{Run, RunId, RunOutcome, ports::RunRepository},
         source::{Observation, SourceError},
-        triage::{Candidate, Route, passes_filters, route},
+        triage::{Candidate, Route, excerpts, passes_filters, route},
         values::{SourceName, UnitInterval},
     },
 };
@@ -121,12 +121,16 @@ fn observation(
     route: &str,
     strength: f64,
 ) -> Result<Observation, CoreError> {
-    let raw = json!({
+    let mut raw = json!({
         "title": candidate.title,
         "matched": matched,
         "route": route,
         "details": candidate.details,
     });
+    let passages = excerpts(&candidate.text, matched);
+    if !passages.is_empty() {
+        raw["excerpts"] = json!(passages);
+    }
     Ok(Observation {
         domain: candidate.domain.clone(),
         kind: candidate.kind.clone(),
