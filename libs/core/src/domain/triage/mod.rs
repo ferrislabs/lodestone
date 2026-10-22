@@ -12,7 +12,7 @@ pub mod excerpt;
 pub mod filters;
 
 pub use excerpt::excerpts;
-pub use filters::passes as passes_filters;
+pub use filters::{FilterKind, failing_filter, passes as passes_filters};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Candidate {

@@ -52,6 +52,8 @@ impl Modify for SecurityAddon {
         handlers::drafts::edit_draft,
         handlers::drafts::approve_draft,
         handlers::drafts::reject_draft,
+        handlers::dropped::list_dropped,
+        handlers::dropped::review_dropped,
         handlers::quality::quality,
         handlers::calibration::calibration,
         handlers::calibration::run_calibration,

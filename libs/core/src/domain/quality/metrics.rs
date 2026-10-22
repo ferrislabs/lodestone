@@ -3,6 +3,7 @@ use std::collections::{BTreeMap, HashMap};
 use chrono::{DateTime, Utc};
 
 use crate::domain::{
+    dropped::RecallRow,
     lead::LeadId,
     profile::{ProfileId, definition::VerdictThresholds},
     qualification::Verdict,
@@ -238,6 +239,7 @@ pub struct QualityReport {
     pub profiles: Vec<ProfileQuality>,
     pub exclusions: Vec<ExclusionCount>,
     pub exclusion_candidates: Vec<ExclusionCandidate>,
+    pub triage_recall: Vec<RecallRow>,
 }
 
 fn latest_lead_decisions(labels: &[DecisionLabel]) -> Vec<&DecisionLabel> {
@@ -619,6 +621,7 @@ impl QualityReport {
                 .collect(),
             exclusions: Vec::new(),
             exclusion_candidates: Vec::new(),
+            triage_recall: Vec::new(),
         }
     }
 }

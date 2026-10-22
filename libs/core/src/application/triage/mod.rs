@@ -4,6 +4,7 @@ use chrono::{DateTime, Utc};
 use common::{CoreError, generate_uuid_v7};
 use lodestone_macros::transactional;
 use serde_json::json;
+use tracing::warn;
 
 use crate::{
     application::{
@@ -12,19 +13,21 @@ use crate::{
     },
     domain::{
         agent_work::{AgentWork, CancelReason, WorkKind, WorkTarget},
+        dropped::{DropReason, DroppedCandidate, DroppedId, dropped_excerpts},
         enrichment::EnrichmentStep,
         job::ports::Clock,
         profile::{
-            ActiveProfile,
+            ActiveProfile, ProfileId,
             definition::{AgentId, ProfileDefinition, SearchAgent},
         },
         run::{Run, RunId, RunOutcome, ports::RunRepository},
         source::{Observation, SourceError},
-        triage::{Candidate, Route, excerpts, passes_filters, route},
+        triage::{Candidate, Route, excerpts, failing_filter, route},
         values::{SourceName, UnitInterval},
     },
 };
 
+pub const MAX_DROPPED_PER_TARGET: usize = 200;
 const TITLE_MAX_CHARS: usize = 200;
 const RULES_STRENGTH: f64 = 0.7;
 const AMBIGUOUS_STRENGTH: f64 = 0.5;
@@ -47,6 +50,8 @@ pub struct TriageReport {
     pub rejected_by_rules: u64,
     pub rejected_by_exclusions: u64,
     pub rejected_by_filters: u64,
+    pub dropped_kept: u64,
+    pub dropped_not_kept: u64,
     pub skipped_no_lead: u64,
     pub runs: u64,
     pub cancelled: u64,
@@ -143,24 +148,110 @@ fn observation(
     })
 }
 
+struct DropScope<'a> {
+    profile_id: ProfileId,
+    agent: Option<&'a AgentId>,
+    source: SourceName,
+    at: DateTime<Utc>,
+}
+
+#[derive(Default)]
+struct Triaged {
+    observations: Vec<Observation>,
+    dropped: Vec<DroppedCandidate>,
+}
+
+impl Triaged {
+    fn has_room(&self, report: &mut TriageReport) -> bool {
+        let room = self.dropped.len() < MAX_DROPPED_PER_TARGET;
+        if !room {
+            report.dropped_not_kept += 1;
+        }
+        room
+    }
+
+    fn drop_candidate(
+        &mut self,
+        scope: &DropScope<'_>,
+        candidate: &Candidate,
+        reason: DropReason,
+        keywords: (Vec<String>, Vec<String>),
+    ) {
+        let (matched, excluded) = keywords;
+        self.dropped.push(DroppedCandidate {
+            id: DroppedId(generate_uuid_v7()),
+            profile_id: scope.profile_id,
+            agent: scope.agent.cloned(),
+            source: scope.source,
+            kind: candidate.kind.clone(),
+            domain: candidate.domain.clone(),
+            title: candidate.title.clone(),
+            excerpts: dropped_excerpts(&candidate.text, reason, &matched, &excluded),
+            provenance: candidate.provenance.clone(),
+            observed_at: candidate.observed_at,
+            reason,
+            matched,
+            excluded,
+            details: candidate.details.clone(),
+            dropped_at: scope.at,
+            review: None,
+            reviewed_at: None,
+            reviewed_by: None,
+        });
+    }
+}
+
+fn keywords_of(route: Route) -> (Vec<String>, Vec<String>) {
+    match route {
+        Route::Reject => (Vec::new(), Vec::new()),
+        Route::Excluded { matched, excluded } => (matched, excluded),
+        Route::Accept { matched } | Route::Ambiguous { matched } => (matched, Vec::new()),
+    }
+}
+
 fn decide(
     target: &KeywordTarget<'_>,
+    scope: &DropScope<'_>,
     candidates: &[Candidate],
     report: &mut TriageReport,
-) -> Result<Vec<Observation>, CoreError> {
+) -> Result<Triaged, CoreError> {
     let agent = target.rules.as_ref();
-    let mut observations = Vec::new();
+    let mut triaged = Triaged::default();
     for candidate in candidates {
-        if !passes_filters(&agent.filters, candidate) {
+        if let Some(filter) = failing_filter(&agent.filters, candidate) {
             report.rejected_by_filters += 1;
+            if triaged.has_room(report) {
+                let keywords = keywords_of(route(&candidate_text(candidate), agent));
+                triaged.drop_candidate(scope, candidate, DropReason::from(filter), keywords);
+            }
             continue;
         }
         match route(&candidate_text(candidate), agent) {
-            Route::Reject => report.rejected_by_rules += 1,
-            Route::Excluded { .. } => report.rejected_by_exclusions += 1,
+            Route::Reject => {
+                report.rejected_by_rules += 1;
+                if triaged.has_room(report) {
+                    triaged.drop_candidate(
+                        scope,
+                        candidate,
+                        DropReason::NoKeyword,
+                        (Vec::new(), Vec::new()),
+                    );
+                }
+            }
+            Route::Excluded { matched, excluded } => {
+                report.rejected_by_exclusions += 1;
+                if triaged.has_room(report) {
+                    triaged.drop_candidate(
+                        scope,
+                        candidate,
+                        DropReason::Exclusion,
+                        (matched, excluded),
+                    );
+                }
+            }
             Route::Accept { matched } => {
                 report.accepted_by_rules += 1;
-                observations.push(observation(
+                triaged.observations.push(observation(
                     candidate,
                     target.agent,
                     &matched,
@@ -170,7 +261,7 @@ fn decide(
             }
             Route::Ambiguous { matched } => {
                 report.accepted_ambiguous += 1;
-                observations.push(observation(
+                triaged.observations.push(observation(
                     candidate,
                     target.agent,
                     &matched,
@@ -180,7 +271,7 @@ fn decide(
             }
         }
     }
-    Ok(observations)
+    Ok(triaged)
 }
 
 impl LodestoneUseCase {
@@ -277,8 +368,17 @@ impl LodestoneUseCase {
         };
         let mut first_error: Option<CoreError> = None;
         for (((active, target), run), work) in targets.iter().zip(&runs).zip(&works) {
-            let observations = match decide(target, &candidates, &mut report) {
-                Ok(observations) => observations,
+            let scope = DropScope {
+                profile_id: active.profile.id,
+                agent: target.agent,
+                source: name,
+                at: clock.now(),
+            };
+            let Triaged {
+                observations,
+                dropped,
+            } = match decide(target, &scope, &candidates, &mut report) {
+                Ok(triaged) => triaged,
                 Err(error) => {
                     let outcome = RunOutcome::Failed {
                         volume,
@@ -307,6 +407,12 @@ impl LodestoneUseCase {
                     clock,
                 )
                 .await;
+            match &recorded {
+                Ok(recorded) if recorded.stopped.is_none() => {
+                    self.keep_dropped(&dropped, &mut report).await;
+                }
+                _ => report.dropped_not_kept += count(dropped.len()),
+            }
             let outcome = match &recorded {
                 Ok(recorded) => recorded.outcome(volume),
                 Err(error) => RunOutcome::Failed {
@@ -333,6 +439,19 @@ impl LodestoneUseCase {
         match first_error {
             Some(error) => Err(error.into()),
             None => Ok(report),
+        }
+    }
+
+    async fn keep_dropped(&self, dropped: &[DroppedCandidate], report: &mut TriageReport) {
+        if dropped.is_empty() {
+            return;
+        }
+        match self.store_dropped(dropped).await {
+            Ok(stored) => report.dropped_kept += stored,
+            Err(error) => {
+                warn!(%error, dropped = dropped.len(), "dropped candidates could not be stored");
+                report.dropped_not_kept += count(dropped.len());
+            }
         }
     }
 

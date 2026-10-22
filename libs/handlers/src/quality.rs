@@ -4,13 +4,15 @@ use axum::{
 };
 use chrono::{DateTime, Utc};
 use lodestone_core::{
-    MIN_LABELLED_LEADS, ProfileId, ProfileQuality, QualityReport, ReasonCount, Suggestion,
+    MIN_LABELLED_LEADS, ProfileId, ProfileQuality, QualityReport, ReasonCount, RecallRow,
+    Suggestion,
 };
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
 use crate::{
     auth::AuthenticatedUser,
+    dropped::DropReasonDto,
     errors::ApiError,
     leads::{RejectionReasonDto, VerdictDto, invalid},
     response::{DataEnvelope, Response},
@@ -123,6 +125,36 @@ pub struct ExclusionCandidateDto {
 }
 
 #[derive(Debug, Serialize, PartialEq, ToSchema)]
+pub struct TriageRecallDto {
+    pub profile_id: String,
+    /// Agent whose keyword triage dropped the candidates; absent for the company job offers read without an agent.
+    pub agent: Option<String>,
+    pub reason: DropReasonDto,
+    /// Candidates dropped in the period.
+    pub dropped: u64,
+    /// Dropped candidates an operator reviewed.
+    pub reviewed: u64,
+    /// Reviewed candidates the operator judged should have been kept.
+    pub should_have_kept: u64,
+    /// `should_have_kept` over `reviewed`, between 0 and 1; absent until a candidate is reviewed.
+    pub share: Option<f64>,
+}
+
+impl From<&RecallRow> for TriageRecallDto {
+    fn from(row: &RecallRow) -> Self {
+        Self {
+            profile_id: row.profile_id.to_string(),
+            agent: row.agent.as_ref().map(|agent| agent.as_str().to_owned()),
+            reason: DropReasonDto::from(row.reason),
+            dropped: row.dropped,
+            reviewed: row.reviewed,
+            should_have_kept: row.should_have_kept,
+            share: row.share(),
+        }
+    }
+}
+
+#[derive(Debug, Serialize, PartialEq, ToSchema)]
 pub struct ThresholdsDto {
     pub reliable_from: u8,
     pub discard_below: u8,
@@ -169,6 +201,8 @@ pub struct QualityDto {
     pub exclusions: Vec<ExclusionCountDto>,
     /// Most recent leads rejected for a reason that can feed the Exclusions agent lists; the lists are never changed automatically.
     pub exclusion_candidates: Vec<ExclusionCandidateDto>,
+    /// Candidates the keyword triage dropped in the period, per agent and reason, with the share an operator judged wrongly dropped among the reviewed ones.
+    pub triage_recall: Vec<TriageRecallDto>,
 }
 
 impl From<&Suggestion> for SuggestionDto {
@@ -314,6 +348,11 @@ impl From<&QualityReport> for QualityDto {
                     reason: row.reason.as_str().to_owned(),
                     decided_at: row.decided_at.to_rfc3339(),
                 })
+                .collect(),
+            triage_recall: report
+                .triage_recall
+                .iter()
+                .map(TriageRecallDto::from)
                 .collect(),
         }
     }

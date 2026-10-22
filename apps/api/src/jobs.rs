@@ -8,6 +8,7 @@ use lodestone_core::{
     PartnerAward, SourceName, WEBHOOK_JOB_KIND,
     calibration::{calibration_job, is_recurring_calibration, next_calibration},
     company::{PAGE_RECHECK_JOB_KIND, page_recheck_job},
+    dropped::{DROPPED_PURGE_JOB_KIND, dropped_purge_job, next_dropped_purge},
     infrastructure::{contact_target::postgres::PgAtsTargets, job::postgres::PgJobQueue},
     is_continuous,
     jobs::{JobError, JobHandler, JobOutcome, SystemClock},
@@ -112,6 +113,17 @@ impl JobRouter {
         Ok(JobOutcome::RescheduleAt(next_timeline_purge(now)))
     }
 
+    async fn run_dropped_purge(&self) -> Result<JobOutcome, JobError> {
+        let now = SystemClock.now();
+        let removed = self
+            .usecase
+            .purge_dropped(now)
+            .await
+            .map_err(|error| JobError::Retryable(error.to_string()))?;
+        info!(removed, "dropped candidates purged");
+        Ok(JobOutcome::RescheduleAt(next_dropped_purge(now)))
+    }
+
     pub fn with_page_verifier(mut self, pages: CompanyPages) -> Self {
         self.pages = Some(pages);
         self
@@ -136,6 +148,8 @@ impl JobRouter {
             rejected_by_rules = report.rejected_by_rules,
             rejected_by_exclusions = report.rejected_by_exclusions,
             rejected_by_filters = report.rejected_by_filters,
+            dropped_kept = report.dropped_kept,
+            dropped_not_kept = report.dropped_not_kept,
             skipped_no_lead = report.skipped_no_lead,
             cancelled = report.cancelled,
             "keyword sourcing finished"
@@ -357,6 +371,7 @@ impl JobHandler for JobRouter {
             CALIBRATION_JOB_KIND => self.run_calibration(job).await,
             PAGE_RECHECK_JOB_KIND => self.run_page_recheck().await,
             TIMELINE_PURGE_JOB_KIND => self.run_timeline_purge().await,
+            DROPPED_PURGE_JOB_KIND => self.run_dropped_purge().await,
             other => Err(JobError::Permanent(format!(
                 "no handler for job kind `{other}`"
             ))),
@@ -402,6 +417,18 @@ pub async fn schedule_timeline_purge(queue: &Arc<PgJobQueue>) -> Result<(), Core
         .is_some()
     {
         info!("scheduled the first lead timeline purge");
+    }
+    Ok(())
+}
+
+pub async fn schedule_dropped_purge(queue: &Arc<PgJobQueue>) -> Result<(), CoreError> {
+    let now = Utc::now();
+    if queue
+        .enqueue(&dropped_purge_job(now)?, now)
+        .await?
+        .is_some()
+    {
+        info!("scheduled the first dropped candidates purge");
     }
     Ok(())
 }
@@ -543,6 +570,20 @@ mod tests {
         assert_eq!(
             provider_key_of_source(SourceName::WelcomeToTheJungle.as_str()),
             Some(WELCOME_TO_THE_JUNGLE)
+        );
+    }
+
+    #[test]
+    fn the_dropped_purge_job_is_recurring_deduplicated_and_not_a_source() {
+        let now = Utc::now();
+        let job = dropped_purge_job(now).unwrap();
+        assert_eq!(job.kind.as_str(), DROPPED_PURGE_JOB_KIND);
+        assert_eq!(job.dedup_key.as_deref(), Some("triage:purge_dropped"));
+        assert_eq!(next_dropped_purge(now) - now, Delta::hours(24));
+        assert!(
+            !scheduled_sources()
+                .iter()
+                .any(|source| source.as_str().contains("dropped"))
         );
     }
 

@@ -9,6 +9,7 @@ use crate::{
     application::LodestoneUseCase,
     domain::{
         company::ports::CompanyRepository,
+        dropped::ports::DroppedCandidateRepository,
         lead::{
             Lead,
             ports::{AssessmentRepository, LeadRepository},
@@ -77,7 +78,7 @@ pub(crate) async fn record_decisions(
 }
 
 impl LodestoneUseCase {
-    #[transactional(decision, profile, lead, company)]
+    #[transactional(decision, profile, lead, company, dropped)]
     pub async fn quality_report(
         &self,
         from: Option<DateTime<Utc>>,
@@ -88,6 +89,7 @@ impl LodestoneUseCase {
         let mut profiles = profile_repository;
         let mut leads = lead_repository;
         let mut companies = company_repository;
+        let mut dropped = dropped_repository;
 
         if let Some(profile_id) = profile_id
             && profiles.find(profile_id).await?.is_none()
@@ -130,6 +132,7 @@ impl LodestoneUseCase {
         let mut report =
             QualityReport::compute(&labels, verdicts, &infos, profile_id, &agent_names);
         report.exclusions = decisions.exclusion_counts(&filter).await?;
+        report.triage_recall = dropped.recall(profile_id, from, to).await?;
         for target in exclusion_targets(&labels) {
             let Some(lead) = leads.find(target.lead_id).await? else {
                 continue;

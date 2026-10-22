@@ -229,10 +229,27 @@ fn country_passes(filters: &SearchFilters, candidate: &Candidate) -> bool {
             .any(|wanted| found.contains(&wanted.as_str()))
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FilterKind {
+    Remote,
+    Country,
+    Contract,
+}
+
+pub fn failing_filter(filters: &SearchFilters, candidate: &Candidate) -> Option<FilterKind> {
+    if !remote_passes(filters.remote, candidate) {
+        Some(FilterKind::Remote)
+    } else if !country_passes(filters, candidate) {
+        Some(FilterKind::Country)
+    } else if !contract_passes(filters, candidate) {
+        Some(FilterKind::Contract)
+    } else {
+        None
+    }
+}
+
 pub fn passes(filters: &SearchFilters, candidate: &Candidate) -> bool {
-    remote_passes(filters.remote, candidate)
-        && country_passes(filters, candidate)
-        && contract_passes(filters, candidate)
+    failing_filter(filters, candidate).is_none()
 }
 
 #[cfg(test)]
@@ -459,5 +476,34 @@ mod tests {
         assert!(!passes(&filters, &on_site));
         let abroad = candidate("acme.de", "job_offer", "Freelance full remote", Value::Null);
         assert!(!passes(&filters, &abroad));
+    }
+
+    #[test]
+    fn the_failing_filter_is_the_first_one_that_does_not_hold() {
+        let filters = SearchFilters {
+            remote: RemoteFilter::FullRemote,
+            countries: vec![CountryCode::new("FR")],
+            contracts: vec![ContractFilter::Freelance],
+        };
+        let wanted = candidate("acme.fr", "job_offer", "Freelance full remote", Value::Null);
+        assert_eq!(failing_filter(&filters, &wanted), None);
+        let on_site = candidate("acme.de", "job_offer", "CDI sur site", Value::Null);
+        assert_eq!(failing_filter(&filters, &on_site), Some(FilterKind::Remote));
+        let abroad = candidate("acme.de", "job_offer", "Freelance full remote", Value::Null);
+        assert_eq!(failing_filter(&filters, &abroad), Some(FilterKind::Country));
+        let employee = candidate("acme.fr", "job_offer", "CDI full remote", Value::Null);
+        assert_eq!(
+            failing_filter(&filters, &employee),
+            Some(FilterKind::Contract)
+        );
+    }
+
+    #[test]
+    fn passes_is_the_absence_of_a_failing_filter() {
+        let filters = remote(RemoteFilter::FullRemote);
+        assert!(passes(&filters, &job("Full remote")));
+        assert!(failing_filter(&filters, &job("Full remote")).is_none());
+        assert!(!passes(&filters, &job("Sur site")));
+        assert!(failing_filter(&filters, &job("Sur site")).is_some());
     }
 }

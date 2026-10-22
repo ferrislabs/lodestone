@@ -4,6 +4,7 @@ pub(crate) mod ats_target;
 pub(crate) mod calibration;
 pub(crate) mod company;
 pub(crate) mod contact;
+pub(crate) mod dropped;
 pub(crate) mod ecosystem;
 pub(crate) mod enrichment;
 pub(crate) mod facts;

@@ -17,6 +17,7 @@ pub mod calibration;
 pub mod company;
 pub mod contacts;
 pub mod drafts;
+pub mod dropped;
 pub mod ecosystem;
 pub mod evaluation;
 pub mod jobs;

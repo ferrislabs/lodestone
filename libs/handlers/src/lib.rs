@@ -3,6 +3,7 @@ pub mod auth;
 pub mod calibration;
 pub mod company;
 pub mod drafts;
+pub mod dropped;
 pub mod ecosystem;
 pub mod errors;
 pub mod exports;
