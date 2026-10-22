@@ -7,7 +7,11 @@ import {
 } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import type { Calibration, Quality } from '#/pages/quality/lib/types'
+import type {
+	Calibration,
+	Quality,
+	TriageRecall,
+} from '#/pages/quality/lib/types'
 import { QualityPage } from './quality-page'
 
 afterEach(cleanup)
@@ -38,6 +42,7 @@ const EMPTY: Quality = {
 	profiles: [],
 	exclusions: [],
 	exclusion_candidates: [],
+	triage_recall: [],
 }
 
 const FILLED: Quality = {
@@ -155,7 +160,29 @@ const FILLED: Quality = {
 	],
 	exclusions: [],
 	exclusion_candidates: [],
+	triage_recall: [],
 }
+
+const RECALL: TriageRecall[] = [
+	{
+		profile_id: 'p1',
+		agent: 'offres-france',
+		reason: 'no_keyword',
+		dropped: 120,
+		reviewed: 20,
+		should_have_kept: 3,
+		share: 0.15,
+	},
+	{
+		profile_id: 'p2',
+		agent: null,
+		reason: 'filter_country',
+		dropped: 40,
+		reviewed: 0,
+		should_have_kept: 0,
+		share: null,
+	},
+]
 
 const CALIBRATION: Calibration = {
 	required: 50,
@@ -239,6 +266,8 @@ function renderPage(
 		calibrationNotice: null,
 		calibrationError: null,
 		onRecalibrate: vi.fn(),
+		onReviewTriage: vi.fn(),
+		onOpenDropped: vi.fn(),
 		...overrides,
 	}
 	render(<QualityPage {...props} />)
@@ -641,5 +670,75 @@ describe('QualityPage', () => {
 			within(screen.getByLabelText('Calibration')).getByRole('alert')
 				.textContent,
 		).toBe('Impossible de programmer le recalcul')
+	})
+
+	it('shows the recall of the triage per agent and reason', () => {
+		renderPage({ quality: { ...FILLED, triage_recall: RECALL } })
+		const card = within(screen.getByLabelText('Rappel du tri'))
+		expect(card.getByText('Rappel du tri')).toBeTruthy()
+		expect(
+			card.getByText(
+				"Annonces écartées par le tri par mots-clés sur la période, et part de celles qu'un opérateur a jugées à garder.",
+			),
+		).toBeTruthy()
+		const first = card.getByRole('row', { name: /Aucun mot-clé/ })
+		expect(within(first).getByText('offres-france')).toBeTruthy()
+		expect(within(first).getByText('Fintech')).toBeTruthy()
+		expect(within(first).getByText('120')).toBeTruthy()
+		expect(within(first).getByText('20')).toBeTruthy()
+		expect(within(first).getByText('3')).toBeTruthy()
+		expect(within(first).getByText('15 %')).toBeTruthy()
+		const second = card.getByRole('row', { name: /Filtre pays/ })
+		expect(
+			within(second).getByText("Offres d'emploi de l'entreprise"),
+		).toBeTruthy()
+		expect(within(second).getByText('Santé')).toBeTruthy()
+		expect(within(second).getByText('40')).toBeTruthy()
+		expect(within(second).getByText('—')).toBeTruthy()
+	})
+
+	it('shows the recall of the triage even before any decision', () => {
+		renderPage({ quality: { ...EMPTY, triage_recall: RECALL } })
+		expect(screen.getByText(/Aucune décision enregistrée/)).toBeTruthy()
+		expect(
+			within(screen.getByLabelText('Rappel du tri')).getAllByRole('row'),
+		).toHaveLength(3)
+	})
+
+	it('hides the recall of the triage when nothing was dropped or while loading', () => {
+		renderPage()
+		expect(screen.queryByLabelText('Rappel du tri')).toBeNull()
+		cleanup()
+		renderPage({
+			quality: { ...EMPTY, triage_recall: RECALL },
+			state: 'loading',
+		})
+		expect(screen.queryByLabelText('Rappel du tri')).toBeNull()
+	})
+
+	it('opens a sample of the dropped announcements of a recall row', () => {
+		const props = renderPage({ quality: { ...FILLED, triage_recall: RECALL } })
+		const second = screen.getByRole('row', { name: /Filtre pays/ })
+		fireEvent.click(
+			within(second).getByRole('button', { name: 'Revoir un échantillon' }),
+		)
+		expect(props.onReviewTriage).toHaveBeenCalledWith(RECALL[1])
+	})
+
+	it('links to the review of the dropped announcements with the chosen profile', () => {
+		const props = renderPage({ profileId: 'p1' })
+		const link = screen.getByRole('link', {
+			name: 'Revoir les annonces écartées',
+		})
+		expect(link.getAttribute('href')).toBe('/quality/dropped?profile=p1')
+		fireEvent.click(link)
+		expect(props.onOpenDropped).toHaveBeenCalledWith('p1')
+		cleanup()
+		renderPage({ profileId: '' })
+		expect(
+			screen
+				.getByRole('link', { name: 'Revoir les annonces écartées' })
+				.getAttribute('href'),
+		).toBe('/quality/dropped')
 	})
 })

@@ -14,3 +14,7 @@ export type Calibration = Schemas.CalibrationDto
 export type ProfileCalibration = Schemas.ProfileCalibrationDto
 export type AgentCalibration = Schemas.AgentCalibrationDto
 export type ReliabilityBin = Schemas.ReliabilityBinDto
+export type TriageRecall = Schemas.TriageRecallDto
+export type DroppedCandidate = Schemas.DroppedCandidateDto
+export type DropReason = Schemas.DropReasonDto
+export type DropReview = Schemas.DropReviewDto

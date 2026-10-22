@@ -729,6 +729,16 @@ export namespace Schemas {
     suggestion: SuggestionDto;
     validated: number;
   };
+  export type DropReasonDto = "no_keyword" | "exclusion" | "filter_remote" | "filter_country" | "filter_contract";
+  export type TriageRecallDto = {
+    agent?: (string | null) | undefined;
+    dropped: number;
+    profile_id: string;
+    reason: DropReasonDto;
+    reviewed: number;
+    share?: (number | null) | undefined;
+    should_have_kept: number;
+  };
   export type VerdictPrecisionDto = {
     n: number;
     precision?: (number | null) | undefined;
@@ -757,9 +767,33 @@ export namespace Schemas {
       exclusion_candidates: Array<ExclusionCandidateDto>;
       exclusions: Array<ExclusionCountDto>;
       profiles: Array<ProfileQualityDto>;
+      triage_recall: Array<TriageRecallDto>;
       verdicts: Array<VerdictPrecisionDto>;
       versions: Array<VersionPrecisionDto>;
     };
+    pagination?: (null | PaginationMetadata) | undefined;
+  };
+  export type DropReviewDto = "rightly_dropped" | "should_have_kept";
+  export type DroppedCandidateDto = {
+    agent?: (string | null) | undefined;
+    domain: string;
+    dropped_at: string;
+    excerpts: Array<string>;
+    excluded: Array<string>;
+    id: string;
+    kind: string;
+    matched: Array<string>;
+    observed_at: string;
+    profile_id: string;
+    provenance: string;
+    reason: DropReasonDto;
+    review?: (null | DropReviewDto) | undefined;
+    reviewed_at?: (string | null) | undefined;
+    source: string;
+    title: string;
+  };
+  export type DataEnvelope_ReviewedDropDto = {
+    data: { candidate: DroppedCandidateDto; lead_id?: (string | null) | undefined };
     pagination?: (null | PaginationMetadata) | undefined;
   };
   export type RevisionSummaryDto = { created_at: string; created_by?: (string | null) | undefined; number: number };
@@ -836,6 +870,27 @@ export namespace Schemas {
       lead: DraftLeadDto;
       summary: string;
       verdict_narrative: string;
+    }>;
+    pagination?: (null | PaginationMetadata) | undefined;
+  };
+  export type DataEnvelope_Vec_DroppedCandidateDto = {
+    data: Array<{
+      agent?: (string | null) | undefined;
+      domain: string;
+      dropped_at: string;
+      excerpts: Array<string>;
+      excluded: Array<string>;
+      id: string;
+      kind: string;
+      matched: Array<string>;
+      observed_at: string;
+      profile_id: string;
+      provenance: string;
+      reason: DropReasonDto;
+      review?: (null | DropReviewDto) | undefined;
+      reviewed_at?: (string | null) | undefined;
+      source: string;
+      title: string;
     }>;
     pagination?: (null | PaginationMetadata) | undefined;
   };
@@ -1102,6 +1157,7 @@ export namespace Schemas {
     exclusion_candidates: Array<ExclusionCandidateDto>;
     exclusions: Array<ExclusionCountDto>;
     profiles: Array<ProfileQualityDto>;
+    triage_recall: Array<TriageRecallDto>;
     verdicts: Array<VerdictPrecisionDto>;
     versions: Array<VersionPrecisionDto>;
   };
@@ -1110,6 +1166,8 @@ export namespace Schemas {
     note: string | null;
     reason: null | RejectionReasonDto;
   }>;
+  export type ReviewDroppedRequest = { review: DropReviewDto };
+  export type ReviewedDropDto = { candidate: DroppedCandidateDto; lead_id?: (string | null) | undefined };
   export type RevisionDto = RevisionSummaryDto & { definition: Record<string, unknown> };
   export type SaveProviderRequest = Partial<{ secrets: Record<string, unknown>; settings: Record<string, unknown> }>;
   export type SourceDto = {
@@ -1233,6 +1291,24 @@ export namespace Endpoints {
       404: unknown;
       409: unknown;
       422: unknown;
+    };
+  };
+  export type post_Review_dropped = {
+    method: "POST";
+    path: "/api/v1/dropped/{dropped_id}/review";
+    requestFormat: "json";
+    parameters: {
+      path: { dropped_id: string };
+
+      body: Schemas.ReviewDroppedRequest;
+    };
+    responses: {
+      200: Schemas.DataEnvelope_ReviewedDropDto;
+      400: unknown;
+      401: unknown;
+      403: unknown;
+      404: unknown;
+      409: unknown;
     };
   };
   export type get_List_ecosystem_modules = {
@@ -1563,6 +1639,28 @@ export namespace Endpoints {
     };
     responses: { 200: Schemas.DataEnvelope_ProfileDto; 400: unknown; 401: unknown; 403: unknown; 404: unknown };
   };
+  export type get_List_dropped = {
+    method: "GET";
+    path: "/api/v1/profiles/{profile_id}/dropped";
+    requestFormat: "json";
+    parameters: {
+      query: Partial<{
+        reason: "no_keyword" | "exclusion" | "filter_remote" | "filter_country" | "filter_contract";
+        agent: string;
+        reviewed: boolean;
+        order: string;
+        limit: number;
+      }>;
+      path: { profile_id: string };
+    };
+    responses: {
+      200: Schemas.DataEnvelope_Vec_DroppedCandidateDto;
+      400: unknown;
+      401: unknown;
+      403: unknown;
+      404: unknown;
+    };
+  };
   export type get_Export_profile = {
     method: "GET";
     path: "/api/v1/profiles/{profile_id}/export";
@@ -1782,6 +1880,7 @@ export type EndpointByMethod = {
     "/api/v1/me": Endpoints.get_Me;
     "/api/v1/profiles": Endpoints.get_List_profiles;
     "/api/v1/profiles/{profile_id}": Endpoints.get_Get_profile;
+    "/api/v1/profiles/{profile_id}/dropped": Endpoints.get_List_dropped;
     "/api/v1/profiles/{profile_id}/export": Endpoints.get_Export_profile;
     "/api/v1/profiles/{profile_id}/leads": Endpoints.get_List_leads;
     "/api/v1/profiles/{profile_id}/leads/export": Endpoints.get_Export_leads;
@@ -1803,6 +1902,7 @@ export type EndpointByMethod = {
   post: {
     "/api/v1/drafts/{assessment_id}/approve": Endpoints.post_Approve_draft;
     "/api/v1/drafts/{assessment_id}/reject": Endpoints.post_Reject_draft;
+    "/api/v1/dropped/{dropped_id}/review": Endpoints.post_Review_dropped;
     "/api/v1/leads/{lead_id}/agents/retry": Endpoints.post_Retry_lead_agents;
     "/api/v1/leads/{lead_id}/company/refresh": Endpoints.post_Refresh_company;
     "/api/v1/leads/{lead_id}/ecosystem/dry-run": Endpoints.post_Dry_run_ecosystem_module;

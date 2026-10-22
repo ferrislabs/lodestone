@@ -69,6 +69,7 @@ const QUALITY: Quality = {
 			decided_at: '2026-02-01T00:00:00Z',
 		},
 	],
+	triage_recall: [],
 }
 
 const CALIBRATION: Calibration = {

@@ -18,6 +18,7 @@ import { Route as AppLlmIndexRouteImport } from './routes/_app.llm.index'
 import { Route as AppLeadsIndexRouteImport } from './routes/_app.leads.index'
 import { Route as AppDraftsIndexRouteImport } from './routes/_app.drafts.index'
 import { Route as AppSourcesActivityRouteImport } from './routes/_app.sources.activity'
+import { Route as AppQualityDroppedRouteImport } from './routes/_app.quality.dropped'
 import { Route as AppProfilesNewRouteImport } from './routes/_app.profiles.new'
 import { Route as AppProfilesProfileIdRouteImport } from './routes/_app.profiles.$profileId'
 import { Route as AppLlmNewRouteImport } from './routes/_app.llm.new'
@@ -70,6 +71,11 @@ const AppSourcesActivityRoute = AppSourcesActivityRouteImport.update({
   path: '/sources/activity',
   getParentRoute: () => AppRoute,
 } as any)
+const AppQualityDroppedRoute = AppQualityDroppedRouteImport.update({
+  id: '/quality/dropped',
+  path: '/quality/dropped',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppProfilesNewRoute = AppProfilesNewRouteImport.update({
   id: '/profiles/new',
   path: '/profiles/new',
@@ -114,6 +120,7 @@ export interface FileRoutesByFullPath {
   '/llm/new': typeof AppLlmNewRoute
   '/profiles/$profileId': typeof AppProfilesProfileIdRoute
   '/profiles/new': typeof AppProfilesNewRoute
+  '/quality/dropped': typeof AppQualityDroppedRoute
   '/sources/activity': typeof AppSourcesActivityRoute
   '/drafts/': typeof AppDraftsIndexRoute
   '/leads/': typeof AppLeadsIndexRoute
@@ -131,6 +138,7 @@ export interface FileRoutesByTo {
   '/llm/new': typeof AppLlmNewRoute
   '/profiles/$profileId': typeof AppProfilesProfileIdRoute
   '/profiles/new': typeof AppProfilesNewRoute
+  '/quality/dropped': typeof AppQualityDroppedRoute
   '/sources/activity': typeof AppSourcesActivityRoute
   '/drafts': typeof AppDraftsIndexRoute
   '/leads': typeof AppLeadsIndexRoute
@@ -150,6 +158,7 @@ export interface FileRoutesById {
   '/_app/llm/new': typeof AppLlmNewRoute
   '/_app/profiles/$profileId': typeof AppProfilesProfileIdRoute
   '/_app/profiles/new': typeof AppProfilesNewRoute
+  '/_app/quality/dropped': typeof AppQualityDroppedRoute
   '/_app/sources/activity': typeof AppSourcesActivityRoute
   '/_app/drafts/': typeof AppDraftsIndexRoute
   '/_app/leads/': typeof AppLeadsIndexRoute
@@ -169,6 +178,7 @@ export interface FileRouteTypes {
     | '/llm/new'
     | '/profiles/$profileId'
     | '/profiles/new'
+    | '/quality/dropped'
     | '/sources/activity'
     | '/drafts/'
     | '/leads/'
@@ -186,6 +196,7 @@ export interface FileRouteTypes {
     | '/llm/new'
     | '/profiles/$profileId'
     | '/profiles/new'
+    | '/quality/dropped'
     | '/sources/activity'
     | '/drafts'
     | '/leads'
@@ -204,6 +215,7 @@ export interface FileRouteTypes {
     | '/_app/llm/new'
     | '/_app/profiles/$profileId'
     | '/_app/profiles/new'
+    | '/_app/quality/dropped'
     | '/_app/sources/activity'
     | '/_app/drafts/'
     | '/_app/leads/'
@@ -283,6 +295,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppSourcesActivityRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/quality/dropped': {
+      id: '/_app/quality/dropped'
+      path: '/quality/dropped'
+      fullPath: '/quality/dropped'
+      preLoaderRoute: typeof AppQualityDroppedRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/profiles/new': {
       id: '/_app/profiles/new'
       path: '/profiles/new'
@@ -343,6 +362,7 @@ interface AppRouteChildren {
   AppLlmNewRoute: typeof AppLlmNewRoute
   AppProfilesProfileIdRoute: typeof AppProfilesProfileIdRoute
   AppProfilesNewRoute: typeof AppProfilesNewRoute
+  AppQualityDroppedRoute: typeof AppQualityDroppedRoute
   AppSourcesActivityRoute: typeof AppSourcesActivityRoute
   AppDraftsIndexRoute: typeof AppDraftsIndexRoute
   AppLeadsIndexRoute: typeof AppLeadsIndexRoute
@@ -361,6 +381,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppLlmNewRoute: AppLlmNewRoute,
   AppProfilesProfileIdRoute: AppProfilesProfileIdRoute,
   AppProfilesNewRoute: AppProfilesNewRoute,
+  AppQualityDroppedRoute: AppQualityDroppedRoute,
   AppSourcesActivityRoute: AppSourcesActivityRoute,
   AppDraftsIndexRoute: AppDraftsIndexRoute,
   AppLeadsIndexRoute: AppLeadsIndexRoute,
