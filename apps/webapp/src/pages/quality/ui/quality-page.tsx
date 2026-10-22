@@ -4,9 +4,11 @@ import { visibleProfiles } from '#/pages/quality/lib/calibration'
 import { droppedReviewHref } from '#/pages/quality/lib/dropped'
 import { hasDecisions } from '#/pages/quality/lib/format'
 import { PERIOD_LABELS, PERIODS, type Period } from '#/pages/quality/lib/period'
+import type { SuggestionOutcome } from '#/pages/quality/lib/sourcing'
 import type {
 	Calibration,
 	ExclusionCandidate,
+	KeywordSuggestion,
 	ProfileSummary,
 	Quality,
 	TriageRecall,
@@ -17,7 +19,9 @@ import { ConfidenceHistogram } from '#/pages/quality/ui/confidence-histogram'
 import { DecisionsCard } from '#/pages/quality/ui/decisions-card'
 import { DiscardedCard } from '#/pages/quality/ui/discarded-card'
 import { ExclusionsCard } from '#/pages/quality/ui/exclusions-card'
+import { KeywordSuggestionsCard } from '#/pages/quality/ui/keyword-suggestions-card'
 import { RejectionReasonsCard } from '#/pages/quality/ui/rejection-reasons-card'
+import { SourcingYieldCard } from '#/pages/quality/ui/sourcing-yield-card'
 import { SuggestionsCard } from '#/pages/quality/ui/suggestions-card'
 import { TriageRecallCard } from '#/pages/quality/ui/triage-recall-card'
 import { VerdictPrecisionCard } from '#/pages/quality/ui/verdict-precision-card'
@@ -48,6 +52,11 @@ interface QualityPageProps {
 	onRecalibrate: () => void
 	onReviewTriage: (row: TriageRecall) => void
 	onOpenDropped: (profileId: string) => void
+	expandedAgents: readonly string[]
+	onToggleAgent: (key: string) => void
+	suggestions: readonly KeywordSuggestion[]
+	suggestionOutcomes: Readonly<Record<string, SuggestionOutcome>>
+	onApplySuggestion: (suggestion: KeywordSuggestion) => void
 }
 
 export function QualityPage({
@@ -70,6 +79,11 @@ export function QualityPage({
 	onRecalibrate,
 	onReviewTriage,
 	onOpenDropped,
+	expandedAgents,
+	onToggleAgent,
+	suggestions,
+	suggestionOutcomes,
+	onApplySuggestion,
 }: QualityPageProps) {
 	const calibrationCard =
 		state === 'ready' && calibration !== null ? (
@@ -104,6 +118,28 @@ export function QualityPage({
 				profiles={profiles}
 				onReview={onReviewTriage}
 			/>
+		) : null
+	const sourcingCards =
+		state === 'ready' && quality !== null ? (
+			<>
+				{quality.sourcing_yield.length > 0 ? (
+					<SourcingYieldCard
+						agents={quality.sourcing_yield}
+						profiles={profiles}
+						expandedAgents={expandedAgents}
+						onToggleAgent={onToggleAgent}
+					/>
+				) : null}
+				{suggestions.length > 0 ? (
+					<KeywordSuggestionsCard
+						suggestions={suggestions}
+						agents={quality.sourcing_yield}
+						profiles={profiles}
+						outcomes={suggestionOutcomes}
+						onApply={onApplySuggestion}
+					/>
+				) : null}
+			</>
 		) : null
 	return (
 		<div className="flex flex-col gap-6 p-4 md:p-8">
@@ -186,6 +222,7 @@ export function QualityPage({
 				<>
 					{exclusionsCard}
 					{triageCard}
+					{sourcingCards}
 				</>
 			) : null}
 			{state === 'ready' && quality !== null && hasDecisions(quality) ? (
@@ -201,6 +238,7 @@ export function QualityPage({
 					<RejectionReasonsCard profiles={quality.profiles} />
 					{exclusionsCard}
 					{triageCard}
+					{sourcingCards}
 					<SuggestionsCard
 						profiles={quality.profiles}
 						onOpenProfile={onOpenProfile}

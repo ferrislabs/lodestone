@@ -320,6 +320,30 @@ A candidate is reviewed once; a second review is a conflict.
 
 The quality report (`GET /api/v1/quality`) carries `triage_recall`, per profile, agent and reason, for the same profile and period as the rest of the report (the period is the one of `dropped_at`): `dropped`, `reviewed`, `should_have_kept` and `share`, the part of the reviewed candidates that should have been kept (`should_have_kept` over `reviewed`, absent while nothing is reviewed). It measures the recall of the triage on a sample, which the decision labels of reviewed leads cannot do (ADR 0008).
 
+### Keyword yield and suggestions
+
+The quality report (`GET /api/v1/quality`, same `from`, `to` and `profile_id` as the rest of the report) tells which sourcing agent and which keyword bring good leads (issue 256). It joins the signals of the agents with the verdict of each lead and the human decisions.
+
+`sourcing_yield` holds one row per profile and sourcing agent (ordered by profile, then agent id), with the keywords that matched under it:
+
+- `leads`: the leads that have at least one signal of the agent observed in the period (`signals.observed_at` between `from` and `to`). A lead found by two agents counts for both, and once for each however many signals it has.
+- `verdicts`: the current verdict of those leads, `reliable` (`fiable`), `to_verify` (`a_verifier`), `discarded` (`ecarte`) and `none` while the lead has no verdict.
+- `validated` and `rejected`: the leads whose latest lead decision, whenever it was taken, is `lead_validated` or `lead_rejected`. `precision` is `validated` over `validated + rejected`, absent while nothing is decided.
+- `keywords`: for each keyword found in `raw.matched` of the agent's signals, as written in the profile, the same counts. A lead counts for a keyword when one of the agent's signals matched it. `exclusive_leads` counts the leads for which every signal of the agent that matched something matched this keyword and no other: removing the keyword would lose them. Keywords are ordered by `leads`, then by name. A keyword that matched nothing in the period has no row.
+
+Signals without an agent are ignored. Suppressed leads are left out, as in the rest of the report.
+
+`keyword_suggestions` follows two fixed rules, computed for the current revision of every profile, active or not, and only for search agents. Nothing is applied automatically.
+
+| Action | Rule | `word` |
+| --- | --- | --- |
+| `remove_keyword` | The keyword is still in the agent, has at least 5 decided leads (`MIN_DECIDED_PER_KEYWORD`) and none of them validated. Never suggested for the last keyword of an agent. | The keyword as written in the profile. |
+| `add_exclusion` | The word comes from the titles of the agent's leads, folded (lowercase, no accent, as the triage does) and split on every character that is not a letter or a digit. It has at least 4 characters (`MIN_EXCLUSION_WORD_CHARS`), is not only digits, is not a French or English function word of the fixed stop list, is not already a keyword or an exclusion of the agent nor a word of one of its keywords (compared folded), appears in the titles of at least 3 distinct rejected leads (`MIN_REJECTED_WITH_WORD`) and in the title of no validated lead. At most 5 per agent (`MAX_EXCLUSION_SUGGESTIONS_PER_AGENT`), the most frequent first, then alphabetical. | The folded word. |
+
+Each suggestion carries `decided` (the decided leads behind it) and `rejected`. Undecided leads count for neither rule.
+
+An operator applies one with `POST /api/v1/profiles/{profile_id}/keyword-suggestions/apply` and the body `{"agent_id", "action": "remove_keyword" | "add_exclusion", "word", "revision"}`, where `revision` is the current revision number the suggestion was read against. The agent is edited as follows: the exact keyword is removed from the agent, or the word is appended to its exclusions, the result is validated and stored as a new revision created by the caller, and the response is the profile with that revision. The request is refused with a conflict when the current revision differs from `revision`, when the keyword is no longer in the agent, when the exclusion is already there (compared folded) or when removing the keyword would leave the agent without any; with a not-found when the profile or the search agent does not exist. A client token is refused.
+
 ### Welcome to the Jungle
 
 `welcome_to_the_jungle` searches the job offers of welcometothejungle.com through the search backend of its public search page (Algolia), under an authorisation the operator declares in the catalog (`authorised`, dated in `authorised_at`, and `authorisation_reference`). Scope: keyword search of offers and the company of each offer, nothing else. Every run reads `/api/env` for the application id and the public search-only key (never stored), and sends the `Referer` value the operator entered (`referer`, an https URL on welcometothejungle.com) with the Lodestone User-Agent; no other browser header is sent. The jobs index is `jobs_index` when set, otherwise it is discovered once per process in the public scripts of `/fr/jobs` (at most 8 scripts). Each distinct keyword is searched (`max_pages` pages of 30 offers, 1 to 3, default 3) and an offer found twice is kept once (by object id). The company website comes from the offer when present, otherwise from the organisation index (one lookup per company, cached, at most 60 per run); an offer without a website is counted as `skipped_no_domain`. The signal is a `job_offer` titled « offer — company » whose provenance is the offer page on welcometothejungle.com and whose date is the publication date. Requests to one host are spaced to `requests_per_minute` (default 10, 1 to 30). A `429` stops the run as rate limited; a `403` naming the referer, any other `403` or a challenge marks the provider `failing` with the reason and stops the run, without retry nor workaround.

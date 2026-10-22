@@ -1,11 +1,12 @@
 use axum::{
-    Extension,
-    extract::{Query, State},
+    Extension, Json,
+    extract::{Path, Query, State, rejection::JsonRejection},
 };
 use chrono::{DateTime, Utc};
 use lodestone_core::{
-    MIN_LABELLED_LEADS, ProfileId, ProfileQuality, QualityReport, ReasonCount, RecallRow,
-    Suggestion,
+    AgentYield, KeywordSuggestion, KeywordYield, MIN_LABELLED_LEADS, ProfileId, ProfileQuality,
+    QualityReport, ReasonCount, RecallRow, RevisionNumber, Suggestion, SuggestionAction,
+    SuggestionEdit, YieldVerdicts,
 };
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
@@ -13,8 +14,9 @@ use utoipa::{IntoParams, ToSchema};
 use crate::{
     auth::AuthenticatedUser,
     dropped::DropReasonDto,
-    errors::ApiError,
+    errors::{ApiError, ErrorBody},
     leads::{RejectionReasonDto, VerdictDto, invalid},
+    profiles::{ProfileDetailDto, ProfileDto},
     response::{DataEnvelope, Response},
     state::AppState,
 };
@@ -186,6 +188,127 @@ pub struct ProfileQualityDto {
     pub rejection_reasons: Vec<ReasonCountDto>,
 }
 
+#[derive(Debug, Serialize, PartialEq, Eq, ToSchema)]
+pub struct YieldVerdictsDto {
+    pub reliable: u64,
+    pub to_verify: u64,
+    pub discarded: u64,
+    pub none: u64,
+}
+
+impl From<&YieldVerdicts> for YieldVerdictsDto {
+    fn from(verdicts: &YieldVerdicts) -> Self {
+        Self {
+            reliable: verdicts.reliable,
+            to_verify: verdicts.to_verify,
+            discarded: verdicts.discarded,
+            none: verdicts.none,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, PartialEq, ToSchema)]
+pub struct KeywordYieldDto {
+    pub keyword: String,
+    pub leads: u64,
+    pub exclusive_leads: u64,
+    pub verdicts: YieldVerdictsDto,
+    pub validated: u64,
+    pub rejected: u64,
+    pub precision: Option<f64>,
+}
+
+impl From<&KeywordYield> for KeywordYieldDto {
+    fn from(row: &KeywordYield) -> Self {
+        Self {
+            keyword: row.keyword.clone(),
+            leads: row.leads,
+            exclusive_leads: row.exclusive_leads,
+            verdicts: YieldVerdictsDto::from(&row.verdicts),
+            validated: row.validated,
+            rejected: row.rejected,
+            precision: row.precision,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, PartialEq, ToSchema)]
+pub struct AgentYieldDto {
+    pub profile_id: String,
+    pub agent_id: String,
+    pub agent_name: Option<String>,
+    pub leads: u64,
+    pub verdicts: YieldVerdictsDto,
+    pub validated: u64,
+    pub rejected: u64,
+    pub precision: Option<f64>,
+    pub keywords: Vec<KeywordYieldDto>,
+}
+
+impl From<&AgentYield> for AgentYieldDto {
+    fn from(agent: &AgentYield) -> Self {
+        Self {
+            profile_id: agent.profile_id.to_string(),
+            agent_id: agent.agent_id.clone(),
+            agent_name: agent.agent_name.clone(),
+            leads: agent.leads,
+            verdicts: YieldVerdictsDto::from(&agent.verdicts),
+            validated: agent.validated,
+            rejected: agent.rejected,
+            precision: agent.precision,
+            keywords: agent.keywords.iter().map(KeywordYieldDto::from).collect(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SuggestionActionDto {
+    RemoveKeyword,
+    AddExclusion,
+}
+
+impl From<SuggestionAction> for SuggestionActionDto {
+    fn from(action: SuggestionAction) -> Self {
+        match action {
+            SuggestionAction::RemoveKeyword => Self::RemoveKeyword,
+            SuggestionAction::AddExclusion => Self::AddExclusion,
+        }
+    }
+}
+
+impl From<SuggestionActionDto> for SuggestionAction {
+    fn from(action: SuggestionActionDto) -> Self {
+        match action {
+            SuggestionActionDto::RemoveKeyword => Self::RemoveKeyword,
+            SuggestionActionDto::AddExclusion => Self::AddExclusion,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, PartialEq, Eq, ToSchema)]
+pub struct KeywordSuggestionDto {
+    pub profile_id: String,
+    pub agent_id: String,
+    pub action: SuggestionActionDto,
+    pub word: String,
+    pub decided: u64,
+    pub rejected: u64,
+}
+
+impl From<&KeywordSuggestion> for KeywordSuggestionDto {
+    fn from(suggestion: &KeywordSuggestion) -> Self {
+        Self {
+            profile_id: suggestion.profile_id.to_string(),
+            agent_id: suggestion.agent_id.clone(),
+            action: SuggestionActionDto::from(suggestion.action),
+            word: suggestion.word.clone(),
+            decided: suggestion.decided,
+            rejected: suggestion.rejected,
+        }
+    }
+}
+
 #[derive(Debug, Serialize, PartialEq, ToSchema)]
 pub struct QualityDto {
     pub decisions: DecisionCountsDto,
@@ -203,6 +326,8 @@ pub struct QualityDto {
     pub exclusion_candidates: Vec<ExclusionCandidateDto>,
     /// Candidates the keyword triage dropped in the period, per agent and reason, with the share an operator judged wrongly dropped among the reviewed ones.
     pub triage_recall: Vec<TriageRecallDto>,
+    pub sourcing_yield: Vec<AgentYieldDto>,
+    pub keyword_suggestions: Vec<KeywordSuggestionDto>,
 }
 
 impl From<&Suggestion> for SuggestionDto {
@@ -354,6 +479,18 @@ impl From<&QualityReport> for QualityDto {
                 .iter()
                 .map(TriageRecallDto::from)
                 .collect(),
+            sourcing_yield: report
+                .sourcing
+                .agents
+                .iter()
+                .map(AgentYieldDto::from)
+                .collect(),
+            keyword_suggestions: report
+                .sourcing
+                .suggestions
+                .iter()
+                .map(KeywordSuggestionDto::from)
+                .collect(),
         }
     }
 }
@@ -385,7 +522,7 @@ fn instant(field: &str, raw: Option<&str>) -> Result<Option<DateTime<Utc>>, ApiE
     security(("bearer_auth" = [])),
     params(QualityParams),
     responses(
-        (status = 200, description = "Quality of the verdicts measured against human decisions. Threshold suggestions are advice only", body = DataEnvelope<QualityDto>),
+        (status = 200, description = "Quality of the verdicts measured against human decisions, and the yield of each sourcing agent and keyword with the keyword suggestions drawn from it. Suggestions are advice only", body = DataEnvelope<QualityDto>),
         (status = 400, description = "A parameter is invalid"),
         (status = 401, description = "Missing, malformed, invalid or expired bearer token"),
         (status = 403, description = "The caller is not a user"),
@@ -415,4 +552,61 @@ pub async fn quality(
         .transpose()?;
     let report = state.usecase.quality_report(from, to, profile_id).await?;
     Ok(Response::OK(QualityDto::from(&report)))
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct ApplyKeywordSuggestionRequest {
+    pub agent_id: String,
+    pub action: SuggestionActionDto,
+    pub word: String,
+    pub revision: u32,
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/profiles/{profile_id}/keyword-suggestions/apply",
+    tag = "quality",
+    security(("bearer_auth" = [])),
+    description = "Applies one keyword suggestion as a new profile revision. `word` is the keyword as written in the profile for `remove_keyword` and the word to append to the exclusions for `add_exclusion`. `revision` is the current revision number the suggestion was read against.",
+    params(("profile_id" = String, Path, description = "Profile identifier (UUID)")),
+    request_body = ApplyKeywordSuggestionRequest,
+    responses(
+        (status = 200, description = "The profile with the new revision, whose agent has the keyword removed or the exclusion added", body = DataEnvelope<ProfileDetailDto>),
+        (status = 400, description = "Malformed profile identifier, body or revision number"),
+        (status = 401, description = "Missing, malformed, invalid or expired bearer token"),
+        (status = 403, description = "The caller is not a user"),
+        (status = 404, description = "Unknown profile or search agent"),
+        (status = 409, description = "The profile moved to another revision, the keyword is no longer in the agent, the exclusion is already there, or the keyword is the last of the agent"),
+        (status = 422, description = "The edited profile is not valid, for example an empty exclusion", body = ErrorBody),
+    )
+)]
+pub async fn apply_keyword_suggestion(
+    State(state): State<AppState>,
+    user: Option<Extension<AuthenticatedUser>>,
+    Path(profile_id): Path<String>,
+    body: Result<Json<ApplyKeywordSuggestionRequest>, JsonRejection>,
+) -> Result<Response<ProfileDetailDto>, ApiError> {
+    let Some(Extension(AuthenticatedUser(actor))) = user else {
+        return Err(ApiError::Forbidden);
+    };
+    let profile_id: ProfileId = profile_id
+        .parse()
+        .map_err(|_| invalid("profile_id", "must be a UUID"))?;
+    let Json(request) = body.map_err(|rejection| invalid("body", &rejection.body_text()))?;
+    let revision = RevisionNumber::new(request.revision)
+        .ok_or_else(|| invalid("revision", "must be at least 1"))?;
+    let suggestion = SuggestionEdit {
+        agent_id: request.agent_id,
+        action: request.action.into(),
+        word: request.word,
+    };
+    let applied = state
+        .usecase
+        .apply_keyword_suggestion(profile_id, &suggestion, revision, actor)
+        .await?;
+    Ok(Response::OK(ProfileDetailDto {
+        profile: ProfileDto::from(&applied.profile),
+        revision: applied.revision.number.get(),
+        definition: applied.revision.definition.to_json(),
+    }))
 }
