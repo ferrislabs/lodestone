@@ -18,6 +18,7 @@ use crate::{
 pub mod metrics;
 pub mod ports;
 pub mod rejection;
+pub mod sourcing;
 
 pub use metrics::{
     AgentSeparation, ConfidenceBucket, DecisionCounts, DiscardedShare, EXCLUSION_REASONS,
@@ -26,6 +27,12 @@ pub use metrics::{
     VerdictCounts, VerdictPrecision, VersionKind, VersionPrecision, exclusion_targets,
 };
 pub use rejection::{MAX_NOTE_CHARS, Rejection, RejectionProblem, RejectionReason};
+pub use sourcing::{
+    AgentRules, AgentYield, EditProblem, KeywordSuggestion, KeywordYield,
+    MAX_EXCLUSION_SUGGESTIONS_PER_AGENT, MIN_DECIDED_PER_KEYWORD, MIN_EXCLUSION_WORD_CHARS,
+    MIN_REJECTED_WITH_WORD, SourcingRow, SourcingYield, SuggestionAction, SuggestionEdit,
+    YieldVerdicts,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DecisionKind {

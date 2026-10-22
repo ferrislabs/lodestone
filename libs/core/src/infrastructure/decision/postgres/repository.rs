@@ -4,10 +4,10 @@ use lodestone_macros::repository;
 use uuid::Uuid;
 
 use crate::{
-    LeadId, ProfileId, RevisionNumber, UserId,
+    LeadId, ProfileId, RevisionNumber, UserId, Verdict,
     domain::quality::{
         DecisionKind, DecisionLabel, DecisionSnapshot, ExclusionCount, LabelFilter, Rejection,
-        RejectionReason, VerdictCounts, ports::DecisionRepository,
+        RejectionReason, SourcingRow, VerdictCounts, ports::DecisionRepository,
     },
     infrastructure::{
         lead::postgres::repository::NOT_SUPPRESSED,
@@ -77,6 +77,61 @@ impl TryFrom<LabelRow> for DecisionLabel {
             decided_at: row.decided_at,
             snapshot,
             rejection,
+        })
+    }
+}
+
+#[derive(Debug, sqlx::FromRow)]
+struct SourcingRecord {
+    profile_id: Uuid,
+    agent_id: String,
+    lead_id: Uuid,
+    matched: Option<serde_json::Value>,
+    title: Option<String>,
+    verdict: Option<String>,
+    decision: Option<String>,
+}
+
+impl TryFrom<SourcingRecord> for SourcingRow {
+    type Error = CoreError;
+
+    fn try_from(record: SourcingRecord) -> Result<Self, Self::Error> {
+        let verdict = record
+            .verdict
+            .as_deref()
+            .map(|raw| {
+                Verdict::parse(raw)
+                    .ok_or_else(|| CoreError::Internal("stored lead verdict is invalid".to_owned()))
+            })
+            .transpose()?;
+        let decision = record
+            .decision
+            .as_deref()
+            .map(|raw| {
+                DecisionKind::parse(raw)
+                    .ok_or_else(|| CoreError::Internal("stored label kind is invalid".to_owned()))
+            })
+            .transpose()?;
+        let matched = record
+            .matched
+            .as_ref()
+            .and_then(serde_json::Value::as_array)
+            .map(|words| {
+                words
+                    .iter()
+                    .filter_map(serde_json::Value::as_str)
+                    .map(str::to_owned)
+                    .collect()
+            })
+            .unwrap_or_default();
+        Ok(Self {
+            profile_id: ProfileId(record.profile_id),
+            agent_id: record.agent_id,
+            lead_id: LeadId(record.lead_id),
+            matched,
+            title: record.title.unwrap_or_default(),
+            verdict,
+            decision,
         })
     }
 }
@@ -201,5 +256,45 @@ impl<'tx> DecisionRepository for PgDecisionRepository<'tx> {
                 },
             )
             .collect())
+    }
+
+    #[tracing::instrument(skip(self), fields(db.system = "postgresql", db.operation = "select", db.table = "signals"), err)]
+    async fn sourcing_rows(
+        &mut self,
+        profile_id: Option<ProfileId>,
+        from: Option<DateTime<Utc>>,
+        to: Option<DateTime<Utc>>,
+    ) -> Result<Vec<SourcingRow>, CoreError> {
+        let query = format!(
+            "SELECT leads.profile_id, signals.agent_id, signals.lead_id,
+                    signals.raw -> 'matched' AS matched,
+                    COALESCE(signals.raw ->> 'title', signals.value) AS title,
+                    leads.verdict,
+                    decision.kind AS decision
+             FROM signals
+             JOIN leads ON leads.id = signals.lead_id
+             LEFT JOIN LATERAL (
+                 SELECT labels.kind
+                 FROM decision_labels labels
+                 WHERE labels.lead_id = leads.id
+                   AND labels.kind IN ('lead_validated', 'lead_rejected')
+                 ORDER BY labels.decided_at DESC, labels.id DESC
+                 LIMIT 1
+             ) decision ON TRUE
+             WHERE signals.agent_id IS NOT NULL
+               AND ($1::uuid IS NULL OR leads.profile_id = $1)
+               AND ($2::timestamptz IS NULL OR signals.observed_at >= $2)
+               AND ($3::timestamptz IS NULL OR signals.observed_at <= $3){NOT_SUPPRESSED}
+             ORDER BY leads.profile_id, signals.agent_id, signals.lead_id, signals.observed_at, signals.id"
+        );
+        let mut tx = self.tx.lock().await;
+        let records = sqlx::query_as::<_, SourcingRecord>(&query)
+            .bind(profile_id.map(|id| id.0))
+            .bind(from)
+            .bind(to)
+            .fetch_all(&mut ***tx)
+            .await
+            .map_err(map_sqlx_error)?;
+        records.into_iter().map(SourcingRow::try_from).collect()
     }
 }

@@ -1,6 +1,10 @@
+use chrono::{DateTime, Utc};
 use common::CoreError;
 
-use crate::domain::quality::{DecisionLabel, ExclusionCount, LabelFilter, VerdictCounts};
+use crate::domain::{
+    profile::ProfileId,
+    quality::{DecisionLabel, ExclusionCount, LabelFilter, SourcingRow, VerdictCounts},
+};
 
 #[cfg_attr(test, mockall::automock)]
 pub trait DecisionRepository: Send {
@@ -23,4 +27,11 @@ pub trait DecisionRepository: Send {
         &mut self,
         filter: &LabelFilter,
     ) -> impl Future<Output = Result<Vec<ExclusionCount>, CoreError>> + Send;
+
+    fn sourcing_rows(
+        &mut self,
+        profile_id: Option<ProfileId>,
+        from: Option<DateTime<Utc>>,
+        to: Option<DateTime<Utc>>,
+    ) -> impl Future<Output = Result<Vec<SourcingRow>, CoreError>> + Send;
 }

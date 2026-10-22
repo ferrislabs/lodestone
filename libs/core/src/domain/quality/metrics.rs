@@ -7,7 +7,7 @@ use crate::domain::{
     lead::LeadId,
     profile::{ProfileId, definition::VerdictThresholds},
     qualification::Verdict,
-    quality::{DecisionKind, DecisionLabel, RejectionReason},
+    quality::{DecisionKind, DecisionLabel, RejectionReason, SourcingYield},
 };
 
 pub const MIN_LABELLED_LEADS: u64 = 20;
@@ -29,7 +29,7 @@ fn mean(values: &[f64]) -> Option<f64> {
     Some(total / f64::from(u32::try_from(values.len()).unwrap_or(u32::MAX)))
 }
 
-fn ratio(numerator: u64, denominator: u64) -> Option<f64> {
+pub(super) fn ratio(numerator: u64, denominator: u64) -> Option<f64> {
     if denominator == 0 {
         return None;
     }
@@ -240,6 +240,7 @@ pub struct QualityReport {
     pub exclusions: Vec<ExclusionCount>,
     pub exclusion_candidates: Vec<ExclusionCandidate>,
     pub triage_recall: Vec<RecallRow>,
+    pub sourcing: SourcingYield,
 }
 
 fn latest_lead_decisions(labels: &[DecisionLabel]) -> Vec<&DecisionLabel> {
@@ -622,6 +623,7 @@ impl QualityReport {
             exclusions: Vec::new(),
             exclusion_candidates: Vec::new(),
             triage_recall: Vec::new(),
+            sourcing: SourcingYield::default(),
         }
     }
 }

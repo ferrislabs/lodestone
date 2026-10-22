@@ -4,6 +4,8 @@ use chrono::{DateTime, Utc};
 use common::CoreError;
 use lodestone_macros::transactional;
 
+mod suggestions;
+
 use crate::{
     UserId,
     application::LodestoneUseCase,
@@ -17,8 +19,9 @@ use crate::{
         profile::{ProfileId, RevisionNumber, ports::ProfileRepository},
         qualification::ports::QualificationRepository,
         quality::{
-            DecisionKind, DecisionLabel, DecisionSnapshot, ExclusionCandidate, LabelFilter,
-            ProfileInfo, QualityReport, Rejection, exclusion_targets, ports::DecisionRepository,
+            AgentRules, DecisionKind, DecisionLabel, DecisionSnapshot, ExclusionCandidate,
+            LabelFilter, ProfileInfo, QualityReport, Rejection, SourcingYield, exclusion_targets,
+            ports::DecisionRepository,
         },
         scoring_agent::ports::ScoringRepository,
     },
@@ -105,6 +108,7 @@ impl LodestoneUseCase {
         let verdicts = decisions.verdict_counts(&filter).await?;
         let mut infos = Vec::new();
         let mut agent_names = BTreeMap::new();
+        let mut current = Vec::new();
         for profile in profiles.list().await? {
             if profile_id.is_some_and(|selected| selected != profile.id) {
                 continue;
@@ -128,11 +132,28 @@ impl LodestoneUseCase {
                 name: profile.name.as_str().to_owned(),
                 thresholds,
             });
+            current.extend(revisions.into_iter().max_by_key(|revision| revision.number));
         }
         let mut report =
             QualityReport::compute(&labels, verdicts, &infos, profile_id, &agent_names);
         report.exclusions = decisions.exclusion_counts(&filter).await?;
         report.triage_recall = dropped.recall(profile_id, from, to).await?;
+        let rows = decisions.sourcing_rows(profile_id, from, to).await?;
+        let rules: Vec<AgentRules<'_>> = current
+            .iter()
+            .flat_map(|revision| {
+                revision
+                    .definition
+                    .definition()
+                    .agents
+                    .iter()
+                    .map(|agent| AgentRules {
+                        profile_id: revision.profile_id,
+                        agent,
+                    })
+            })
+            .collect();
+        report.sourcing = SourcingYield::compute(&rows, &rules);
         for target in exclusion_targets(&labels) {
             let Some(lead) = leads.find(target.lead_id).await? else {
                 continue;

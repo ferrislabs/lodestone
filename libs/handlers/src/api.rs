@@ -131,6 +131,10 @@ pub fn router(state: AppState) -> Router<AppState> {
             post(dropped::review_dropped),
         )
         .route("/quality", get(quality::quality))
+        .route(
+            "/profiles/{profile_id}/keyword-suggestions/apply",
+            post(quality::apply_keyword_suggestion),
+        )
         .route("/quality/calibration", get(calibration::calibration))
         .route(
             "/quality/calibration/run",

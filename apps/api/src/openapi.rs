@@ -55,6 +55,7 @@ impl Modify for SecurityAddon {
         handlers::dropped::list_dropped,
         handlers::dropped::review_dropped,
         handlers::quality::quality,
+        handlers::quality::apply_keyword_suggestion,
         handlers::calibration::calibration,
         handlers::calibration::run_calibration,
         handlers::source_providers::list_source_providers,
