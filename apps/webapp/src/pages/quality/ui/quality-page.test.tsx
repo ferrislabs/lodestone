@@ -6,9 +6,11 @@ import {
 	within,
 } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-
+import type { SuggestionOutcome } from '#/pages/quality/lib/sourcing'
 import type {
+	AgentYield,
 	Calibration,
+	KeywordSuggestion,
 	Quality,
 	TriageRecall,
 } from '#/pages/quality/lib/types'
@@ -43,6 +45,8 @@ const EMPTY: Quality = {
 	exclusions: [],
 	exclusion_candidates: [],
 	triage_recall: [],
+	sourcing_yield: [],
+	keyword_suggestions: [],
 }
 
 const FILLED: Quality = {
@@ -161,6 +165,8 @@ const FILLED: Quality = {
 	exclusions: [],
 	exclusion_candidates: [],
 	triage_recall: [],
+	sourcing_yield: [],
+	keyword_suggestions: [],
 }
 
 const RECALL: TriageRecall[] = [
@@ -181,6 +187,69 @@ const RECALL: TriageRecall[] = [
 		reviewed: 0,
 		should_have_kept: 0,
 		share: null,
+	},
+]
+
+const YIELD: AgentYield[] = [
+	{
+		profile_id: 'p1',
+		agent_id: 'offres-france',
+		agent_name: 'Offres France',
+		leads: 12,
+		verdicts: { reliable: 5, to_verify: 4, discarded: 2, none: 1 },
+		validated: 6,
+		rejected: 3,
+		precision: 0.6667,
+		keywords: [
+			{
+				keyword: 'cloud',
+				leads: 8,
+				exclusive_leads: 3,
+				verdicts: { reliable: 3, to_verify: 2, discarded: 1, none: 2 },
+				validated: 4,
+				rejected: 1,
+				precision: 0.8,
+			},
+			{
+				keyword: 'devops',
+				leads: 5,
+				exclusive_leads: 0,
+				verdicts: { reliable: 1, to_verify: 1, discarded: 0, none: 3 },
+				validated: 0,
+				rejected: 0,
+				precision: null,
+			},
+		],
+	},
+	{
+		profile_id: 'p2',
+		agent_id: 'wttj',
+		agent_name: null,
+		leads: 3,
+		verdicts: { reliable: 0, to_verify: 0, discarded: 0, none: 3 },
+		validated: 0,
+		rejected: 0,
+		precision: null,
+		keywords: [],
+	},
+]
+
+const SUGGESTIONS: KeywordSuggestion[] = [
+	{
+		profile_id: 'p1',
+		agent_id: 'offres-france',
+		action: 'remove_keyword',
+		word: 'stage',
+		decided: 6,
+		rejected: 6,
+	},
+	{
+		profile_id: 'p1',
+		agent_id: 'offres-france',
+		action: 'add_exclusion',
+		word: 'alternance',
+		decided: 4,
+		rejected: 4,
 	},
 ]
 
@@ -242,6 +311,12 @@ const CALIBRATION: Calibration = {
 	],
 }
 
+function cellTexts(row: HTMLElement): string[] {
+	return within(row)
+		.getAllByRole('cell')
+		.map((cell) => (cell.textContent ?? '').replace(/\s+/g, ' '))
+}
+
 function renderPage(
 	overrides: Partial<Parameters<typeof QualityPage>[0]> = {},
 ) {
@@ -268,6 +343,11 @@ function renderPage(
 		onRecalibrate: vi.fn(),
 		onReviewTriage: vi.fn(),
 		onOpenDropped: vi.fn(),
+		expandedAgents: [] as string[],
+		onToggleAgent: vi.fn(),
+		suggestions: [] as KeywordSuggestion[],
+		suggestionOutcomes: {} as Record<string, SuggestionOutcome>,
+		onApplySuggestion: vi.fn(),
 		...overrides,
 	}
 	render(<QualityPage {...props} />)
@@ -740,5 +820,252 @@ describe('QualityPage', () => {
 				.getByRole('link', { name: 'Revoir les annonces écartées' })
 				.getAttribute('href'),
 		).toBe('/quality/dropped')
+	})
+
+	it('lists the yield of each sourcing agent with its verdicts and decisions', () => {
+		renderPage({ quality: { ...FILLED, sourcing_yield: YIELD } })
+		const card = within(
+			screen.getByLabelText('Rendement des agents de recherche'),
+		)
+		expect(
+			card.getByText(
+				'Leads trouvés par chaque agent de recherche et par mot-clé sur la période, avec leurs verdicts et les décisions humaines.',
+			),
+		).toBeTruthy()
+		expect(
+			card.getAllByRole('columnheader').map((cell) => cell.textContent),
+		).toEqual([
+			'Mots-clés',
+			'Agent',
+			'Leads',
+			'Fiable',
+			'À vérifier',
+			'Écarté',
+			'Validés',
+			'Rejetés',
+			'Précision',
+		])
+		const first = card.getByRole('row', { name: /Offres France/ })
+		expect(cellTexts(first)).toEqual([
+			'',
+			'Offres FranceFintech',
+			'12',
+			'5',
+			'4',
+			'2',
+			'6',
+			'3',
+			'67 %',
+		])
+		const second = card.getByRole('row', { name: /wttj/ })
+		expect(
+			within(second).getByText('Absent de la révision actuelle'),
+		).toBeTruthy()
+		expect(within(second).getByText('Santé')).toBeTruthy()
+		expect(within(second).getAllByText('—')).toHaveLength(1)
+	})
+
+	it('names the profile under the agent only when several profiles are covered', () => {
+		renderPage({ quality: { ...FILLED, sourcing_yield: [YIELD[0]] } })
+		const row = screen.getByRole('row', { name: /Offres France/ })
+		expect(within(row).queryByText('Fintech')).toBeNull()
+	})
+
+	it('hides the yield of the sourcing agents when there is none or while loading', () => {
+		renderPage()
+		expect(
+			screen.queryByLabelText('Rendement des agents de recherche'),
+		).toBeNull()
+		cleanup()
+		renderPage({
+			quality: { ...EMPTY, sourcing_yield: YIELD },
+			state: 'loading',
+		})
+		expect(
+			screen.queryByLabelText('Rendement des agents de recherche'),
+		).toBeNull()
+	})
+
+	it('shows the yield of the sourcing agents even before any decision', () => {
+		renderPage({ quality: { ...EMPTY, sourcing_yield: YIELD } })
+		expect(screen.getByText(/Aucune décision enregistrée/)).toBeTruthy()
+		expect(
+			screen.getByLabelText('Rendement des agents de recherche'),
+		).toBeTruthy()
+	})
+
+	it('asks to open and close the keywords of an agent', () => {
+		const props = renderPage({ quality: { ...FILLED, sourcing_yield: YIELD } })
+		const toggle = screen.getByRole('button', {
+			name: 'Mots-clés de Offres France',
+		})
+		expect(toggle.getAttribute('aria-expanded')).toBe('false')
+		expect(screen.queryByRole('row', { name: /cloud/ })).toBeNull()
+		fireEvent.click(toggle)
+		expect(props.onToggleAgent).toHaveBeenCalledWith('p1:offres-france')
+	})
+
+	it('shows the keywords of an opened agent with their exclusive leads', () => {
+		renderPage({
+			quality: { ...FILLED, sourcing_yield: YIELD },
+			expandedAgents: ['p1:offres-france'],
+		})
+		const toggle = screen.getByRole('button', {
+			name: 'Mots-clés de Offres France',
+		})
+		expect(toggle.getAttribute('aria-expanded')).toBe('true')
+		const cloud = screen.getByRole('row', { name: /cloud/ })
+		expect(cellTexts(cloud)).toEqual([
+			'',
+			'cloud',
+			'8dont 3 seul',
+			'3',
+			'2',
+			'1',
+			'4',
+			'1',
+			'80 %',
+		])
+		expect(within(cloud).getByTitle('dont 3 par ce seul mot-clé')).toBeTruthy()
+		const devops = screen.getByRole('row', { name: /devops/ })
+		expect(within(devops).queryByText(/dont/)).toBeNull()
+		expect(within(devops).getByText('—')).toBeTruthy()
+		expect(
+			screen
+				.getByRole('button', { name: 'Mots-clés de wttj' })
+				.getAttribute('aria-expanded'),
+		).toBe('false')
+	})
+
+	it('says so when an opened agent has no keyword', () => {
+		renderPage({
+			quality: { ...FILLED, sourcing_yield: YIELD },
+			expandedAgents: ['p2:wttj'],
+		})
+		expect(screen.getByText(/Aucun mot-clé n'a trouvé de lead/)).toBeTruthy()
+	})
+
+	it('words both kinds of keyword suggestions', () => {
+		renderPage({
+			quality: { ...FILLED, sourcing_yield: YIELD },
+			suggestions: SUGGESTIONS,
+		})
+		const card = within(screen.getByLabelText('Suggestions de mots-clés'))
+		expect(
+			card.getByText(
+				"Règles fixes appliquées aux décisions humaines. Rien n'est modifié sans votre clic : appliquer crée une nouvelle révision du profil.",
+			),
+		).toBeTruthy()
+		expect(
+			card.getByText(
+				'Retirer le mot-clé « stage » de Offres France : 6 leads décidés, aucun validé.',
+			),
+		).toBeTruthy()
+		expect(
+			card.getByText(
+				'Ajouter « alternance » aux exclusions de Offres France : présent dans 4 leads rejetés, aucun validé.',
+			),
+		).toBeTruthy()
+		expect(card.getAllByRole('button', { name: 'Appliquer' })).toHaveLength(2)
+	})
+
+	it('applies the suggestion of the clicked line', () => {
+		const props = renderPage({ suggestions: SUGGESTIONS })
+		const second = screen
+			.getByText(/Ajouter « alternance »/)
+			.closest('li') as HTMLElement
+		fireEvent.click(within(second).getByRole('button', { name: 'Appliquer' }))
+		expect(props.onApplySuggestion).toHaveBeenCalledTimes(1)
+		expect(props.onApplySuggestion).toHaveBeenCalledWith(SUGGESTIONS[1])
+	})
+
+	it('falls back to the agent id when the yield does not know the agent', () => {
+		renderPage({ suggestions: SUGGESTIONS })
+		expect(
+			screen.getByText(/Retirer le mot-clé « stage » de offres-france :/),
+		).toBeTruthy()
+	})
+
+	it('disables the button of a suggestion being applied', () => {
+		renderPage({
+			suggestions: SUGGESTIONS,
+			suggestionOutcomes: {
+				'p1:offres-france:remove_keyword:stage': { status: 'pending' },
+			},
+		})
+		const pending = screen.getByRole('button', {
+			name: 'Application…',
+		}) as HTMLButtonElement
+		expect(pending.disabled).toBe(true)
+		expect(screen.getAllByRole('button', { name: 'Appliquer' })).toHaveLength(1)
+	})
+
+	it('confirms an applied suggestion with the new revision and drops its button', () => {
+		renderPage({
+			suggestions: SUGGESTIONS,
+			suggestionOutcomes: {
+				'p1:offres-france:remove_keyword:stage': {
+					status: 'applied',
+					revision: 4,
+				},
+			},
+		})
+		const line = screen
+			.getByText(/Retirer le mot-clé « stage »/)
+			.closest('li') as HTMLElement
+		expect(within(line).getByText('Révision 4 créée')).toBeTruthy()
+		expect(within(line).queryByRole('button')).toBeNull()
+	})
+
+	it('shows the error of a suggestion under its line and keeps the button', () => {
+		renderPage({
+			suggestions: SUGGESTIONS,
+			suggestionOutcomes: {
+				'p1:offres-france:add_exclusion:alternance': {
+					status: 'failed',
+					message: 'Le profil a changé de révision',
+				},
+			},
+		})
+		const line = screen
+			.getByText(/Ajouter « alternance »/)
+			.closest('li') as HTMLElement
+		expect(within(line).getByRole('alert').textContent).toBe(
+			'Le profil a changé de révision',
+		)
+		expect(within(line).getByRole('button', { name: 'Appliquer' })).toBeTruthy()
+	})
+
+	it('names the profile of a suggestion only when several profiles are covered', () => {
+		const other: KeywordSuggestion = {
+			...SUGGESTIONS[0],
+			profile_id: 'p2',
+			agent_id: 'wttj',
+		}
+		renderPage({ suggestions: [SUGGESTIONS[0], other] })
+		const card = within(screen.getByLabelText('Suggestions de mots-clés'))
+		expect(card.getByText('Fintech')).toBeTruthy()
+		expect(card.getByText('Santé')).toBeTruthy()
+		cleanup()
+		renderPage({ suggestions: SUGGESTIONS })
+		expect(
+			within(screen.getByLabelText('Suggestions de mots-clés')).queryByText(
+				'Fintech',
+			),
+		).toBeNull()
+	})
+
+	it('hides the keyword suggestions when there are none or while loading', () => {
+		renderPage()
+		expect(screen.queryByLabelText('Suggestions de mots-clés')).toBeNull()
+		cleanup()
+		renderPage({ quality: null, state: 'loading', suggestions: SUGGESTIONS })
+		expect(screen.queryByLabelText('Suggestions de mots-clés')).toBeNull()
+	})
+
+	it('shows the keyword suggestions even before any decision', () => {
+		renderPage({ quality: EMPTY, suggestions: SUGGESTIONS })
+		expect(screen.getByText(/Aucune décision enregistrée/)).toBeTruthy()
+		expect(screen.getByLabelText('Suggestions de mots-clés')).toBeTruthy()
 	})
 })

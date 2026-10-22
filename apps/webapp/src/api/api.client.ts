@@ -40,6 +40,34 @@ export namespace Schemas {
     reason: string;
     stopped_at: string;
   };
+  export type YieldVerdictsDto = { discarded: number; none: number; reliable: number; to_verify: number };
+  export type KeywordYieldDto = {
+    exclusive_leads: number;
+    keyword: string;
+    leads: number;
+    precision?: (number | null) | undefined;
+    rejected: number;
+    validated: number;
+    verdicts: YieldVerdictsDto;
+  };
+  export type AgentYieldDto = {
+    agent_id: string;
+    agent_name?: (string | null) | undefined;
+    keywords: Array<KeywordYieldDto>;
+    leads: number;
+    precision?: (number | null) | undefined;
+    profile_id: string;
+    rejected: number;
+    validated: number;
+    verdicts: YieldVerdictsDto;
+  };
+  export type SuggestionActionDto = "remove_keyword" | "add_exclusion";
+  export type ApplyKeywordSuggestionRequest = {
+    action: SuggestionActionDto;
+    agent_id: string;
+    revision: number;
+    word: string;
+  };
   export type ApproveDraftRequest = Partial<{ expected_revision: number | null }>;
   export type DraftStatusDto = "pending" | "approved" | "rejected";
   export type DraftDto = {
@@ -710,6 +738,14 @@ export namespace Schemas {
     option: string;
     question_id: string;
   };
+  export type KeywordSuggestionDto = {
+    action: SuggestionActionDto;
+    agent_id: string;
+    decided: number;
+    profile_id: string;
+    rejected: number;
+    word: string;
+  };
   export type ThresholdsDto = { discard_below: number; reliable_from: number };
   export type ReasonCountDto = { count: number; reason: RejectionReasonDto };
   export type SuggestionDto = {
@@ -766,7 +802,9 @@ export namespace Schemas {
       discarded: DiscardedShareDto;
       exclusion_candidates: Array<ExclusionCandidateDto>;
       exclusions: Array<ExclusionCountDto>;
+      keyword_suggestions: Array<KeywordSuggestionDto>;
       profiles: Array<ProfileQualityDto>;
+      sourcing_yield: Array<AgentYieldDto>;
       triage_recall: Array<TriageRecallDto>;
       verdicts: Array<VerdictPrecisionDto>;
       versions: Array<VersionPrecisionDto>;
@@ -1156,7 +1194,9 @@ export namespace Schemas {
     discarded: DiscardedShareDto;
     exclusion_candidates: Array<ExclusionCandidateDto>;
     exclusions: Array<ExclusionCountDto>;
+    keyword_suggestions: Array<KeywordSuggestionDto>;
     profiles: Array<ProfileQualityDto>;
+    sourcing_yield: Array<AgentYieldDto>;
     triage_recall: Array<TriageRecallDto>;
     verdicts: Array<VerdictPrecisionDto>;
     versions: Array<VersionPrecisionDto>;
@@ -1670,6 +1710,25 @@ export namespace Endpoints {
     };
     responses: { 200: Record<string, unknown>; 400: unknown; 401: unknown; 404: unknown };
   };
+  export type post_Apply_keyword_suggestion = {
+    method: "POST";
+    path: "/api/v1/profiles/{profile_id}/keyword-suggestions/apply";
+    requestFormat: "json";
+    parameters: {
+      path: { profile_id: string };
+
+      body: Schemas.ApplyKeywordSuggestionRequest;
+    };
+    responses: {
+      200: Schemas.DataEnvelope_ProfileDetailDto;
+      400: unknown;
+      401: unknown;
+      403: unknown;
+      404: unknown;
+      409: unknown;
+      422: Schemas.ErrorBody;
+    };
+  };
   export type get_List_leads = {
     method: "GET";
     path: "/api/v1/profiles/{profile_id}/leads";
@@ -1916,6 +1975,7 @@ export type EndpointByMethod = {
     "/api/v1/profiles/import": Endpoints.post_Import_profile;
     "/api/v1/profiles/{profile_id}/activate": Endpoints.post_Activate_profile;
     "/api/v1/profiles/{profile_id}/deactivate": Endpoints.post_Deactivate_profile;
+    "/api/v1/profiles/{profile_id}/keyword-suggestions/apply": Endpoints.post_Apply_keyword_suggestion;
     "/api/v1/quality/calibration/run": Endpoints.post_Run_calibration;
     "/api/v1/source-providers/{key}/disconnect": Endpoints.post_Disconnect_source_provider;
     "/api/v1/source-providers/{key}/oauth/start": Endpoints.post_Start_source_provider_oauth;

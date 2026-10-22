@@ -18,3 +18,6 @@ export type TriageRecall = Schemas.TriageRecallDto
 export type DroppedCandidate = Schemas.DroppedCandidateDto
 export type DropReason = Schemas.DropReasonDto
 export type DropReview = Schemas.DropReviewDto
+export type AgentYield = Schemas.AgentYieldDto
+export type KeywordYield = Schemas.KeywordYieldDto
+export type KeywordSuggestion = Schemas.KeywordSuggestionDto
